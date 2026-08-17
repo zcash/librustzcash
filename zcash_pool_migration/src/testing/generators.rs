@@ -5,7 +5,7 @@
 //! so does any downstream store crate: generating the SAME values everywhere is what makes one
 //! store's coverage comparable to another's.
 
-use core::num::NonZeroU32;
+use core::num::{NonZeroU32, NonZeroUsize};
 
 use proptest::prelude::*;
 
@@ -23,7 +23,7 @@ use crate::engine::{
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::satisfiability::{ReplanThreshold, UnsatisfiableKind};
 use crate::scheduling::AnchorBucketInterval;
-use crate::signing_rounds::{PlannedTx, SigningRoundBudget};
+use crate::signing_rounds::{PlannedTx, RunSigningCapacity, SigningRoundBudget};
 
 use alloc::vec::Vec;
 
@@ -368,6 +368,21 @@ pub fn arb_signing_round_budget() -> impl Strategy<Value = SigningRoundBudget> {
         Just(SigningRoundBudget::DEFAULT),
         (floor..=1024u32)
             .prop_map(|n| SigningRoundBudget::new(NonZeroU32::new(n).expect("nonzero"))),
+    ]
+}
+
+/// An arbitrary [`RunSigningCapacity`], covering the named [`RunSigningCapacity::KEYSTONE`] plus a
+/// spread of budgets, per-run round allowances, and note ceilings.
+pub fn arb_run_signing_capacity() -> impl Strategy<Value = RunSigningCapacity> {
+    prop_oneof![
+        Just(RunSigningCapacity::KEYSTONE),
+        (arb_signing_round_budget(), 1usize..4, 1usize..60).prop_map(
+            |(budget, max_rounds, max_notes)| RunSigningCapacity::new(
+                budget,
+                NonZeroUsize::new(max_rounds).expect("nonzero"),
+                NonZeroUsize::new(max_notes).expect("nonzero"),
+            )
+        ),
     ]
 }
 

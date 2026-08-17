@@ -45,6 +45,37 @@ and this library adheres to Rust's notion of
   runs it is about to plan. The same values must be passed to both, or the
   preview will not describe the runs that get planned. Its cost scales inversely
   with the cap, since a bigger run means fewer runs to iterate.
+- `signing_rounds::RunSigningCapacity`, `signing_rounds::RunShape` and
+  `signing_rounds::largest_run_size_within`: bounding a run by what a signer will
+  sign, and the search that turns that bound into a per-run note cap. This is the
+  inverse of the round count in the run SIZE, as
+  `signing_rounds::min_budget_for_rounds` is its inverse in the BUDGET. Under a
+  round count non-decreasing in the cap — which the canonical decomposition
+  gives — the chosen cap is the largest run the signer signs; otherwise it is
+  still one that fits.
+- `engine::plan_migration_for_signer` and
+  `engine::plan_migration_for_signer_with`, which size a run by an external
+  signer's capacity instead of by a note count, so one run is one signing
+  session. A note cap cannot express that bound: a run's actions are
+  `16 * preparations + 3 * transfers`, and the preparation count follows the
+  wallet's fragmentation, so the same cap yields a one-round run for one wallet
+  and a four-round run for another. Both sizings are supported;
+  `engine::plan_migration` and `engine::plan_migration_with` are unchanged and
+  keep sizing by note count. The resulting plan exceeds the signer's rounds only
+  when a one-note run already does, which no smaller run can fix; the overflow is
+  visible in `engine::MigrationPlan::signing_round_count`.
+- `engine::estimate_migration_runs_for_signer` and
+  `engine::estimate_migration_runs_for_signer_with`, the preview counterparts,
+  taking exactly the planning functions' knobs. Sizing is per run, over that
+  run's own note structure, so a wallet migrates fewer notes in the runs that
+  consolidate its fragmentation and more once its notes are larger.
+- `engine::RunSizing`, `engine::plan_migration_sized_with` and
+  `engine::estimate_migration_runs_sized_with`: the bound as a VALUE (a note
+  count or a signer capacity) and the entry points that take it, for an
+  application that lets the user choose between the two and carries that choice.
+  The fixed-bound entry points are these with one variant pre-chosen.
+- `testing::arb_run_signing_capacity`, a `proptest` strategy over
+  `signing_rounds::RunSigningCapacity`.
 
 ### Changed
 - `denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN` is a `NonZeroUsize` where

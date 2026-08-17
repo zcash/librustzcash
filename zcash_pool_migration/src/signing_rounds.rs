@@ -18,6 +18,15 @@
 //! 374), so the packer may mix preparation and transfer across rounds; broadcast order stays a
 //! separate concern of the schedule.
 //!
+//! # The two inverse queries
+//!
+//! Packing answers "how many rounds does this run take". Both inverses are here as well, for the
+//! application that must decide something rather than display it: [`min_budget_for_rounds`] inverts
+//! the map in the BUDGET ("which signer signs this run in one interaction"), and
+//! [`largest_run_size_within`] inverts it in the run SIZE ("how big a run does this signer sign in
+//! one interaction"). The latter is what sizes a run for a capacity-limited signer, since a run's
+//! action count is not a function of its note count alone — see [`RunSigningCapacity`].
+//!
 //! The pluggable [`SigningRoundStrategy`] is the "named solution of the NP problem" seam, mirroring
 //! [`DenominationStrategy`](crate::denomination::DenominationStrategy): [`MinRounds`] (the optimal
 //! default) and [`NextFit`] (an order-preserving greedy). Any new solution inherits the crate's
@@ -28,7 +37,10 @@ use core::num::{NonZeroU32, NonZeroUsize};
 
 use zcash_protocol::consensus::BlockHeight;
 
-use crate::engine::{MigrationTransferId, MigrationTxKind};
+use crate::{
+    denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    engine::{MigrationTransferId, MigrationTxKind},
+};
 
 /// The Orchard-family actions a padded preparation transaction carries.
 pub const PREPARATION_ACTIONS: u32 = crate::preparation::PREP_TX_ACTIONS as u32;
@@ -422,6 +434,158 @@ pub fn min_budget_for_rounds(n_prep: usize, n_transfer: usize, k: NonZeroUsize) 
     nz(lo)
 }
 
+/// The transaction counts of one migration run, the only inputs the round count depends on: its
+/// preparation transactions (16 actions each) and its pool-crossing transfers (3 actions each).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunShape {
+    preparation_transactions: usize,
+    transfers: usize,
+}
+
+impl RunShape {
+    /// A run of `preparation_transactions` preparation transactions and `transfers` transfers.
+    #[must_use]
+    pub const fn new(preparation_transactions: usize, transfers: usize) -> Self {
+        Self {
+            preparation_transactions,
+            transfers,
+        }
+    }
+
+    /// The run's preparation transactions.
+    #[must_use]
+    pub const fn preparation_transactions(self) -> usize {
+        self.preparation_transactions
+    }
+
+    /// The run's pool-crossing transfers (one per funding note).
+    #[must_use]
+    pub const fn transfers(self) -> usize {
+        self.transfers
+    }
+
+    /// The number of signing rounds this run needs under `budget`, the optimal [`MinRounds`] count.
+    #[must_use]
+    pub fn signing_rounds(self, budget: SigningRoundBudget) -> usize {
+        min_signing_rounds(self.preparation_transactions, self.transfers, budget)
+    }
+}
+
+/// What one migration run may ask of a signer: at most [`max_rounds`](Self::max_rounds)
+/// interactions of at most [`budget`](Self::budget) total actions each, from a run preparing at most
+/// [`max_notes`](Self::max_notes) notes.
+///
+/// This is the capacity-side statement of a run's size. The note cap alone cannot make it: a run's
+/// actions are `16 * preparations + 3 * transfers`, and the preparation count is a function of the
+/// wallet's note structure (how deeply it must be consolidated), not of the number of notes the run
+/// mints. `max_notes` is therefore a CEILING the sizing never exceeds, not the target; see
+/// [`largest_run_size_within`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunSigningCapacity {
+    budget: SigningRoundBudget,
+    max_rounds: NonZeroUsize,
+    max_notes: NonZeroUsize,
+}
+
+impl RunSigningCapacity {
+    /// A Keystone signing each run in a single interaction: [`SigningRoundBudget::KEYSTONE`], one
+    /// round, and the crate's default note ceiling.
+    pub const KEYSTONE: Self = Self::single_round(SigningRoundBudget::KEYSTONE);
+
+    /// A signer of `budget` actions per interaction that signs each run in ONE interaction, over a
+    /// run of at most [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes.
+    #[must_use]
+    pub const fn single_round(budget: SigningRoundBudget) -> Self {
+        Self::new(
+            budget,
+            NonZeroUsize::MIN,
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+        )
+    }
+
+    /// A signer of `budget` actions per interaction, allowed `max_rounds` interactions per run, over
+    /// a run of at most `max_notes` notes.
+    #[must_use]
+    pub const fn new(
+        budget: SigningRoundBudget,
+        max_rounds: NonZeroUsize,
+        max_notes: NonZeroUsize,
+    ) -> Self {
+        Self {
+            budget,
+            max_rounds,
+            max_notes,
+        }
+    }
+
+    /// The per-round action budget.
+    #[must_use]
+    pub const fn budget(self) -> SigningRoundBudget {
+        self.budget
+    }
+
+    /// The number of signing interactions one run may take.
+    #[must_use]
+    pub const fn max_rounds(self) -> NonZeroUsize {
+        self.max_rounds
+    }
+
+    /// The largest per-run note cap the sizing may choose.
+    #[must_use]
+    pub const fn max_notes(self) -> NonZeroUsize {
+        self.max_notes
+    }
+}
+
+/// The largest per-run note cap, at most [`RunSigningCapacity::max_notes`], whose run `shape_at`
+/// reports as signable within `capacity` — the inverse of "how many rounds does this run take",
+/// dual to [`min_budget_for_rounds`] (which inverts the same map in the budget instead of the size).
+///
+/// `shape_at` answers what a run capped at `n` notes would look like; it is called
+/// `O(log max_notes)` times.
+///
+/// The returned cap is one `shape_at` reported as fitting, EXCEPT when even a one-note run exceeds
+/// the capacity, in which case it is one: a wallet fragmented enough that minting a single funding
+/// note takes more consolidation than a round holds cannot be made to fit by shrinking the run, and
+/// the caller sees the overflow in the resulting plan's
+/// [`signing_round_count`](crate::engine::MigrationPlan::signing_round_count).
+///
+/// It is the LARGEST such cap whenever the run's round count is non-decreasing in the cap, which
+/// holds for this crate's canonical decomposition (raising the cap extends the split rather than
+/// reshaping it) and for any preparation portfolio that does not mint more notes with fewer
+/// transactions. Under that monotonicity this function and the round count are adjoint —
+/// `shape_at(n).signing_rounds(budget) <= max_rounds` exactly when `n` is at most the returned cap —
+/// so the result is the greatest run that fits. A portfolio violating it still gets a cap that
+/// fits, just not necessarily the largest.
+#[must_use]
+pub fn largest_run_size_within<F>(capacity: RunSigningCapacity, mut shape_at: F) -> NonZeroUsize
+where
+    F: FnMut(NonZeroUsize) -> RunShape,
+{
+    let mut fits = |n: NonZeroUsize| {
+        shape_at(n).signing_rounds(capacity.budget()) <= capacity.max_rounds().get()
+    };
+    // The whole run fits: the common case, and the one that costs a single probe.
+    if fits(capacity.max_notes()) {
+        return capacity.max_notes();
+    }
+    // Binary-search the largest cap that fits, keeping only caps a probe accepted, so the answer is
+    // certified even where the round count is not monotone in the cap.
+    let mut best = NonZeroUsize::MIN;
+    let (mut lo, mut hi) = (1usize, capacity.max_notes().get() - 1);
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let cap = NonZeroUsize::new(mid).expect("`lo` starts at one, so `mid` is at least one");
+        if fits(cap) {
+            best = cap;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    best
+}
+
 /// Total actions of `n_prep` preparation and `n_transfer` transfer transactions (u32-saturating).
 fn total_actions(n_prep: usize, n_transfer: usize) -> u32 {
     let prep = (n_prep as u64).saturating_mul(u64::from(PREPARATION_ACTIONS));
@@ -546,6 +710,8 @@ fn div_ceil_u64(a: u64, b: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use proptest::{prop_assert, prop_assert_eq};
+
     use super::*;
 
     fn assert_valid(
@@ -645,6 +811,127 @@ mod tests {
             let n_transfer = txs.iter().filter(|t| t.is_transfer()).count();
             crate::testing::assert_optimal_round_count(&MinRounds, n_prep, n_transfer, budget);
             crate::testing::assert_no_worse_than(&MinRounds, &NextFit, n_prep, n_transfer, budget);
+        }
+    }
+
+    /// An oracle over explicit per-cap shapes: `shapes[n - 1]` is the run a cap of `n` notes
+    /// produces. Records every cap it was asked about, so a test can bound the probe count.
+    fn oracle<'a>(
+        shapes: &'a [RunShape],
+        probes: &'a mut Vec<usize>,
+    ) -> impl FnMut(NonZeroUsize) -> RunShape + 'a {
+        move |n| {
+            probes.push(n.get());
+            shapes[n.get() - 1]
+        }
+    }
+
+    /// Per-cap shapes that grow with the cap: `n` transfers, one preparation transaction per
+    /// `FUNDING_OUTPUTS_PER_TX` of them — the shape of a run over an unfragmented wallet.
+    fn monotone_shapes(ceiling: usize) -> Vec<RunShape> {
+        (1..=ceiling)
+            .map(|n| RunShape::new(n.div_ceil(crate::preparation::FUNDING_OUTPUTS_PER_TX), n))
+            .collect()
+    }
+
+    #[test]
+    fn sizing_fills_a_keystone_round() {
+        let ceiling = MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
+        let shapes = monotone_shapes(ceiling.get());
+        let mut probes = Vec::new();
+        let chosen =
+            largest_run_size_within(RunSigningCapacity::KEYSTONE, oracle(&shapes, &mut probes));
+        // 5 notes: one preparation transaction (16 actions) and 5 transfers (15) is 31 of the 96;
+        // 6 notes would take a second preparation transaction and 34 actions, still one round.
+        assert!(chosen.get() > 5, "a Keystone round holds more than 5 notes");
+        assert_eq!(
+            shapes[chosen.get() - 1].signing_rounds(SigningRoundBudget::KEYSTONE),
+            1,
+            "the chosen cap signs in one round"
+        );
+        assert!(
+            chosen == ceiling
+                || shapes[chosen.get()].signing_rounds(SigningRoundBudget::KEYSTONE) > 1,
+            "one note more needs a second round"
+        );
+        assert!(
+            probes.len() <= usize::BITS as usize - ceiling.get().leading_zeros() as usize + 1,
+            "the search probes logarithmically, not linearly: {probes:?}"
+        );
+    }
+
+    #[test]
+    fn sizing_bottoms_out_at_one_note() {
+        // A wallet so fragmented that minting even one funding note takes 7 preparation
+        // transactions (112 actions): no cap fits a Keystone round, and the smallest run is
+        // returned rather than a failure.
+        let shapes: Vec<RunShape> = (1..=10).map(|n| RunShape::new(6 + n, n)).collect();
+        let mut probes = Vec::new();
+        let capacity = RunSigningCapacity::new(
+            SigningRoundBudget::KEYSTONE,
+            NonZeroUsize::MIN,
+            NonZeroUsize::new(shapes.len()).unwrap(),
+        );
+        let chosen = largest_run_size_within(capacity, oracle(&shapes, &mut probes));
+        assert_eq!(chosen, NonZeroUsize::MIN);
+        assert!(
+            shapes[0].signing_rounds(SigningRoundBudget::KEYSTONE) > 1,
+            "this wallet cannot be made to fit, which is what the caller must see"
+        );
+    }
+
+    proptest::proptest! {
+        // The ADJUNCTION: for a run whose round count is non-decreasing in the cap, a cap fits the
+        // signer exactly when it is at most the chosen one. That is what makes the chosen cap the
+        // greatest run the signer signs, not merely one that fits.
+        #[test]
+        fn sizing_is_adjoint_to_the_round_count(
+            capacity in crate::testing::arb_run_signing_capacity(),
+        ) {
+            let shapes = monotone_shapes(capacity.max_notes().get());
+            let mut probes = Vec::new();
+            let chosen = largest_run_size_within(capacity, oracle(&shapes, &mut probes));
+            prop_assert!(chosen <= capacity.max_notes());
+            for (i, shape) in shapes.iter().enumerate() {
+                let cap = i + 1;
+                let fits = shape.signing_rounds(capacity.budget()) <= capacity.max_rounds().get();
+                // The one asymmetry: when not even a one-note run fits, the minimum is returned
+                // anyway, since no smaller run exists to fall back to.
+                if cap == 1 && !fits {
+                    prop_assert_eq!(chosen, NonZeroUsize::MIN);
+                    continue;
+                }
+                prop_assert_eq!(fits, cap <= chosen.get(), "cap {} against {:?}", cap, chosen);
+            }
+        }
+
+        // Without monotonicity the chosen cap is no longer maximal, but it is still one a probe
+        // accepted — the guarantee an arbitrary preparation portfolio gets.
+        #[test]
+        fn sizing_always_returns_a_cap_that_fits(
+            capacity in crate::testing::arb_run_signing_capacity(),
+            raw in proptest::collection::vec((0usize..12, 0usize..40), 1..64),
+        ) {
+            // Reshape the arbitrary (and so arbitrarily non-monotone) counts to the ceiling.
+            let shapes: Vec<RunShape> = (0..capacity.max_notes().get())
+                .map(|i| {
+                    let (prep, transfers) = raw[i % raw.len()];
+                    RunShape::new(prep, transfers)
+                })
+                .collect();
+            let mut probes = Vec::new();
+            let chosen = largest_run_size_within(capacity, oracle(&shapes, &mut probes));
+            prop_assert!(chosen <= capacity.max_notes());
+            let fits = shapes[chosen.get() - 1].signing_rounds(capacity.budget())
+                <= capacity.max_rounds().get();
+            prop_assert!(
+                fits || chosen == NonZeroUsize::MIN,
+                "only a probed-feasible cap is returned, unless nothing fits"
+            );
+            prop_assert!(
+                probes.contains(&chosen.get()) || chosen == NonZeroUsize::MIN,
+                "the returned cap was measured, not assumed"
+            );
         }
     }
 
