@@ -118,6 +118,7 @@
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
 use alloc::vec::Vec;
+use core::num::NonZeroUsize;
 
 use rand_core::{CryptoRng, RngCore};
 
@@ -137,16 +138,23 @@ pub use strategies::CanonicalOneTwoFive;
 /// remainder too (which can compromise privacy, so it is shown with a disclaimer) or lock it to keep
 /// that privacy.
 ///
-/// Both are defaults: the cap and minimum actually used are chosen per run by the caller (the
-/// wallet) and passed to the strategy constructor.
+/// Both are NORMATIVE: they are the bounds ZIP 318 fixes for the denomination set, so they are not
+/// caller-settable. A wallet chooses how many notes a run prepares (see
+/// [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`]), never which values may cross.
 pub use zcash_protocol::zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE};
 
 /// The default cap on how many notes one migration run prepares. Bounding the note count keeps the
 /// decomposition a bounded problem and bounds each run's transaction and proving cost; a larger
 /// balance migrates over several runs.
 ///
-/// This is a policy default of this crate, not a ZIP 318 constant.
-pub const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: usize = 50;
+/// This is a policy default of this crate, not a ZIP 318 constant: the ZIP fixes the denomination
+/// set (`{1, 2, 5} * 10^k`) and its bounds ([`DENOM_CAP`] and [`MAX_RESIDUAL_VALUE`]), but says
+/// nothing about how many notes one run may prepare. The count is therefore the caller's to choose
+/// — a wallet may override it per run — while the set and its bounds are not caller-settable.
+pub const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: NonZeroUsize = match NonZeroUsize::new(50) {
+    Some(v) => v,
+    None => panic!("nonzero"),
+};
 
 /// The outcome of denomination planning: the self-funding notes to create, the values that will
 /// cross the turnstile, and the residual kept in the source pool. Produced by a
@@ -325,17 +333,26 @@ pub(crate) fn zat(value: u64) -> Zatoshis {
     Zatoshis::from_u64(value).expect("split values are bounded by the validated total input")
 }
 
-/// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
-/// quantization), sized by the caller-computed canonical fees (see [`DenominationStrategy::plan`]).
-pub fn plan_denominations<R: RngCore + CryptoRng>(
+/// Convenience wrapper: plan with the canonical [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
+/// quantization) capped at `max_notes` prepared notes, sized by the caller-computed canonical fees
+/// (see [`DenominationStrategy::plan`]).
+///
+/// `max_notes` is the ONLY knob: the denomination set and its [`DENOM_CAP`]/[`MAX_RESIDUAL_VALUE`]
+/// bounds are normative ZIP 318 values, not parameters. Pass
+/// [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] for this crate's default.
+pub fn plan_denominations<R>(
     total_input: Zatoshis,
     spendable_note_count: usize,
+    max_notes: NonZeroUsize,
     transfer_fee_buffer: Zatoshis,
     prep_tx_fee: Zatoshis,
     prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
     rng: &mut R,
-) -> DenominationPlan {
-    CanonicalOneTwoFive::recommended(transfer_fee_buffer).plan(
+) -> DenominationPlan
+where
+    R: RngCore + CryptoRng,
+{
+    CanonicalOneTwoFive::with_max_notes(max_notes, transfer_fee_buffer).plan(
         total_input,
         spendable_note_count,
         prep_tx_fee,
@@ -351,13 +368,20 @@ pub fn plan_denominations<R: RngCore + CryptoRng>(
 /// is `false` has nothing to migrate regardless of how the notes hold the value, while `true` with
 /// an empty reconciled plan means the note values — not the balance — blocked the run (see
 /// [`MigrationError::UnfundableSplit`](crate::engine::MigrationError::UnfundableSplit)).
+///
+/// The answer does not in fact depend on `max_notes`: a first part forms or not from the balance,
+/// the transfer buffer and the preparation fee alone, and every positive cap admits that first
+/// part, so the emptiness of the split is invariant across caps. The cap is taken anyway so that
+/// the question is asked of the run actually being planned rather than of a hypothetical default
+/// one.
 pub(crate) fn balance_has_canonical_split(
     total_input: Zatoshis,
     spendable_note_count: usize,
+    max_notes: NonZeroUsize,
     transfer_fee_buffer: Zatoshis,
     prep_tx_fee: Zatoshis,
 ) -> bool {
-    !CanonicalOneTwoFive::recommended(transfer_fee_buffer)
+    !CanonicalOneTwoFive::with_max_notes(max_notes, transfer_fee_buffer)
         .unconstrained_split(
             u64::from(total_input),
             spendable_note_count,

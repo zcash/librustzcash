@@ -70,9 +70,12 @@ use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 #[cfg(feature = "orchard")]
 use crate::satisfiability::{DuenessTargets, UnsatisfiableCause};
 use crate::{
-    denomination::{DenominationPlan, balance_has_canonical_split, plan_denominations},
+    denomination::{
+        DenominationPlan, MIGRATION_MAX_PREPARED_NOTES_PER_RUN, balance_has_canonical_split,
+        plan_denominations,
+    },
     preparation::{
-        PREP_TX_ACTIONS, PrepError, PrepInput, PrepOutput, PreparationPlan, plan_preparation,
+        PREP_TX_ACTIONS, PrepError, PrepInput, PrepOutput, PreparationPlan, plan_preparation_with,
     },
     satisfiability::{ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableKind},
     scheduling::{self, Schedule},
@@ -1572,6 +1575,7 @@ where
 {
     plan_migration_with(
         &crate::preparation::default_portfolio(),
+        MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
         params,
         backend,
         rng,
@@ -1579,14 +1583,22 @@ where
 }
 
 /// As [`plan_migration`], planning the preparation transactions against a chosen set of strategies
-/// rather than the ones the crate ships.
+/// rather than the ones the crate ships, and preparing at most `max_notes` notes in this run rather
+/// than the crate's [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] default.
 ///
-/// The choice reaches the whole plan, not only its preparation transactions: the denomination
-/// decomposition asks the preparation planner what it can mint at every step, so a portfolio that
-/// can build fewer transaction shapes yields different crossings as well as different
-/// preparations.
+/// The portfolio choice reaches the whole plan, not only its preparation transactions: the
+/// denomination decomposition asks the preparation planner what it can mint at every step, so a
+/// portfolio that can build fewer transaction shapes yields different crossings as well as
+/// different preparations.
+///
+/// `max_notes` is the only denomination knob: the `{1, 2, 5} * 10^k` set and its
+/// [`DENOM_CAP`](crate::denomination::DENOM_CAP) /
+/// [`MAX_RESIDUAL_VALUE`](crate::denomination::MAX_RESIDUAL_VALUE) bounds are normative ZIP 318
+/// values and are not settable. Whichever knobs are passed here must also be passed to
+/// [`estimate_migration_runs_with`], or the preview will not describe the runs that get planned.
 pub fn plan_migration_with<Pf, P, B, R>(
     portfolio: &Pf,
+    max_notes: NonZeroUsize,
     params: &P,
     backend: &B,
     rng: &mut R,
@@ -1632,6 +1644,7 @@ where
     let denominations = plan_denominations(
         balance,
         notes.len(),
+        max_notes,
         transfer_fee_buffer,
         prep_tx_fee,
         &prep_tx_count,
@@ -1643,7 +1656,13 @@ where
         // value remains), and DEFERRAL when the balance has a canonical split that this wallet's
         // note values cannot fund; the two need different reporting, so they are distinct errors.
         return Err(
-            if balance_has_canonical_split(balance, notes.len(), transfer_fee_buffer, prep_tx_fee) {
+            if balance_has_canonical_split(
+                balance,
+                notes.len(),
+                max_notes,
+                transfer_fee_buffer,
+                prep_tx_fee,
+            ) {
                 MigrationError::UnfundableSplit
             } else {
                 MigrationError::NothingToMigrate
@@ -1912,6 +1931,38 @@ where
     B: MigrationBackend,
     R: RngCore + rand_core::CryptoRng,
 {
+    estimate_migration_runs_with(
+        &crate::preparation::default_portfolio(),
+        MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+        params,
+        backend,
+        rng,
+    )
+}
+
+/// As [`estimate_migration_runs`], estimating against a chosen set of preparation strategies rather
+/// than the ones the crate ships, and with at most `max_notes` prepared notes per run rather than
+/// the crate's [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] default.
+///
+/// These are exactly [`plan_migration_with`]'s knobs, in the same order, because this previews the
+/// runs that function will plan: the same values must be passed to both, or the preview will not
+/// describe the runs that get planned.
+///
+/// Raising `max_notes` migrates more per run and so takes fewer runs; the whole estimate costs
+/// roughly one [`plan_migration_with`] per run, so its cost scales INVERSELY with `max_notes`.
+pub fn estimate_migration_runs_with<Pf, P, B, R>(
+    portfolio: &Pf,
+    max_notes: NonZeroUsize,
+    params: &P,
+    backend: &B,
+    rng: &mut R,
+) -> Result<MigrationRunEstimate, MigrationError<B::Error>>
+where
+    Pf: crate::preparation::Portfolio,
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend,
+    R: RngCore + rand_core::CryptoRng,
+{
     let height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
@@ -1938,13 +1989,14 @@ where
         // reassigned below.
         let denominations = {
             let prep_tx_count = |funding: &[Zatoshis]| {
-                plan_preparation(&notes, funding, prep_tx_fee)
+                plan_preparation_with(portfolio, &notes, funding, prep_tx_fee)
                     .ok()
                     .map(|plan| plan.transaction_count())
             };
             plan_denominations(
                 balance,
                 notes.len(),
+                max_notes,
                 transfer_fee_buffer,
                 prep_tx_fee,
                 &prep_tx_count,
@@ -1966,8 +2018,8 @@ where
         // the note-preparation side of the estimate, and which notes it spends and which residuals it
         // leaves give the next run's note structure. The denomination plan only ever proposes a funding
         // multiset the preparation planner accepted, so this plan succeeds by construction.
-        let preparation =
-            plan_preparation(&notes, &funding, prep_tx_fee).map_err(MigrationError::Preparation)?;
+        let preparation = plan_preparation_with(portfolio, &notes, &funding, prep_tx_fee)
+            .map_err(MigrationError::Preparation)?;
         runs.push(RunEstimate {
             migratable: denominations.total_migratable(),
             crossings: funding.len(),
@@ -4836,11 +4888,11 @@ pub(crate) mod tests {
             "a whale migrates over several runs, got {}",
             est.run_count()
         );
-        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * u64::from(DENOM_CAP);
+        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get() as u64 * u64::from(DENOM_CAP);
         assert_eq!(u64::from(est.runs()[0].migratable()), per_run_cap);
         assert_eq!(
             est.runs()[0].crossings(),
-            MIGRATION_MAX_PREPARED_NOTES_PER_RUN
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get()
         );
         let summed: usize = est.runs().iter().map(|r| r.crossings()).sum();
         assert_eq!(est.total_crossings(), summed);

@@ -289,7 +289,7 @@ fn migration_scenarios_end_to_end() {
 
         // Every scenario's quanta fit one run (within the per-run note cap).
         assert!(
-            sc.expected_transfers <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+            sc.expected_transfers <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get(),
             "{}: quanta fit one run",
             sc.label
         );
@@ -473,7 +473,7 @@ fn total_keystone_rounds_evolve_across_runs() {
         // per-run sum (rounds cannot span runs).
         for run in est.runs() {
             assert!(run.crossings() >= 1);
-            assert!(run.crossings() <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+            assert!(run.crossings() <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get());
         }
         let summed: usize = est
             .runs()

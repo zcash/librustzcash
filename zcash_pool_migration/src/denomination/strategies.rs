@@ -8,6 +8,7 @@
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
 use alloc::vec::Vec;
+use core::num::NonZeroUsize;
 
 use rand_core::{CryptoRng, RngCore};
 
@@ -58,16 +59,29 @@ impl CanonicalOneTwoFive {
         }
     }
 
-    /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes, the
+    /// The ZIP 318 configuration with a caller-chosen per-run note count: `max_notes` notes, the
     /// [`DENOM_CAP`] maximum denomination, the [`MAX_RESIDUAL_VALUE`] minimum denomination, and the
     /// caller-computed transfer-fee buffer.
-    pub fn recommended(transfer_fee_buffer: Zatoshis) -> Self {
+    ///
+    /// The two bounds are NOT parameters here: they are the normative ZIP 318 values that fix which
+    /// denominations may cross the turnstile, and moving them would move this wallet's crossings out
+    /// of the anonymity set every other wallet shares. Only the per-run note count is the caller's
+    /// to choose; it bounds one run's transaction and proving cost and says nothing about which
+    /// values are published.
+    pub fn with_max_notes(max_notes: NonZeroUsize, transfer_fee_buffer: Zatoshis) -> Self {
         Self::new(
-            MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+            max_notes.get(),
             DENOM_CAP,
             MAX_RESIDUAL_VALUE,
             transfer_fee_buffer,
         )
+    }
+
+    /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes, the
+    /// [`DENOM_CAP`] maximum denomination, the [`MAX_RESIDUAL_VALUE`] minimum denomination, and the
+    /// caller-computed transfer-fee buffer.
+    pub fn recommended(transfer_fee_buffer: Zatoshis) -> Self {
+        Self::with_max_notes(MIGRATION_MAX_PREPARED_NOTES_PER_RUN, transfer_fee_buffer)
     }
 }
 
@@ -261,6 +275,25 @@ mod tests {
         )
     }
 
+    /// A spendable-note count: one (the exact-funding special case `unconstrained_split` gates on)
+    /// or more (the general fee-reserving path).
+    fn arb_note_count() -> impl Strategy<Value = usize> {
+        1usize..=4
+    }
+
+    /// One balance and preparation fee, held as some note count, asked of TWO independently drawn
+    /// note caps: the input shape of the cap-invariance law.
+    fn arb_two_caps_over_one_balance() -> impl Strategy<Value = (u64, u64, usize, usize, usize)> {
+        (
+            arb_plan_input(),
+            1usize..=MAX_SAMPLED_NOTE_CAP,
+            arb_note_count(),
+        )
+            .prop_map(|((total, fee, cap_a), cap_b, note_count)| {
+                (total, fee, cap_a, cap_b, note_count)
+            })
+    }
+
     /// The canonical strategy with the given note cap and the ZIP-317 transfer buffer.
     fn canonical(max_notes: usize) -> CanonicalOneTwoFive {
         CanonicalOneTwoFive::new(
@@ -344,13 +377,40 @@ mod tests {
             let mut other = ChaCha8Rng::seed_from_u64(1);
             prop_assert_eq!(&p, &s.plan(zat(total), MULTI_NOTE, zat(fee), &prep_tx_count_stub, &mut other));
         }
+
+        /// WHETHER a balance quantizes to anything at all is invariant across note caps: the split
+        /// is empty under one positive cap exactly when it is empty under every other. The first
+        /// part forms (or does not) from the balance, the transfer buffer and the preparation fee
+        /// alone, and every positive cap admits that first part, so only the LENGTH of the split
+        /// depends on the cap, never its emptiness.
+        ///
+        /// This is the lemma
+        /// [`balance_has_canonical_split`](super::super::balance_has_canonical_split) rests on when
+        /// it distinguishes "this balance has nothing to migrate" from "this wallet's note values
+        /// cannot fund what the balance quantizes to": that verdict must not turn on the caller's
+        /// per-run note count.
+        #[test]
+        fn split_emptiness_is_cap_invariant(
+            (total, fee, cap_a, cap_b, note_count) in arb_two_caps_over_one_balance(),
+        ) {
+            let a = canonical(cap_a).unconstrained_split(total, note_count, fee);
+            let b = canonical(cap_b).unconstrained_split(total, note_count, fee);
+            prop_assert_eq!(
+                a.is_empty(),
+                b.is_empty(),
+                "caps {} and {} disagree on emptiness for balance {}",
+                cap_a,
+                cap_b,
+                total
+            );
+        }
     }
 
     /// A whale's balance is split into capped notes, so one run migrates at most `max_notes * cap`
     /// and the rest rolls over as change.
     #[test]
     fn whale_is_capped_and_rolls_over() {
-        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get());
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         let p = s.plan(
             zat(MAX_MONEY),
@@ -359,7 +419,7 @@ mod tests {
             &prep_tx_count_stub,
             &mut rng,
         );
-        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * u64::from(DENOM_CAP);
+        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get() as u64 * u64::from(DENOM_CAP);
         assert!(u64::from(p.total_migratable()) <= per_run_cap);
         assert!(
             p.change().map(u64::from).unwrap_or(0) > per_run_cap,
@@ -370,7 +430,7 @@ mod tests {
     /// A balance below the smallest self-funding note migrates nothing and keeps it all as change.
     #[test]
     fn below_min_note_migrates_nothing() {
-        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get());
         let buffer = zip317_buffer();
         let below = u64::from(MAX_RESIDUAL_VALUE) + buffer - 1;
         let mut rng = ChaCha8Rng::seed_from_u64(0);
@@ -428,7 +488,7 @@ mod tests {
     fn assert_one_quantum_plus_fees(quantum: u64, prep_fee: u64) {
         let buffer = zip317_buffer();
         let balance = quantum + buffer + prep_fee;
-        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get());
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         let p = s.plan(
             zat(balance),
@@ -504,7 +564,7 @@ mod tests {
         };
         let mut rng = ChaCha8Rng::seed_from_u64(0);
 
-        let plan = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN).plan(
+        let plan = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get()).plan(
             zat(funding),
             available.len(),
             zat(prep_fee),
@@ -961,7 +1021,7 @@ mod tests {
         let canonical = s.unconstrained_split(total, notes.len(), fee);
         assert_eq!(
             canonical,
-            vec![cap; MIGRATION_MAX_PREPARED_NOTES_PER_RUN],
+            vec![cap; MIGRATION_MAX_PREPARED_NOTES_PER_RUN.get()],
             "the canonical split saturates the per-run cap with repeated DENOM_CAP parts"
         );
 

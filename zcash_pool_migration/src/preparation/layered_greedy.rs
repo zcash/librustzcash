@@ -1263,6 +1263,9 @@ mod tests {
     /// Replays [`SCENARIOS_UNDER_THIS_RULE`] through a migration planned against this rule alone.
     #[test]
     fn what_a_migration_looks_like_under_this_rule_alone() {
-        crate::preparation::assert_scenarios_under(&(LayeredGreedy, ()), SCENARIOS_UNDER_THIS_RULE);
+        crate::preparation::tests::assert_scenarios_under(
+            &(LayeredGreedy, ()),
+            SCENARIOS_UNDER_THIS_RULE,
+        );
     }
 }

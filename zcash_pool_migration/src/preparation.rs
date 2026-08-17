@@ -47,21 +47,6 @@ use zcash_protocol::value::Zatoshis;
 
 use core::fmt;
 
-#[cfg(test)]
-use rand_chacha::ChaCha8Rng;
-#[cfg(test)]
-use rand_core::SeedableRng;
-
-#[cfg(test)]
-use crate::engine::{
-    plan_migration_with,
-    tests::{MockBackend, test_net},
-};
-#[cfg(test)]
-use crate::signing_rounds::SigningRoundBudget;
-#[cfg(test)]
-use crate::testing::MIGRATION_SCENARIOS;
-
 pub mod first_fit_decreasing;
 pub mod layered_greedy;
 
@@ -660,59 +645,72 @@ fn validate_instance(available: &[Zatoshis], funding: &[Zatoshis]) -> Result<(),
     Ok(())
 }
 
-/// Replay a strategy module's scenario table through a whole migration planned under `portfolio`
-/// alone: for each row, plan the named `MIGRATION_SCENARIOS` wallet with `plan_migration_with` and
-/// assert the preparation-transaction count, crossings, Keystone signing rounds, and migrated
-/// value (in units of 0.01 ZEC). Each strategy module keeps its own table; this is the one driver
-/// they all replay it through.
 #[cfg(test)]
-pub(crate) fn assert_scenarios_under<Pf: Portfolio>(
-    portfolio: &Pf,
-    scenarios: &[(&str, usize, usize, usize, u64)],
-) {
-    /// One hundredth of a ZEC, the unit the migrated column is written in.
-    const H: u64 = zcash_protocol::value::COIN / 100;
-    /// Any fixed seed: the canonical decomposition does not consult the RNG.
-    const SEED: u64 = 7;
-    /// A post-NU6.3 chain tip to plan against.
-    const TIP: u32 = 2_000_000;
-
-    for (label, preparations, crossings, keystone_rounds, migrated) in scenarios {
-        let scenario = MIGRATION_SCENARIOS
-            .iter()
-            .find(|sc| sc.label == *label)
-            .expect("every row names a shared scenario");
-        let backend = MockBackend::new(scenario.source_notes.to_vec(), TIP);
-        let mut rng = ChaCha8Rng::seed_from_u64(SEED);
-        let plan = plan_migration_with(portfolio, &test_net(), &backend, &mut rng)
-            .expect("this rule plans every shared scenario");
-
-        assert_eq!(
-            plan.preparation_tx_count(),
-            *preparations,
-            "{label}: preparations"
-        );
-        assert_eq!(plan.transfer_tx_count(), *crossings, "{label}: crossings");
-        assert_eq!(
-            plan.signing_round_count(SigningRoundBudget::KEYSTONE),
-            *keystone_rounds,
-            "{label}: Keystone rounds",
-        );
-        assert_eq!(
-            u64::from(plan.value_migrated()) / H,
-            *migrated,
-            "{label}: migrated"
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    use rand_chacha::ChaCha8Rng;
+    use rand_core::SeedableRng;
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::testing::{PREPARATION_VECTORS, preparation_fee_per_tx};
+    use crate::denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
+    use crate::engine::{
+        plan_migration_with,
+        tests::{MockBackend, test_net},
+    };
+    use crate::signing_rounds::SigningRoundBudget;
+    use crate::testing::{MIGRATION_SCENARIOS, PREPARATION_VECTORS, preparation_fee_per_tx};
+
+    /// Replay a strategy module's scenario table through a whole migration planned under
+    /// `portfolio` alone: for each row, plan the named `MIGRATION_SCENARIOS` wallet with
+    /// `plan_migration_with` and assert the preparation-transaction count, crossings, Keystone
+    /// signing rounds, and migrated value (in units of 0.01 ZEC). Each strategy module keeps its
+    /// own table; this is the one driver they all replay it through.
+    pub(crate) fn assert_scenarios_under<Pf: Portfolio>(
+        portfolio: &Pf,
+        scenarios: &[(&str, usize, usize, usize, u64)],
+    ) {
+        /// One hundredth of a ZEC, the unit the migrated column is written in.
+        const H: u64 = zcash_protocol::value::COIN / 100;
+        /// Any fixed seed: the canonical decomposition does not consult the RNG.
+        const SEED: u64 = 7;
+        /// A post-NU6.3 chain tip to plan against.
+        const TIP: u32 = 2_000_000;
+
+        for (label, preparations, crossings, keystone_rounds, migrated) in scenarios {
+            let scenario = MIGRATION_SCENARIOS
+                .iter()
+                .find(|sc| sc.label == *label)
+                .expect("every row names a shared scenario");
+            let backend = MockBackend::new(scenario.source_notes.to_vec(), TIP);
+            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+            let plan = plan_migration_with(
+                portfolio,
+                MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+                &test_net(),
+                &backend,
+                &mut rng,
+            )
+            .expect("this rule plans every shared scenario");
+
+            assert_eq!(
+                plan.preparation_tx_count(),
+                *preparations,
+                "{label}: preparations"
+            );
+            assert_eq!(plan.transfer_tx_count(), *crossings, "{label}: crossings");
+            assert_eq!(
+                plan.signing_round_count(SigningRoundBudget::KEYSTONE),
+                *keystone_rounds,
+                "{label}: Keystone rounds",
+            );
+            assert_eq!(
+                u64::from(plan.value_migrated()) / H,
+                *migrated,
+                "{label}: migrated"
+            );
+        }
+    }
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
     /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.
