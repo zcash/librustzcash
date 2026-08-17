@@ -5184,12 +5184,21 @@ pub(crate) fn put_tx_meta(
     tx: &WalletTx<AccountUuid>,
     height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
-    // It isn't there, so insert our transaction into the database.
+    // `block` is set only when the block at that height has actually been scanned, since it
+    // references `blocks(height)`; `mined_height` records the height either way. The nullifier
+    // map may be loaded independently of block scanning, so this is reached with heights for
+    // which no `blocks` row exists.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
         "INSERT INTO transactions (txid, block, mined_height, tx_index, min_observed_height)
-        VALUES (:txid, :block, :block, :tx_index, :block)
+        VALUES (
+            :txid,
+            (SELECT height FROM blocks WHERE height = :block),
+            :block,
+            :tx_index,
+            :block
+        )
         ON CONFLICT (txid) DO UPDATE
-        SET block = :block,
+        SET block = (SELECT height FROM blocks WHERE height = :block),
             mined_height = :block,
             tx_index = :tx_index,
             min_observed_height = MIN(min_observed_height, :block),
@@ -6248,6 +6257,42 @@ mod tests {
             query_nullifier_map(&tx, ShieldedPool::Sapling, &nf),
             Ok(None)
         );
+    }
+
+    /// `transactions.block` references `blocks(height)` and means "observed in a scanned block",
+    /// so it may be set only for a height the wallet has actually scanned. The nullifier map is
+    /// loaded independently of scanning, so recording a transaction found through it must record
+    /// the height in `mined_height` alone.
+    #[test]
+    fn nullifier_map_lookup_does_not_record_an_unscanned_block() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let conn = st.wallet_mut().conn_mut();
+
+        // The migrator leaves foreign key enforcement on for this connection, so a dangling
+        // `block` reference is rejected outright rather than merely being wrong.
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+
+        let tx = conn.transaction().unwrap();
+        let nf = insert_test_nullifier(&tx, 100, 1);
+        assert_eq!(count(&tx, "blocks"), 0, "height 100 has not been scanned");
+
+        query_nullifier_map(&tx, ShieldedPool::Sapling, &nf)
+            .unwrap()
+            .expect("the locator identifies a transaction");
+
+        let (block, mined_height) = tx
+            .query_row("SELECT block, mined_height FROM transactions", [], |row| {
+                Ok((row.get::<_, Option<u32>>(0)?, row.get::<_, Option<u32>>(1)?))
+            })
+            .unwrap();
+        assert_eq!(block, None, "the block has not been scanned");
+        assert_eq!(mined_height, Some(100));
     }
 
     /// A pool whose checkpoints all lie at or below the requested height tolerates a

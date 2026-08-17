@@ -20,6 +20,13 @@ workspace.
   counterparts) failed with a decoding error on encountering one. Such an
   entry is now reported as no detected spend. Wallets carrying entries
   orphaned by an earlier version are repaired by the next prune.
+- Recording a transaction discovered through the nullifier map no longer sets
+  `transactions.block` to a height whose block has not been scanned. That
+  height violates the column's foreign key into `blocks`, so on a connection
+  with foreign key enforcement on (any connection the migrator ran on)
+  `WalletRead::detect_sapling_spend` and its Orchard and Ironwood
+  counterparts failed whenever the nullifier map had been loaded ahead of
+  scanning. The height continues to be recorded in `mined_height`.
 
 ## [0.22.0-rc.8] - 2026-08-07
 
