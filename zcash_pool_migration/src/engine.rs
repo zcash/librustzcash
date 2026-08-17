@@ -982,7 +982,7 @@ impl MigrationState {
 /// A planned migration, before anything is built, signed, or broadcast: the denomination split, the
 /// preparation transactions that mint the funding notes, and the phase-2 transfer schedule. This is the
 /// preview a wallet shows the user for consent (ZIP 318) to the pool-crossing amounts.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MigrationPlan {
     denominations: DenominationPlan,
     preparation: PreparationPlan,
@@ -1076,13 +1076,8 @@ struct PlannedRun {
     rows: Vec<PlannedTx>,
     /// Per preparation transaction, in row order: the note each of its
     /// [`Prior`](PrepInput::Prior) inputs claims, in input order.
-    ///
-    /// Read by the build, which is Orchard-only; the assignment is still MADE without the feature,
-    /// because it is what the rows' dependencies are derived from.
-    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
     prep_feeders: Vec<Vec<Option<MintedOrdinal>>>,
     /// Per crossing, in crossing order: the funding note it claims.
-    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
     transfer_funding: Vec<Option<MintedOrdinal>>,
 }
 
@@ -1148,6 +1143,234 @@ impl PlannedRun {
 }
 
 impl MigrationPlan {
+    /// Reassemble a plan from its parts, VALIDATING them: the denomination split, the preparation
+    /// transactions that mint its funding notes, the preparation broadcast schedule (in the
+    /// layers' `[layer][index]` shape), and the transfer schedule (one entry per crossing, in the
+    /// shuffled order [`schedule`](Self::schedule) publishes).
+    ///
+    /// This exists for an application that plans elsewhere — a preview computed on another device,
+    /// a plan carried across a process boundary — and then drives [`commit_preparation`] with it.
+    /// A [`MigrationPlan`] is never persisted (a store round-trips a [`MigrationState`], which
+    /// holds transactions rather than schedules), so this is not a store constructor and its parts
+    /// are not "as stored".
+    ///
+    /// # Why this validates when the other `from_parts` constructors do not
+    ///
+    /// The divergence is not stylistic. [`PreparationPlan::from_parts`] and
+    /// [`PrepTransaction::from_parts`] hand back parts that every downstream consumer re-checks:
+    /// `build_prep_tx` resolves each input against the notes actually available and each output
+    /// against the value actually spent, so an inconsistent preparation plan fails loudly at the
+    /// build. A [`MigrationPlan`]'s CROSSING VALUES have no such backstop — they are what the user
+    /// consents to and what the transfers put on chain — and its two schedules are stamped onto the
+    /// committed transactions verbatim. A plan built from unvalidated parts could therefore publish
+    /// a value off the `{1, 2, 5} * 10^k` series, which joins no anonymity set and is
+    /// unrecoverable once mined. So this constructor establishes here what nothing downstream will.
+    ///
+    /// `constants` supplies the ZIP 318 denomination bounds to judge canonicality against, so a
+    /// test network running scaled bounds is checked against ITS bounds rather than the specified
+    /// ones. Obtain it from the wallet (see [`PoolMigrationConstants`]), never from the network
+    /// type.
+    ///
+    /// # What it establishes
+    ///
+    /// Every invariant [`plan_migration`] establishes and that is checkable from the parts alone:
+    /// the two schedules match the shapes they index, the preparation heights are non-decreasing
+    /// within a layer and serialized across layers, no transfer precedes the preparation's
+    /// estimated mining, every preparation spend and every crossing resolves to a note the plan
+    /// mints, the declared totals match the values, and every crossing is canonical. In
+    /// particular, resolving the spends here is what makes
+    /// [`CommitError::InconsistentPlan`] unreachable for a plan this returns.
+    ///
+    /// # What it cannot establish
+    ///
+    /// - That a [`PrepInput::Wallet`] index names a real spendable note of that value. Only the
+    ///   wallet knows, and the commit checks it, yielding [`CommitError::StalePlan`].
+    /// - The full anchor floor. [`TransferPrecedesPreparation`] is its checkable shadow: the real
+    ///   floor is [`scheduling::earliest_broadcast_height`], which needs the anchor bucket interval
+    ///   and the NU6.3 activation height, neither of which a plan carries.
+    /// - Per-transaction value conservation. [`ValueNotConserved`] checks the denomination plan's
+    ///   own accounting; checking each preparation transaction's would need the per-transaction fee
+    ///   the plan does not carry.
+    ///
+    /// - That the crossing COUNT respects the per-run note cap. The cap is the caller's to choose
+    ///   ([`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] is only this crate's default), and a plan
+    ///   carries no record of the one it was planned under, so the count is unverifiable here BY
+    ///   CONSTRUCTION rather than merely unchecked. Judging it against the default would reject
+    ///   plans a caller legitimately produced with a larger cap.
+    ///
+    /// The transfer schedule is deliberately NOT required to be monotone in crossing index. It is
+    /// shuffled (ZIP 318): the crossing values are non-increasing, so a schedule ordered with them
+    /// would spell the balance out on chain. Do not "fix" that here.
+    ///
+    /// [`PreparationPlan::from_parts`]: crate::preparation::PreparationPlan::from_parts
+    /// [`PrepTransaction::from_parts`]: crate::preparation::PrepTransaction::from_parts
+    /// [`PoolMigrationConstants`]: zcash_protocol::zip318::PoolMigrationConstants
+    /// [`TransferPrecedesPreparation`]: MigrationPlanError::TransferPrecedesPreparation
+    /// [`ValueNotConserved`]: MigrationPlanError::ValueNotConserved
+    pub fn from_parts<C>(
+        constants: &C,
+        denominations: DenominationPlan,
+        preparation: PreparationPlan,
+        prep_schedule: Vec<Vec<BlockHeight>>,
+        schedule: Vec<Schedule>,
+    ) -> Result<Self, MigrationPlanError>
+    where
+        C: zcash_protocol::zip318::PoolMigrationConstants + ?Sized,
+    {
+        // --- arity, before any content ---
+
+        let crossings = denominations.crossing_values().len();
+        if schedule.len() != crossings {
+            return Err(MigrationPlanError::TransferScheduleArity {
+                schedule: schedule.len(),
+                crossings,
+            });
+        }
+        if prep_schedule.len() != preparation.layer_count() {
+            return Err(MigrationPlanError::PrepScheduleLayerArity {
+                schedule: prep_schedule.len(),
+                layers: preparation.layer_count(),
+            });
+        }
+        for (layer, (heights, txs)) in prep_schedule.iter().zip(preparation.layers()).enumerate() {
+            if heights.len() != txs.len() {
+                return Err(MigrationPlanError::PrepScheduleTransactionArity {
+                    layer,
+                    heights: heights.len(),
+                    transactions: txs.len(),
+                });
+            }
+        }
+
+        // --- the preparation schedule's shape in time ---
+
+        // The bound the next NON-EMPTY layer must respect, carried across empty ones. `plan_migration`
+        // advances its base by `EST_PREP_LAYER_MINING_BLOCKS` even for an empty layer, so skipping
+        // them here yields a bound at or below the one it drew against and can never reject a plan
+        // it produced.
+        let mut earliest_layer_start: Option<BlockHeight> = None;
+        for (layer, heights) in prep_schedule.iter().enumerate() {
+            for (index, window) in heights.windows(2).enumerate() {
+                if window[1] < window[0] {
+                    return Err(MigrationPlanError::PrepScheduleNotMonotone {
+                        layer,
+                        index: index + 1,
+                        previous: window[0],
+                        height: window[1],
+                    });
+                }
+            }
+            let (Some(&first), Some(&last)) = (heights.first(), heights.last()) else {
+                continue;
+            };
+            if let Some(earliest) = earliest_layer_start
+                && first < earliest
+            {
+                return Err(MigrationPlanError::PrepLayersNotSerialized {
+                    layer,
+                    first,
+                    earliest,
+                });
+            }
+            earliest_layer_start = Some(last + EST_PREP_LAYER_MINING_BLOCKS);
+        }
+
+        // The estimated height at which the LAST preparation transaction has mined and its funding
+        // notes are witnessable. No preparation, no constraint.
+        if let Some(earliest) = prep_schedule
+            .iter()
+            .flatten()
+            .copied()
+            .max()
+            .map(|last| last + EST_PREP_LAYER_MINING_BLOCKS)
+        {
+            for (crossing, slot) in schedule.iter().enumerate() {
+                if slot.broadcast_height() < earliest {
+                    return Err(MigrationPlanError::TransferPrecedesPreparation {
+                        crossing,
+                        broadcast: slot.broadcast_height(),
+                        earliest,
+                    });
+                }
+            }
+        }
+
+        // --- every spend resolves to a note the plan mints ---
+
+        let plan = MigrationPlan {
+            denominations,
+            preparation,
+            prep_schedule,
+            schedule,
+        };
+        // Asked of the plan's own walk rather than re-derived: the first-fit rule that pairs a
+        // crossing with its funding note is decided in exactly one place, and a second statement of
+        // it here would be a second answer that agrees only by coincidence.
+        let run = plan.planned_run();
+        for (transaction, feeders) in run.prep_feeders.iter().enumerate() {
+            for (input, claim) in feeders.iter().enumerate() {
+                if claim.is_none() {
+                    return Err(MigrationPlanError::UnresolvedFeeder { transaction, input });
+                }
+            }
+        }
+        for (crossing, claim) in run.transfer_funding.iter().enumerate() {
+            if claim.is_none() {
+                return Err(MigrationPlanError::UnmintedFundingNote { crossing });
+            }
+        }
+
+        // --- the denomination plan's own accounting ---
+
+        let denominations = plan.denominations();
+        // Widened to `u128` throughout: the parts are the caller's, so neither sum is bounded by a
+        // validated balance the way a planner's own arithmetic is.
+        let wide = |value: Zatoshis| u128::from(u64::from(value));
+        let sum = |values: &[Zatoshis]| values.iter().copied().map(wide).sum::<u128>();
+
+        let crossing_total = sum(denominations.crossing_values());
+        if crossing_total != wide(denominations.total_migratable()) {
+            return Err(MigrationPlanError::MigratableTotalMismatch {
+                declared: denominations.total_migratable(),
+                crossings: crossing_total,
+            });
+        }
+
+        let accounted = sum(&denominations.migration_outputs())
+            + wide(denominations.prep_fees())
+            + wide(denominations.change().unwrap_or(Zatoshis::ZERO));
+        if accounted != wide(denominations.total_input()) {
+            return Err(MigrationPlanError::ValueNotConserved {
+                accounted,
+                total_input: denominations.total_input(),
+            });
+        }
+        if plan.preparation_tx_count() == 0 && denominations.prep_fees() != Zatoshis::ZERO {
+            return Err(MigrationPlanError::PrepFeesWithoutPreparation {
+                prep_fees: denominations.prep_fees(),
+            });
+        }
+
+        // --- what reaches the chain ---
+
+        for (crossing, &value) in denominations.crossing_values().iter().enumerate() {
+            if !constants.is_canonical_denomination(value) {
+                return Err(MigrationPlanError::NonCanonicalDenomination { crossing, value });
+            }
+        }
+        for (crossing, window) in denominations.crossing_values().windows(2).enumerate() {
+            if window[1] > window[0] {
+                return Err(MigrationPlanError::CrossingValuesNotDescending {
+                    crossing: crossing + 1,
+                    previous: window[0],
+                    value: window[1],
+                });
+            }
+        }
+
+        Ok(plan)
+    }
+
     /// The denomination decomposition (the denominations and residual). It already reflects
     /// reconciliation against the preparation fees: when the fees did not fit the balance, the
     /// smallest denominations were dropped (left in the source pool) during the decomposition.
@@ -1517,6 +1740,243 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
         }
     }
 }
+
+/// Why a set of parts is not a [`MigrationPlan`] ([`MigrationPlan::from_parts`]).
+///
+/// One variant per invariant that constructor enforces, each carrying the offending indices and
+/// values, so a caller can locate the fault rather than being told only that something was wrong.
+/// The checks run in the order the variants are declared — arity before content — and the FIRST
+/// failure is reported, so the error a given set of parts yields is deterministic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MigrationPlanError {
+    /// The transfer schedule does not carry exactly one entry per crossing.
+    TransferScheduleArity {
+        /// The number of schedule entries supplied.
+        schedule: usize,
+        /// The number of crossings the denomination plan declares.
+        crossings: usize,
+    },
+    /// The preparation schedule does not carry exactly one layer per preparation layer. A spurious
+    /// trailing layer is as much a defect as a missing one: it shifts the estimated last
+    /// preparation height, and with it the anchor floor of every transfer.
+    PrepScheduleLayerArity {
+        /// The number of schedule layers supplied.
+        schedule: usize,
+        /// The number of layers the preparation plan holds.
+        layers: usize,
+    },
+    /// A preparation schedule layer does not carry exactly one height per transaction in the
+    /// matching preparation layer.
+    PrepScheduleTransactionArity {
+        /// The layer at fault.
+        layer: usize,
+        /// The number of heights supplied for it.
+        heights: usize,
+        /// The number of transactions it holds.
+        transactions: usize,
+    },
+    /// A preparation schedule layer's heights decrease. The heights are cumulative draws, so a
+    /// backwards one could not have been drawn — and it would stamp the canonical expiry window of
+    /// the wrong period on the transaction it schedules.
+    PrepScheduleNotMonotone {
+        /// The layer at fault.
+        layer: usize,
+        /// The index within the layer whose height went backwards.
+        index: usize,
+        /// The height at the preceding index.
+        previous: BlockHeight,
+        /// The offending height.
+        height: BlockHeight,
+    },
+    /// A preparation layer is scheduled to start before its predecessor is estimated to have mined,
+    /// so it would spend notes that do not yet exist.
+    PrepLayersNotSerialized {
+        /// The layer at fault.
+        layer: usize,
+        /// Its first scheduled height.
+        first: BlockHeight,
+        /// The earliest height it may start at.
+        earliest: BlockHeight,
+    },
+    /// A transfer is scheduled before the preparation phase is estimated to have mined, so its
+    /// funding note would not exist (and no anchor boundary above that note's creation would).
+    TransferPrecedesPreparation {
+        /// The crossing at fault.
+        crossing: usize,
+        /// Its scheduled broadcast height.
+        broadcast: BlockHeight,
+        /// The earliest height any transfer may be broadcast at.
+        earliest: BlockHeight,
+    },
+    /// A preparation transaction spends a [`PrepInput::Prior`] note the plan does not mint: the
+    /// coordinate is out of range, names a [`Change`](PrepOutput::Change) output, names an output
+    /// of that transaction itself or of a later one, or names one an earlier transaction has
+    /// already spent.
+    UnresolvedFeeder {
+        /// The preparation transaction's index in commit order (layers in order, then transactions
+        /// within each layer).
+        transaction: usize,
+        /// Which of that transaction's `Prior` inputs, in input order, resolved to nothing.
+        input: usize,
+    },
+    /// A crossing has no funding note: the preparation phase mints no unclaimed note of the value
+    /// the crossing needs.
+    UnmintedFundingNote {
+        /// The crossing at fault.
+        crossing: usize,
+    },
+    /// The declared total migratable value is not the sum of the crossing values. This is the
+    /// figure a wallet shows the user for consent, and nothing downstream recomputes it.
+    MigratableTotalMismatch {
+        /// The total the denomination plan declares.
+        declared: Zatoshis,
+        /// The sum of its crossing values, widened so a corrupt set cannot overflow the check.
+        crossings: u128,
+    },
+    /// The denomination plan does not conserve value: the prepared notes, the preparation fees and
+    /// the change do not add up to the total input it decomposes.
+    ValueNotConserved {
+        /// The prepared notes plus the preparation fees plus the change, widened so a corrupt set
+        /// cannot overflow the check.
+        accounted: u128,
+        /// The total input the plan declares it decomposes.
+        total_input: Zatoshis,
+    },
+    /// The denomination plan reserves preparation fees although the preparation plan has no
+    /// transactions to spend them.
+    PrepFeesWithoutPreparation {
+        /// The fees reserved.
+        prep_fees: Zatoshis,
+    },
+    /// A crossing value is not a canonical denomination. Every crossing value in a plan reaches the
+    /// chain, and a value off the `{1, 2, 5} * 10^k` series joins no anonymity set.
+    NonCanonicalDenomination {
+        /// The crossing at fault.
+        crossing: usize,
+        /// Its value.
+        value: Zatoshis,
+    },
+    /// The crossing values are not non-increasing. Advisory: this is the shape every decomposition
+    /// this crate ships produces (the split takes the largest denomination first and reconciliation
+    /// only drops from the back), and the transfer schedule is shuffled precisely because of it, so
+    /// a plan ordered otherwise is a plan whose privacy argument no longer applies.
+    CrossingValuesNotDescending {
+        /// The crossing at fault.
+        crossing: usize,
+        /// The value at the preceding index.
+        previous: Zatoshis,
+        /// The offending value.
+        value: Zatoshis,
+    },
+}
+
+impl fmt::Display for MigrationPlanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MigrationPlanError::TransferScheduleArity {
+                schedule,
+                crossings,
+            } => write!(
+                f,
+                "the transfer schedule has {schedule} entries for {crossings} crossings"
+            ),
+            MigrationPlanError::PrepScheduleLayerArity { schedule, layers } => write!(
+                f,
+                "the preparation schedule has {schedule} layers for {layers} preparation layers"
+            ),
+            MigrationPlanError::PrepScheduleTransactionArity {
+                layer,
+                heights,
+                transactions,
+            } => write!(
+                f,
+                "preparation layer {layer} has {heights} scheduled heights for {transactions} \
+                 transactions"
+            ),
+            MigrationPlanError::PrepScheduleNotMonotone {
+                layer,
+                index,
+                previous,
+                height,
+            } => write!(
+                f,
+                "preparation layer {layer} goes backwards at index {index}: {} follows {}",
+                u32::from(*height),
+                u32::from(*previous)
+            ),
+            MigrationPlanError::PrepLayersNotSerialized {
+                layer,
+                first,
+                earliest,
+            } => write!(
+                f,
+                "preparation layer {layer} starts at {}, before its predecessor is estimated to \
+                 have mined at {}",
+                u32::from(*first),
+                u32::from(*earliest)
+            ),
+            MigrationPlanError::TransferPrecedesPreparation {
+                crossing,
+                broadcast,
+                earliest,
+            } => write!(
+                f,
+                "the transfer of crossing {crossing} is scheduled at {}, before the preparation is \
+                 estimated to have mined at {}",
+                u32::from(*broadcast),
+                u32::from(*earliest)
+            ),
+            MigrationPlanError::UnresolvedFeeder { transaction, input } => write!(
+                f,
+                "preparation transaction {transaction} spends a note the plan does not mint at its \
+                 prior input {input}"
+            ),
+            MigrationPlanError::UnmintedFundingNote { crossing } => {
+                write!(f, "no minted funding note for crossing {crossing}")
+            }
+            MigrationPlanError::MigratableTotalMismatch {
+                declared,
+                crossings,
+            } => write!(
+                f,
+                "the declared total migratable value {} is not the sum {crossings} of the crossing \
+                 values",
+                u64::from(*declared)
+            ),
+            MigrationPlanError::ValueNotConserved {
+                accounted,
+                total_input,
+            } => write!(
+                f,
+                "the prepared notes, preparation fees and change total {accounted}, not the {} \
+                 decomposed",
+                u64::from(*total_input)
+            ),
+            MigrationPlanError::PrepFeesWithoutPreparation { prep_fees } => write!(
+                f,
+                "{} reserved for preparation fees, but the plan has no preparation transactions",
+                u64::from(*prep_fees)
+            ),
+            MigrationPlanError::NonCanonicalDenomination { crossing, value } => write!(
+                f,
+                "crossing {crossing} carries {}, which is not a canonical denomination",
+                u64::from(*value)
+            ),
+            MigrationPlanError::CrossingValuesNotDescending {
+                crossing,
+                previous,
+                value,
+            } => write!(
+                f,
+                "crossing {crossing} carries {}, above the {} before it",
+                u64::from(*value),
+                u64::from(*previous)
+            ),
+        }
+    }
+}
+
+impl core::error::Error for MigrationPlanError {}
 
 /// The two canonical ZIP-317 fees of a migration, computed from the canonical transaction shapes:
 /// the fee of one padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation
@@ -2201,17 +2661,34 @@ impl ProvedTransaction {
         state.set_transaction_proved(self.id, self.pczt, self.lock_owner);
     }
 
-    /// Reassemble a proved transaction from its parts, for exercising a store's
-    /// [`store_proved_transaction`](PoolMigrationWrite::store_proved_transaction) without
-    /// driving the whole prove pipeline. Test-only: production code obtains these exclusively
-    /// from [`prove_transfer`] / [`prove_preparation`].
-    #[cfg(any(test, feature = "test-dependencies"))]
+    /// Assemble a proved transaction from its parts: the id of the transaction it proves and the
+    /// proven PCZT's bytes, holding no note reservation (see
+    /// [`with_lock_owner`](Self::with_lock_owner)).
+    ///
+    /// [`prove_transfer`] and [`prove_preparation`] are how the crate's own pipeline produces one.
+    /// This is for a prover the crate does not drive — a hardware signer, a remote proving service
+    /// — that returns proven bytes some other way: [`MigrationProver`] is a public trait and
+    /// [`store_proved_transaction`](PoolMigrationWrite::store_proved_transaction) takes a
+    /// [`ProvedTransaction`] BY VALUE, so without this an out-of-tree prover could not hand its
+    /// result to a store at all in a release build.
     pub fn from_parts(id: MigrationTransferId, pczt: Vec<u8>) -> Self {
         Self {
             id,
             pczt,
             lock_owner: None,
         }
+    }
+
+    /// Record the token this transaction's spent notes were reserved under, as
+    /// [`MigrationProver::lock_spent_notes`] returned it.
+    ///
+    /// Separate from [`from_parts`](Self::from_parts) rather than a third argument to it, because
+    /// the reservation is optional in exactly the way the trait makes it optional: a prover that
+    /// models no lock state returns `None` and never calls this. A prover that DOES take locks must
+    /// call it, or the token is lost and a later cancel (or a restart) cannot release what it
+    /// reserved — which is the whole reason the proof and its reservation are carried in one value.
+    pub fn with_lock_owner(self, lock_owner: Option<MigrationLockOwner>) -> Self {
+        Self { lock_owner, ..self }
     }
 }
 
@@ -4280,7 +4757,7 @@ pub(crate) mod tests {
             assert_put_get_roundtrip, assert_update_transaction, first_transaction_id,
         },
     };
-    use proptest::proptest;
+    use proptest::{prop_assert, prop_assert_eq, proptest};
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
@@ -5147,6 +5624,493 @@ pub(crate) mod tests {
                 assert_update_transaction(&mut backend, &state, id, new_state);
             }
         });
+    }
+
+    // --- `MigrationPlan::from_parts` ---
+
+    /// The ZIP 318 parameters, as a wallet that overrides none of them supplies them.
+    struct Zip318Constants;
+
+    impl zcash_protocol::zip318::PoolMigrationConstants for Zip318Constants {}
+
+    /// The per-note fee buffer, preparation fees and source-pool change of [`plan_parts_for`]. No
+    /// planner computed them and nothing in `from_parts` relates them to a fee rule: they are
+    /// related only to each other, through the value-conservation invariant.
+    const FIXTURE_BUFFER: u64 = 20_000;
+    const FIXTURE_PREP_FEES: u64 = 30_000;
+    const FIXTURE_CHANGE: u64 = 5_000;
+
+    /// The height [`plan_parts_for`]'s first preparation layer is scheduled at.
+    const FIXTURE_BASE_HEIGHT: u32 = 2_000_000;
+
+    /// A set of [`MigrationPlan::from_parts`] arguments, so a test can break exactly one of them.
+    struct PlanParts {
+        denominations: DenominationPlan,
+        preparation: PreparationPlan,
+        prep_schedule: Vec<Vec<BlockHeight>>,
+        schedule: Vec<Schedule>,
+    }
+
+    impl PlanParts {
+        fn build(self) -> Result<MigrationPlan, MigrationPlanError> {
+            MigrationPlan::from_parts(
+                &Zip318Constants,
+                self.denominations,
+                self.preparation,
+                self.prep_schedule,
+                self.schedule,
+            )
+        }
+
+        /// Re-point the layer-1 transaction's `Prior` input at `coordinate`, leaving what it mints
+        /// alone, so a test can name an output that mints nothing.
+        fn with_feeder(mut self, coordinate: (usize, usize, usize)) -> Self {
+            let (layer, transaction, output) = coordinate;
+            let split = &self.preparation.layers()[1][0];
+            let respent = crate::preparation::PrepTransaction::from_parts(
+                vec![PrepInput::Prior {
+                    layer,
+                    transaction,
+                    output,
+                    value: split.inputs()[0].value(),
+                }],
+                split.outputs().to_vec(),
+            );
+            self.preparation = PreparationPlan::from_parts(
+                vec![self.preparation.layers()[0].clone(), vec![respent]],
+                self.preparation.direct_funding_notes().to_vec(),
+            );
+            self
+        }
+    }
+
+    /// Wrap a raw zatoshi amount for the fixtures below.
+    fn zat(value: u64) -> Zatoshis {
+        Zatoshis::from_u64(value).expect("fixture values are valid amounts")
+    }
+
+    /// The denomination plan of [`plan_parts_for`], with the two declared totals and the
+    /// preparation fees passed rather than derived, so a test can break exactly one of the
+    /// accounting invariants without disturbing the others.
+    fn fixture_denominations(
+        crossings: &[u64],
+        prep_fees: u64,
+        total_input: u64,
+        total_migratable: u64,
+    ) -> DenominationPlan {
+        DenominationPlan::from_stored_parts(
+            crossings.iter().copied().map(zat).collect(),
+            zat(FIXTURE_BUFFER),
+            Some(zat(FIXTURE_CHANGE)),
+            zat(prep_fees),
+            zat(total_input),
+            zat(total_migratable),
+        )
+        .expect("the fixture's crossings and buffer are representable")
+    }
+
+    /// The total source-pool balance a plan crossing `crossings` decomposes: one prepared note per
+    /// crossing (the crossing plus the buffer), the preparation fees, and the change.
+    fn fixture_total_input(crossings: &[u64]) -> u64 {
+        crossings.iter().map(|c| c + FIXTURE_BUFFER).sum::<u64>()
+            + FIXTURE_PREP_FEES
+            + FIXTURE_CHANGE
+    }
+
+    /// A VALID set of [`MigrationPlan::from_parts`] arguments crossing `crossings`, in a shape that
+    /// every invariant has something to range over: two preparation layers, the first holding two
+    /// transactions (so a layer's heights can be made to go backwards) and the second spending a
+    /// `Prior` output of the first (so a feeder can be made to resolve to nothing), and one
+    /// transfer per crossing.
+    ///
+    /// Hand-built rather than planned, because a planner cannot produce the invalid neighbours
+    /// these tests need — that is the whole point of validating a constructor a planner does not
+    /// go through. [`from_parts_round_trips_a_planned_migration`] pins the other direction: that
+    /// what the planner DOES produce is accepted.
+    fn plan_parts_for(crossings: &[u64]) -> PlanParts {
+        let notes: Vec<u64> = crossings.iter().map(|c| c + FIXTURE_BUFFER).collect();
+        let minted: u64 = notes.iter().sum();
+        let total_input = fixture_total_input(crossings);
+
+        let denominations = fixture_denominations(
+            crossings,
+            FIXTURE_PREP_FEES,
+            total_input,
+            crossings.iter().sum(),
+        );
+
+        // Layer 0 consolidates the wallet into one intermediate note, alongside a transaction that
+        // only returns change (which mints nothing, so its output carries no coordinate); layer 1
+        // spends the intermediate note into one funding note per crossing.
+        let consolidate = crate::preparation::PrepTransaction::from_parts(
+            vec![PrepInput::Wallet {
+                index: 0,
+                value: zat(total_input - FIXTURE_CHANGE),
+            }],
+            vec![PrepOutput::Intermediate(zat(minted))],
+        );
+        let refund = crate::preparation::PrepTransaction::from_parts(
+            vec![PrepInput::Wallet {
+                index: 1,
+                value: zat(FIXTURE_CHANGE),
+            }],
+            vec![PrepOutput::Change(zat(FIXTURE_CHANGE))],
+        );
+        let split = crate::preparation::PrepTransaction::from_parts(
+            vec![PrepInput::Prior {
+                layer: 0,
+                transaction: 0,
+                output: 0,
+                value: zat(minted),
+            }],
+            notes.iter().map(|&v| PrepOutput::Funding(zat(v))).collect(),
+        );
+        let preparation =
+            PreparationPlan::from_parts(vec![vec![consolidate, refund], vec![split]], vec![]);
+
+        // Heights a draw could have produced: non-decreasing within a layer, layer 1 starting a
+        // full mining margin past layer 0's last, and the transfers a further margin past that.
+        let h = |offset: u32| BlockHeight::from_u32(FIXTURE_BASE_HEIGHT + offset);
+        let last_of_layer_0 = 3;
+        let layer_1 = last_of_layer_0 + EST_PREP_LAYER_MINING_BLOCKS;
+        let first_transfer = layer_1 + EST_PREP_LAYER_MINING_BLOCKS;
+        let prep_schedule = vec![vec![h(0), h(last_of_layer_0)], vec![h(layer_1)]];
+        let schedule = (0..crossings.len())
+            .map(|i| Schedule::new(h(first_transfer + i as u32)))
+            .collect();
+
+        PlanParts {
+            denominations,
+            preparation,
+            prep_schedule,
+            schedule,
+        }
+    }
+
+    /// The base fixture: two canonical crossings in the non-increasing order a split produces.
+    fn plan_parts() -> PlanParts {
+        plan_parts_for(&[2 * COIN, COIN])
+    }
+
+    /// The fixture the rejection tests below mutate is itself accepted, so each of them isolates
+    /// the one mutation it makes rather than passing for some unrelated reason.
+    #[test]
+    fn from_parts_accepts_the_fixture() {
+        let plan = plan_parts().build().expect("the fixture is a valid plan");
+        assert_eq!(plan.transfer_tx_count(), 2);
+        assert_eq!(plan.preparation_tx_count(), 3);
+        assert_eq!(plan.value_migrated(), zat(3 * COIN));
+    }
+
+    /// Every plan [`plan_migration`] produces reassembles: feeding a plan's own accessors back
+    /// through [`MigrationPlan::from_parts`] yields an equal plan.
+    ///
+    /// This is what makes the constructor's invariants a description of real plans rather than a
+    /// guess at them. A check no drawn plan satisfies would reject the very values it exists to
+    /// admit, and the temporal ones (layer serialization, the transfer floor) are only genuinely
+    /// exercised by schedules an RNG actually drew.
+    #[test]
+    fn from_parts_round_trips_a_planned_migration() {
+        proptest!(|(
+            seed in 0u64..64,
+            notes in proptest::collection::vec(1u64..120, 1..4),
+        )| {
+            let backend = MockBackend::new(
+                notes.iter().map(|n| n * COIN).collect(),
+                FIXTURE_BASE_HEIGHT,
+            );
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            // A wallet whose balance does not decompose has no plan to round-trip.
+            let Ok(plan) = plan_migration(&test_net(), &backend, &mut rng) else {
+                return Ok(());
+            };
+            let rebuilt = MigrationPlan::from_parts(
+                &Zip318Constants,
+                plan.denominations().clone(),
+                plan.preparation().clone(),
+                plan.prep_schedule().to_vec(),
+                plan.schedule().to_vec(),
+            );
+            match rebuilt {
+                Ok(rebuilt) => prop_assert_eq!(rebuilt, plan),
+                Err(e) => prop_assert!(false, "a planned migration's own parts were rejected: {}", e),
+            }
+        });
+    }
+
+    /// The transfer schedule must carry exactly one entry per crossing.
+    #[test]
+    fn from_parts_rejects_a_short_transfer_schedule() {
+        let mut parts = plan_parts();
+        parts.schedule.pop();
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::TransferScheduleArity {
+                schedule: 1,
+                crossings: 2,
+            })
+        );
+    }
+
+    /// The preparation schedule must carry exactly one layer per preparation layer. A SPURIOUS
+    /// trailing layer is rejected, not tolerated: it would shift the estimated last preparation
+    /// height and with it the anchor floor of every transfer.
+    #[test]
+    fn from_parts_rejects_a_spurious_preparation_layer() {
+        let mut parts = plan_parts();
+        parts.prep_schedule.push(Vec::new());
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::PrepScheduleLayerArity {
+                schedule: 3,
+                layers: 2,
+            })
+        );
+    }
+
+    /// A preparation schedule layer must carry exactly one height per transaction in it.
+    #[test]
+    fn from_parts_rejects_a_layer_missing_a_height() {
+        let mut parts = plan_parts();
+        parts.prep_schedule[0].pop();
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::PrepScheduleTransactionArity {
+                layer: 0,
+                heights: 1,
+                transactions: 2,
+            })
+        );
+    }
+
+    /// A preparation layer's heights are cumulative draws, so they never go backwards.
+    #[test]
+    fn from_parts_rejects_a_backwards_preparation_height() {
+        let mut parts = plan_parts();
+        parts.prep_schedule[0].swap(0, 1);
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::PrepScheduleNotMonotone {
+                layer: 0,
+                index: 1,
+                previous: BlockHeight::from_u32(FIXTURE_BASE_HEIGHT + 3),
+                height: BlockHeight::from_u32(FIXTURE_BASE_HEIGHT),
+            })
+        );
+    }
+
+    /// A preparation layer must start past its predecessor's estimated mining, since it spends
+    /// notes that predecessor mints.
+    #[test]
+    fn from_parts_rejects_unserialized_preparation_layers() {
+        let mut parts = plan_parts();
+        let earliest = FIXTURE_BASE_HEIGHT + 3 + EST_PREP_LAYER_MINING_BLOCKS;
+        parts.prep_schedule[1][0] = BlockHeight::from_u32(earliest - 1);
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::PrepLayersNotSerialized {
+                layer: 1,
+                first: BlockHeight::from_u32(earliest - 1),
+                earliest: BlockHeight::from_u32(earliest),
+            })
+        );
+    }
+
+    /// No transfer may be broadcast before the preparation phase is estimated to have mined: its
+    /// funding note would not exist yet.
+    #[test]
+    fn from_parts_rejects_a_transfer_before_the_preparation() {
+        let mut parts = plan_parts();
+        let earliest = FIXTURE_BASE_HEIGHT + 3 + 2 * EST_PREP_LAYER_MINING_BLOCKS;
+        parts.schedule[1] = Schedule::new(BlockHeight::from_u32(earliest - 1));
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::TransferPrecedesPreparation {
+                crossing: 1,
+                broadcast: BlockHeight::from_u32(earliest - 1),
+                earliest: BlockHeight::from_u32(earliest),
+            })
+        );
+    }
+
+    /// A `Prior` input naming an output that mints nothing (here a change output) is refused, so
+    /// `CommitError::InconsistentPlan` is unreachable for a plan this constructor returns.
+    #[test]
+    fn from_parts_rejects_an_unresolved_feeder() {
+        assert_eq!(
+            plan_parts().with_feeder((0, 1, 0)).build(),
+            Err(MigrationPlanError::UnresolvedFeeder {
+                transaction: 2,
+                input: 0,
+            })
+        );
+    }
+
+    /// A crossing whose funding note the preparation phase does not mint is refused. Raising the
+    /// first crossing to another CANONICAL denomination is what isolates this from the
+    /// accounting and canonicality checks: only the note it needs has changed.
+    #[test]
+    fn from_parts_rejects_an_unminted_funding_note() {
+        let mut parts = plan_parts();
+        let crossings = [5 * COIN, COIN];
+        parts.denominations = fixture_denominations(
+            &crossings,
+            FIXTURE_PREP_FEES,
+            fixture_total_input(&crossings),
+            crossings.iter().sum(),
+        );
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::UnmintedFundingNote { crossing: 0 })
+        );
+    }
+
+    /// The declared total migratable value is the figure shown to the user for consent, and
+    /// nothing downstream recomputes it, so it must be the sum of the crossings.
+    #[test]
+    fn from_parts_rejects_a_mismatched_migratable_total() {
+        let mut parts = plan_parts();
+        let crossings = [2 * COIN, COIN];
+        parts.denominations = fixture_denominations(
+            &crossings,
+            FIXTURE_PREP_FEES,
+            fixture_total_input(&crossings),
+            3 * COIN + 1,
+        );
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::MigratableTotalMismatch {
+                declared: zat(3 * COIN + 1),
+                crossings: u128::from(3 * COIN),
+            })
+        );
+    }
+
+    /// The prepared notes, the preparation fees and the change account for the whole balance the
+    /// plan decomposes.
+    #[test]
+    fn from_parts_rejects_unconserved_value() {
+        let mut parts = plan_parts();
+        let crossings = [2 * COIN, COIN];
+        let accounted = fixture_total_input(&crossings);
+        parts.denominations = fixture_denominations(
+            &crossings,
+            FIXTURE_PREP_FEES,
+            accounted + 1,
+            crossings.iter().sum(),
+        );
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::ValueNotConserved {
+                accounted: u128::from(accounted),
+                total_input: zat(accounted + 1),
+            })
+        );
+    }
+
+    /// Fees reserved for a preparation phase that has no transactions to spend them. The crossings
+    /// are funded directly from wallet notes here, so the plan is otherwise coherent: only the
+    /// fees are unexplained.
+    #[test]
+    fn from_parts_rejects_prep_fees_without_preparation() {
+        let crossings = [2 * COIN, COIN];
+        let direct = crossings
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, zat(c + FIXTURE_BUFFER)))
+            .collect();
+        let parts = PlanParts {
+            denominations: fixture_denominations(
+                &crossings,
+                FIXTURE_PREP_FEES,
+                fixture_total_input(&crossings),
+                crossings.iter().sum(),
+            ),
+            preparation: PreparationPlan::from_parts(Vec::new(), direct),
+            prep_schedule: Vec::new(),
+            schedule: vec![
+                Schedule::new(BlockHeight::from_u32(FIXTURE_BASE_HEIGHT)),
+                Schedule::new(BlockHeight::from_u32(FIXTURE_BASE_HEIGHT + 1)),
+            ],
+        };
+        assert_eq!(
+            parts.build(),
+            Err(MigrationPlanError::PrepFeesWithoutPreparation {
+                prep_fees: zat(FIXTURE_PREP_FEES),
+            })
+        );
+    }
+
+    /// The product-critical one: a crossing value off the `{1, 2, 5} * 10^k` series is refused.
+    /// Every crossing value in a plan reaches the chain, so an unvalidated constructor would let a
+    /// caller publish an amount that joins no anonymity set, unrecoverably once mined. Three ZEC
+    /// is the case that discriminates: a round, plausible-looking amount that is not on the series.
+    #[test]
+    fn from_parts_rejects_a_non_canonical_crossing() {
+        assert_eq!(
+            plan_parts_for(&[3 * COIN, COIN]).build(),
+            Err(MigrationPlanError::NonCanonicalDenomination {
+                crossing: 0,
+                value: zat(3 * COIN),
+            })
+        );
+        // And at both ends of the ZIP 318 range, where the series alone does not decide it: five
+        // zatoshi is on the series but far below `MAX_RESIDUAL_VALUE`.
+        assert_eq!(
+            plan_parts_for(&[5]).build(),
+            Err(MigrationPlanError::NonCanonicalDenomination {
+                crossing: 0,
+                value: zat(5),
+            })
+        );
+    }
+
+    /// The crossing values must be non-increasing. Advisory, but pinned: the transfer schedule is
+    /// shuffled precisely BECAUSE they are ordered, so a plan ordered otherwise is one the shuffle
+    /// no longer buys anything for.
+    #[test]
+    fn from_parts_rejects_ascending_crossings() {
+        assert_eq!(
+            plan_parts_for(&[COIN, 2 * COIN]).build(),
+            Err(MigrationPlanError::CrossingValuesNotDescending {
+                crossing: 1,
+                previous: zat(COIN),
+                value: zat(2 * COIN),
+            })
+        );
+    }
+
+    /// The transfer schedule is NOT required to be monotone in crossing index. It is shuffled (ZIP
+    /// 318): the crossings are non-increasing, so a schedule ordered with them would put the
+    /// balance on chain as a temporal sequence. Pinned as a test so nobody "fixes" the constructor
+    /// by adding the check.
+    #[test]
+    fn from_parts_admits_a_shuffled_transfer_schedule() {
+        let mut parts = plan_parts();
+        parts.schedule.reverse();
+        parts
+            .build()
+            .expect("a shuffled transfer schedule is what a plan carries");
+    }
+
+    /// `ProvedTransaction::from_parts` holds no note reservation, and `with_lock_owner` records the
+    /// one a prover that takes locks returns — the case an out-of-tree prover needs and the gated
+    /// constructor could not express.
+    #[test]
+    fn a_proved_transaction_carries_the_lock_its_prover_took() {
+        let id = MigrationTransferId::new(3);
+        let proved = ProvedTransaction::from_parts(id, vec![7u8; 4]);
+        assert_eq!(proved.id(), id);
+        assert_eq!(proved.pczt(), &[7u8; 4]);
+        assert_eq!(proved.lock_owner(), None);
+
+        let owner = MigrationLockOwner::from_bytes([9u8; 32]);
+        assert_eq!(
+            ProvedTransaction::from_parts(id, vec![7u8; 4])
+                .with_lock_owner(Some(owner))
+                .lock_owner(),
+            Some(owner)
+        );
     }
 }
 

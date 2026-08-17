@@ -45,8 +45,42 @@ and this library adheres to Rust's notion of
   runs it is about to plan. The same values must be passed to both, or the
   preview will not describe the runs that get planned. Its cost scales inversely
   with the cap, since a bigger run means fewer runs to iterate.
+- `engine::MigrationPlan::from_parts`, reassembling a plan from the denomination
+  split, the preparation plan and the two schedules, for an application that
+  plans elsewhere (a preview computed on another device, a plan carried across a
+  process boundary) and then commits with it. A `MigrationPlan` is never
+  persisted, so this is not a store constructor and its parts are not "as
+  stored". Unlike the crate's other `from_parts` constructors it VALIDATES,
+  reporting the new `engine::MigrationPlanError`: a
+  `preparation::PreparationPlan` is re-checked downstream when its transactions
+  are built, whereas a plan's crossing values are what the user consents to and
+  what reaches the chain, so a value off the `{1, 2, 5} * 10^k` series would
+  join no anonymity set and could not be recovered once mined. It also resolves
+  every preparation spend and every crossing against the notes the plan mints,
+  which makes `engine::CommitError::InconsistentPlan` unreachable for a plan it
+  returns. The canonicality bounds come from the passed
+  `zcash_protocol::zip318::PoolMigrationConstants`, so a test network is judged
+  against its own. Two things are deliberately not checked: the transfer
+  schedule need not be monotone in crossing index, because it is shuffled
+  precisely to keep the balance off the chain as a temporal sequence; and the
+  crossing count is not judged against a per-run note cap, which is the caller's
+  to choose and which a plan carries no record of. `engine::MigrationPlan` now
+  derives `PartialEq` and `Eq`.
+- `scheduling::Schedule::new`, the schedule of a transfer broadcast at a given
+  height. The expiry is DERIVED from that height rather than passed: it is a
+  pure function of it, so a disagreeing pair could not have come from a drawn
+  schedule, and a caller-stamped per-transaction expiry would reintroduce
+  exactly the fingerprint the canonical rolling window exists to remove.
+- `engine::ProvedTransaction::with_lock_owner`, recording the token a prover
+  reserved a transaction's spent notes under.
 
 ### Changed
+- `engine::ProvedTransaction::from_parts` is available in release builds, where
+  it was gated behind `test-dependencies`. `engine::MigrationProver` is a public
+  trait and `engine::PoolMigrationWrite::store_proved_transaction` takes a
+  `ProvedTransaction` by value, so an out-of-tree prover (a hardware device, a
+  proving service) had no way to hand its result to a store. A prover that
+  models lock state pairs it with `engine::ProvedTransaction::with_lock_owner`.
 - `denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN` is a `NonZeroUsize` where
   it was a `usize`. A run that prepares no notes migrates nothing, so zero is
   not a cap a caller can now express. Read it with `.get()` where a `usize` is

@@ -429,6 +429,26 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    /// The schedule of a transfer broadcast at `broadcast_height`, with the canonical expiry that
+    /// height DERIVES (see [`expiry_height`]).
+    ///
+    /// The expiry is not an argument, and deliberately so. It is a pure function of the broadcast
+    /// height, so a pair that disagreed could not have come from a schedule [`schedule`] drew —
+    /// there would be no valid plan to reconstruct. And a caller-stamped per-transaction expiry is
+    /// exactly the fingerprint the canonical rolling window exists to remove: every transfer in one
+    /// modulus period shares one expiry, so an expiry chosen per transaction singles its
+    /// transaction out of that set (ZIP 318's EXPIRY MUST).
+    ///
+    /// This is what makes a [`Schedule`] constructible outside [`schedule`], which
+    /// [`MigrationPlan::from_parts`](crate::engine::MigrationPlan::from_parts) needs: a caller
+    /// reassembling a plan has the drawn broadcast heights, not an RNG that would redraw them.
+    pub fn new(broadcast_height: BlockHeight) -> Self {
+        Schedule {
+            broadcast_height,
+            expiry_height: expiry_height(broadcast_height),
+        }
+    }
+
     /// The block height at which this transfer is scheduled to be broadcast (a cumulative sum of
     /// per-part delays from the commit height; see [`schedule_broadcast_heights`]).
     pub fn broadcast_height(&self) -> BlockHeight {
@@ -731,10 +751,7 @@ pub fn schedule<R: RngCore + CryptoRng>(
 ) -> Vec<Schedule> {
     schedule_broadcast_heights(params, commit_height, n_parts, rng)
         .into_iter()
-        .map(|broadcast_height| Schedule {
-            broadcast_height,
-            expiry_height: expiry_height(broadcast_height),
-        })
+        .map(Schedule::new)
         .collect()
 }
 
@@ -2176,6 +2193,29 @@ mod tests {
                 u32::from(expiry_height(bh(b))),
                 "expiry {e} != expiry_height({b})"
             );
+        }
+    }
+
+    /// [`Schedule::new`] reconstructs a drawn slot exactly: the expiry it derives from a broadcast
+    /// height is the one [`schedule`] paired with that height.
+    ///
+    /// This is what lets a plan be reassembled from its published schedule
+    /// ([`MigrationPlan::from_parts`](crate::engine::MigrationPlan::from_parts)) without an RNG,
+    /// and it is why the expiry is derived rather than passed: a reconstructed slot is
+    /// indistinguishable from a drawn one, so no caller can stamp an expiry of its own and single
+    /// its transfer out of the period's anonymity set.
+    #[test]
+    fn schedule_new_reconstructs_a_drawn_slot() {
+        for (commit, n, seed) in [
+            (2_000_000u32, 8usize, 7u64),
+            (0, 3, 11),
+            (u32::MAX - 5, 2, 13),
+        ] {
+            let drawn = schedule(&P, bh(commit), n, &mut rng(seed));
+            assert_eq!(drawn.len(), n);
+            for slot in &drawn {
+                assert_eq!(Schedule::new(slot.broadcast_height()), *slot);
+            }
         }
     }
 
