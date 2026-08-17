@@ -943,6 +943,7 @@ where
             proposed_version,
         )?,
     };
+    proposal.check_transaction_size()?;
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
         lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
@@ -1254,6 +1255,8 @@ where
         )
         .map_err(Error::from)?;
 
+    proposal.check_transaction_size()?;
+
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
         lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
@@ -1444,6 +1447,11 @@ where
     // The transaction version is carried on the proposal, chosen when the proposal was
     // constructed; `None` builds at the version implied by the target height.
     let proposed_version = proposal.proposed_version();
+
+    // Defense-in-depth: reject oversized proposals at the build entry point, so a
+    // proposal from a third-party input selector or a deserialized proposal that
+    // bypassed the `propose_*` wrappers cannot reach the expensive proving path.
+    proposal.check_transaction_size()?;
 
     if let Some(expiry_height) = expiry_height {
         let min_target_height = BlockHeight::from(proposal.min_target_height());
@@ -2885,6 +2893,10 @@ where
     if proposal.steps().len() > 1 {
         return Err(Error::ProposalNotSupported);
     }
+
+    // Defense-in-depth: reject oversized proposals at the build entry point.
+    proposal.check_transaction_size()?;
+
     let fee_rule = proposal.fee_rule();
     let min_target_height = proposal.min_target_height();
 
