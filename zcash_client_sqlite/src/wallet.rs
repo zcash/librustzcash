@@ -5109,17 +5109,19 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
     // For each transaction that spends a transparent output of this transaction and does not
     // already have a known fee value.
     let mut spending_txs_stmt = conn.prepare(
+        // Inner joins: the referenced transaction's outputs are what selects the spending
+        // transactions, so joining outer would leave that restriction unapplied and return every
+        // fee-unknown transaction that spends any transparent output the wallet knows of.
         "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
          -- find transactions that spend transparent outputs of the decrypted tx
-         LEFT OUTER JOIN transparent_received_output_spends ts
+         JOIN transparent_received_output_spends ts
             ON ts.transaction_id = t.id_tx
-         LEFT OUTER JOIN transparent_received_outputs tro
-            ON tro.transaction_id = :transaction_id
-            AND tro.id = ts.transparent_received_output_id
+         JOIN transparent_received_outputs tro
+            ON tro.id = ts.transparent_received_output_id
+            AND tro.transaction_id = :transaction_id
          WHERE t.fee IS NULL
-         AND t.raw IS NOT NULL
-         AND ts.transaction_id IS NOT NULL",
+         AND t.raw IS NOT NULL",
     )?;
 
     spending_txs_stmt
@@ -6122,10 +6124,13 @@ mod tests {
         wallet::{ConfirmationsPolicy, TargetHeight},
     };
     use zcash_keys::keys::UnifiedAddressRequest;
-    use zcash_primitives::block::BlockHash;
+    use zcash_primitives::{
+        block::BlockHash,
+        transaction::{TransactionData, TxVersion},
+    };
     use zcash_protocol::{
         TxId,
-        consensus::{BlockHeight, NetworkUpgrade, Parameters, TxIndex},
+        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters, TxIndex},
         value::Zatoshis,
         zip318::{Zip318Classification, Zip318TxKind},
     };
@@ -6361,6 +6366,108 @@ mod tests {
         );
         assert_eq!(received[0].output_index(), 1);
         assert_eq!(received[0].value(), Zatoshis::const_from_u64(25000));
+    }
+
+    /// The referenced transaction's own outputs are what select the spending transactions to
+    /// report. A transaction that spends some other transparent output the wallet knows of is not
+    /// a spender of this one, and reporting it would make every enhancement re-derive the fee of
+    /// an unbounded set of unrelated transactions.
+    #[test]
+    fn get_txs_spending_transparent_outputs_of_is_scoped_to_the_referenced_tx() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let params = *st.network();
+        // Nu5 activates at the Sapling activation height in the test network, so a transaction
+        // recorded as mined at the account birthday parses under the branch it was built for.
+        let height = st.test_account().unwrap().birthday().height();
+        let conn = st.wallet_mut().conn_mut();
+
+        let account_id: i64 = conn
+            .query_row("SELECT id FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        let address_id: i64 = conn
+            .query_row("SELECT id FROM addresses LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+
+        // Inserts a transaction whose fee is unknown, distinguished by `lock_time` so that each
+        // one gets its own transaction ID. Returns its `id_tx`.
+        let insert_tx = |conn: &Connection, lock_time: u32| -> i64 {
+            let tx = TransactionData::from_parts(
+                TxVersion::V5,
+                BranchId::Nu5,
+                lock_time,
+                height,
+                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                Zatoshis::ZERO,
+                None,
+                None,
+                None,
+                None,
+            )
+            .freeze()
+            .unwrap();
+            let mut raw = vec![];
+            tx.write(&mut raw).unwrap();
+            conn.query_row(
+                "INSERT INTO transactions (txid, raw, mined_height, min_observed_height)
+                 VALUES (:txid, :raw, :height, :height)
+                 RETURNING id_tx",
+                named_params![
+                    ":txid": tx.txid().as_ref(),
+                    ":raw": raw,
+                    ":height": u32::from(height),
+                ],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        // Inserts a transparent output of `tx_ref` belonging to the wallet, and returns its id.
+        let insert_output = |conn: &Connection, tx_ref: i64| -> i64 {
+            conn.query_row(
+                "INSERT INTO transparent_received_outputs
+                    (transaction_id, output_index, account_id, address, script, value_zat,
+                     address_id)
+                 VALUES (:tx, 0, :account, 'addr', X'00', 10000, :address)
+                 RETURNING id",
+                named_params![":tx": tx_ref, ":account": account_id, ":address": address_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let referenced = insert_tx(conn, 1);
+        let unrelated = insert_tx(conn, 2);
+        let referenced_output = insert_output(conn, referenced);
+        let unrelated_output = insert_output(conn, unrelated);
+
+        let spender_of_referenced = insert_tx(conn, 3);
+        let spender_of_unrelated = insert_tx(conn, 4);
+        for (output, spender) in [
+            (referenced_output, spender_of_referenced),
+            (unrelated_output, spender_of_unrelated),
+        ] {
+            conn.execute(
+                "INSERT INTO transparent_received_output_spends
+                    (transparent_received_output_id, transaction_id)
+                 VALUES (:output, :spender)",
+                named_params![":output": output, ":spender": spender],
+            )
+            .unwrap();
+        }
+
+        let spenders =
+            super::get_txs_spending_transparent_outputs_of(conn, &params, TxRef(referenced))
+                .unwrap();
+
+        assert_eq!(
+            spenders.iter().map(|(r, _)| r.0).collect::<Vec<_>>(),
+            vec![spender_of_referenced],
+            "only the spender of the referenced transaction's output is reported"
+        );
     }
 
     /// A pool whose checkpoints all lie at or below the requested height tolerates a

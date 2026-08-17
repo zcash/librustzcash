@@ -31,6 +31,11 @@ workspace.
   transaction paid to external recipients as outputs received by the wallet.
   A caller that summed the returned values, or presented them as incoming,
   overstated a transaction's effect by the amount it sent.
+- `LowLevelWalletRead::get_txs_spending_transparent_outputs_of` now returns
+  only the transactions that spend a transparent output of the referenced
+  transaction. It previously returned every fee-unknown transaction that
+  spent any transparent output known to the wallet, so the fee-completion
+  pass run by `store_decrypted_tx` grew with the wallet's history.
 
 ## [0.22.0-rc.8] - 2026-08-07
 
