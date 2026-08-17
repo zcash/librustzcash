@@ -548,8 +548,11 @@ impl RunSigningCapacity {
 /// reports as signable within `capacity` — the inverse of "how many rounds does this run take",
 /// dual to [`min_budget_for_rounds`] (which inverts the same map in the budget instead of the size).
 ///
-/// `shape_at` answers what a run capped at `n` notes would look like; it is called
-/// `O(log max_notes)` times.
+/// `shape_at` answers what a run capped at `n` notes would look like, or `None` if no run can be
+/// built at that cap; it is called `O(log max_notes)` times. A `None` is treated as NOT fitting,
+/// which is the conservative reading: a cap whose run cannot be built must never be preferred over
+/// one that can, and the alternative (reporting an empty shape) would make it the cheapest
+/// candidate rather than the worst.
 ///
 /// The returned cap is one `shape_at` reported as fitting, EXCEPT when even a one-note run exceeds
 /// the capacity, in which case it is one: a wallet fragmented enough that minting a single funding
@@ -567,10 +570,12 @@ impl RunSigningCapacity {
 #[must_use]
 pub fn largest_run_size_within<F>(capacity: RunSigningCapacity, mut shape_at: F) -> NonZeroUsize
 where
-    F: FnMut(NonZeroUsize) -> RunShape,
+    F: FnMut(NonZeroUsize) -> Option<RunShape>,
 {
     let mut fits = |n: NonZeroUsize| {
-        shape_at(n).signing_rounds(capacity.budget()) <= capacity.max_rounds().get()
+        shape_at(n).is_some_and(|shape| {
+            shape.signing_rounds(capacity.budget()) <= capacity.max_rounds().get()
+        })
     };
     // The whole run fits: the common case, and the one that costs a single probe.
     if fits(capacity.max_notes()) {
@@ -826,10 +831,10 @@ mod tests {
     fn oracle<'a>(
         shapes: &'a [RunShape],
         probes: &'a mut Vec<usize>,
-    ) -> impl FnMut(NonZeroUsize) -> RunShape + 'a {
+    ) -> impl FnMut(NonZeroUsize) -> Option<RunShape> + 'a {
         move |n| {
             probes.push(n.get());
-            shapes[n.get() - 1]
+            Some(shapes[n.get() - 1])
         }
     }
 
@@ -864,6 +869,34 @@ mod tests {
         assert!(
             probes.len() <= usize::BITS as usize - ceiling.get().leading_zeros() as usize + 1,
             "the search probes logarithmically, not linearly: {probes:?}"
+        );
+    }
+
+    // A cap whose run cannot be built must never be chosen, and in particular must never be
+    // preferred over one that can. Reading an unbuildable cap as an empty run would make it the
+    // CHEAPEST candidate, so the search would settle on exactly the caps that fail to plan.
+    #[test]
+    fn an_unbuildable_cap_is_never_chosen() {
+        // Every cap above 3 is unbuildable; caps 1..=3 fit comfortably.
+        let buildable = 3usize;
+        let capacity = RunSigningCapacity::new(
+            SigningRoundBudget::KEYSTONE,
+            NonZeroUsize::MIN,
+            NonZeroUsize::new(20).unwrap(),
+        );
+        let mut probes = Vec::new();
+        let chosen = largest_run_size_within(capacity, |n| {
+            probes.push(n.get());
+            (n.get() <= buildable).then(|| RunShape::new(1, n.get()))
+        });
+        assert_eq!(
+            chosen.get(),
+            buildable,
+            "the largest buildable cap is chosen, not an unbuildable one that looks cheap"
+        );
+        assert!(
+            probes.iter().any(|&n| n > buildable),
+            "the search did probe into the unbuildable range, so it really rejected it"
         );
     }
 

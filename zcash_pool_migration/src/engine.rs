@@ -1692,6 +1692,52 @@ impl Default for RunSizing {
 /// The transaction counts a run capped at `max_notes` would have, over the note structure `notes`
 /// (whose validated total is `balance`): what the denomination and preparation planners produce,
 /// before anything is scheduled. The sizing probe of [`largest_run_size_within`].
+/// The denomination plan for one run over the note structure `notes` (whose validated total is
+/// `balance`), capped at `max_notes`: the canonical decomposition, reconciled against what the
+/// preparation planner can actually mint from those notes.
+///
+/// The reconciliation needs to ask "how many preparation transactions would minting this multiset
+/// take, and can it be minted at all", which is the one capability every caller of
+/// [`plan_denominations`] in this module has to supply. Supplying it once here is what keeps the
+/// sizing probe, the planner and the estimator asking the SAME question of the same wallet.
+fn plan_run_denominations<Pf, R>(
+    portfolio: &Pf,
+    notes: &[Zatoshis],
+    balance: Zatoshis,
+    max_notes: NonZeroUsize,
+    transfer_fee_buffer: Zatoshis,
+    prep_tx_fee: Zatoshis,
+    rng: &mut R,
+) -> DenominationPlan
+where
+    Pf: crate::preparation::Portfolio,
+    R: RngCore + rand_core::CryptoRng,
+{
+    plan_denominations(
+        balance,
+        notes.len(),
+        max_notes,
+        transfer_fee_buffer,
+        prep_tx_fee,
+        &|funding: &[Zatoshis]| {
+            plan_preparation_with(portfolio, notes, funding, prep_tx_fee)
+                .ok()
+                .map(|plan| plan.transaction_count())
+        },
+        rng,
+    )
+}
+
+/// The shape a run capped at `max_notes` would have over the note structure `notes`, or `None` if
+/// no such run can be built: the sizing probe of [`largest_run_size_within`].
+///
+/// `None` is what stops a cap the preparation planner rejects from being read as CHEAP. A rejected
+/// multiset has no transaction count, and reporting zero preparation transactions would make the
+/// shape the least expensive one available, so the search would prefer exactly the caps that
+/// [`plan_migration_sized_with`] then fails to plan.
+///
+/// A run that migrates nothing is a different answer: it is genuinely signable, in zero rounds, at
+/// every cap. The caller learns there is nothing to migrate when it plans, not from the sizing.
 fn run_shape_at<Pf, R>(
     portfolio: &Pf,
     notes: &[Zatoshis],
@@ -1700,30 +1746,27 @@ fn run_shape_at<Pf, R>(
     transfer_fee_buffer: Zatoshis,
     prep_tx_fee: Zatoshis,
     rng: &mut R,
-) -> RunShape
+) -> Option<RunShape>
 where
     Pf: crate::preparation::Portfolio,
     R: RngCore + rand_core::CryptoRng,
 {
-    let prep_tx_count = |funding: &[Zatoshis]| {
-        plan_preparation_with(portfolio, notes, funding, prep_tx_fee)
-            .ok()
-            .map(|plan| plan.transaction_count())
-    };
-    let funding = plan_denominations(
+    let funding = plan_run_denominations(
+        portfolio,
+        notes,
         balance,
-        notes.len(),
         max_notes,
         transfer_fee_buffer,
         prep_tx_fee,
-        &prep_tx_count,
         rng,
     )
     .migration_outputs();
-    // The denomination plan only ever proposes a funding multiset the preparation planner accepted,
-    // so this re-plan succeeds; a run that migrates nothing has no preparation either.
-    let preparations = prep_tx_count(&funding).unwrap_or(0);
-    RunShape::new(preparations, funding.len())
+    if funding.is_empty() {
+        return Some(RunShape::new(0, 0));
+    }
+    plan_preparation_with(portfolio, notes, &funding, prep_tx_fee)
+        .ok()
+        .map(|plan| RunShape::new(plan.transaction_count(), funding.len()))
 }
 
 /// The note cap `sizing` chooses for a run over the note structure `notes` (whose validated total is
@@ -1810,21 +1853,13 @@ where
         rng,
     );
 
-    // The preparation-layout capability the decomposition's reconciliation consults: how many
-    // preparation transactions minting a candidate funding multiset takes, or `None` when the
-    // wallet's notes cannot mint it (so the split drops its smallest part and asks again).
-    let prep_tx_count = |funding: &[Zatoshis]| {
-        crate::preparation::plan_preparation_with(portfolio, &notes, funding, prep_tx_fee)
-            .ok()
-            .map(|plan| plan.transaction_count())
-    };
-    let denominations = plan_denominations(
+    let denominations = plan_run_denominations(
+        portfolio,
+        &notes,
         balance,
-        notes.len(),
         max_notes,
         transfer_fee_buffer,
         prep_tx_fee,
-        &prep_tx_count,
         rng,
     );
     let funding_notes = denominations.migration_outputs();
@@ -2247,22 +2282,15 @@ where
             rng,
         );
 
-        let denominations = {
-            let prep_tx_count = |funding: &[Zatoshis]| {
-                plan_preparation_with(portfolio, &notes, funding, prep_tx_fee)
-                    .ok()
-                    .map(|plan| plan.transaction_count())
-            };
-            plan_denominations(
-                balance,
-                notes.len(),
-                max_notes,
-                transfer_fee_buffer,
-                prep_tx_fee,
-                &prep_tx_count,
-                rng,
-            )
-        };
+        let denominations = plan_run_denominations(
+            portfolio,
+            &notes,
+            balance,
+            max_notes,
+            transfer_fee_buffer,
+            prep_tx_fee,
+            rng,
+        );
 
         let funding = denominations.migration_outputs();
         if funding.is_empty() {
