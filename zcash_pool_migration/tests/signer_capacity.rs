@@ -72,16 +72,28 @@ fn estimate_for_signer(notes: &[u64], capacity: RunSigningCapacity) -> Migration
 
 /// The scenarios whose one run takes more than one Keystone round under the default note cap: the
 /// wallets the multi-round QR flow was built for.
-fn multi_round_scenarios() -> impl Iterator<Item = &'static MigrationScenario> {
-    MIGRATION_SCENARIOS
+///
+/// Asserts the selection is non-empty, because every caller's assertions live INSIDE a loop over
+/// it. Exactly one scenario qualifies today, so a change to the fee model, the packer or that
+/// wallet's shape could empty this filter, and each of those tests would then pass while checking
+/// nothing at all. Guarding here rather than in each caller is what makes that impossible to
+/// forget for the next test that iterates this.
+fn multi_round_scenarios() -> Vec<&'static MigrationScenario> {
+    let scenarios: Vec<_> = MIGRATION_SCENARIOS
         .iter()
         .filter(|sc| sc.expected_keystone_rounds > 1)
+        .collect();
+    assert!(
+        !scenarios.is_empty(),
+        "no scenario needs several Keystone rounds under the note cap, so every test comparing \
+         the two sizings would iterate nothing and pass vacuously"
+    );
+    scenarios
 }
 
 /// Sizing for a Keystone turns each of those runs into ONE signing round.
 #[test]
 fn a_keystone_sized_run_is_one_signing_round() {
-    let mut sized = 0;
     for scenario in multi_round_scenarios() {
         let plan = plan_for_signer(scenario.source_notes, RunSigningCapacity::KEYSTONE);
         assert_eq!(
@@ -96,13 +108,7 @@ fn a_keystone_sized_run_is_one_signing_round() {
             "{}: the run fits the device's per-round budget",
             scenario.label,
         );
-        sized += 1;
     }
-    assert!(
-        sized > 0,
-        "the scenarios must include a wallet that needs several rounds under the note cap, \
-         or this proves nothing"
-    );
 }
 
 /// The two sizings coexist: the note-cap API is unchanged, and on a wallet where they differ the
