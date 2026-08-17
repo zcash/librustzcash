@@ -16,6 +16,26 @@ workspace.
   address into an account as watch-only, without any associated key material.
 - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneAddress`
 - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_address`
+- `zcash_client_backend::proposal::Step::estimated_serialized_size`, a
+  conservative upper-bound estimate of the serialized byte size of the
+  transaction a step describes. The estimate sums the per-element byte costs of
+  every input, output, and change output (using the v4 Sapling sizes, the
+  Orchard `ACTION_SIZE` plus per-action spend authorization signatures and
+  proof shares, and the standard P2PKH transparent sizes) plus per-bundle
+  overhead added only for bundles that are present. It never under-counts, so
+  comparing it against `MAX_BLOCK_BYTES` is a safe size bound for rejecting
+  proposals that cannot be mined.
+- `zcash_client_backend::proposal::Step::check_transaction_size`, which
+  validates a step's estimated serialized size against `MAX_BLOCK_BYTES` and
+  returns `ProposalError::TransactionTooLarge` if exceeded. Called by the
+  input-selection paths (`propose_transaction`, `propose_send_max`,
+  `propose_shielding`); not called during proposal deserialization, so
+  previously-persisted proposals remain recoverable.
+- `zcash_client_backend::proposal::ProposalError::TransactionTooLarge`, returned
+  by `check_transaction_size` when the step's estimated serialized size exceeds
+  `MAX_BLOCK_BYTES`. Carries the estimated size, the limit, and the total
+  shielded input count so a wallet can explain the situation to a user in terms
+  of notes rather than bytes.
 
 ### Changed
 - The `orchard` feature is now enabled by default. Consumers that require a

@@ -33,6 +33,21 @@ pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
+/// The consensus maximum size of a serialized transparent input: outpoint (36) +
+/// CompactSize prefix for the scriptSig (at most 9) + scriptSig (at most
+/// `MAX_SCRIPT_SIZE = 10_000`) + sequence (4). This is the safe upper bound for a
+/// transparent input whose script size is unknown.
+pub const MAX_TRANSPARENT_INPUT_SIZE: usize = 36 + 9 + 10_000 + 4;
+
+/// The per-bundle overhead of a transparent bundle: two CompactSize vector-length
+/// prefixes (one for `vin`, one for `vout`), at most 9 bytes each.
+pub const TRANSPARENT_BUNDLE_OVERHEAD: usize = 18;
+
+/// The fixed size of a Zcash transaction header: version (4) +
+/// `consensus_branch_id` (4) + `lock_time` (4) + `expiry_height` (4). The constant
+/// leaves room for future header fields (e.g. the `zip233_amount` under NU7).
+pub const TX_HEADER_SIZE: usize = 32;
+
 /// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///

@@ -1967,7 +1967,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         .expect("removing payments from a TransactionRequest preserves validity");
 
         let mut steps = vec![];
-        steps.push(Step::from_parts(
+        let step0 = Step::from_parts(
             &[],
             tr0,
             payment_pools,
@@ -1979,11 +1979,12 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             false,
             #[cfg(feature = "orchard")]
             ironwood_active,
-        )?);
+        )?;
+        steps.push(step0);
 
         let tr1 =
             TransactionRequest::new(ephemeral_step.tr1_payments).expect("valid by construction");
-        steps.push(Step::from_parts(
+        let step1 = Step::from_parts(
             &steps,
             tr1,
             ephemeral_step.tr1_payment_pools,
@@ -1995,7 +1996,8 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             false,
             #[cfg(feature = "orchard")]
             ironwood_active,
-        )?);
+        )?;
+        steps.push(step1);
 
         return Proposal::multi_step(
             fee_rule.clone(),
