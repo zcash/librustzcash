@@ -6471,6 +6471,49 @@ mod tests {
         );
     }
 
+    /// `expired_unmined` is a boolean: a transaction is expired-and-unmined or it is not. With no
+    /// scanned blocks there is no height to have expired against, which is the "not expired" case,
+    /// not an unknown one. Reporting NULL there makes the column fail to decode as a boolean.
+    #[test]
+    fn expired_unmined_is_false_with_no_scanned_blocks() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let conn = st.wallet_mut().conn_mut();
+
+        let account_id: i64 = conn
+            .query_row("SELECT id FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        // An unmined transaction with an expiry height, in a wallet that has scanned nothing.
+        conn.execute_batch(
+            "INSERT INTO transactions (txid, expiry_height, min_observed_height)
+             VALUES (X'07', 500000, 1);",
+        )
+        .unwrap();
+        let tx_ref: i64 = conn
+            .query_row("SELECT id_tx FROM transactions", [], |row| row.get(0))
+            .unwrap();
+
+        // A received note, so that the transaction appears in `v_transactions` at all.
+        conn.execute(
+            "INSERT INTO sapling_received_notes
+                (transaction_id, output_index, account_id, diversifier, value, rcm, is_change)
+             VALUES (:tx, 0, :account, X'000000000000000000000000', 25000, X'00', 0)",
+            named_params![":tx": tx_ref, ":account": account_id],
+        )
+        .unwrap();
+
+        assert_eq!(count(conn, "blocks"), 0);
+        let expired_unmined: bool = conn
+            .query_row("SELECT expired_unmined FROM v_transactions", [], |row| {
+                row.get(0)
+            })
+            .expect("`expired_unmined` decodes as a boolean");
+        assert!(!expired_unmined);
+    }
+
     /// A pool whose checkpoints all lie at or below the requested height tolerates a
     /// truncation to that height (its tree holds nothing the truncation must remove), so the
     /// requested height itself qualifies even though the pool has no checkpoint there.

@@ -36,6 +36,11 @@ workspace.
   transaction. It previously returned every fee-unknown transaction that
   spent any transparent output known to the wallet, so the fee-completion
   pass run by `store_decrypted_tx` grew with the wallet's history.
+- A schema migration makes `expired_unmined` report `0` rather than `NULL` in
+  `v_transactions` and `v_transactions_with_pending_migrations` when the
+  wallet has scanned no blocks. The column is a boolean, and a consumer
+  decoding it as one — including `WalletTest::get_tx_history` — failed on
+  every unmined transaction held by a wallet in that state.
 
 ## [0.22.0-rc.8] - 2026-08-07
 

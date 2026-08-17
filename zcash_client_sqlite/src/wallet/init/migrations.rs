@@ -170,6 +170,7 @@ migration_modules!(
     v_received_output_spends_account,
     v_sapling_shard_unscanned_ranges,
     v_transactions_additional_totals,
+    v_transactions_expired_unmined_not_null,
     v_transactions_net,
     v_transactions_note_uniqueness,
     v_transactions_pool_crossing,
@@ -281,6 +282,12 @@ pub(super) fn all_migrations<
     //                             |                             |            \
     //                             |              v_transactions_pool_crossing \
     //                             `------------------------------------------- v_tx_outputs_transparent_addresses
+    //
+    //  The transaction-view chain continues:
+    //
+    //    zip318_classification --> v_transactions_zip318_kind --> v_migration_transactions
+    //                                                                      |
+    //                                              v_transactions_expired_unmined_not_null
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -400,6 +407,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_broadcast_binding::Migration),
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
+        Box::new(v_transactions_expired_unmined_not_null::Migration),
         Box::new(standalone_address::Migration),
     ]
 }

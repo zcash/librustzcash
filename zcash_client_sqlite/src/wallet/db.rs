@@ -1439,7 +1439,7 @@ SELECT vmt.account_uuid          AS account_uuid,
        vmt.received_note_count   AS received_note_count,
        0                         AS memo_count,
        NULL                      AS block_time,
-       (vmt.expiry_height BETWEEN 1 AND (SELECT MAX(blocks.height) FROM blocks))
+       IFNULL(vmt.expiry_height BETWEEN 1 AND (SELECT MAX(blocks.height) FROM blocks), 0)
                                  AS expired_unmined,
        vmt.spent_note_count      AS spent_note_count,
        0                         AS is_shielding,
@@ -1581,9 +1581,13 @@ SELECT accounts.uuid                AS account_uuid,
        SUM(notes.received_count)         AS received_note_count,
        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
        blocks.time                       AS block_time,
-       (
+       -- With no scanned blocks there is no height for a transaction to have expired
+       -- against, which is the not-expired case rather than an unknown one; without the
+       -- IFNULL the comparison against a NULL maximum makes the whole column NULL.
+       IFNULL(
             transactions.mined_height IS NULL
-            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
+            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height,
+            0
        ) AS expired_unmined,
        SUM(notes.spent_note_count) AS spent_note_count,
        (
