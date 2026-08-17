@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Pruning and truncating the nullifier map now delete the nullifier entries
+  themselves rather than relying on the `ON DELETE CASCADE` from
+  `tx_locator_map`. `PRAGMA foreign_keys` is a per-connection setting that is
+  off unless the migrator ran on that connection, so on a pooled or
+  reopened connection the entries were retained indefinitely, and
+  `WalletRead::detect_sapling_spend` (and its Orchard and Ironwood
+  counterparts) failed with a decoding error on encountering one. Such an
+  entry is now reported as no detected spend. Wallets carrying entries
+  orphaned by an earlier version are repaired by the next prune.
+
 ## [0.22.0-rc.8] - 2026-08-07
 
 ### Added

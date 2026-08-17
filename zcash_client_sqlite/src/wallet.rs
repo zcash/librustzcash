@@ -4547,7 +4547,16 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         )?;
 
         // Delete from the nullifier map any entries with a locator referencing a block
-        // height greater than the truncation height.
+        // height greater than the truncation height. The nullifier entries are deleted
+        // explicitly rather than left to the cascade from `tx_locator_map`, because foreign
+        // key enforcement is a per-connection setting that this connection may not have
+        // enabled; a surviving entry would name a locator that no longer exists.
+        conn.execute(
+            "DELETE FROM nullifier_map
+            WHERE block_height > :block_height",
+            named_params![":block_height": u32::from(truncation_height)],
+        )?;
+
         conn.execute(
             "DELETE FROM tx_locator_map
             WHERE block_height > :block_height",
@@ -5787,10 +5796,13 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     spend_pool: ShieldedPool,
     nf: &N,
 ) -> Result<Option<TxRef>, SqliteClientError> {
+    // An inner join: a nullifier entry whose locator is absent identifies no transaction, so it
+    // is not a detected spend. Joining outer here would instead yield a row with a NULL `txid`,
+    // which decodes as a malformed transaction ID rather than as "not found".
     let mut stmt_select_locator = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
         FROM nullifier_map
-        LEFT JOIN tx_locator_map USING (block_height, tx_index)
+        JOIN tx_locator_map USING (block_height, tx_index)
         WHERE spend_pool = :spend_pool AND nf = :nf",
     )?;
 
@@ -5846,6 +5858,17 @@ pub(crate) fn prune_nullifier_map(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
+    // The nullifier entries are deleted explicitly rather than left to the cascade from
+    // `tx_locator_map`, because foreign key enforcement is a per-connection setting that this
+    // connection may not have enabled; a surviving entry would name a locator that no longer
+    // exists, and would never be pruned thereafter.
+    let mut stmt_delete_nullifiers = conn.prepare_cached(
+        "DELETE FROM nullifier_map
+        WHERE block_height < :block_height",
+    )?;
+
+    stmt_delete_nullifiers.execute(named_params![":block_height": u32::from(block_height)])?;
+
     let mut stmt_delete_locators = conn.prepare_cached(
         "DELETE FROM tx_locator_map
         WHERE block_height < :block_height",
@@ -6089,7 +6112,7 @@ mod tests {
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
         TxId,
-        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        consensus::{BlockHeight, NetworkUpgrade, Parameters, TxIndex},
         value::Zatoshis,
         zip318::{Zip318Classification, Zip318TxKind},
     };
@@ -6102,8 +6125,9 @@ mod tests {
 
     use super::{
         KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday,
-        flag_previously_received_change, min_shared_checkpoint_height, put_zip318_classification,
-        queue_tx_retrieval, select_truncation_height,
+        flag_previously_received_change, insert_nullifier_map, min_shared_checkpoint_height,
+        prune_nullifier_map, put_zip318_classification, query_nullifier_map, queue_tx_retrieval,
+        select_truncation_height,
     };
 
     use incrementalmerkletree::frontier::Frontier;
@@ -6138,6 +6162,92 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    /// Disables foreign key enforcement, modelling a connection that did not itself run the
+    /// migrator: `PRAGMA foreign_keys` is per-connection and off by default, so this is the state
+    /// of any connection that merely opens an already-migrated wallet, including every connection
+    /// drawn from a pool.
+    fn disable_fk_enforcement(conn: &Connection) {
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "the premise of these tests is that enforcement is off"
+        );
+    }
+
+    /// Inserts one nullifier-map entry at `height`, returning the nullifier.
+    fn insert_test_nullifier(conn: &rusqlite::Transaction<'_>, height: u32, seed: u8) -> [u8; 32] {
+        let nf = [seed; 32];
+        insert_nullifier_map(
+            conn,
+            BlockHeight::from_u32(height),
+            ShieldedPool::Sapling,
+            &[(TxIndex::from(0u16), TxId::from_bytes([seed; 32]), vec![nf])],
+        )
+        .unwrap();
+        nf
+    }
+
+    fn count(conn: &rusqlite::Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    /// Pruning the nullifier map must remove the nullifier entries themselves, not merely the
+    /// locators they reference. Deleting only the locators leaves the entries behind on any
+    /// connection without foreign key enforcement, where the `ON DELETE CASCADE` does not run;
+    /// they are then unreachable and never pruned again.
+    #[test]
+    fn prune_nullifier_map_deletes_entries_without_the_fk_cascade() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let conn = st.wallet_mut().conn_mut();
+        disable_fk_enforcement(conn);
+        let tx = conn.transaction().unwrap();
+
+        insert_test_nullifier(&tx, 100, 1);
+        insert_test_nullifier(&tx, 200, 2);
+        assert_eq!(count(&tx, "nullifier_map"), 2);
+
+        prune_nullifier_map(&tx, BlockHeight::from_u32(150)).unwrap();
+
+        assert_eq!(count(&tx, "tx_locator_map"), 1);
+        assert_eq!(
+            count(&tx, "nullifier_map"),
+            1,
+            "the pruned entry must be gone, not just its locator"
+        );
+    }
+
+    /// A nullifier entry whose locator is absent identifies no transaction, so it is not a
+    /// detected spend. It must report as "not found" rather than as a transaction whose ID is
+    /// NULL, which is what an outer join to the locator table would produce.
+    #[test]
+    fn detect_spend_ignores_a_nullifier_whose_locator_is_missing() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let conn = st.wallet_mut().conn_mut();
+        disable_fk_enforcement(conn);
+        let tx = conn.transaction().unwrap();
+
+        let nf = insert_test_nullifier(&tx, 100, 1);
+
+        // Orphan the entry, as a wallet pruned by a version that deleted only locators would
+        // have on disk already.
+        tx.execute_batch("DELETE FROM tx_locator_map").unwrap();
+        assert_eq!(count(&tx, "nullifier_map"), 1);
+
+        assert_matches!(
+            query_nullifier_map(&tx, ShieldedPool::Sapling, &nf),
+            Ok(None)
+        );
     }
 
     /// A pool whose checkpoints all lie at or below the requested height tolerates a
