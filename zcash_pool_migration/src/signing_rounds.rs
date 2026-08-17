@@ -469,6 +469,13 @@ impl RunShape {
     pub fn signing_rounds(self, budget: SigningRoundBudget) -> usize {
         min_signing_rounds(self.preparation_transactions, self.transfers, budget)
     }
+
+    /// The total Orchard-family actions across this run's transactions: the signing WORKLOAD, as
+    /// distinct from [`signing_rounds`](Self::signing_rounds), the number of interactions.
+    #[must_use]
+    pub fn total_actions(self) -> u32 {
+        total_actions(self.preparation_transactions, self.transfers)
+    }
 }
 
 /// What one migration run may ask of a signer: at most [`max_rounds`](Self::max_rounds)

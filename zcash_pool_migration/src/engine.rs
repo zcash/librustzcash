@@ -82,7 +82,6 @@ use crate::{
     signing_rounds::{
         MinRounds, PlannedSigningRound, PlannedTx, RunShape, RunSigningCapacity,
         SigningRoundBudget, SigningRoundStrategy, largest_run_size_within, min_budget_for_rounds,
-        min_signing_rounds,
     },
 };
 
@@ -1394,13 +1393,15 @@ impl MigrationPlan {
         self.preparation.layer_count()
     }
 
+    /// This plan's [`RunShape`]: the transaction counts every signer-facing quantity is derived
+    /// from, so a caller can ask a plan the same questions it asks an estimate.
+    pub fn shape(&self) -> RunShape {
+        RunShape::new(self.preparation_tx_count(), self.transfer_tx_count())
+    }
+
     /// The total Orchard-family actions across every transaction this plan builds.
     pub fn total_actions(&self) -> u32 {
-        let prep = (self.preparation_tx_count() as u64)
-            .saturating_mul(u64::from(crate::signing_rounds::PREPARATION_ACTIONS));
-        let xfer = (self.transfer_tx_count() as u64)
-            .saturating_mul(u64::from(crate::signing_rounds::TRANSFER_ACTIONS));
-        u32::try_from(prep.saturating_add(xfer)).unwrap_or(u32::MAX)
+        self.shape().total_actions()
     }
 
     /// The total value that migrates to the destination pool (the sum of the crossing values).
@@ -1437,11 +1438,7 @@ impl MigrationPlan {
     /// The number of signing rounds this plan needs for a signer bounded by `budget` (the optimal
     /// [`MinRounds`] count), without materializing the packing.
     pub fn signing_round_count(&self, budget: SigningRoundBudget) -> usize {
-        min_signing_rounds(
-            self.preparation_tx_count(),
-            self.transfer_tx_count(),
-            budget,
-        )
+        self.shape().signing_rounds(budget)
     }
 
     /// The smallest per-round budget that signs this whole plan in ONE round: the plan's total
@@ -1958,11 +1955,13 @@ impl RunEstimate {
     /// distinct from the number of interactions ([`signing_rounds`](Self::signing_rounds)): combine
     /// it with the device's per-action time to estimate how long signing this run will take.
     pub fn actions(&self) -> u32 {
-        let prep = (self.prep_transactions as u64)
-            .saturating_mul(u64::from(crate::signing_rounds::PREPARATION_ACTIONS));
-        let xfer = (self.crossings as u64)
-            .saturating_mul(u64::from(crate::signing_rounds::TRANSFER_ACTIONS));
-        u32::try_from(prep.saturating_add(xfer)).unwrap_or(u32::MAX)
+        self.shape().total_actions()
+    }
+
+    /// This run's [`RunShape`]: the transaction counts its signer-facing quantities are derived
+    /// from, and the same value the sizing search measures a candidate run by.
+    pub fn shape(&self) -> RunShape {
+        RunShape::new(self.prep_transactions, self.crossings)
     }
 
     /// The number of signing ROUNDS this run needs when an external signer is bounded by `budget`
@@ -1975,7 +1974,7 @@ impl RunEstimate {
     ///
     /// [ZIP 374]: https://zips.z.cash/zip-0374
     pub fn signing_rounds(&self, budget: SigningRoundBudget) -> usize {
-        min_signing_rounds(self.prep_transactions, self.crossings, budget)
+        self.shape().signing_rounds(budget)
     }
 }
 
