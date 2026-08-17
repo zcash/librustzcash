@@ -2,7 +2,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
-use crate::tor::{Client, Error};
+use crate::privacy::http::http_get_json_over;
+use crate::privacy::{DynPrivateNetwork, Error};
 
 /// Querier for the XT exchange.
 pub struct Xt {
@@ -37,18 +38,18 @@ struct XtResponse {
 }
 
 impl Exchange for Xt {
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error> {
         // API documentation:
         // https://doc.xt.com/docs/spot/Market/GetBestPendingOrderTicker
-        let res = client
-            .http_get_json::<XtResponse>(
-                "https://sapi.xt.com/v4/public/ticker/book?symbol=zec_usdt"
-                    .parse()
-                    .unwrap(),
-                RETRY_LIMIT,
-                retry_filter,
-            )
-            .await?;
+        let res = http_get_json_over::<XtResponse>(
+            net,
+            "https://sapi.xt.com/v4/public/ticker/book?symbol=zec_usdt"
+                .parse()
+                .unwrap(),
+            RETRY_LIMIT,
+            retry_filter,
+        )
+        .await?;
         let data = res.into_body().result.0;
         Ok(ExchangeData {
             bid: data.bp,

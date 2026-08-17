@@ -3,7 +3,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
-use crate::tor::{Client, Error, http::HttpError};
+use crate::privacy::http::{HttpError, http_get_json_over};
+use crate::privacy::{DynPrivateNetwork, Error};
 
 /// Querier for the CoinEx exchange.
 pub struct CoinEx {
@@ -44,18 +45,18 @@ struct CoinExResponse {
 }
 
 impl Exchange for CoinEx {
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error> {
         // API documentation:
         // https://docs.coinex.com/api/v2/spot/market/http/list-market-depth
-        let res = client
-            .http_get_json::<CoinExResponse>(
-                "https://api.coinex.com/v2/spot/depth?market=ZECUSDT&limit=5&interval=0"
-                    .parse()
-                    .unwrap(),
-                RETRY_LIMIT,
-                retry_filter,
-            )
-            .await?;
+        let res = http_get_json_over::<CoinExResponse>(
+            net,
+            "https://api.coinex.com/v2/spot/depth?market=ZECUSDT&limit=5&interval=0"
+                .parse()
+                .unwrap(),
+            RETRY_LIMIT,
+            retry_filter,
+        )
+        .await?;
         let data = res.into_body().data.depth;
         Ok(ExchangeData {
             bid: data

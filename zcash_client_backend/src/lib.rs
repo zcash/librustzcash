@@ -77,6 +77,9 @@ pub mod serialization;
 #[cfg(feature = "sync-decryptor")]
 mod task;
 
+#[cfg(feature = "lightwalletd-privacy")]
+pub mod privacy;
+
 #[cfg(feature = "tor")]
 pub mod tor;
 
