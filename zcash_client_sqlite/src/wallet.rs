@@ -68,9 +68,10 @@
 //! This view exposes the history of transaction outputs received by and sent from the wallet,
 //! keyed by transaction ID, pool type, and output index. The contents of this view are useful for
 //! producing a detailed report of the effects of a transaction. Each row of this view contains:
-//! - `from_account_id` for sent outputs, the account from which the value was sent.
-//! - `to_account_id` in the case that the output was received by an account in the wallet, the
-//!   identifier for the account receiving the funds.
+//! - `from_account_uuid` for sent outputs, the account from which the value was sent.
+//! - `to_account_uuid` in the case that the output was received by an account in the wallet, the
+//!   identifier for the account receiving the funds; `NULL` for an output sent to a recipient
+//!   outside the wallet.
 //! - `to_address` the address to which an output was sent, or the address at which value was
 //!   received in the case of received transparent funds.
 //! - `value` the value of the output. This is always a positive number, for both sent and received

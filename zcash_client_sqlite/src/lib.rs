@@ -1514,11 +1514,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         txid: &TxId,
     ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error> {
         let mut stmt_sent = self.conn.borrow().prepare(
+            // The transparent output is matched to the sent note that produced it, by index
+            // within the transaction. Joining on the transaction alone pairs every sent note
+            // with every transparent output of the transaction, so a transaction with more than
+            // one of each is reported once per combination.
             "SELECT value, to_address,
                     a.cached_transparent_receiver_address, a.transparent_child_index
              FROM sent_notes
              JOIN transactions t ON t.id_tx = sent_notes.transaction_id
-             LEFT JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
+             LEFT JOIN transparent_received_outputs tro
+                ON tro.transaction_id = t.id_tx
+                AND tro.output_index = sent_notes.output_index
+                AND sent_notes.output_pool = :transparent_pool
              LEFT JOIN addresses a ON a.id = tro.address_id AND a.key_scope = :key_scope
              WHERE t.txid = :txid
              ORDER BY value",
@@ -1528,6 +1535,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
             .query_map(
                 named_params![
                     ":txid": txid.as_ref(),
+                    ":transparent_pool": pool_code(PoolType::Transparent),
                     ":key_scope": KeyScope::Ephemeral.encode()
                 ],
                 |row| {
