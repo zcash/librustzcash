@@ -5964,6 +5964,10 @@ pub(crate) fn get_received_outputs(
          LEFT OUTER JOIN transactions tt
             ON tt.id_tx = tro.transaction_id
          WHERE vto.txid = :txid
+         -- `v_tx_outputs` reports the wallet's outgoing outputs alongside its incoming ones;
+         -- `to_account_uuid` is NULL exactly for an output sent to an external recipient,
+         -- which this function must not report as received.
+         AND vto.to_account_uuid IS NOT NULL
          GROUP BY vto.output_pool, vto.output_index",
     )?;
 
@@ -6115,7 +6119,7 @@ mod tests {
             AddressType, DataStoreFactory, FakeCompactOutput, InitialChainState, TestBuilder,
             TestState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
         },
-        wallet::ConfirmationsPolicy,
+        wallet::{ConfirmationsPolicy, TargetHeight},
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
@@ -6293,6 +6297,70 @@ mod tests {
             .unwrap();
         assert_eq!(block, None, "the block has not been scanned");
         assert_eq!(mined_height, Some(100));
+    }
+
+    /// `v_tx_outputs` reports the outputs a wallet sent alongside those it received, telling the
+    /// two apart by whether `to_account_uuid` is set. A transaction paying an external recipient
+    /// therefore contributes a row that is not a received output, and must not be reported as one.
+    #[test]
+    fn get_received_outputs_excludes_external_recipient_outputs() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let birthday = st.test_account().unwrap().birthday().height();
+        let conn = st.wallet_mut().conn_mut();
+
+        let account_id: i64 = conn
+            .query_row("SELECT id FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        let txid = TxId::from_bytes([7; 32]);
+        conn.execute(
+            "INSERT INTO transactions (txid, mined_height, min_observed_height)
+             VALUES (:txid, :height, :height)",
+            named_params![":txid": txid.as_ref(), ":height": u32::from(birthday)],
+        )
+        .unwrap();
+        let tx_ref: i64 = conn
+            .query_row("SELECT id_tx FROM transactions", [], |row| row.get(0))
+            .unwrap();
+
+        // Output 0: a payment to an external recipient. `to_account_id` is NULL because no
+        // account of this wallet received it.
+        conn.execute(
+            "INSERT INTO sent_notes
+                (transaction_id, output_pool, output_index, from_account_id, to_address, value)
+             VALUES (:tx, 2, 0, :account, 'an-external-address', 100000)",
+            named_params![":tx": tx_ref, ":account": account_id],
+        )
+        .unwrap();
+
+        // Output 1: change, which the wallet both sent and received.
+        conn.execute(
+            "INSERT INTO sapling_received_notes
+                (transaction_id, output_index, account_id, diversifier, value, rcm, is_change)
+             VALUES (:tx, 1, :account, X'000000000000000000000000', 25000, X'00', 1)",
+            named_params![":tx": tx_ref, ":account": account_id],
+        )
+        .unwrap();
+
+        let received = super::get_received_outputs(
+            conn,
+            txid,
+            TargetHeight::from(birthday + 1),
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+        assert_eq!(
+            received.len(),
+            1,
+            "only the wallet's own output is a received output"
+        );
+        assert_eq!(received[0].output_index(), 1);
+        assert_eq!(received[0].value(), Zatoshis::const_from_u64(25000));
     }
 
     /// A pool whose checkpoints all lie at or below the requested height tolerates a

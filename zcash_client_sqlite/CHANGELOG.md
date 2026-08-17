@@ -27,6 +27,10 @@ workspace.
   `WalletRead::detect_sapling_spend` and its Orchard and Ironwood
   counterparts failed whenever the nullifier map had been loaded ahead of
   scanning. The height continues to be recorded in `mined_height`.
+- `WalletRead::get_received_outputs` no longer reports the outputs a
+  transaction paid to external recipients as outputs received by the wallet.
+  A caller that summed the returned values, or presented them as incoming,
+  overstated a transaction's effect by the amount it sent.
 
 ## [0.22.0-rc.8] - 2026-08-07
 
