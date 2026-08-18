@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-08-18
+
 ### Added
 - `zcash_primitives::transaction::components::sapling::SPEND_DESCRIPTION_SIZE` and
   `OUTPUT_DESCRIPTION_SIZE`, the sizes in bytes of a Sapling spend description and
