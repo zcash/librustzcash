@@ -1364,10 +1364,6 @@ criteria = "safe-to-deploy"
 version = "0.6.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.toml_datetime]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.toml_edit]]
 version = "0.19.15"
 criteria = "safe-to-deploy"
@@ -1377,10 +1373,6 @@ version = "0.22.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_parser]]
-version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.toml_writer]]
 version = "1.0.4"
 criteria = "safe-to-deploy"
 

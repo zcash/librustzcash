@@ -47,7 +47,7 @@ zcash_client_backend = { version = "0.24.0-rc.7", path = "zcash_client_backend",
 zcash_encoding = { version = "0.4", default-features = false }
 zcash_keys = { version = "0.16.1", path = "zcash_keys", default-features = false  }
 zcash_pool_migration = { version = "0.1.0-rc.7", path = "zcash_pool_migration" }
-zcash_protocol = { version = "0.10.4", path = "components/zcash_protocol", default-features = false }
+zcash_protocol = { version = "0.10.5", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.9.0-rc.1", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
