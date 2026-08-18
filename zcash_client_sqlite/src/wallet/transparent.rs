@@ -3235,6 +3235,14 @@ mod tests {
     }
 
     #[test]
+    fn prefer_consolidation_accounts_for_selected_transparent_value() {
+        zcash_client_backend::data_api::testing::transparent::prefer_consolidation_accounts_for_selected_transparent_value(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn propose_transfer_transparent_input_cap() {
         zcash_client_backend::data_api::testing::transparent::propose_transfer_transparent_input_cap(
             TestDbFactory::default(),

@@ -1330,3 +1330,89 @@ pub fn single_note_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
         "Exclude must never surface a locked note"
     );
 }
+
+/// Consolidation funding and optional notes both honor the caller's preferred lock tier.
+pub fn consolidation_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let locked_covering = Zatoshis::const_from_u64(1_200_000);
+    let locked_small = Zatoshis::const_from_u64(10_000);
+    let unlocked_large = Zatoshis::const_from_u64(600_000);
+    let unlocked_medium = Zatoshis::const_from_u64(500_000);
+    let unlocked_small = Zatoshis::const_from_u64(20_000);
+    st.add_notes_checking_balance([
+        [locked_covering],
+        [locked_small],
+        [unlocked_large],
+        [unlocked_medium],
+        [unlocked_small],
+    ]);
+
+    let account_id = st.test_account().unwrap().id();
+    let owner = LockOwner::new([0xA1; 32]);
+    for value in [locked_covering, locked_small] {
+        let note_ref = st.note_ref_by_value(value);
+        assert_eq!(
+            st.wallet_mut()
+                .lock_outputs(&[note_ref], owner, BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1,
+        );
+    }
+
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |policy: &LockedInputPolicy, target| {
+        st.wallet()
+            .select_spendable_notes_for_consolidation(
+                account_id,
+                target,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(policy),
+                4,
+            )
+            .unwrap()
+            .into_parts()
+    };
+
+    let single_tier_target = Zatoshis::const_from_u64(1_000_000);
+    let unlocked_pref = LockedInputPolicy::PreferUnlocked(NonEmptyBTreeSet::singleton(owner));
+    let (funding, additional) = select(&unlocked_pref, single_tier_target);
+    assert_eq!(
+        funding.total_value().unwrap(),
+        (unlocked_large + unlocked_medium).unwrap(),
+    );
+    assert_eq!(additional.total_value().unwrap(), unlocked_small);
+
+    let locked_pref = LockedInputPolicy::PreferLocked(NonEmptyBTreeSet::singleton(owner));
+    let (funding, additional) = select(&locked_pref, single_tier_target);
+    assert_eq!(funding.total_value().unwrap(), locked_covering);
+    assert_eq!(additional.total_value().unwrap(), locked_small);
+
+    let (funding, additional) = select(&LockedInputPolicy::Exclude, single_tier_target);
+    assert_eq!(
+        funding.total_value().unwrap(),
+        (unlocked_large + unlocked_medium).unwrap(),
+    );
+    assert_eq!(additional.total_value().unwrap(), unlocked_small);
+
+    let cross_tier_target = Zatoshis::const_from_u64(2_000_000);
+    let (funding, additional) = select(&unlocked_pref, cross_tier_target);
+    assert!(funding.total_value().unwrap() >= cross_tier_target);
+    assert!(additional.is_empty());
+
+    let (funding, additional) = select(&locked_pref, cross_tier_target);
+    assert!(funding.total_value().unwrap() >= cross_tier_target);
+    assert!(additional.is_empty());
+}

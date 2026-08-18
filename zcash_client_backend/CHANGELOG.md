@@ -11,6 +11,13 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::ConsolidationNotes` and
+  `InputSource::select_spendable_notes_for_consolidation`, an input-selection
+  primitive with a best-effort default implementation.
+- Reusable consolidation-selection test cases under the `test-dependencies`
+  feature, covering funding cardinality, fee iteration, confirmation and
+  exclusion filtering, lock tiers, transparent value, and shielded action
+  shape.
 - `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_address`
   (requires the `transparent-key-import` feature): imports a transparent
   address into an account as watch-only, without any associated key material.
@@ -38,6 +45,11 @@ workspace.
   of notes rather than bytes.
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::input_selection::NoteSelection` has a
+  new `PreferConsolidation` variant. It prefers a small funding set and may fill
+  otherwise unused shielded action slots with the smallest eligible notes,
+  without changing the transaction fee or observable shape. Exhaustive matches
+  must add an arm for it.
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
   features they need.

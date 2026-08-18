@@ -45,7 +45,7 @@ use crate::{
         },
         wallet::{
             ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            input_selection::{GreedyInputSelector, LockFilter, NoteSelection, SpendPolicy},
         },
     },
     decrypt_transaction,
@@ -78,7 +78,7 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    crate::data_api::wallet::propose_transfer,
     std::collections::BTreeMap,
     zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
@@ -139,7 +139,7 @@ use {
 };
 
 pub mod dsl;
-use dsl::{TestDsl, TestNoteConfig};
+use dsl::{TestDsl, TestNoteConfig, TestScenario};
 
 pub mod locking;
 pub use locking::*;
@@ -258,6 +258,46 @@ pub trait ShieldedPoolTester {
         signer: &mut Signer,
         usk: &UnifiedSpendingKey,
     ) -> Result<(), pczt::roles::signer::Error>;
+}
+
+fn selected_notes_for_transfer<T, Cache, Dsf>(
+    st: &mut TestDsl<TestScenario<T, Cache, Dsf>>,
+    amount: Zatoshis,
+    note_selection: NoteSelection,
+) -> Vec<Zatoshis>
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    let account_id = st.test_account().unwrap().id();
+    let recipient_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let recipient = T::fvk_default_address(&recipient_fvk).to_zcash_address(st.network());
+    let request = TransactionRequest::new(vec![Payment::without_memo(recipient, amount)]).unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let spend_policy =
+        SpendPolicy::shielded_pools([T::SHIELDED_PROTOCOL]).with_note_selection(note_selection);
+    let proposal = st
+        .propose_transfer_with_policy(
+            account_id,
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+        )
+        .expect("the selected notes cover the payment and fee");
+
+    proposal
+        .steps()
+        .first()
+        .shielded_inputs()
+        .expect("the proposal spends shielded notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect()
 }
 
 /// Tests sending funds within the given shielded pool in a single transaction.
@@ -7121,6 +7161,223 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
     for note in spendable_notes {
         assert_eq!(T::note_value(note.note()), value);
     }
+}
+
+/// `PreferConsolidation` uses a deterministic minimum-cardinality funding set.
+pub fn prefer_consolidation_uses_fewest_funding_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let small = Zatoshis::const_from_u64(180_000);
+    let large = Zatoshis::const_from_u64(600_000);
+    st.add_notes_checking_balance([
+        [small],
+        [small],
+        [small],
+        [small],
+        [small],
+        [small],
+        [large],
+        [large],
+        [large],
+    ]);
+
+    assert_eq!(
+        selected_notes_for_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(1_000_000),
+            NoteSelection::Accumulate,
+        )
+        .len(),
+        6,
+        "the default policy remains oldest-first accumulation",
+    );
+
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(1_000_000),
+        NoteSelection::PreferConsolidation,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [large, large]);
+}
+
+/// Necessary funding remains uncapped when a payment requires more than five notes.
+pub fn prefer_consolidation_allows_more_than_five_funding_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values =
+        [300_000, 250_000, 200_000, 150_000, 100_000, 90_000, 10_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance(values.map(|value| [value]));
+
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(1_050_000),
+        NoteSelection::PreferConsolidation,
+    );
+    selected.sort_unstable();
+    assert_eq!(
+        selected,
+        [90_000, 100_000, 150_000, 200_000, 250_000, 300_000].map(Zatoshis::const_from_u64),
+    );
+}
+
+/// Fee iteration refreshes consolidation funding when a five-input estimate becomes insufficient.
+pub fn prefer_consolidation_refreshes_funding_after_fee_growth<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    st.add_notes_checking_balance(
+        [220_000, 200_000, 200_000, 200_000, 200_000, 50_000, 10_000]
+            .map(Zatoshis::const_from_u64)
+            .map(|value| [value]),
+    );
+
+    assert_eq!(
+        selected_notes_for_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(1_000_000),
+            NoteSelection::PreferConsolidation,
+        )
+        .len(),
+        6,
+    );
+}
+
+/// Consolidation selection filters candidates before applying either value ordering.
+pub fn consolidation_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values = [[600_000, 500_000], [20_000, 30_000], [2_000_000, 10_000]]
+        .map(|block| block.map(Zatoshis::const_from_u64));
+    st.add_notes_checking_balance(values);
+
+    let account_id = st.test_account().unwrap().id();
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+
+    // The largest and smallest notes are in the newest block and therefore do not satisfy the
+    // two-confirmation policy. Selection must continue through the ordered candidates instead of
+    // letting either ineligible extreme consume the query's funding or additional-note budget.
+    let (funding, additional) = st
+        .wallet()
+        .select_spendable_notes_for_consolidation(
+            account_id,
+            Zatoshis::const_from_u64(1_000_000),
+            T::SHIELDED_PROTOCOL,
+            target_height,
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                true,
+            ),
+            &[],
+            LockFilter::Policy(&Default::default()),
+            2,
+        )
+        .unwrap()
+        .into_parts();
+    assert_eq!(
+        funding.total_value().unwrap(),
+        Zatoshis::const_from_u64(1_100_000)
+    );
+    assert_eq!(
+        additional.total_value().unwrap(),
+        Zatoshis::const_from_u64(50_000)
+    );
+
+    let excluded = st
+        .wallet()
+        .get_notes(T::SHIELDED_PROTOCOL)
+        .unwrap()
+        .into_iter()
+        .filter(|note| matches!(u64::from(note.note().value()), 2_000_000 | 10_000 | 20_000))
+        .map(|note| *note.internal_note_id())
+        .collect::<Vec<_>>();
+    let (funding, additional) = st
+        .wallet()
+        .select_spendable_notes_for_consolidation(
+            account_id,
+            Zatoshis::const_from_u64(1_000_000),
+            T::SHIELDED_PROTOCOL,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &excluded,
+            LockFilter::Policy(&Default::default()),
+            1,
+        )
+        .unwrap()
+        .into_parts();
+    assert_eq!(
+        funding.total_value().unwrap(),
+        Zatoshis::const_from_u64(1_100_000)
+    );
+    assert_eq!(
+        additional.total_value().unwrap(),
+        Zatoshis::const_from_u64(30_000)
+    );
+}
+
+/// Sapling inputs are not added merely because ZIP 317's grace actions keep the fee unchanged.
+pub fn prefer_consolidation_does_not_grow_sapling_spends(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache)
+        .build::<super::sapling::SaplingPoolTester>();
+    st.add_notes_checking_balance([
+        [Zatoshis::const_from_u64(2_000_000)],
+        [Zatoshis::const_from_u64(10_000)],
+    ]);
+
+    assert_eq!(
+        selected_notes_for_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(100_000),
+            NoteSelection::PreferConsolidation,
+        ),
+        [Zatoshis::const_from_u64(2_000_000)],
+    );
+}
+
+/// Pre-NU6.3 Orchard can replace a dummy spend side without growing the action count.
+#[cfg(feature = "orchard")]
+pub fn prefer_consolidation_fills_existing_orchard_actions(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    st.add_notes_checking_balance([
+        [Zatoshis::const_from_u64(2_000_000)],
+        [Zatoshis::const_from_u64(20_000)],
+        [Zatoshis::const_from_u64(10_000)],
+    ]);
+
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::PreferConsolidation,
+    );
+    selected.sort_unstable();
+    assert_eq!(
+        selected,
+        [
+            Zatoshis::const_from_u64(10_000),
+            Zatoshis::const_from_u64(2_000_000),
+        ],
+    );
 }
 
 #[cfg(feature = "pczt")]
