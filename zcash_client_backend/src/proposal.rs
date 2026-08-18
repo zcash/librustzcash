@@ -162,10 +162,16 @@ pub enum ProposalError {
         estimated_size: usize,
         /// The maximum serialized byte size a Zcash block may carry (`MAX_BLOCK_BYTES`).
         limit: usize,
-        /// The total number of shielded inputs (across all shielded pools) the step spends.
-        /// Carried alongside the byte counts so a wallet can explain the situation to a
-        /// user in terms of notes rather than bytes.
-        shielded_input_count: usize,
+        /// The number of Sapling inputs the step spends, including prior-step inputs.
+        /// Carried so a wallet can explain the situation in terms of notes rather than
+        /// bytes; the different shielded pools have very different per-input costs.
+        sapling_input_count: usize,
+        /// The number of Orchard inputs the step spends, including prior-step inputs.
+        #[cfg(feature = "orchard")]
+        orchard_input_count: usize,
+        /// The number of Ironwood inputs the step spends, including prior-step inputs.
+        #[cfg(feature = "orchard")]
+        ironwood_input_count: usize,
     },
 }
 
@@ -289,11 +295,30 @@ impl Display for ProposalError {
             ProposalError::TransactionTooLarge {
                 estimated_size,
                 limit,
-                shielded_input_count,
-            } => write!(
-                f,
-                "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum block size ({limit} bytes). It spends {shielded_input_count} shielded inputs; reduce the payment amount or consolidate small notes before retrying."
-            ),
+                sapling_input_count,
+                #[cfg(feature = "orchard")]
+                orchard_input_count,
+                #[cfg(feature = "orchard")]
+                ironwood_input_count,
+            } => {
+                #[cfg(feature = "orchard")]
+                let _ = (orchard_input_count, ironwood_input_count);
+                write!(
+                    f,
+                    "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum block size ({limit} bytes). It spends {sapling_input_count} Sapling inputs"
+                )?;
+                #[cfg(feature = "orchard")]
+                {
+                    write!(
+                        f,
+                        ", {orchard_input_count} Orchard inputs, {ironwood_input_count} Ironwood inputs"
+                    )?;
+                }
+                write!(
+                    f,
+                    "; reduce the payment amount or consolidate small notes before retrying."
+                )
+            }
         }
     }
 }
@@ -536,22 +561,13 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// mineability caveat.
     pub fn estimated_serialized_size(&self) -> usize {
         let steps = self.steps();
-        // Build a resolver closure that maps a prior-step reference to the pool of
-        // the referenced output. The closure captures the proposal's step list, so
-        // `step_index()` always resolves — no panic risk.
-        let resolve_pool = |s_ref: &StepOutput| {
-            let prior = &steps[s_ref.step_index()];
-            match s_ref.output_index() {
-                StepOutputIndex::Payment(i) => *prior
-                    .payment_pools()
-                    .get(&i)
-                    .expect("payment pool exists for referenced payment"),
-                StepOutputIndex::Change(i) => prior.balance().proposed_change()[i].output_pool(),
-            }
-        };
         steps
             .iter()
-            .map(|step| step.estimated_serialized_size(&resolve_pool))
+            .map(|step| {
+                step.estimated_serialized_size(&|s_ref| {
+                    Self::resolve_prior_output_pool(steps, s_ref)
+                })
+            })
             .sum()
     }
 
@@ -566,44 +582,66 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// previously-persisted proposals remain recoverable.
     pub fn check_transaction_size(&self) -> Result<(), ProposalError> {
         let steps = self.steps();
-        let resolve_pool = |s_ref: &StepOutput| {
-            let prior = &steps[s_ref.step_index()];
-            match s_ref.output_index() {
-                StepOutputIndex::Payment(i) => *prior
-                    .payment_pools()
-                    .get(&i)
-                    .expect("payment pool exists for referenced payment"),
-                StepOutputIndex::Change(i) => prior.balance().proposed_change()[i].output_pool(),
-            }
-        };
         for step in steps.iter() {
-            let estimated_size = step.estimated_serialized_size(&resolve_pool);
+            let estimated_size = step
+                .estimated_serialized_size(&|s_ref| Self::resolve_prior_output_pool(steps, s_ref));
             if estimated_size > MAX_BLOCK_BYTES {
-                // Count both the step's own shielded inputs and prior-step shielded
-                // inputs, so the count matches what the estimate charged.
-                let shielded_input_count = step
-                    .shielded_inputs()
-                    .iter()
-                    .flat_map(|s| s.notes().iter())
-                    .count()
+                // Count per-pool shielded inputs (both the step's own and prior-step)
+                // so the counts match what the estimate charged.
+                let sapling_input_count = step.input_count_in_pool(PoolType::SAPLING)
                     + step
                         .prior_step_inputs()
                         .iter()
                         .filter(|s_ref| {
-                            matches!(
-                                resolve_pool(s_ref),
-                                PoolType::SAPLING | PoolType::ORCHARD | PoolType::IRONWOOD
-                            )
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::SAPLING
+                        })
+                        .count();
+                #[cfg(feature = "orchard")]
+                let orchard_input_count = step.input_count_in_pool(PoolType::ORCHARD)
+                    + step
+                        .prior_step_inputs()
+                        .iter()
+                        .filter(|s_ref| {
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::ORCHARD
+                        })
+                        .count();
+                #[cfg(feature = "orchard")]
+                let ironwood_input_count = step.input_count_in_pool(PoolType::IRONWOOD)
+                    + step
+                        .prior_step_inputs()
+                        .iter()
+                        .filter(|s_ref| {
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::IRONWOOD
                         })
                         .count();
                 return Err(ProposalError::TransactionTooLarge {
                     estimated_size,
                     limit: MAX_BLOCK_BYTES,
-                    shielded_input_count,
+                    sapling_input_count,
+                    #[cfg(feature = "orchard")]
+                    orchard_input_count,
+                    #[cfg(feature = "orchard")]
+                    ironwood_input_count,
                 });
             }
         }
         Ok(())
+    }
+
+    /// Resolves the pool of a prior-step output referenced by `s_ref`, by looking up
+    /// the referenced step in the proposal's step list. Shared by
+    /// [`estimated_serialized_size`](Self::estimated_serialized_size) and
+    /// [`check_transaction_size`](Self::check_transaction_size) to avoid duplicating the
+    /// `StepOutput`-to-`PoolType` resolution logic.
+    fn resolve_prior_output_pool(steps: &NonEmpty<Step<NoteRef>>, s_ref: &StepOutput) -> PoolType {
+        let prior = &steps[s_ref.step_index()];
+        match s_ref.output_index() {
+            StepOutputIndex::Payment(i) => *prior
+                .payment_pools()
+                .get(&i)
+                .expect("payment pool exists for referenced payment"),
+            StepOutputIndex::Change(i) => prior.balance().proposed_change()[i].output_pool(),
+        }
     }
 }
 
@@ -875,23 +913,23 @@ impl<NoteRef> Step<NoteRef> {
             return Err(ProposalError::MissingShieldedAnchor);
         }
 
-        if input_total != output_total {
-            return Err(ProposalError::BalanceError {
+        if input_total == output_total {
+            Ok(Self {
+                transaction_request,
+                payment_pools,
+                transparent_inputs,
+                shielded_inputs,
+                anchor_height,
+                prior_step_inputs,
+                balance,
+                is_shielding,
+            })
+        } else {
+            Err(ProposalError::BalanceError {
                 input_total,
                 output_total,
-            });
+            })
         }
-
-        Ok(Self {
-            transaction_request,
-            payment_pools,
-            transparent_inputs,
-            shielded_inputs,
-            anchor_height,
-            prior_step_inputs,
-            balance,
-            is_shielding,
-        })
     }
 
     /// Returns the transaction request that describes the payments to be made.
@@ -1868,10 +1906,16 @@ mod tests {
             Err(ProposalError::TransactionTooLarge {
                 estimated_size,
                 limit,
-                shielded_input_count,
+                sapling_input_count,
+                #[cfg(feature = "orchard")]
+                orchard_input_count,
+                #[cfg(feature = "orchard")]
+                ironwood_input_count,
             }) if limit == MAX_BLOCK_BYTES
                 && estimated_size > MAX_BLOCK_BYTES
-                && shielded_input_count == oversize_spend_count
+                && sapling_input_count == 0
+                && orchard_input_count == oversize_spend_count
+                && ironwood_input_count == 0
         );
     }
 
