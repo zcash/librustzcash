@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-18
+
 ### Added
 - `signing_rounds::PlannedTx::depends_on` and
   `signing_rounds::PlannedTx::scheduled_height`: what each transaction of a

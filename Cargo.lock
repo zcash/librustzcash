@@ -7340,7 +7340,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.1.0-rc.7"
+version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "corez",
