@@ -10,11 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- Migrated to `zcash_client_backend 0.24.0`, `zcash_pool_migration 0.1.0`,
-  `zip321 0.9.0`.
-
-## [0.22.0-rc.8] - 2026-08-07
+## [0.22.0] - 2026-08-18
 
 ### Added
 - Support for `WalletWrite::import_standalone_transparent_address` (under the
@@ -26,6 +22,14 @@ workspace.
   `import_standalone_transparent_script` now upgrades such a row in place.
   Outputs received by an address imported without key material contribute to
   the account balance but are excluded from spendable-output selection.
+
+### Changed
+- Migrated to `zcash_client_backend 0.24.0`, `zcash_pool_migration 0.1.0`,
+  `zip321 0.9.0`.
+
+## [0.22.0-rc.8] - 2026-08-07
+
+### Added
 - `wallet::init::migrations` release-state constants backfilling every
   published crate version whose migration-graph state had no constant:
   `V_0_7_0`, `V_0_8_0_RC1`, `V_0_8_0_RC4`, `V_0_8_0_RC5`, `V_0_8_1`,
