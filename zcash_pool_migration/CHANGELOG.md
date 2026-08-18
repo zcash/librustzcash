@@ -86,6 +86,7 @@ and this library adheres to Rust's notion of
   `signing_rounds::RunSigningCapacity`.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0`.
 - `denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN` is a `NonZeroUsize` where
   it was a `usize`. A run that prepares no notes migrates nothing, so zero is
   not a cap a caller can now express. Read it with `.get()` where a `usize` is

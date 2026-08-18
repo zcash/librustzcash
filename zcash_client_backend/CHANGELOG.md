@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-18
+
 ### Added
 - `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_address`
   (requires the `transparent-key-import` feature): imports a transparent
