@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `zip321 0.9.0`.
+
 ## [0.22.0-rc.8] - 2026-08-07
 
 ### Added

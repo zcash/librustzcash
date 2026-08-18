@@ -39,6 +39,7 @@ workspace.
   the situation to a user in terms of notes rather than bytes.
 
 ### Changed
+- Migrated to `zip321 0.9.0`.
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
   features they need.

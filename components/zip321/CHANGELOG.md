@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-18
+
+### Fixed
+- The `test-dependencies` feature now enables `zcash_address/test-dependencies`
+  and `zcash_protocol/test-dependencies`, which the strategies in
+  `zip321::testing` require. Enabling it without also enabling those features on
+  those crates directly previously failed to compile.
+
 ## [0.9.0-rc.1] - 2026-07-12
 
 ### Changed
