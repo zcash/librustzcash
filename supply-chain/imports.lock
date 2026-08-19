@@ -1,30 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_client_backend]]
-version = "0.24.0"
-audited_as = "0.24.0-rc.7"
-
-[[unpublished.zcash_client_sqlite]]
-version = "0.22.0"
-audited_as = "0.22.0-rc.8"
-
-[[unpublished.zcash_pool_migration]]
-version = "0.1.0"
-audited_as = "0.1.0-rc.7"
-
-[[unpublished.zcash_primitives]]
-version = "0.30.1"
-audited_as = "0.30.0"
-
-[[unpublished.zcash_protocol]]
-version = "0.10.5"
-audited_as = "0.10.4"
-
-[[unpublished.zip321]]
-version = "0.9.0"
-audited_as = "0.9.0-rc.1"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -473,15 +449,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.24.0-rc.7"
-when = "2026-08-04"
+version = "0.24.0"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.22.0-rc.8"
-when = "2026-08-07"
+version = "0.22.0"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -515,15 +491,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.1.0-rc.7"
-when = "2026-08-07"
+version = "0.1.0"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.30.0"
-when = "2026-07-24"
+version = "0.30.1"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -536,8 +512,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.10.4"
-when = "2026-08-04"
+version = "0.10.5"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -578,8 +554,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.9.0-rc.1"
-when = "2026-07-12"
+version = "0.9.0"
+when = "2026-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
