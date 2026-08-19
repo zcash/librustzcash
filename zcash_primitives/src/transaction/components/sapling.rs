@@ -73,6 +73,11 @@ const CMU_BYTE_SIZE: usize = 32;
 /// The size in bytes of the encoding of a Sapling ephemeral key.
 const EPHEMERAL_KEY_BYTE_SIZE: usize = size_of::<EphemeralKeyBytes>();
 
+/// The per-bundle overhead of a Sapling bundle, excluding the per-spend and per-output
+/// data: CompactSize prefixes for the spends and outputs arrays (at most 9 + 9) +
+/// value_balance (8) + anchor (32) + binding_sig (64).
+pub const BUNDLE_OVERHEAD: usize = 9 + 9 + 8 + 32 + 64;
+
 /// Returns the enforcement policy for ZIP 212 at the given height.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
     if params.is_nu_active(NetworkUpgrade::Canopy, height) {
@@ -88,11 +93,6 @@ pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip2
         Zip212Enforcement::Off
     }
 }
-
-/// The per-bundle overhead of a Sapling bundle, excluding the per-spend and per-output
-/// data: CompactSize prefixes for the spends and outputs arrays (at most 9 + 9) +
-/// value_balance (8) + anchor (32) + binding_sig (64).
-pub const BUNDLE_OVERHEAD: usize = 9 + 9 + 8 + 32 + 64;
 
 /// A map from one bundle authorization to another.
 ///

@@ -467,7 +467,6 @@ impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<A
         match self.known_input_size {
             Some(size) => transparent_fees::InputSize::Known(size),
             None => {
-                // Fall back to default: only P2PKH is recognized.
                 match zcash_script::script::PubKey::parse(&self.txout.script_pubkey().0)
                     .ok()
                     .as_ref()
@@ -475,6 +474,17 @@ impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<A
                 {
                     Some(zcash_script::solver::ScriptKind::PubKeyHash { .. }) => {
                         transparent_fees::InputSize::STANDARD_P2PKH
+                    }
+                    Some(zcash_script::solver::ScriptKind::ScriptHash { .. }) => {
+                        // P2SH input size depends on the redeem script, which the
+                        // wallet must set via `with_known_input_size` (the SQLite
+                        // backend does this by reading the redeem script from the DB
+                        // and computing the exact size via
+                        // `p2sh_input_serialized_len`). Without it we cannot
+                        // determine the exact input size; return `Unknown` so the
+                        // estimator falls back to the consensus-maximum input size
+                        // rather than guessing.
+                        transparent_fees::InputSize::Unknown(self.outpoint.clone())
                     }
                     _ => transparent_fees::InputSize::Unknown(self.outpoint.clone()),
                 }
