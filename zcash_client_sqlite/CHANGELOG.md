@@ -23,6 +23,11 @@ workspace.
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
 
+### Changed
+- Block scanning records transparent outputs paying the wallet and spends of the
+  wallet's transparent outputs. A spend observed before the block that created
+  the spent output has been scanned is resolved when that output is discovered.
+
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
