@@ -20,6 +20,15 @@ workspace.
 
 ### Changed
 - `zcash_transparent::pczt`:
+  - `Input::sign` and `Input::append_signature` now verify the consistency of the
+    input before signing it, returning `SignerError::InvalidInput` if the input
+    sets a `redeem_script` that its `script_pubkey` does not commit to. Previously
+    the `redeem_script` was used unchecked, both to locate the pubkey to sign with
+    and as the `script_code` committed to by the signature.
+  - `Input::with_signable_input` now applies the same verification, and returns
+    `Result<T, SignerError>` instead of `T`. Whoever signs the sighash it prepares
+    is authorizing whatever that sighash commits to, so preparing one over an
+    unverified `script_code` was equivalent to signing over it.
   - `SignerError` has added variants:
     - `DisallowedSighashType`
     - `InvalidInput`

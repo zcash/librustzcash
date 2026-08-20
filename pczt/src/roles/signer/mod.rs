@@ -200,6 +200,10 @@ impl Signer {
     /// This can be used to produce a signature externally suitable for passing to e.g.
     /// [`Self::append_transparent_signature`].}
     ///
+    /// Whoever signs the returned sighash is authorizing whatever it commits to, so the
+    /// consistency of the input and the acceptability of its sighash type are checked
+    /// here, exactly as they are when this Signer produces the signature itself.
+    ///
     /// Returns an error if `index` is invalid for this PCZT.
     pub fn transparent_sighash(&self, index: usize) -> Result<[u8; 32], Error> {
         let input = self
