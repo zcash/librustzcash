@@ -406,7 +406,10 @@ where
                 .queue_tx_retrieval(std::iter::once(tx.txid()), None)
                 .map_err(PutBlocksError::Storage)?;
 
-            // Mark notes as spent and remove them from the scanning cache
+            // Mark notes as spent and remove them from the scanning cache. Block scanning does
+            // not yet detect transparent spends, so no prevouts are available here.
+            // TODO: Pass the scanned transparent spends once the scanner reports them.
+            // https://github.com/zcash/librustzcash/issues/2395
             let _ = mark_notes_spent(
                 wallet_db,
                 tx_ref,
@@ -505,6 +508,24 @@ where
                 |_account_id| (),
             )
             .map_err(PutBlocksError::Storage)?;
+
+            // Record the transparent outputs of the transaction that pay this wallet. As for
+            // the shielded pools above, only the receive side is recorded here; the sent
+            // outputs of a transaction the wallet funded are recorded when the complete
+            // transaction data arrives via `put_decrypted_tx`, which this scan has queued for
+            // retrieval. The gap-address regeneration that follows the block loop observes
+            // these receives, so no separate notification is needed.
+            #[cfg(feature = "transparent-inputs")]
+            for output in tx.transparent_outputs() {
+                put_received_transparent_output(
+                    wallet_db,
+                    tx_ref,
+                    output,
+                    block.height(),
+                    |_, _| (),
+                )
+                .map_err(PutBlocksError::Storage)?;
+            }
         }
 
         // Insert the new nullifiers from this block into the nullifier map, unless the caller

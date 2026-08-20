@@ -32,6 +32,11 @@ workspace.
   a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
   transaction was silently deferred to the post-import rescan and counted
   under `transactions_without_wallet_relevance`.
+- `WalletDb::put_blocks` records the transparent outputs of each scanned
+  transaction that pay a wallet account, and queues each such outpoint for
+  transparent spend detection. Transparent outputs detected by
+  `zcash_client_backend::scanning::full::scan_block` were previously discarded
+  when the scanned blocks were persisted.
 
 ## [0.22.0] - 2026-08-18
 

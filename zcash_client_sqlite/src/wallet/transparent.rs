@@ -2938,6 +2938,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn scan_full_block_persists_transparent_outputs() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_persists_transparent_outputs(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn put_blocks_rolls_back_transparent_outputs() {
+        zcash_client_backend::data_api::testing::transparent::put_blocks_rolls_back_transparent_outputs(
+            TestDbFactory::default(),
+        );
+    }
+
     /// Re-storing a transparent output with an unknown mined height (`None`) must not discard
     /// the mined height already recorded for its transaction. A `None` height means "we do not
     /// yet know this to have been mined" — for example, an output re-observed via the mempool
