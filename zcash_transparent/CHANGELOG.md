@@ -12,6 +12,20 @@ workspace.
 
 ### Added
 - `zcash_transparent::sighash::SighashPolicy`
+- `zcash_transparent::pczt`:
+  - `Input::sign_with_sighash_policy`
+  - `Input::append_signature_with_sighash_policy`
+  - `Input::with_signable_input_with_sighash_policy`
+  - `Bundle::finalize_spends_with_sighash_policy`
+
+### Changed
+- `zcash_transparent::pczt`:
+  - `SignerError` has added variants:
+    - `DisallowedSighashType`
+    - `InvalidInput`
+  - `SpendFinalizerError` has added variants:
+    - `DisallowedSighashType`
+    - `MismatchedSighashType`
 
 ## [0.10.0] - 2026-07-23
 
