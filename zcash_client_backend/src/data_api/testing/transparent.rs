@@ -2364,6 +2364,156 @@ fn fake_transparent_payment_tx(
     .unwrap()
 }
 
+/// Scans a block that spends a wallet transparent output *before* scanning the block that created
+/// it, and verifies that the spend is recognized once the output is discovered.
+///
+/// This is the out-of-order case the transparent spend map exists for: at the time the spending
+/// block is scanned the wallet does not know it holds the output, so the spend cannot be matched
+/// against anything. The spending transaction is recorded against the outpoint, and the spend must
+/// be resolved when the earlier block brings the output into the wallet.
+pub fn scan_detects_out_of_order_transparent_spend<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+
+    // The block that pays the wallet, followed by the block that spends what it paid.
+    let (received_height, _, received_txid) =
+        st.generate_next_block_transparent(&[], &[(taddr, value)]);
+    let funded_outpoint = OutPoint::new(received_txid.into(), 0);
+    let (spend_height, _, spend_txid) =
+        st.generate_next_block_transparent(std::slice::from_ref(&funded_outpoint), &[]);
+
+    st.scan_cached_blocks(spend_height, 1);
+
+    // The wallet cannot recognize a spend of an output it has never seen, so at this point it
+    // holds no record of the output at all.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(None),
+        "the wallet must not know of the output before the block creating it is scanned",
+    );
+
+    // Scanning the earlier block brings the output into the wallet, at which point the
+    // already-observed spend must be attached to it.
+    st.scan_cached_blocks(received_height, 1);
+
+    let target_height = TargetHeight::from(spend_height + 1);
+
+    // The output is now known to the wallet. Asserting this separately is what keeps the
+    // "not unspent" assertions below from being satisfied by an output that was never recorded
+    // at all, which is indistinguishable from a spent one in every query that filters on
+    // spendability.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must have been recorded when the block creating it was scanned",
+    );
+
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, target_height),
+        Ok(None),
+        "the spend observed before the output was discovered must have been resolved",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                &taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+            )
+            .as_deref(),
+        Ok(&[])
+    );
+    assert_matches!(
+        st.wallet()
+            .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN),
+        Ok(balances) if balances.get(&taddr).map(|(_, b)| b.total()) == Some(Zatoshis::ZERO)
+            || balances.is_empty()
+    );
+
+    // The spend must be attributed to the transaction that actually effected it, which the wallet
+    // had no other reason to store.
+    let spending_txids = st
+        .wallet()
+        .get_tx_history()
+        .unwrap()
+        .into_iter()
+        .map(|tx| tx.txid())
+        .collect::<Vec<_>>();
+    assert!(
+        spending_txids.contains(&spend_txid),
+        "the spending transaction {spend_txid} should have been recorded; history holds {spending_txids:?}",
+    );
+}
+
+/// Scans a block that pays a wallet transparent address, then the block that spends the output,
+/// and verifies that the spend is recognized directly during the scan of the later block.
+///
+/// This is the in-order counterpart of [`scan_detects_out_of_order_transparent_spend`]: here the
+/// wallet already tracks the outpoint when the spending block is scanned, so the spend is matched
+/// without consulting the spend map.
+pub fn scan_detects_transparent_spend<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+
+    let (received_height, _, received_txid) =
+        st.generate_next_block_transparent(&[], &[(taddr, value)]);
+    let funded_outpoint = OutPoint::new(received_txid.into(), 0);
+
+    st.scan_cached_blocks(received_height, 1);
+
+    // The scan of the paying block must have recorded the output as a wallet UTXO.
+    assert_matches!(
+        st.wallet().get_unspent_transparent_output(
+            &funded_outpoint,
+            TargetHeight::from(received_height + 1),
+        ),
+        Ok(Some(utxo)) if utxo.txout().value() == value
+    );
+
+    let (spend_height, _, _) =
+        st.generate_next_block_transparent(std::slice::from_ref(&funded_outpoint), &[]);
+    st.scan_cached_blocks(spend_height, 1);
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(_)),
+        "the output must remain known to the wallet after being spent",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(spend_height + 1)),
+        Ok(None),
+        "the output must be recorded as spent once its spend has been scanned",
+    );
+}
+
 /// Returns the default external transparent receiver of the given account.
 fn wallet_taddr<DbT>(wallet: &DbT, account_id: <DbT as WalletRead>::AccountId) -> TransparentAddress
 where

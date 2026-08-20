@@ -49,6 +49,19 @@ workspace.
   behind `transparent-inputs`, `get_unspent_transparent_outpoints` and
   `find_account_for_transparent_address`. Both are called on the scan path, so
   they are required rather than defaulted to a panic.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`, `track_block_transparent_spends`, and
+  `prune_tracked_nullifiers` is renamed to `prune_tracked_spends`: it now prunes
+  the transparent spend map alongside the nullifier maps.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` detects transparent
+  outputs paying the wallet and spends of the wallet's transparent outputs,
+  including spends observed before the block that created the spent output has
+  been scanned. Transparent data present in a `CompactTx` was previously
+  ignored, so such transactions were found only by querying an indexer for
+  transactions involving each address. Requesting transparent data from the
+  server is not yet wired up: `zcash_client_backend::sync` still requests only
+  shielded data, so a caller must set `BlockRange.poolTypes` itself to receive
+  it.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
