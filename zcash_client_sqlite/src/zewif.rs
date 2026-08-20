@@ -1640,7 +1640,7 @@ mod tests {
     use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use zcash_client_backend::{
-        data_api::{Account as _, AccountPurpose, AccountSource, WalletRead},
+        data_api::{AccountPurpose, AccountSource, WalletRead},
         wallet::Exposure,
     };
     use zcash_keys::{

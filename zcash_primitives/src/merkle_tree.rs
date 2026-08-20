@@ -249,11 +249,12 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
     witness = &witness[1..];
 
     // Begin to construct the authentication path
-    let iter = witness.chunks_exact(33);
-    witness = iter.remainder();
+    let (chunks, remainder) = witness.as_chunks::<33>();
+    witness = remainder;
 
     // The vector works in reverse
-    let auth_path = iter
+    let auth_path = chunks
+        .iter()
         .rev()
         .map(|bytes| {
             // Length of inner vector should be the length of a Pedersen hash
