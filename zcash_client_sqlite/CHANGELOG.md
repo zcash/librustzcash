@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_sqlite`:
+  - `WalletDb::put_blocks` records the transparent outputs of each scanned
+    transaction that pay a wallet account, and queues each such outpoint for
+    transparent spend detection. Transparent outputs detected by
+    `zcash_client_backend::scanning::full::scan_block` were previously discarded
+    when the scanned blocks were persisted.
+
 ## [0.22.0] - 2026-08-18
 
 ### Added

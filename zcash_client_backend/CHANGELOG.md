@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
+  atomic: an implementation must apply the whole batch of blocks or none of it,
+  and a caller may assume after an error that nothing was persisted. An
+  implementation that applies blocks one at a time must be updated.
+
+### Fixed
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
+  transparent outputs of each scanned transaction that pay a wallet account, and
+  queues each such outpoint for transparent spend detection. Transparent outputs
+  detected by `zcash_client_backend::scanning::full::scan_block` were previously
+  discarded when the scanned blocks were persisted, and were recovered only when
+  complete transaction data reached
+  `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
+  Transparent spends are still not detected during block scanning.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added
