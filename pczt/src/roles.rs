@@ -104,6 +104,8 @@ mod tests {
         feature = "zcp-builder"
     ))]
     mod transparent_authentication {
+        use alloc::vec::Vec;
+
         use ::transparent::{
             address::TransparentAddress,
             bundle::{OutPoint, TxOut},
@@ -373,6 +375,113 @@ mod tests {
         fn finalizer_accepts_all_sighash_type() {
             let pczt = signed(|_| (), SighashPolicy::ALL_ONLY);
             assert!(SpendFinalizer::new(pczt).finalize_spends().is_ok());
+        }
+
+        /// The attacker's own coin, which they contribute to their own transaction.
+        fn attacker_coin() -> (secp256k1::PublicKey, OutPoint, TxOut) {
+            let pubkey = public_key(&secp256k1::SecretKey::from_slice(&[2; 32]).expect("valid"));
+            let addr = TransparentAddress::from_pubkey(&pubkey);
+            (
+                pubkey,
+                OutPoint::new([2; 32], 0),
+                TxOut::new(Zatoshis::const_from_u64(1_000_000), addr.script().into()),
+            )
+        }
+
+        /// A PCZT for a *different* transaction, which the victim never sees: it spends
+        /// the same coin of theirs alongside one of the attacker's, and pays the whole
+        /// balance to the attacker.
+        fn attacker_pczt(sighash_type: u8) -> Pczt {
+            let (attacker_pubkey, attacker_utxo, attacker_coin) = attacker_coin();
+            let attacker_addr = TransparentAddress::from_pubkey(&attacker_pubkey);
+            let (victim_utxo, victim_coin) = victim_coin();
+
+            let mut builder = builder();
+            builder
+                .add_transparent_p2pkh_input(public_key(&secret_key()), victim_utxo, victim_coin)
+                .unwrap();
+            builder
+                .add_transparent_p2pkh_input(attacker_pubkey, attacker_utxo, attacker_coin)
+                .unwrap();
+            builder
+                .add_transparent_output(&attacker_addr, Zatoshis::const_from_u64(1_990_000))
+                .unwrap();
+
+            let mut pczt = finalize(builder);
+            pczt.transparent.inputs[0].sighash_type = sighash_type;
+            pczt
+        }
+
+        /// The victim's signature over the single input of the transaction they were
+        /// shown, with the trailing sighash byte stripped.
+        fn victim_signature(sighash_type: u8, sighash_policy: SighashPolicy) -> Vec<u8> {
+            let pczt = signed(|input| input.sighash_type = sighash_type, sighash_policy);
+            let mut sig = pczt.transparent.inputs[0]
+                .partial_signatures
+                .get(&public_key(&secret_key()).serialize())
+                .expect("the victim signed")
+                .clone();
+            assert_eq!(
+                sig.pop(),
+                Some(sighash_type),
+                "signature carries its sighash type"
+            );
+            sig
+        }
+
+        /// Whether `sig` authorizes the victim's input of `pczt`.
+        fn authorizes(sig: &[u8], pczt: Pczt) -> bool {
+            let sighash = unguarded_sighash(pczt);
+
+            secp256k1::Secp256k1::new()
+                .verify_ecdsa(
+                    &secp256k1::Message::from_digest(sighash),
+                    &secp256k1::ecdsa::Signature::from_der(sig).expect("DER-encoded"),
+                    &public_key(&secret_key()),
+                )
+                .is_ok()
+        }
+
+        /// Why `SighashPolicy::ALL_ONLY` is the default: a signature the victim was
+        /// induced to make under `SIGHASH_NONE | SIGHASH_ANYONECANPAY` commits to
+        /// neither the outputs nor the other inputs, so it is equally a valid
+        /// authorization of a transaction the victim never saw, which pays the attacker.
+        ///
+        /// The Signer refuses to produce this signature at all unless the caller opts in,
+        /// which is what `signer_rejects_hostile_sighash_type` covers; this test is what
+        /// makes that refusal worth having.
+        #[test]
+        fn a_non_all_signature_authorizes_the_attackers_transaction() {
+            let hostile = SIGHASH_NONE | SIGHASH_ANYONECANPAY;
+            let sig = victim_signature(hostile, SighashPolicy::ANY);
+
+            assert!(
+                authorizes(&sig, tampered_pczt(|input| input.sighash_type = hostile)),
+                "the victim's signature should authorize the transaction they were shown",
+            );
+            assert!(
+                authorizes(&sig, attacker_pczt(hostile)),
+                "and, because it commits to neither the outputs nor the other inputs, \
+                 the attacker's transaction as well",
+            );
+        }
+
+        /// The contrast: a `SIGHASH_ALL` signature over the same input commits to the
+        /// whole transaction the victim was shown, so it authorizes nothing else.
+        #[test]
+        fn an_all_signature_authorizes_nothing_else() {
+            let sig = victim_signature(SIGHASH_ALL, SighashPolicy::ALL_ONLY);
+
+            // Establishes that the negative below is a real refusal rather than, say, a
+            // signature that fails to verify against anything at all.
+            assert!(
+                authorizes(&sig, transparent_pczt()),
+                "the victim's signature should authorize the transaction they were shown",
+            );
+            assert!(
+                !authorizes(&sig, attacker_pczt(SIGHASH_ALL)),
+                "but not the attacker's",
+            );
         }
 
         #[test]
