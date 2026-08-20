@@ -32,6 +32,12 @@ workspace.
     unverified `script_code`, or for a counterparty's chosen sighash type, was
     equivalent to signing over it. Use
     `Input::with_signable_input_with_sighash_policy` to permit other sighash types.
+  - `Bundle::finalize_spends` now requires every partial signature it uses to end
+    in a sighash-type byte matching its input's `sighash_type`, and finalizes only
+    `SighashType::ALL` signatures. Signatures that are discarded rather than placed
+    into a `script_sig` are not checked, so that a Combiner cannot block
+    finalization by contributing junk. Use
+    `Bundle::finalize_spends_with_sighash_policy` to permit other sighash types.
   - `SignerError` has added variants:
     - `DisallowedSighashType`
     - `InvalidInput`
