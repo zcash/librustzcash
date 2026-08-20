@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::sighash::SighashPolicy`
+
 ## [0.10.0] - 2026-07-23
 
 ### Changed
