@@ -1283,6 +1283,38 @@ CREATE TABLE nullifier_map (
 pub(super) const INDEX_NF_MAP_LOCATOR_IDX: &str =
     r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#;
 
+/// A map from spent transparent outpoints to the transaction that spent them.
+///
+/// This is the transparent counterpart of [`TABLE_NULLIFIER_MAP`], and exists for the same
+/// reason: an outpoint observed being spent while scanning a range `Y..Z` may spend an output
+/// the wallet has not yet discovered, and the spend must be recoverable once it is.
+///
+/// It is distinct from [`TABLE_TRANSPARENT_SPEND_MAP`], which records the same relation for a
+/// spending transaction the wallet stores. Block scanning observes spending transactions with
+/// no wallet involvement, for which no [`TABLE_TRANSACTIONS`] row exists or should be created,
+/// so the spending transaction is identified by its locator in [`TABLE_TX_LOCATOR_MAP`].
+///
+/// The `prevout_uniq` constraint holds because an outpoint can be spent at most once on a given
+/// chain; a competing spend belongs to a fork, and the entry for it is removed with the locator
+/// when the reorg is processed.
+pub(super) const TABLE_TRANSPARENT_SPEND_LOCATOR_MAP: &str = r#"
+CREATE TABLE transparent_spend_locator_map (
+    prevout_txid BLOB NOT NULL,
+    prevout_output_index INTEGER NOT NULL,
+    block_height INTEGER NOT NULL,
+    tx_index INTEGER NOT NULL,
+    CONSTRAINT tx_locator
+        FOREIGN KEY (block_height, tx_index)
+        REFERENCES tx_locator_map(block_height, tx_index)
+        ON DELETE CASCADE
+        ON UPDATE RESTRICT,
+    CONSTRAINT prevout_uniq UNIQUE (prevout_txid, prevout_output_index)
+)"#;
+pub(super) const INDEX_TRANSPARENT_SPEND_LOCATOR_IDX: &str = r#"CREATE INDEX transparent_spend_locator_idx ON transparent_spend_locator_map (
+    block_height,
+    tx_index
+)"#;
+
 //
 // Internal tables
 //

@@ -48,6 +48,8 @@ workspace.
   behind `transparent-inputs`, `get_unspent_transparent_outpoints` and
   `find_account_for_transparent_address`. Both are called on the scan path, so
   they are required rather than defaulted to a panic.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`, `track_block_transparent_spends`.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
@@ -58,6 +60,15 @@ workspace.
   complete transaction data reached
   `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
   `scanning::full::scan_block` still does not detect transparent spends.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` detects transparent
+  outputs paying the wallet and spends of the wallet's transparent outputs,
+  including spends observed before the block that created the spent output has
+  been scanned. Transparent data present in a `CompactTx` was previously
+  ignored, so such transactions were found only by querying an indexer for
+  transactions involving each address. Requesting transparent data from the
+  server is not yet wired up: `zcash_client_backend::sync` still requests only
+  shielded data, so a caller must set `BlockRange.poolTypes` itself to receive
+  it.
 
 ## [0.24.0] - 2026-08-18
 

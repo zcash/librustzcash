@@ -542,6 +542,35 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
     ) -> Result<(), Self::Error>;
 
+    /// Causes the given transparent spends to be tracked by the wallet.
+    ///
+    /// This is the transparent counterpart of
+    /// [`track_block_sapling_nullifiers`](Self::track_block_sapling_nullifiers), and exists for
+    /// the same reason: a transparent output created in a block range the wallet has not yet
+    /// scanned cannot be recognized as its own at the time its spend is observed, so the spending
+    /// transaction must be recorded against the outpoint and resolved if the output is later
+    /// discovered.
+    ///
+    /// The spending transactions here are in general not transactions the wallet stores, so an
+    /// implementation must be able to record them without a corresponding transaction record; for
+    /// space efficiency it may use the combination of block height and index within the block
+    /// instead of the txid, as for the nullifier maps. Entries are removed by
+    /// [`prune_tracked_nullifiers`](Self::prune_tracked_nullifiers).
+    ///
+    /// # Parameters
+    /// - `block_height`: The height of the block containing the spending transactions.
+    /// - `spends`: A slice of tuples, where each tuple contains:
+    ///   - The index of the transaction within the block.
+    ///   - The transaction ID of the transaction effecting the spends.
+    ///   - The outpoints spent by that transaction's transparent inputs that do not spend any
+    ///     output the wallet already knows of.
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error>;
+
     /// Removes tracked nullifiers that are no longer needed for spend detection.
     ///
     /// This function prunes nullifiers that were recorded at block heights less than

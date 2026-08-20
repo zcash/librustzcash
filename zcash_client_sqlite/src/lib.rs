@@ -2953,6 +2953,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_transparent_spend_locator_map(self.conn.borrow(), block_height, spends)
+    }
+
     fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
         if let Some(meta) = wallet::block_fully_scanned(self.conn.borrow(), &self.params)? {
             wallet::prune_nullifier_map(
