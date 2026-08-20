@@ -293,21 +293,24 @@ pub struct PutBlocksRows {
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
 ///
-/// # Nullifier tracking
+/// # Spend tracking
 ///
 /// When a batch extends the wallet's contiguous fully-scanned frontier (i.e.
 /// [`LowLevelWalletRead::block_fully_scanned_height`] equals the `from_state` height, so
 /// every block from the wallet birthday through the previous block has been scanned),
-/// nullifier-map insertion is skipped for blocks more than
-/// [`NULLIFIER_MAP_RETENTION_BLOCKS`] below the end of the batch. Under that precondition
-/// the skipped entries are provably unobservable: the nullifier map exists to detect
-/// spends observed before the corresponding note's block has been scanned, which cannot
-/// occur below a contiguous frontier — any wallet note spendable in a skipped block was
+/// spend-map insertion is skipped for blocks more than
+/// [`SPEND_MAP_RETENTION_BLOCKS`] below the end of the batch. Under that precondition
+/// the skipped entries are provably unobservable: the spend maps exist to detect
+/// spends observed before the corresponding output's block has been scanned, which cannot
+/// occur below a contiguous frontier — any wallet output spendable in a skipped block was
 /// either received in an already-scanned block (so its spend is detected directly against
-/// the wallet's own nullifiers rather than the map) or is received later in this same
-/// ascending batch (so the spend is linked when the receiving transaction is processed).
-/// For every out-of-order range — scanning after a gap, recent-first, or chain-tip
-/// pre-scans — the nullifiers of every block are tracked.
+/// the wallet's own nullifiers and outpoints rather than the map) or is received later in
+/// this same ascending batch (so the spend is linked when the receiving transaction is
+/// processed). For every out-of-order range — scanning after a gap, recent-first, or
+/// chain-tip pre-scans — every block's spends are tracked.
+///
+/// This governs the shielded nullifier maps and the transparent spend map alike; the
+/// argument above is indifferent to which kind of output identifier is being tracked.
 pub fn put_blocks_rows<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
@@ -345,7 +348,7 @@ where
         });
     }
 
-    let nullifier_tracking_floor = nullifier_tracking_floor(
+    let spend_tracking_floor = spend_tracking_floor(
         wallet_db
             .block_fully_scanned_height()
             .map_err(PutBlocksError::Storage)?,
@@ -406,15 +409,14 @@ where
                 .queue_tx_retrieval(std::iter::once(tx.txid()), None)
                 .map_err(PutBlocksError::Storage)?;
 
-            // Mark notes as spent and remove them from the scanning cache. Block scanning does
-            // not yet detect transparent spends, so no prevouts are available here.
-            // TODO: Pass the scanned transparent spends once the scanner reports them.
-            // https://github.com/zcash/librustzcash/issues/2395
+            // Mark notes and transparent outputs as spent, and remove them from the scanning
+            // cache. Only spends of outputs the wallet already knew of appear here; those it
+            // could not yet recognize are handled by the spend map below.
             let _ = mark_notes_spent(
                 wallet_db,
                 tx_ref,
                 #[cfg(feature = "transparent-inputs")]
-                None.iter(),
+                tx.transparent_spends().iter().map(|spend| spend.outpoint()),
                 tx.sapling_spends().iter().map(|spend| spend.nf()),
                 #[cfg(feature = "orchard")]
                 tx.orchard_spends().iter().map(|spend| spend.nf()),
@@ -528,9 +530,9 @@ where
             }
         }
 
-        // Insert the new nullifiers from this block into the nullifier map, unless the caller
-        // has excluded this height from nullifier tracking.
-        if should_track_nullifiers(nullifier_tracking_floor, block.height()) {
+        // Insert this block's unmatched nullifiers and transparent prevouts into the spend maps,
+        // unless the height lies below the spend-tracking floor.
+        if should_track_spends(spend_tracking_floor, block.height()) {
             wallet_db
                 .track_block_sapling_nullifiers(block.height(), block.sapling().nullifier_map())
                 .map_err(PutBlocksError::Storage)?;
@@ -543,6 +545,11 @@ where
             #[cfg(feature = "orchard")]
             wallet_db
                 .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "transparent-inputs")]
+            wallet_db
+                .track_block_transparent_spends(block.height(), block.transparent_spend_map())
                 .map_err(PutBlocksError::Storage)?;
         }
 
@@ -613,9 +620,9 @@ where
         }
     }
 
-    // Prune the nullifier map of entries we no longer need.
+    // Prune the nullifier and transparent spend maps of entries we no longer need.
     wallet_db
-        .prune_tracked_nullifiers(PRUNING_DEPTH)
+        .prune_tracked_spends(PRUNING_DEPTH)
         .map_err(PutBlocksError::Storage)?;
 
     Ok(PutBlocksRows {
@@ -1655,23 +1662,23 @@ pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPT
         .collect::<Vec<_>>()
 }
 
-/// The number of trailing blocks in a batch whose nullifier-map entries are always
-/// retained, even when [`put_blocks_rows`] can prove that insertion is skippable. This
-/// keeps the map's contents aligned with a
-/// [`LowLevelWalletWrite::prune_tracked_nullifiers`] pruning depth of the same value, and
-/// comfortably exceeds the maximum reorg depth the wallet tolerates.
+/// The number of trailing blocks in a batch whose spend-map entries are always retained,
+/// even when [`put_blocks_rows`] can prove that insertion is skippable. This keeps the
+/// maps' contents aligned with a [`LowLevelWalletWrite::prune_tracked_spends`] pruning
+/// depth of the same value, and comfortably exceeds the maximum reorg depth the wallet
+/// tolerates.
 ///
-/// [`LowLevelWalletWrite::prune_tracked_nullifiers`]: super::LowLevelWalletWrite::prune_tracked_nullifiers
-pub const NULLIFIER_MAP_RETENTION_BLOCKS: u32 = 100;
+/// [`LowLevelWalletWrite::prune_tracked_spends`]: super::LowLevelWalletWrite::prune_tracked_spends
+pub const SPEND_MAP_RETENTION_BLOCKS: u32 = 100;
 
-/// Derives the nullifier-tracking floor for one [`put_blocks_rows`] batch (see the
-/// "Nullifier tracking" section of its documentation).
+/// Derives the spend-tracking floor for one [`put_blocks_rows`] batch (see the
+/// "Spend tracking" section of its documentation).
 ///
 /// Returns `Some` only when the batch extends the contiguous fully-scanned frontier
 /// (`fully_scanned == Some(from_state_height)`) and is long enough that a floor above
-/// `from_state_height` retains the full [`NULLIFIER_MAP_RETENTION_BLOCKS`] trailing
+/// `from_state_height` retains the full [`SPEND_MAP_RETENTION_BLOCKS`] trailing
 /// window; every out-of-order or short batch derives `None` and tracks fully.
-fn nullifier_tracking_floor(
+fn spend_tracking_floor(
     fully_scanned: Option<BlockHeight>,
     from_state_height: BlockHeight,
     batch_end: Option<BlockHeight>,
@@ -1679,7 +1686,7 @@ fn nullifier_tracking_floor(
     if fully_scanned == Some(from_state_height) {
         batch_end.and_then(|last| {
             let floor =
-                BlockHeight::from(u32::from(last).saturating_sub(NULLIFIER_MAP_RETENTION_BLOCKS));
+                BlockHeight::from(u32::from(last).saturating_sub(SPEND_MAP_RETENTION_BLOCKS));
             (floor > from_state_height + 1).then_some(floor)
         })
     } else {
@@ -1687,17 +1694,17 @@ fn nullifier_tracking_floor(
     }
 }
 
-/// Returns whether the nullifiers of a block at `block_height` should be inserted into the
-/// nullifier map.
+/// Returns whether the spends observed in a block at `block_height` should be inserted into
+/// the spend maps.
 ///
-/// Tracking is skipped only when a `nullifier_tracking_floor` was derived and
-/// `block_height` lies strictly below it; with no floor, every block's nullifiers are
-/// tracked. See the "Nullifier tracking" section of [`put_blocks_rows`].
-fn should_track_nullifiers(
-    nullifier_tracking_floor: Option<BlockHeight>,
+/// Tracking is skipped only when a `spend_tracking_floor` was derived and
+/// `block_height` lies strictly below it; with no floor, every block's spends are
+/// tracked. See the "Spend tracking" section of [`put_blocks_rows`].
+fn should_track_spends(
+    spend_tracking_floor: Option<BlockHeight>,
     block_height: BlockHeight,
 ) -> bool {
-    nullifier_tracking_floor.is_none_or(|floor| block_height >= floor)
+    spend_tracking_floor.is_none_or(|floor| block_height >= floor)
 }
 
 /// Returns whether the checkpoint at `height` should be retained as a durable anchor: anchor
@@ -1883,8 +1890,7 @@ mod tests {
     #[cfg(feature = "orchard")]
     use super::batch_ensure_heights;
     use super::{
-        NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
-        should_track_nullifiers,
+        SPEND_MAP_RETENTION_BLOCKS, should_retain_anchor, should_track_spends, spend_tracking_floor,
     };
     use crate::data_api::anchor_retention::{AnchorRetention, AnchorRetentionInterval};
 
@@ -1896,17 +1902,17 @@ mod tests {
         let h = BlockHeight::from;
         // Frontier far below this range's start: gap ⇒ no floor.
         assert_eq!(
-            nullifier_tracking_floor(Some(h(1_000)), h(500_000), Some(h(510_000))),
+            spend_tracking_floor(Some(h(1_000)), h(500_000), Some(h(510_000))),
             None
         );
         // No frontier at all ⇒ no floor.
         assert_eq!(
-            nullifier_tracking_floor(None, h(500_000), Some(h(510_000))),
+            spend_tracking_floor(None, h(500_000), Some(h(510_000))),
             None
         );
         // Frontier above the range start (re-scan below the frontier) ⇒ no floor.
         assert_eq!(
-            nullifier_tracking_floor(Some(h(600_000)), h(500_000), Some(h(510_000))),
+            spend_tracking_floor(Some(h(600_000)), h(500_000), Some(h(510_000))),
             None
         );
     }
@@ -1918,45 +1924,32 @@ mod tests {
     fn frontier_batches_retain_the_trailing_window() {
         let from = BlockHeight::from(500_000);
         let last = BlockHeight::from(510_000);
-        let floor =
-            nullifier_tracking_floor(Some(from), from, Some(last)).expect("frontier ⇒ floor");
+        let floor = spend_tracking_floor(Some(from), from, Some(last)).expect("frontier ⇒ floor");
         assert_eq!(
             u32::from(last) - u32::from(floor),
-            NULLIFIER_MAP_RETENTION_BLOCKS
+            SPEND_MAP_RETENTION_BLOCKS
         );
 
-        let short = BlockHeight::from(500_000 + NULLIFIER_MAP_RETENTION_BLOCKS / 2);
-        assert_eq!(
-            nullifier_tracking_floor(Some(from), from, Some(short)),
-            None
-        );
-        assert_eq!(nullifier_tracking_floor(Some(from), from, None), None);
+        let short = BlockHeight::from(500_000 + SPEND_MAP_RETENTION_BLOCKS / 2);
+        assert_eq!(spend_tracking_floor(Some(from), from, Some(short)), None);
+        assert_eq!(spend_tracking_floor(Some(from), from, None), None);
     }
 
     #[test]
-    fn nullifier_tracking_floor_gating() {
+    fn spend_tracking_floor_gating() {
         let floor = BlockHeight::from(1000);
 
-        // With no floor, every block's nullifiers are tracked.
-        assert!(should_track_nullifiers(None, BlockHeight::from(0)));
-        assert!(should_track_nullifiers(None, BlockHeight::from(999)));
+        // With no floor, every block's spends are tracked.
+        assert!(should_track_spends(None, BlockHeight::from(0)));
+        assert!(should_track_spends(None, BlockHeight::from(999)));
 
         // At or above the floor: tracked.
-        assert!(should_track_nullifiers(
-            Some(floor),
-            BlockHeight::from(1000)
-        ));
-        assert!(should_track_nullifiers(
-            Some(floor),
-            BlockHeight::from(1001)
-        ));
+        assert!(should_track_spends(Some(floor), BlockHeight::from(1000)));
+        assert!(should_track_spends(Some(floor), BlockHeight::from(1001)));
 
         // Strictly below the floor: skipped.
-        assert!(!should_track_nullifiers(
-            Some(floor),
-            BlockHeight::from(999)
-        ));
-        assert!(!should_track_nullifiers(Some(floor), BlockHeight::from(0)));
+        assert!(!should_track_spends(Some(floor), BlockHeight::from(999)));
+        assert!(!should_track_spends(Some(floor), BlockHeight::from(0)));
     }
 
     /// The gating semantics hold identically at the ZIP 318 interval and at a non-default one, so

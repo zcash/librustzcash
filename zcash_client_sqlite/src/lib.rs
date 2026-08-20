@@ -2850,7 +2850,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::sapling::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Sapling, nf)
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Sapling,
+            nf,
+        )
     }
 
     #[cfg(feature = "orchard")]
@@ -2858,7 +2862,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Orchard,
+            &nf.to_bytes(),
+        )
     }
 
     #[cfg(feature = "orchard")]
@@ -2866,7 +2874,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Ironwood, &nf.to_bytes())
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Ironwood,
+            &nf.to_bytes(),
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -3095,9 +3107,18 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
-    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_transparent_spend_locator_map(self.conn.borrow(), block_height, spends)
+    }
+
+    fn prune_tracked_spends(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
         if let Some(meta) = wallet::block_fully_scanned(self.conn.borrow(), &self.params)? {
-            wallet::prune_nullifier_map(
+            wallet::prune_spend_maps(
                 self.conn.borrow(),
                 meta.block_height().saturating_sub(pruning_depth),
             )?;

@@ -159,6 +159,7 @@ migration_modules!(
     support_legacy_sqlite,
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
+    transparent_spend_locator_map,
     tree_retained_checkpoints,
     tx_observation_height,
     tx_retrieval_queue,
@@ -246,8 +247,8 @@ pub(super) fn all_migrations<
     //            \                          \     ephemeral_addresses     /                       /
     //             \                          \            |              /                       /
     //              `----------------------------- tx_retrieval_queue ---------------------------'
-    //                                                  /    \
-    //                              support_legacy_sqlite    tx_retrieval_queue_expiry ----------------.
+    //                                                  /    \      \---------------------------------------.
+    //                              support_legacy_sqlite    tx_retrieval_queue_expiry ----------------.    transparent_spend_locator_map
     //                                 /              \                                                 \
     //            fix_broken_commitment_trees         add_account_uuids                                  \
     //                       /                                /        \                                  \
@@ -392,6 +393,7 @@ pub(super) fn all_migrations<
         Box::new(v_address_uses_ironwood::Migration),
         Box::new(v_transactions_pool_crossing::Migration),
         Box::new(zip318_classification::Migration),
+        Box::new(transparent_spend_locator_map::Migration),
         Box::new(v_transactions_zip318_kind::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
