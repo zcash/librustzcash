@@ -35,7 +35,7 @@ use {
         },
     },
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -3411,6 +3411,23 @@ impl WalletRead for MockWalletDb {
         _query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
         Ok(Vec::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        Ok(HashMap::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receiver_accounts(
+        &self,
+    ) -> Result<
+        HashMap<TransparentAddress, (Self::AccountId, Option<TransparentKeyScope>)>,
+        Self::Error,
+    > {
+        Ok(HashMap::new())
     }
 
     #[cfg(feature = "transparent-inputs")]

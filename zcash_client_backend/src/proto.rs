@@ -220,6 +220,39 @@ impl compact_formats::CompactSaplingSpend {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
+impl compact_formats::CompactTxIn {
+    /// Returns the outpoint of the transparent output that this input spends.
+    ///
+    /// A convenience method that parses [`field@Self::prevout_txid`] and
+    /// [`field@Self::prevout_index`].
+    pub fn prevout(&self) -> Result<transparent::bundle::OutPoint, CompactFormatError> {
+        Ok(transparent::bundle::OutPoint::new(
+            self.prevout_txid[..]
+                .try_into()
+                .map_err(CompactFormatError::InvalidLength)?,
+            self.prevout_index,
+        ))
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl compact_formats::TxOut {
+    /// Returns the transparent output that this message describes.
+    ///
+    /// A convenience method that parses [`field@Self::value`] and [`field@Self::script_pub_key`].
+    ///
+    /// # Errors
+    /// Returns [`CompactFormatError::InvalidValue`] if the value is not a valid amount of
+    /// zatoshis.
+    pub fn to_txout(&self) -> Result<transparent::bundle::TxOut, CompactFormatError> {
+        Ok(transparent::bundle::TxOut::new(
+            Zatoshis::from_u64(self.value).map_err(|_| CompactFormatError::InvalidValue)?,
+            transparent::address::Script(zcash_script::script::Code(self.script_pub_key.clone())),
+        ))
+    }
+}
+
 #[cfg(feature = "orchard")]
 impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryption::CompactAction {
     type Error = CompactFormatError;

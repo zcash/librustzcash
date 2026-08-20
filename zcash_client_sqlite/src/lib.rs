@@ -1488,6 +1488,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        wallet::transparent::get_unspent_outpoints(self.conn.borrow())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receiver_accounts(
+        &self,
+    ) -> Result<
+        HashMap<TransparentAddress, (Self::AccountId, Option<TransparentKeyScope>)>,
+        Self::Error,
+    > {
+        wallet::transparent::get_receiver_accounts(self.conn.borrow(), &self.params)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
         account: Self::AccountId,
