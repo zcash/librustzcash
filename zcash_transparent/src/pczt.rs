@@ -282,22 +282,15 @@ pub(crate) mod testing {
     use alloc::collections::BTreeMap;
     use alloc::vec::Vec;
 
-    use ripemd::Ripemd160;
-    use sha2::{Digest, Sha256};
     use zcash_protocol::{value::Zatoshis, TxId};
     use zcash_script::{
         pattern,
         script::{self, Evaluable},
     };
 
-    use crate::{address::TransparentAddress, sighash::SighashType};
+    use crate::{address::TransparentAddress, hash160, sighash::SighashType};
 
     use super::Input;
-
-    /// `RIPEMD160(SHA256(data))`.
-    pub(crate) fn hash160(data: &[u8]) -> [u8; 20] {
-        *Ripemd160::digest(Sha256::digest(data)).as_ref()
-    }
 
     /// The P2PKH `script_pubkey` paying to `pubkey`.
     pub(crate) fn p2pkh(pubkey: &[u8; 33]) -> script::FromChain {

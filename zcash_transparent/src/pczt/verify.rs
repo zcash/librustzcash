@@ -1,8 +1,6 @@
-use ripemd::Ripemd160;
-use sha2::{Digest, Sha256};
 use zcash_script::script::Evaluable;
 
-use crate::address::TransparentAddress;
+use crate::{address::TransparentAddress, hash160};
 
 impl super::Input {
     /// Verifies the consistency of this transparent input.
@@ -17,7 +15,7 @@ impl super::Input {
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
                 if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
+                    if hash != hash160(&redeem_script.to_bytes()) {
                         return Err(VerifyError::WrongRedeemScript);
                     }
                 }
@@ -42,7 +40,7 @@ impl super::Output {
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
                 if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
+                    if hash != hash160(&redeem_script.to_bytes()) {
                         return Err(VerifyError::WrongRedeemScript);
                     }
                 }

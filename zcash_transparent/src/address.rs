@@ -13,9 +13,6 @@ use zcash_script::{
     solver,
 };
 
-#[cfg(feature = "transparent-inputs")]
-use sha2::{Digest, Sha256};
-
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
 #[derive(Clone)]
 pub struct Script(pub script::Code);
@@ -189,9 +186,7 @@ impl TransparentAddress {
     /// Derives the P2PKH transparent address corresponding to the given pubkey bytes.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn from_pubkey_bytes(pubkey: &[u8; 33]) -> Self {
-        TransparentAddress::PublicKeyHash(
-            *ripemd::Ripemd160::digest(Sha256::digest(pubkey)).as_ref(),
-        )
+        TransparentAddress::PublicKeyHash(crate::hash160(pubkey))
     }
 }
 

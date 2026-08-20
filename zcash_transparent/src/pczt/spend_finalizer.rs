@@ -1,9 +1,8 @@
-use ripemd::Ripemd160;
-use sha2::{Digest, Sha256};
 use zcash_script::{pattern::push_script, pv, script, solver};
 
 use crate::{
     address::TransparentAddress,
+    hash160,
     sighash::{SighashPolicy, SighashType},
 };
 
@@ -53,7 +52,7 @@ impl super::Bundle {
                         }
                         .and_then(|(pubkey, sig_bytes)| {
                             // Check that the signature is for this input.
-                            if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
+                            if hash != hash160(pubkey) {
                                 Err(SpendFinalizerError::UnexpectedSignatures)
                             } else {
                                 check_sighash_type(sig_bytes, input.sighash_type, sighash_policy)?;
