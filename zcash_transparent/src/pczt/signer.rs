@@ -16,8 +16,10 @@ impl Input {
     /// to produce a signature externally suitable for passing to [`Self::append_signature`].
     ///
     /// The `script_code` that the sighash commits to is checked against the coin being
-    /// spent. Whoever signs the resulting sighash is authorizing whatever it commits to,
-    /// so this is the same check that [`Input::sign`] makes.
+    /// spent, and only [`SighashType::ALL`] is prepared for; use
+    /// [`Input::with_signable_input_with_sighash_policy`] for a wider policy. Whoever
+    /// signs the resulting sighash is authorizing whatever it commits to, so these are
+    /// the same checks that [`Input::sign`] makes.
     pub fn with_signable_input<T, F>(&self, index: usize, f: F) -> Result<T, SignerError>
     where
         F: FnOnce(SignableInput) -> T,
@@ -39,7 +41,7 @@ impl Input {
     where
         F: FnOnce(SignableInput) -> T,
     {
-        let _ = sighash_policy;
+        self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
 
         // For P2PKH, `script_code` is always the same as `script_pubkey`.
@@ -52,6 +54,16 @@ impl Input {
             script_pubkey: &Script::from(&self.script_pubkey),
             value: self.value,
         }))
+    }
+
+    /// The sighash type reaches us from whoever gave us this PCZT, so it is our policy,
+    /// not theirs, that decides whether to authorize such a signature.
+    fn check_sighash_policy(&self, sighash_policy: SighashPolicy) -> Result<(), SignerError> {
+        if sighash_policy.permits(self.sighash_type) {
+            Ok(())
+        } else {
+            Err(SignerError::DisallowedSighashType(self.sighash_type))
+        }
     }
 
     /// The `redeem_script` reaches us from whoever gave us this PCZT, and the signing
@@ -113,7 +125,7 @@ impl Input {
     where
         F: FnOnce(SignableInput) -> [u8; 32],
     {
-        let _ = sighash_policy;
+        self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
 
         let pubkey = sk.public_key(secp).serialize();
@@ -225,7 +237,7 @@ impl Input {
     where
         F: FnOnce(SignableInput) -> [u8; 32],
     {
-        let _ = sighash_policy;
+        self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
 
         // For P2PKH, `script_code` is always the same as `script_pubkey`.
