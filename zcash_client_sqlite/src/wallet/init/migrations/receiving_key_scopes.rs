@@ -679,6 +679,8 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 Some(0),
             )),
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, std::convert::Infallible>(None),
         )
         .unwrap();
 
