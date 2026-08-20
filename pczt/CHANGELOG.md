@@ -15,6 +15,9 @@ workspace.
   behind `zcash_unstable="nutachyon"`, using the V6 transaction body.
 - `pczt::roles::signer::Signer::with_transparent_sighash_policy`
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
+### Changed
+- `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
+  transparent_sighash}` now check the consistency of the transparent input.
 
 ## [0.9.3] - 2026-08-07
 

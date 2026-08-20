@@ -14,6 +14,10 @@ impl Input {
     ///
     /// This can be used to calculate the sighash for this input within its transaction,
     /// to produce a signature externally suitable for passing to [`Self::append_signature`].
+    ///
+    /// The `script_code` that the sighash commits to is checked against the coin being
+    /// spent. Whoever signs the resulting sighash is authorizing whatever it commits to,
+    /// so this is the same check that [`Input::sign`] makes.
     pub fn with_signable_input<T, F>(&self, index: usize, f: F) -> Result<T, SignerError>
     where
         F: FnOnce(SignableInput) -> T,
@@ -36,6 +40,7 @@ impl Input {
         F: FnOnce(SignableInput) -> T,
     {
         let _ = sighash_policy;
+        self.verify_for_signing()?;
 
         // For P2PKH, `script_code` is always the same as `script_pubkey`.
         let script_code = self.redeem_script.as_ref().unwrap_or(&self.script_pubkey);
@@ -47,6 +52,20 @@ impl Input {
             script_pubkey: &Script::from(&self.script_pubkey),
             value: self.value,
         }))
+    }
+
+    /// The `redeem_script` reaches us from whoever gave us this PCZT, and the signing
+    /// paths both search it for a pubkey and commit to it in the sighash. Check that it
+    /// really is the script that the coin being spent commits to.
+    fn verify_for_signing(&self) -> Result<(), SignerError> {
+        match self.verify() {
+            // `Input::verify` only recognises P2PKH and P2SH `script_pubkey`s, whereas
+            // signing additionally supports bare P2PK and P2MS scripts. Those have no
+            // `redeem_script` to check.
+            Err(VerifyError::UnsupportedScriptPubkey) if self.redeem_script.is_none() => Ok(()),
+            r => r,
+        }
+        .map_err(SignerError::InvalidInput)
     }
 
     /// Signs the transparent spend with the given spend authorizing key.
@@ -95,6 +114,7 @@ impl Input {
         F: FnOnce(SignableInput) -> [u8; 32],
     {
         let _ = sighash_policy;
+        self.verify_for_signing()?;
 
         let pubkey = sk.public_key(secp).serialize();
         let p2pkh_addr = TransparentAddress::from_pubkey_bytes(&pubkey);
@@ -206,6 +226,7 @@ impl Input {
         F: FnOnce(SignableInput) -> [u8; 32],
     {
         let _ = sighash_policy;
+        self.verify_for_signing()?;
 
         // For P2PKH, `script_code` is always the same as `script_pubkey`.
         let script_code = self.redeem_script.as_ref().unwrap_or(&self.script_pubkey);
