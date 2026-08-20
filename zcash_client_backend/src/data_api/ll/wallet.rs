@@ -1077,7 +1077,7 @@ where
         tx_ref,
         &wallet_transparent_outputs,
         #[cfg(feature = "transparent-inputs")]
-        |wallet_db, output| wallet_db.put_transparent_output(output, observed_height, false),
+        observed_height,
         #[cfg(feature = "transparent-inputs")]
         |account_id, t_key_scope| {
             gap_update_set.insert((account_id, t_key_scope));
@@ -1386,21 +1386,76 @@ where
     Ok(())
 }
 
+/// Records the wallet's receipt of `output` if its recipient address belongs to a wallet
+/// account, and queues the resulting outpoint for transparent spend detection.
+///
+/// An output whose recipient address belongs to no wallet account is ignored; recording such an
+/// output as a send is the caller's responsibility.
+///
+/// `observation_height` is the height as of which the output was observed: the height of the
+/// containing block for an output discovered in a mined block, or the caller's best estimate of
+/// the chain tip for one discovered in an unmined transaction. The output is never recorded as
+/// known-unspent, because neither observing it in a block nor receiving complete data for the
+/// transaction that created it establishes that it is still a member of the UTXO set; only a
+/// query of that set can do so.
+///
+/// `on_received` is invoked with the receiving account and key scope when the output is recorded,
+/// so that a caller which does not otherwise track address use can extend the transparent address
+/// gap for that account.
+#[cfg(feature = "transparent-inputs")]
+fn put_received_transparent_output<DbT>(
+    wallet_db: &mut DbT,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    output: &WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>,
+    observation_height: BlockHeight,
+    mut on_received: impl FnMut(<DbT as LowLevelWalletRead>::AccountId, TransparentKeyScope),
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+{
+    if output.recipient_account().is_none() {
+        return Ok(());
+    }
+
+    let (account_id, _) = wallet_db.put_transparent_output(output, observation_height, false)?;
+
+    if let Some(t_key_scope) = output.recipient_key_scope() {
+        on_received(account_id, t_key_scope);
+    }
+
+    // Queue this outpoint for explicit transparent-spend detection.
+    //
+    // Unlike shielded notes -- whose spends are detected naturally during
+    // scanning via nullifier matching -- transparent spends are only found
+    // when the wallet already knows which outpoints to watch. For receives at
+    // ordinary transparent addresses this is handled by indexer-driven address
+    // watches, but for receives at ephemeral addresses (e.g. the middle hop of
+    // a ZIP 320 / TEX flow) there is no ongoing watch. A purely-transparent
+    // spend of such an output would otherwise go undetected. This is especially
+    // a problem in wallet recovery, where transactions can be processed out of
+    // order: queuing here ensures the spend is detected even when the receive
+    // side is processed first.
+    wallet_db.queue_transparent_spend_detection(
+        *output.recipient_address(),
+        tx_ref,
+        output.outpoint().n(),
+    )?;
+
+    Ok(())
+}
+
+/// Records both sides of each transparent output of a transaction: the wallet's receipt of
+/// those outputs that pay one of its accounts, and, for each output that names a funding
+/// account, the corresponding sent output.
+///
+/// `observation_height` is the height as of which the outputs were observed; see
+/// [`put_received_transparent_output`].
 fn put_transparent_outputs<DbT, P>(
     wallet_db: &mut DbT,
     params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     outputs: &[WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>],
-    #[cfg(feature = "transparent-inputs")] put_received_output: impl Fn(
-        &mut DbT,
-        &WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>,
-    ) -> Result<
-        (
-            <DbT as LowLevelWalletRead>::AccountId,
-            std::option::Option<TransparentKeyScope>,
-        ),
-        <DbT as LowLevelWalletRead>::Error,
-    >,
+    #[cfg(feature = "transparent-inputs")] observation_height: BlockHeight,
     #[cfg(feature = "transparent-inputs")] mut on_received: impl FnMut(
         <DbT as LowLevelWalletRead>::AccountId,
         TransparentKeyScope,
@@ -1414,32 +1469,13 @@ where
         // Receive side: record the output as received whenever its recipient
         // address belongs to a wallet account.
         #[cfg(feature = "transparent-inputs")]
-        if output.recipient_account().is_some() {
-            let (account_id, _) = put_received_output(wallet_db, output)?;
-
-            if let Some(t_key_scope) = output.recipient_key_scope() {
-                on_received(account_id, t_key_scope);
-            }
-
-            // Queue this outpoint for explicit transparent-spend detection.
-            //
-            // Unlike shielded notes -- whose spends are detected naturally
-            // during scanning via nullifier matching -- transparent spends are
-            // only found when the wallet already knows which outpoints to
-            // watch. For receives at ordinary transparent addresses this is
-            // handled by indexer-driven address watches, but for receives at
-            // ephemeral addresses (e.g. the middle hop of a ZIP 320 / TEX
-            // flow) there is no ongoing watch. A purely-transparent spend of
-            // such an output would otherwise go undetected. This is
-            // especially a problem in wallet recovery, where transactions can
-            // be processed out of order: queuing here ensures the spend is
-            // detected even when the receive side is processed first.
-            wallet_db.queue_transparent_spend_detection(
-                *output.recipient_address(),
-                tx_ref,
-                output.outpoint().n(),
-            )?;
-        }
+        put_received_transparent_output(
+            wallet_db,
+            tx_ref,
+            output,
+            observation_height,
+            &mut on_received,
+        )?;
 
         // Send side: record the output as sent for the wallet account that
         // funded the transaction, if any. If the recipient is also a wallet
