@@ -90,4 +90,354 @@ mod tests {
             io_finalizer::Error::NoSpends,
         ));
     }
+
+    /// Tests that a hostile Creator, Updater, or Combiner cannot induce the Signer or the
+    /// Spend Finalizer into producing a spend authorization over data that the coin being
+    /// spent does not commit to.
+    ///
+    /// These use a transparent-only PCZT so that the IO Finalizer does no shielded work
+    /// and no proving keys are needed.
+    #[cfg(all(
+        feature = "io-finalizer",
+        feature = "signer",
+        feature = "spend-finalizer",
+        feature = "zcp-builder"
+    ))]
+    mod transparent_authentication {
+        use ::transparent::{
+            address::TransparentAddress,
+            bundle::{OutPoint, TxOut},
+            pczt::{SignerError, SpendFinalizerError, VerifyError},
+            sighash::{
+                SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy,
+            },
+        };
+        use rand_core::OsRng;
+        use zcash_primitives::transaction::{
+            builder::{BuildConfig, Builder, BundlePadding, PcztResult},
+            fees::zip317,
+        };
+        use zcash_protocol::{consensus::MainNetwork, value::Zatoshis};
+
+        use crate::{
+            Pczt,
+            roles::{
+                creator::Creator, io_finalizer::IoFinalizer, signer, signer::Signer,
+                spend_finalizer, spend_finalizer::SpendFinalizer,
+            },
+        };
+
+        const SIGHASH_ALL_ANYONECANPAY: u8 = SIGHASH_ALL | SIGHASH_ANYONECANPAY;
+
+        fn secret_key() -> secp256k1::SecretKey {
+            secp256k1::SecretKey::from_slice(&[1; 32]).expect("valid")
+        }
+
+        fn public_key(sk: &secp256k1::SecretKey) -> secp256k1::PublicKey {
+            sk.public_key(&secp256k1::Secp256k1::signing_only())
+        }
+
+        /// The coin the victim is being asked to spend.
+        fn victim_coin() -> (OutPoint, TxOut) {
+            let addr = TransparentAddress::from_pubkey(&public_key(&secret_key()));
+            (
+                OutPoint::new([1; 32], 1),
+                TxOut::new(Zatoshis::const_from_u64(1_000_000), addr.script().into()),
+            )
+        }
+
+        fn builder() -> Builder<MainNetwork, ()> {
+            Builder::new(
+                MainNetwork,
+                10_000_000.into(),
+                BuildConfig::Standard {
+                    sapling_anchor: None,
+                    orchard_anchor: None,
+                    ironwood_anchor: None,
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            )
+        }
+
+        fn finalize(builder: Builder<MainNetwork, ()>) -> Pczt {
+            let PcztResult { pczt_parts, .. } = builder
+                .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+                .unwrap();
+
+            IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+                .finalize_io()
+                .unwrap()
+        }
+
+        /// A PCZT spending a single P2PKH coin back to the victim's own address: the
+        /// transaction the victim believes it is authorizing.
+        fn transparent_pczt() -> Pczt {
+            let pubkey = public_key(&secret_key());
+            let addr = TransparentAddress::from_pubkey(&pubkey);
+            let (utxo, coin) = victim_coin();
+
+            let mut builder = builder();
+            builder
+                .add_transparent_p2pkh_input(pubkey, utxo, coin)
+                .unwrap();
+            builder
+                .add_transparent_output(&addr, Zatoshis::const_from_u64(990_000))
+                .unwrap();
+            finalize(builder)
+        }
+
+        /// A PCZT whose single input has been tampered with by a hostile counterparty.
+        fn tampered_pczt(f: impl FnOnce(&mut crate::transparent::Input)) -> Pczt {
+            let mut pczt = transparent_pczt();
+            f(&mut pczt.transparent.inputs[0]);
+            pczt
+        }
+
+        /// A Signer over a PCZT tampered with by `f`, under `sighash_policy`.
+        fn signer(
+            f: impl FnOnce(&mut crate::transparent::Input),
+            sighash_policy: SighashPolicy,
+        ) -> Signer {
+            Signer::new(tampered_pczt(f))
+                .unwrap()
+                .with_transparent_sighash_policy(sighash_policy)
+        }
+
+        /// The sighash for the single input of `pczt`, computed under a policy wide
+        /// enough to admit whatever sighash type it carries.
+        fn unguarded_sighash(pczt: Pczt) -> [u8; 32] {
+            Signer::new(pczt)
+                .unwrap()
+                .with_transparent_sighash_policy(SighashPolicy::ANY)
+                .transparent_sighash(0)
+                .unwrap()
+        }
+
+        /// Signs `sighash` externally — as the counterparty who chose the input's
+        /// sighash type would — and offers the signature to a Signer with the default
+        /// policy.
+        fn append(pczt: Pczt, sighash: [u8; 32]) -> Result<(), signer::Error> {
+            let sig = secp256k1::Secp256k1::new()
+                .sign_ecdsa(&secp256k1::Message::from_digest(sighash), &secret_key());
+            Signer::new(pczt)
+                .unwrap()
+                .append_transparent_signature(0, sig)
+        }
+
+        #[test]
+        fn signer_rejects_unauthenticated_redeem_script() {
+            // The coin being spent is P2PKH, so it commits to no redeem script at all;
+            // `Input::sign` would otherwise search this one for the signer’s pubkey and
+            // commit to it in the sighash.
+            let mut signer = signer(
+                |input| input.redeem_script = Some(vec![0x51]),
+                SighashPolicy::ALL_ONLY,
+            );
+
+            assert!(matches!(
+                signer.sign_transparent(0, &secret_key()),
+                Err(signer::Error::TransparentSign(SignerError::InvalidInput(
+                    VerifyError::NotP2sh
+                ))),
+            ));
+        }
+
+        /// The external-signature path has to authenticate the input for the same reason.
+        #[test]
+        fn signer_rejects_unauthenticated_redeem_script_when_appending() {
+            // The input is refused before the signature is examined, so what was signed
+            // does not matter — and the Signer will not compute a sighash over this input
+            // for us to sign in the first place.
+            assert!(matches!(
+                append(
+                    tampered_pczt(|input| input.redeem_script = Some(vec![0x51])),
+                    [0; 32],
+                ),
+                Err(signer::Error::TransparentSign(SignerError::InvalidInput(
+                    VerifyError::NotP2sh
+                ))),
+            ));
+        }
+
+        /// The same holds for the sighash the Signer hands to an external signer: whoever
+        /// signs it is authorizing whatever it commits to.
+        #[test]
+        fn signer_rejects_unauthenticated_redeem_script_when_computing_sighash() {
+            let signer = signer(
+                |input| input.redeem_script = Some(vec![0x51]),
+                SighashPolicy::ALL_ONLY,
+            );
+
+            assert!(matches!(
+                signer.transparent_sighash(0),
+                Err(signer::Error::TransparentSign(SignerError::InvalidInput(
+                    VerifyError::NotP2sh
+                ))),
+            ));
+        }
+
+        #[test]
+        fn signer_rejects_hostile_sighash_type() {
+            let mut signer = signer(
+                |input| input.sighash_type = SIGHASH_NONE | SIGHASH_ANYONECANPAY,
+                SighashPolicy::ALL_ONLY,
+            );
+
+            assert!(matches!(
+                signer.sign_transparent(0, &secret_key()),
+                Err(signer::Error::TransparentSign(
+                    SignerError::DisallowedSighashType(_)
+                )),
+            ));
+        }
+
+        #[test]
+        fn signer_rejects_hostile_sighash_type_when_appending() {
+            let pczt =
+                tampered_pczt(|input| input.sighash_type = SIGHASH_NONE | SIGHASH_ANYONECANPAY);
+            let sighash = unguarded_sighash(pczt.clone());
+
+            assert!(matches!(
+                append(pczt, sighash),
+                Err(signer::Error::TransparentSign(
+                    SignerError::DisallowedSighashType(_)
+                )),
+            ));
+        }
+
+        #[test]
+        fn signer_rejects_hostile_sighash_type_when_computing_sighash() {
+            let signer = signer(
+                |input| input.sighash_type = SIGHASH_NONE | SIGHASH_ANYONECANPAY,
+                SighashPolicy::ALL_ONLY,
+            );
+
+            assert!(matches!(
+                signer.transparent_sighash(0),
+                Err(signer::Error::TransparentSign(
+                    SignerError::DisallowedSighashType(_)
+                )),
+            ));
+        }
+
+        #[test]
+        fn signer_accepts_hostile_sighash_type_under_explicit_policy() {
+            let mut signer = signer(
+                |input| input.sighash_type = SIGHASH_NONE | SIGHASH_ANYONECANPAY,
+                SighashPolicy::ANY,
+            );
+
+            assert!(signer.sign_transparent(0, &secret_key()).is_ok());
+        }
+
+        /// Signs the single input of a PCZT tampered with by `f`, under `sighash_policy`.
+        fn signed(
+            f: impl FnOnce(&mut crate::transparent::Input),
+            sighash_policy: SighashPolicy,
+        ) -> Pczt {
+            let mut signer = signer(f, sighash_policy);
+            signer.sign_transparent(0, &secret_key()).unwrap();
+            signer.finish()
+        }
+
+        /// A signed PCZT whose input uses `SIGHASH_NONE`.
+        fn signed_sighash_none() -> Pczt {
+            signed(
+                |input| input.sighash_type = SIGHASH_NONE,
+                SighashPolicy::ANY,
+            )
+        }
+
+        #[test]
+        fn finalizer_rejects_non_all_sighash_type() {
+            assert!(matches!(
+                SpendFinalizer::new(signed_sighash_none()).finalize_spends(),
+                Err(spend_finalizer::Error::TransparentFinalize(
+                    SpendFinalizerError::DisallowedSighashType(_)
+                )),
+            ));
+        }
+
+        #[test]
+        fn finalizer_accepts_non_all_sighash_type_under_explicit_policy() {
+            assert!(
+                SpendFinalizer::new(signed_sighash_none())
+                    .with_sighash_policy(SighashPolicy::ANY)
+                    .finalize_spends()
+                    .is_ok()
+            );
+        }
+
+        #[test]
+        fn finalizer_accepts_all_sighash_type() {
+            let pczt = signed(|_| (), SighashPolicy::ALL_ONLY);
+            assert!(SpendFinalizer::new(pczt).finalize_spends().is_ok());
+        }
+
+        #[test]
+        fn finalizer_accepts_sighash_single() {
+            let pczt = signed(
+                |input| input.sighash_type = SIGHASH_SINGLE,
+                SighashPolicy::ANY,
+            );
+
+            assert!(
+                SpendFinalizer::new(pczt)
+                    .with_sighash_policy(SighashPolicy::ANY)
+                    .finalize_spends()
+                    .is_ok()
+            );
+        }
+
+        /// Inputs of a single transaction may deliberately use different sighash types:
+        /// contributors sign `SIGHASH_ALL | SIGHASH_ANYONECANPAY` so that the input set
+        /// stays open, and whoever assembles the transaction fixes it with a
+        /// `SIGHASH_ALL` signature over their own input.
+        #[test]
+        fn finalizer_accepts_mixed_sighash_types() {
+            let contributor_sk = secp256k1::SecretKey::from_slice(&[3; 32]).expect("valid");
+            let contributor_pubkey = public_key(&contributor_sk);
+            let contributor_utxo = OutPoint::new([3; 32], 0);
+            let contributor_coin = TxOut::new(
+                Zatoshis::const_from_u64(1_000_000),
+                TransparentAddress::from_pubkey(&contributor_pubkey)
+                    .script()
+                    .into(),
+            );
+            let (assembler_utxo, assembler_coin) = victim_coin();
+            let addr = TransparentAddress::from_pubkey(&public_key(&secret_key()));
+
+            let mut builder = builder();
+            builder
+                .add_transparent_p2pkh_input(
+                    public_key(&secret_key()),
+                    assembler_utxo,
+                    assembler_coin,
+                )
+                .unwrap();
+            builder
+                .add_transparent_p2pkh_input(contributor_pubkey, contributor_utxo, contributor_coin)
+                .unwrap();
+            builder
+                .add_transparent_output(&addr, Zatoshis::const_from_u64(1_990_000))
+                .unwrap();
+
+            let mut pczt = finalize(builder);
+            pczt.transparent.inputs[1].sighash_type = SIGHASH_ALL_ANYONECANPAY;
+
+            let mut signer = Signer::new(pczt)
+                .unwrap()
+                .with_transparent_sighash_policy(SighashPolicy::ANY);
+            signer.sign_transparent(0, &secret_key()).unwrap();
+            signer.sign_transparent(1, &contributor_sk).unwrap();
+
+            assert!(
+                SpendFinalizer::new(signer.finish())
+                    .with_sighash_policy(SighashPolicy::ANY)
+                    .finalize_spends()
+                    .is_ok()
+            );
+        }
+    }
 }

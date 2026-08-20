@@ -13,6 +13,8 @@ workspace.
 ### Added
 - Experimental support for creating and extracting V7 PCZTs under NuTachyon,
   behind `zcash_unstable="nutachyon"`, using the V6 transaction body.
+- `pczt::roles::signer::Signer::with_transparent_sighash_policy`
+- `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
 
 ## [0.9.3] - 2026-08-07
 
