@@ -411,6 +411,41 @@ mod tests {
             }
         }
 
+        /// The `Global.tx_modifiable` gate is not an alternative to the sighash policy.
+        /// The flags are PCZT data, so a hostile Creator sets them as freely as it sets
+        /// `sighash_type`, and can always make the two agree.
+        ///
+        /// What the gate catches is a PCZT whose flags and sighash types *disagree* —
+        /// see `finalizer_rejects_sighash_type_inconsistent_with_modifiability`. Refusing
+        /// a signature that does not commit to the whole transaction is the policy's job,
+        /// which is why neither stands in for the other.
+        #[test]
+        fn modifiability_flags_are_not_a_substitute_for_the_policy() {
+            let mut pczt =
+                tampered_pczt(|input| input.sighash_type = SIGHASH_NONE | SIGHASH_ANYONECANPAY);
+
+            // Exactly the flags that such a signature requires. The Signer will leave
+            // both set, because a `SIGHASH_NONE | SIGHASH_ANYONECANPAY` signature clears
+            // neither: it commits to no other input and to none of the outputs.
+            pczt.global.tx_modifiable |=
+                FLAG_TRANSPARENT_INPUTS_MODIFIABLE | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE;
+
+            // `SighashPolicy::ANY` throughout models what this library would do if the
+            // policy did not exist.
+            let mut signer = Signer::new(pczt)
+                .unwrap()
+                .with_transparent_sighash_policy(SighashPolicy::ANY);
+            signer.sign_transparent(0, &secret_key()).unwrap();
+
+            assert!(
+                SpendFinalizer::new(signer.finish())
+                    .with_sighash_policy(SighashPolicy::ANY)
+                    .finalize_spends()
+                    .is_ok(),
+                "the gate cannot object: the hostile PCZT is internally consistent",
+            );
+        }
+
         #[test]
         fn finalizer_accepts_all_sighash_type() {
             let pczt = signed(|_| (), SighashPolicy::ALL_ONLY);

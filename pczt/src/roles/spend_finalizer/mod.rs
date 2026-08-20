@@ -2,7 +2,9 @@
 //!
 //! - Combines partial transparent signatures into `script_sig`s.
 
-use ::transparent::sighash::{SighashPolicy, SighashType};
+use ::transparent::sighash::{
+    SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy, SighashType,
+};
 
 use crate::Pczt;
 
@@ -50,6 +52,38 @@ impl SpendFinalizer {
         } = pczt;
 
         let mut transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
+
+        // A Signer that produces a signature leaving part of the transaction uncommitted
+        // is required to record that in `Global.tx_modifiable`. If the flags say the
+        // effects were already fixed, then the sighash type is not the product of a
+        // deliberate multi-party flow, and finalizing would yield a signature that can be
+        // lifted into a different transaction.
+        //
+        // This is a separate gate from the sighash policy, and is not relaxed by
+        // `SpendFinalizer::with_sighash_policy`. Note that the IO Finalizer clears both
+        // transparent modifiability flags whenever the transaction has shielded spends or
+        // outputs, so such a transaction is `SIGHASH_ALL`-only here.
+        for (index, input) in transparent.inputs().iter().enumerate() {
+            let sighash_type = *input.sighash_type();
+            let encoded = sighash_type.encode();
+            let signed_outputs = encoded & !SIGHASH_ANYONECANPAY;
+
+            let inconsistent =
+                // Commits to no other input, so inputs must still be modifiable.
+                (encoded & SIGHASH_ANYONECANPAY != 0 && !global.inputs_modifiable())
+                // Commits to none of the outputs, so outputs must still be modifiable.
+                || (signed_outputs == SIGHASH_NONE && !global.outputs_modifiable())
+                // The input and output pairing must have been recorded as needing to be
+                // preserved.
+                || (signed_outputs == SIGHASH_SINGLE && !global.has_sighash_single());
+
+            if inconsistent {
+                return Err(Error::InconsistentSighashType {
+                    index,
+                    sighash_type,
+                });
+            }
+        }
 
         transparent
             .finalize_spends_with_sighash_policy(sighash_policy)
