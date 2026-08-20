@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-08-18
+
 ### Added
 - `TxId::as_hex`, an encoder producing the canonical byte-reversed display
   form previously only available via `TxId`'s `Display` impl.

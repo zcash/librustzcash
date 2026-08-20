@@ -2,6 +2,7 @@
 ///
 /// This is a wrapper for [`tokio::task::spawn`] that takes a task name.
 #[cfg(not(tokio_unstable))]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! spawn {
     ( $name:expr, $f:expr ) => {
@@ -13,6 +14,7 @@ macro_rules! spawn {
 ///
 /// This is a wrapper for [`tokio::task::spawn`] that takes a task name.
 #[cfg(tokio_unstable)]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! spawn {
     ( $name:expr, $f:expr ) => {
