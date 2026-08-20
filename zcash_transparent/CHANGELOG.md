@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `zcash_transparent::keys::ShieldingOvks`
+- `zcash_transparent::sighash::SighashPolicy`
 
 ### Changed
 - `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns
