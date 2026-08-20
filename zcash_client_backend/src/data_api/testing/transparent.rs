@@ -64,7 +64,7 @@ use crate::{
     },
     fees::{ChangeValue, StandardFeeRule, TransparentChangePolicy},
     scanning::{
-        Nullifiers, ScanningKeys,
+        ScanningKeys, SpendIdentifiers,
         full::{decrypt_block, scan_block},
     },
     wallet::{Exposure, OvkPolicy, WalletTransparentOutput},
@@ -2449,7 +2449,7 @@ where
         &header,
         vtx,
         &scanning_keys,
-        &Nullifiers::empty(),
+        &SpendIdentifiers::empty(),
         Some(&prior_block_metadata),
         |addr| {
             wallet

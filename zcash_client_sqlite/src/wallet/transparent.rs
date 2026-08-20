@@ -121,6 +121,39 @@ pub(crate) fn detect_spending_accounts<'a>(
     Ok(acc)
 }
 
+/// Returns the outpoints of the wallet's transparent outputs that are not known to have been
+/// spent in a mined transaction, each mapped to the account that received it.
+///
+/// An output whose only recorded spend is by a transaction that has not been mined is included:
+/// such a transaction may yet be replaced or expire, so the wallet must keep watching the
+/// outpoint for a spend that does reach the chain.
+pub(crate) fn get_unspent_outpoints(
+    conn: &Connection,
+) -> Result<HashMap<OutPoint, AccountUuid>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, tro.output_index, accounts.uuid
+         FROM transparent_received_outputs tro
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         JOIN accounts ON accounts.id = tro.account_id
+         WHERE tro.id NOT IN (
+             SELECT tros.transparent_received_output_id
+             FROM transparent_received_output_spends tros
+             JOIN transactions stx ON stx.id_tx = tros.transaction_id
+             WHERE stx.mined_height IS NOT NULL
+         )",
+    )?;
+
+    let rows = stmt.query_and_then([], |row| {
+        let txid: [u8; 32] = row.get("txid")?;
+        Ok::<_, SqliteClientError>((
+            OutPoint::new(txid, row.get("output_index")?),
+            AccountUuid(row.get("uuid")?),
+        ))
+    })?;
+
+    rows.collect()
+}
+
 /// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
 /// given as bytes in big-endian order (the reverse of the usual order).
 fn address_index_from_diversifier_index_be(
