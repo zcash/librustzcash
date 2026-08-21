@@ -3110,6 +3110,7 @@ fn parse_tx<P: consensus::Parameters>(
     tx_bytes: &[u8],
     block_height: Option<BlockHeight>,
     expiry_height: Option<BlockHeight>,
+    fallback_height: Option<BlockHeight>,
 ) -> Result<(BlockHeight, Transaction), SqliteClientError> {
     // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
     // (which don't commit directly to one) can store it internally.
@@ -3119,7 +3120,8 @@ fn parse_tx<P: consensus::Parameters>(
     //   upgrade boundary, so the expiry height must be in the same epoch).
     // - Otherwise, we use a placeholder for the initial transaction parse (as the
     //   consensus branch ID is not used there), and then either use its non-zero expiry
-    //   height or return an error.
+    //   height, or fall back to the caller-supplied fallback height (typically the
+    //   wallet's view of the chain tip).
     if let Some(height) =
         block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
     {
@@ -3148,6 +3150,14 @@ fn parse_tx<P: consensus::Parameters>(
             .freeze()
             .map(|t| (expiry_height, t))
             .map_err(SqliteClientError::from)
+        } else if let Some(fallback_height) = fallback_height {
+            // Unmined with no expiry, so no epoch is recorded for it. The branch ID
+            // does not affect parsing (absent from the pre-v5 serialized form; v5
+            // onward commit to their own), so select it from the caller-supplied
+            // fallback height, typically the wallet's view of the chain tip.
+            Transaction::read(tx_bytes, BranchId::for_height(params, fallback_height))
+                .map(|t| (fallback_height, t))
+                .map_err(SqliteClientError::from)
         } else {
             Err(SqliteClientError::CorruptedData(
                 "Consensus branch ID not known, cannot parse this transaction until it is mined"
@@ -3183,7 +3193,11 @@ pub(crate) fn get_transaction<P: Parameters>(
         },
     )
     .optional()?
-    .and_then(|(t_opt, b, e)| t_opt.as_ref().map(|t| parse_tx(params, t, b, e)))
+    .and_then(|(t_opt, b, e)| {
+        t_opt
+            .as_ref()
+            .map(|t| parse_tx(params, t, b, e, chain_tip_height(conn)?))
+    })
     .transpose()
 }
 
@@ -5113,6 +5127,8 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
          AND ts.transaction_id IS NOT NULL",
     )?;
 
+    let chain_tip = chain_tip_height(conn)?;
+
     spending_txs_stmt
         .query_and_then(named_params![":transaction_id": tx_ref.0], |row| {
             let spending_tx_ref = row.get(0).map(TxRef)?;
@@ -5125,6 +5141,7 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
                 &tx_bytes,
                 block.map(BlockHeight::from),
                 expiry.map(BlockHeight::from),
+                chain_tip,
             )?;
 
             Ok((spending_tx_ref, spending_tx))
@@ -6089,7 +6106,7 @@ mod tests {
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
         TxId,
-        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        consensus::{BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters},
         value::Zatoshis,
         zip318::{Zip318Classification, Zip318TxKind},
     };
@@ -6101,9 +6118,9 @@ mod tests {
     };
 
     use super::{
-        KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday,
-        flag_previously_received_change, min_shared_checkpoint_height, put_zip318_classification,
-        queue_tx_retrieval, select_truncation_height,
+        KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday, chain_tip_height,
+        flag_previously_received_change, get_transaction, min_shared_checkpoint_height, parse_tx,
+        put_zip318_classification, queue_tx_retrieval, select_truncation_height,
     };
 
     use incrementalmerkletree::frontier::Frontier;
@@ -6359,6 +6376,105 @@ mod tests {
         let requests = st.wallet().transaction_data_requests().unwrap();
         assert!(requests.contains(&TransactionDataRequest::GetStatus(unexpired_txid)));
         assert!(requests.contains(&TransactionDataRequest::Enhancement(unexpired_txid)));
+    }
+
+    /// Returns a minimal serialized v1 transparent coinbase-style transaction: one input
+    /// spending the null prevout, one output. The v1 format predates ZIP 203, so the
+    /// transaction's expiry height parses as zero.
+    fn raw_v1_zero_expiry_tx() -> Vec<u8> {
+        let mut raw = vec![];
+        raw.extend_from_slice(&1u32.to_le_bytes()); // version
+        raw.push(0x01); // vin count
+        raw.extend_from_slice(&[0u8; 32]); // prevout txid (null)
+        raw.extend_from_slice(&u32::MAX.to_le_bytes()); // prevout index (coinbase)
+        raw.extend_from_slice(&[0x01, 0x51]); // script_sig
+        raw.extend_from_slice(&u32::MAX.to_le_bytes()); // sequence
+        raw.push(0x01); // vout count
+        raw.extend_from_slice(&5_000_000_000u64.to_le_bytes()); // value
+        raw.extend_from_slice(&[0x01, 0x51]); // script_pubkey
+        raw.extend_from_slice(&0u32.to_le_bytes()); // lock_time
+        raw
+    }
+
+    /// An unmined transaction with a zero expiry height carries no epoch information from
+    /// which to select a consensus branch ID, so parsing falls back to the wallet's view
+    /// of the chain tip; without a known chain tip it remains an error.
+    #[test]
+    fn parse_tx_unmined_zero_expiry_uses_fallback_height() {
+        let raw = raw_v1_zero_expiry_tx();
+        let chain_tip = MAIN_NETWORK.activation_height(NetworkUpgrade::Nu5).unwrap();
+
+        let (height, tx) = parse_tx(
+            &MAIN_NETWORK,
+            &raw,
+            None,
+            Some(BlockHeight::from(0)),
+            Some(chain_tip),
+        )
+        .unwrap();
+        assert_eq!(height, chain_tip);
+        assert_eq!(tx.expiry_height(), BlockHeight::from(0));
+        assert_eq!(
+            tx.consensus_branch_id(),
+            BranchId::for_height(&MAIN_NETWORK, chain_tip)
+        );
+
+        assert!(matches!(
+            parse_tx(&MAIN_NETWORK, &raw, None, Some(BlockHeight::from(0)), None),
+            Err(SqliteClientError::CorruptedData(_))
+        ));
+    }
+
+    /// A stored unmined transaction with a zero expiry height (e.g. a coinbase
+    /// transaction imported from a zcashd wallet before any chain scan) must be readable
+    /// back from the wallet database.
+    #[test]
+    fn get_transaction_reads_unmined_zero_expiry_tx() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let dfvk = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let tip = st.sapling_activation_height();
+        st.generate_block_at(
+            tip,
+            BlockHash([0; 32]),
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            )],
+            0,
+            0,
+            0,
+            false,
+        );
+        st.scan_cached_blocks(tip, 1);
+
+        let txid = TxId::from_bytes([3; 32]);
+        st.wallet()
+            .conn()
+            .execute(
+                "INSERT INTO transactions (txid, expiry_height, raw, min_observed_height)
+                 VALUES (:txid, 0, :raw, :min_observed_height)",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":raw": raw_v1_zero_expiry_tx(),
+                    ":min_observed_height": u32::from(tip),
+                ],
+            )
+            .unwrap();
+
+        let chain_tip = chain_tip_height(st.wallet().conn())
+            .unwrap()
+            .expect("chain tip is known");
+        let (height, tx) = get_transaction(st.wallet().conn(), st.network(), txid)
+            .unwrap()
+            .expect("transaction is present");
+        assert_eq!(height, chain_tip);
+        assert_eq!(tx.expiry_height(), BlockHeight::from(0));
     }
 
     #[test]
