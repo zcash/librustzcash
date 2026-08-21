@@ -19,6 +19,9 @@ use zcash_protocol::{
 };
 
 use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
+
+#[doc(inline)]
+pub use super::ScanBlockError;
 use crate::{
     data_api::{
         BlockMetadata, ScannedBlock, ScannedBundles, ll::wallet::detect_wallet_transparent_outputs,
@@ -364,44 +367,6 @@ where
     (header, vtx)
 }
 
-/// Errors that can occur while scanning a full block via [`scan_block`].
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ScanBlockError<E> {
-    /// A structural or continuity error in the block being scanned.
-    Scan(ScanError),
-    /// An error occurred while looking up the wallet account associated with a
-    /// transparent address.
-    AddressLookup(E),
-}
-
-impl<E> From<ScanError> for ScanBlockError<E> {
-    fn from(e: ScanError) -> Self {
-        ScanBlockError::Scan(e)
-    }
-}
-
-impl<E: fmt::Display> fmt::Display for ScanBlockError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ScanBlockError::Scan(e) => write!(f, "Error scanning block: {e}"),
-            ScanBlockError::AddressLookup(e) => write!(
-                f,
-                "Error looking up the wallet account for a transparent address: {e}"
-            ),
-        }
-    }
-}
-
-impl<E: std::error::Error + 'static> std::error::Error for ScanBlockError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ScanBlockError::Scan(e) => Some(e),
-            ScanBlockError::AddressLookup(e) => Some(e),
-        }
-    }
-}
-
 /// Scans a block with a set of [`ScanningKeys`].
 ///
 /// Returns a [`ScannedBlock`] containing one [`WalletTx`] for each transaction in the
@@ -580,8 +545,12 @@ where
         }
 
         // TODO: Transparent spend detection for full blocks is not yet implemented; only
-        // received transparent outputs are scanned here.
+        // received transparent outputs are scanned here. The compact scanner detects them, and
+        // `WalletTx` carries them, so what remains is to match this block's transparent inputs
+        // against `nullifiers.transparent()` as `compact::find_transparent_spends` does.
         // https://github.com/zcash/librustzcash/issues/2395
+        let transparent_spends = vec![];
+
         let transparent_outputs = detect_wallet_transparent_outputs(
             params,
             &tx,
@@ -684,6 +653,7 @@ where
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                transparent_spends,
                 transparent_outputs,
                 sapling_spends,
                 sapling_outputs,
@@ -725,6 +695,11 @@ where
             ironwood_note_commitments,
             ironwood_nullifier_map,
         ),
+        // Full-block scanning does not yet detect transparent spends, so it contributes no
+        // unlinked prevouts to resolve later.
+        // https://github.com/zcash/librustzcash/issues/2395
+        #[cfg(feature = "transparent-inputs")]
+        vec![],
     ))
 }
 

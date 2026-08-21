@@ -2351,6 +2351,41 @@ pub trait WalletRead {
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
 
+    /// Returns the outpoints of the transparent outputs that the wallet holds and does not know
+    /// to have been spent, each mapped to the account that received it.
+    ///
+    /// The result is the transparent counterpart of
+    /// [`get_sapling_nullifiers(NullifierQuery::Unspent)`](Self::get_sapling_nullifiers): it is
+    /// the set of identifiers whose appearance in a scanned block reveals a spend of wallet
+    /// funds. Unlike the queries that serve input selection, it applies no confirmation,
+    /// coinbase-maturity or note-locking filter; an output is included whenever the wallet could
+    /// still observe a spend of it.
+    ///
+    /// This is a required method rather than one defaulting to a panic, for the same reason as
+    /// [`Self::get_ironwood_nullifiers`]: it is called on the scan path, so a backend that did
+    /// not override it would abort the process on the first scan.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error>;
+
+    /// Returns the account that controls the given transparent address, if any, along with the
+    /// change-level key scope used to derive it when the address is HD-derived.
+    ///
+    /// The address is matched against every transparent receiver the wallet knows of, whatever its
+    /// provenance: external and change receivers, ephemeral receivers, and addresses imported
+    /// without key material.
+    ///
+    /// This is a required method rather than one defaulting to a panic, for the same reason as
+    /// [`Self::get_ironwood_nullifiers`]: it is called on the scan path, so a backend that did
+    /// not override it would abort the process on the first scan.
+    #[cfg(feature = "transparent-inputs")]
+    #[allow(clippy::type_complexity)]
+    fn find_account_for_transparent_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
+
     /// Returns the set of non-ephemeral transparent receivers associated with the given
     /// account controlled by this wallet.
     ///
@@ -2866,10 +2901,13 @@ pub struct ScannedBlock<AccountId> {
     orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
     #[cfg(feature = "orchard")]
     ironwood: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_spend_map: Vec<(TxIndex, TxId, Vec<OutPoint>)>,
 }
 
 impl<AccountId> ScannedBlock<AccountId> {
     /// Constructs a new `ScannedBlock`
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
@@ -2884,6 +2922,11 @@ impl<AccountId> ScannedBlock<AccountId> {
             orchard::tree::MerkleHashOrchard,
             orchard::note::Nullifier,
         >,
+        #[cfg(feature = "transparent-inputs")] transparent_spend_map: Vec<(
+            TxIndex,
+            TxId,
+            Vec<OutPoint>,
+        )>,
     ) -> Self {
         Self {
             block_height,
@@ -2895,6 +2938,8 @@ impl<AccountId> ScannedBlock<AccountId> {
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_spend_map,
         }
     }
 
@@ -2937,6 +2982,22 @@ impl<AccountId> ScannedBlock<AccountId> {
         &self,
     ) -> &ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier> {
         &self.ironwood
+    }
+
+    /// Returns, for each transaction in the block, the outpoints spent by its transparent inputs
+    /// that do not spend any transparent output the wallet already knows of.
+    ///
+    /// This is the transparent counterpart of [`ScannedBundles::nullifier_map`], and exists for
+    /// the same reason: an output created in a block range the wallet has not yet scanned cannot
+    /// be recognized as its own at the time the spend is observed. Recording the spending
+    /// transaction against the outpoint allows the spend to be resolved if that output is
+    /// discovered later.
+    ///
+    /// Each entry is keyed by both transaction index within the block and transaction ID, so that
+    /// a caller may identify the transaction by either.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_spend_map(&self) -> &[(TxIndex, TxId, Vec<OutPoint>)] {
+        &self.transparent_spend_map
     }
 
     /// Consumes `self` and returns the lists of Sapling, Orchard, and Ironwood note commitments

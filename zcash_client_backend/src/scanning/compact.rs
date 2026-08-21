@@ -4,7 +4,7 @@ use incrementalmerkletree::Retention;
 use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
 use subtle::ConditionallySelectable;
 
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use zcash_note_encryption::batch;
 use zcash_primitives::transaction::components::sapling::zip212_enforcement;
 use zcash_protocol::{
@@ -12,12 +12,21 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 
-use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
+use super::{
+    Nullifiers, PositionTracker, ScanBlockError, ScanError, ScanningKeys, find_received, find_spent,
+};
 use crate::{
     data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
     proto::compact_formats::{ChainMetadata, CompactBlock, CompactTx},
     scan::{Batch, BatchRunner, CompactDecryptor, Tasks},
     wallet::{WalletSpend, WalletTx},
+};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::find_transparent_spends,
+    crate::wallet::WalletTransparentOutput,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
 
 #[cfg(feature = "orchard")]
@@ -189,7 +198,7 @@ where
                             }
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, ScanError>>()?,
             );
 
             #[cfg(feature = "orchard")]
@@ -208,7 +217,7 @@ where
                             index: i,
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, ScanError>>()?,
             );
 
             #[cfg(feature = "orchard")]
@@ -227,7 +236,7 @@ where
                             index: i,
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, ScanError>>()?,
             );
         }
 
@@ -236,14 +245,20 @@ where
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO, TI>(
+pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO, TI, E>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO, TI>>,
-) -> Result<ScannedBlock<AccountId>, ScanError>
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<ScannedBlock<AccountId>, ScanBlockError<E>>
 where
     P: consensus::Parameters + Send + 'static,
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
@@ -281,7 +296,7 @@ where
     }
 
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
-        return Err(scan_error);
+        return Err(scan_error.into());
     }
 
     trace!("Block continuity okay at {:?}", block.height());
@@ -307,6 +322,9 @@ where
     #[cfg(feature = "orchard")]
     let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "transparent-inputs")]
+    let mut transparent_spend_map = Vec::with_capacity(block.vtx.len());
+
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let tx_index =
@@ -327,7 +345,7 @@ where
                     index,
                 })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, ScanError>>()?;
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
             &sapling_spend_nfs,
             &nullifiers.sapling,
@@ -351,7 +369,7 @@ where
                         index,
                     })
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, ScanError>>()?;
             let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
                 &orchard_spend_nfs,
                 &nullifiers.orchard,
@@ -376,7 +394,7 @@ where
                         index,
                     })
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, ScanError>>()?;
             let (ironwood_spends, ironwood_unlinked_nullifiers) = find_spent(
                 &ironwood_spend_nfs,
                 &nullifiers.ironwood,
@@ -387,8 +405,36 @@ where
             ironwood_spends
         };
 
+        // Detect spends of transparent outputs the wallet is tracking. A compact transaction
+        // omits the coinbase transaction's single null-outpoint input, so every `vin` entry
+        // present here refers to a real prior output.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_spends, unlinked_prevouts) = {
+            let prevouts = tx
+                .vin
+                .iter()
+                .enumerate()
+                .map(|(index, txin)| {
+                    txin.prevout()
+                        .map_err(|_| ScanError::TransparentPrevoutInvalid {
+                            at_height: cur_height,
+                            txid,
+                            index,
+                        })
+                })
+                .collect::<Result<Vec<_>, ScanError>>()?;
+
+            find_transparent_spends(prevouts, nullifiers.transparent())
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map.push((tx_index, txid, unlinked_prevouts));
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
+        #[cfg(feature = "transparent-inputs")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(transparent_spends.iter().map(|spend| spend.account_id()));
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
@@ -420,7 +466,7 @@ where
                         })?,
                     ))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, ScanError>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.sapling.collect_results(cur_hash, txid)),
@@ -458,7 +504,7 @@ where
                     })?;
                     Ok((OrchardDomain::for_compact_action(&action), action))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, ScanError>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.orchard.collect_results(cur_hash, txid)),
@@ -496,7 +542,7 @@ where
                     })?;
                     Ok((IronwoodDomain::for_compact_action(&action), action))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, ScanError>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.ironwood.collect_results(cur_hash, txid)),
@@ -512,6 +558,58 @@ where
         #[cfg(feature = "orchard")]
         ironwood_note_commitments.append(&mut ironwood_nc);
 
+        // Detect transparent outputs of this transaction that pay a wallet account. An output
+        // whose script does not describe a supported address, or whose value is not a valid
+        // amount, cannot be one the wallet controls, so it is skipped rather than treated as a
+        // scan failure; a malformed prevout above is not, because there the wallet would be
+        // unable to tell whether its own funds were being spent.
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_outputs = {
+            let mut detected = vec![];
+            for (output_index, vout) in tx.vout.iter().enumerate() {
+                let Ok(txout) = vout.to_txout() else {
+                    warn!(
+                        "Ignoring transparent output {output_index} of transaction {txid}: value is not a valid amount of zatoshis"
+                    );
+                    continue;
+                };
+
+                let Some(address) = txout
+                    .script_kind()
+                    .as_ref()
+                    .and_then(TransparentAddress::from_script_kind)
+                else {
+                    continue;
+                };
+
+                if let Some((account_id, key_scope)) =
+                    find_account_for_address(&address).map_err(ScanBlockError::AddressLookup)?
+                {
+                    detected.push(
+                        WalletTransparentOutput::from_parts(
+                            OutPoint::new(
+                                txid.into(),
+                                u32::try_from(output_index)
+                                    .expect("a transaction has fewer than 2^32 outputs"),
+                            ),
+                            txout,
+                            Some(cur_height),
+                            Some(account_id),
+                            key_scope,
+                            None,
+                        )
+                        .expect("recipient address extraction previously checked"),
+                    );
+                }
+            }
+            detected
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_transparent = !(transparent_spends.is_empty() && transparent_outputs.is_empty());
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_transparent = false;
+
         #[cfg(feature = "orchard")]
         let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
         #[cfg(not(feature = "orchard"))]
@@ -522,12 +620,17 @@ where
         #[cfg(not(feature = "orchard"))]
         let has_ironwood = false;
 
-        if has_sapling || has_orchard || has_ironwood {
+        if has_transparent || has_sapling || has_orchard || has_ironwood {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
-                // TODO: Scan transparent data in CompactTx if present.
-                // https://github.com/zcash/librustzcash/issues/2187
+                #[cfg(feature = "transparent-inputs")]
+                transparent_spends,
+                #[cfg(not(feature = "transparent-inputs"))]
+                vec![],
+                #[cfg(feature = "transparent-inputs")]
+                transparent_outputs,
+                #[cfg(not(feature = "transparent-inputs"))]
                 vec![],
                 sapling_spends,
                 sapling_outputs,
@@ -569,6 +672,8 @@ where
             ironwood_note_commitments,
             ironwood_nullifier_map,
         ),
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map,
     ))
 }
 
@@ -792,11 +897,11 @@ impl PositionTracker {
 #[cfg(test)]
 mod tests {
 
-    use std::convert::Infallible;
+    use std::{collections::HashMap, convert::Infallible};
 
     #[cfg(feature = "orchard")]
     use {
-        super::ScanError,
+        super::{ScanBlockError, ScanError},
         crate::proto::compact_formats::{
             ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
         },
@@ -866,7 +971,7 @@ mod tests {
                 None
             };
 
-            let scanned_block = scan_block_with_runners(
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
                 &network,
                 cb,
                 &scanning_keys,
@@ -881,6 +986,8 @@ mod tests {
                     Some(0),
                 )),
                 batch_runners.as_mut(),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -1018,7 +1125,7 @@ mod tests {
             runners.add_block(&network, cb.clone()).unwrap();
             runners.flush();
 
-            let scanned_block = scan_block_with_runners(
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
                 &network,
                 cb,
                 &scanning_keys,
@@ -1031,6 +1138,8 @@ mod tests {
                     Some(0),
                 )),
                 Some(&mut runners),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
             )
             .unwrap();
 
@@ -1089,7 +1198,7 @@ mod tests {
         });
 
         // Single-threaded scan (no batch runners); the spend-side nullifier check runs first.
-        let result = scan_block_with_runners::<_, _, _, (), (), ()>(
+        let result = scan_block_with_runners::<_, _, _, (), (), (), Infallible>(
             &network,
             cb,
             &scanning_keys,
@@ -1102,15 +1211,17 @@ mod tests {
                 Some(0),
             )),
             None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
         );
         assert!(
             matches!(
                 result,
-                Err(ScanError::EncodingInvalid {
+                Err(ScanBlockError::Scan(ScanError::EncodingInvalid {
                     pool_type: ShieldedPool::Ironwood,
                     index: 0,
                     ..
-                })
+                }))
             ),
             "a malformed Ironwood spend nullifier must produce a handleable ScanError",
         );
@@ -1150,13 +1261,15 @@ mod tests {
                 None
             };
 
-            let scanned_block = scan_block_with_runners(
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
                 &network,
                 cb,
                 &scanning_keys,
                 &Nullifiers::empty(),
                 None,
                 batch_runners.as_mut(),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -1207,6 +1320,8 @@ mod tests {
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
+            #[cfg(feature = "transparent-inputs")]
+            HashMap::new(),
         );
 
         let cb = fake_compact_block(
@@ -1220,7 +1335,16 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 2);
 
-        let scanned_block = scan_block(&network, cb, &scanning_keys, &nullifiers, None).unwrap();
+        let scanned_block = scan_block::<_, _, _, Infallible>(
+            &network,
+            cb,
+            &scanning_keys,
+            &nullifiers,
+            None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
+        )
+        .unwrap();
         let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 
