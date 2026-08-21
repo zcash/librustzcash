@@ -140,11 +140,7 @@ fn utxo_json(request_type: &str, request: &UtxoPaymentRequest) -> Value {
         "version": JSON_VERSION,
         "type": request_type,
         "address": request.address(),
-        "network": match request.network() {
-            Network::Mainnet => "mainnet",
-            Network::Testnet => "testnet",
-            Network::Regtest => "regtest",
-        },
+        "network": request.network().as_str(),
         "amount": request.amount().map(DecimalAmount::as_str),
         "label": request.label(),
         "message": request.message(),

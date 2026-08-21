@@ -22,6 +22,17 @@ pub enum Network {
     Regtest,
 }
 
+impl Network {
+    /// Returns the lowercase name used in this crate's versioned JSON representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "mainnet",
+            Self::Testnet => "testnet",
+            Self::Regtest => "regtest",
+        }
+    }
+}
+
 /// A validated Bitcoin or Litecoin on-chain payment request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UtxoPaymentRequest {
