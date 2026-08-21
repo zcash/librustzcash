@@ -1,9 +1,17 @@
 use zcash_script::{pattern::push_script, pv, script, solver};
 
-use crate::address::TransparentAddress;
+use crate::{
+    address::TransparentAddress,
+    sighash::{SighashPolicy, SighashType},
+};
 
 impl super::Bundle {
     /// Finalizes the spends for this bundle.
+    ///
+    /// Every partial signature that is used commits to the transaction in full: a
+    /// signature whose sighash type is not [`SighashType::ALL`] is refused, as is one
+    /// whose sighash type does not match that of the input it is being applied to. Use
+    /// [`Bundle::finalize_spends_with_sighash_policy`] to finalize with a wider policy.
     ///
     /// Returns an error if any spend uses an unsupported script format. The supported
     /// script formats are:
@@ -11,6 +19,21 @@ impl super::Bundle {
     /// - P2SH with one of these redeem script formats:
     ///   - P2MS
     pub fn finalize_spends(&mut self) -> Result<(), SpendFinalizerError> {
+        self.finalize_spends_with_sighash_policy(SighashPolicy::ALL_ONLY)
+    }
+
+    /// Finalizes the spends for this bundle, accepting any partial signature whose
+    /// sighash type is permitted by `sighash_policy`. See [`SighashPolicy`] for why that
+    /// is a decision for the Spend Finalizer rather than for whoever supplied the
+    /// signature.
+    ///
+    /// Otherwise behaves exactly as [`Bundle::finalize_spends`], which should be
+    /// preferred: this is the last point at which such a signature can be rejected before
+    /// a broadcastable transaction exists.
+    pub fn finalize_spends_with_sighash_policy(
+        &mut self,
+        sighash_policy: SighashPolicy,
+    ) -> Result<(), SpendFinalizerError> {
         // For each input, the Spend Finalizer determines if the input has enough data to
         // pass validation. If it does, it must construct the `script_sig` and place it
         // into the PCZT input. If `script_sig` is empty for an input, the field should
@@ -31,6 +54,8 @@ impl super::Bundle {
                             if hash[..] != crate::util::hash160::hash(pubkey)[..] {
                                 Err(SpendFinalizerError::UnexpectedSignatures)
                             } else {
+                                check_sighash_type(sig_bytes, input.sighash_type, sighash_policy)?;
+
                                 // P2PKH scriptSig
                                 input.script_sig = Some(script::Component(vec![
                                     pv::push_value(sig_bytes)
@@ -79,6 +104,12 @@ impl super::Bundle {
 
                                     // If we have a signature from this pubkey, use it.
                                     if let Some(sig) = input.partial_signatures.get(&pubkey) {
+                                        check_sighash_type(
+                                            sig,
+                                            input.sighash_type,
+                                            sighash_policy,
+                                        )?;
+
                                         // Valid signatures always fit into `PushData`s.
                                         script_sig.push(
                                             pv::push_value(sig)
@@ -127,9 +158,39 @@ impl super::Bundle {
     }
 }
 
+/// Checks the trailing sighash-type byte of a partial signature that is about to be
+/// placed into a `script_sig`.
+fn check_sighash_type(
+    sig_bytes: &[u8],
+    expected: SighashType,
+    sighash_policy: SighashPolicy,
+) -> Result<(), SpendFinalizerError> {
+    let (hash_type, _) = sig_bytes
+        .split_last()
+        .ok_or(SpendFinalizerError::InvalidSignature)?;
+    let hash_type = SighashType::parse(*hash_type).ok_or(SpendFinalizerError::InvalidSignature)?;
+
+    // The PCZT format requires a Spend Finalizer to fail to finalize an input whose
+    // signatures do not match its `sighash_type`.
+    if hash_type != expected {
+        return Err(SpendFinalizerError::MismatchedSighashType);
+    }
+
+    if !sighash_policy.permits(hash_type) {
+        return Err(SpendFinalizerError::DisallowedSighashType(hash_type));
+    }
+
+    Ok(())
+}
+
 /// Errors that can occur while finalizing the transparent inputs of a PCZT bundle.
 #[derive(Debug)]
 pub enum SpendFinalizerError {
+    /// A partial signature's sighash type is not permitted by the Spend Finalizer's
+    /// [`SighashPolicy`].
+    DisallowedSighashType(SighashType),
+    /// A partial signature's sighash type does not match that of the input it applies to.
+    MismatchedSighashType,
     /// `script_pubkey` is a P2SH script, but `redeem_script` is not set.
     MissingRedeemScript,
     /// `script_pubkey` is a P2SH script, but `redeem_script` is too long for a `PushData`.
@@ -146,4 +207,139 @@ pub enum SpendFinalizerError {
     UnsupportedScriptPubkey,
     /// The `redeem_script` kind is unsupported.
     UnsupportedRedeemScript,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use super::{SighashPolicy, SighashType, SpendFinalizerError};
+    use crate::{
+        pczt::{
+            Bundle, Input,
+            testing::{input, p2ms, p2pkh, p2sh},
+        },
+        sighash::{SIGHASH_ALL, SIGHASH_NONE},
+    };
+
+    /// A pubkey-shaped byte string. The Spend Finalizer never checks that a pubkey is a
+    /// point on the curve, so these do not need to be real.
+    fn pubkey(i: u8) -> [u8; 33] {
+        let mut pubkey = [i; 33];
+        pubkey[0] = 0x02;
+        pubkey
+    }
+
+    /// A signature-shaped byte string ending in `hash_type`. The Spend Finalizer never
+    /// verifies a signature, so this does not need to be a real one.
+    fn signature(hash_type: u8) -> Vec<u8> {
+        vec![0xde, 0xad, 0xbe, 0xef, hash_type]
+    }
+
+    /// A P2PKH input signed by `pubkey(1)`.
+    fn p2pkh_input(sighash_type: SighashType, signature: Vec<u8>) -> Input {
+        let mut input = input(p2pkh(&pubkey(1)), None, sighash_type);
+        input.partial_signatures.insert(pubkey(1), signature);
+        input
+    }
+
+    /// A 2-of-3 P2SH-P2MS input, signed by the pubkeys named by the given indices.
+    fn p2ms_input(sighash_type: SighashType, signatures: &[(u8, u8)]) -> Input {
+        let pubkeys = [pubkey(1), pubkey(2), pubkey(3)];
+        let redeem_script = p2ms(2, &[&pubkeys[0], &pubkeys[1], &pubkeys[2]]);
+        let mut input = input(p2sh(&redeem_script), Some(redeem_script), sighash_type);
+        for (i, hash_type) in signatures {
+            input
+                .partial_signatures
+                .insert(pubkey(*i), signature(*hash_type));
+        }
+        input
+    }
+
+    fn finalize(input: Input, sighash_policy: SighashPolicy) -> Result<(), SpendFinalizerError> {
+        Bundle {
+            inputs: vec![input],
+            outputs: vec![],
+        }
+        .finalize_spends_with_sighash_policy(sighash_policy)
+    }
+
+    #[test]
+    fn finalize_accepts_p2pkh() {
+        let input = p2pkh_input(SighashType::ALL, signature(SIGHASH_ALL));
+        assert!(finalize(input, SighashPolicy::ALL_ONLY).is_ok());
+    }
+
+    #[test]
+    fn finalize_accepts_multisig() {
+        let input = p2ms_input(SighashType::ALL, &[(1, SIGHASH_ALL), (2, SIGHASH_ALL)]);
+        assert!(finalize(input, SighashPolicy::ALL_ONLY).is_ok());
+    }
+
+    /// The PCZT format requires a Spend Finalizer to reject a signature that does not
+    /// match the sighash type of the input it applies to.
+    #[test]
+    fn finalize_rejects_mismatched_sighash_type() {
+        let input = p2pkh_input(SighashType::ALL, signature(SIGHASH_NONE));
+        assert!(matches!(
+            finalize(input, SighashPolicy::ALL_ONLY),
+            Err(SpendFinalizerError::MismatchedSighashType),
+        ));
+    }
+
+    #[test]
+    fn finalize_rejects_mismatched_sighash_type_in_multisig() {
+        let input = p2ms_input(SighashType::ALL, &[(1, SIGHASH_ALL), (2, SIGHASH_NONE)]);
+        assert!(matches!(
+            finalize(input, SighashPolicy::ALL_ONLY),
+            Err(SpendFinalizerError::MismatchedSighashType),
+        ));
+    }
+
+    #[test]
+    fn finalize_rejects_non_all_sighash_type_by_default() {
+        let input = p2pkh_input(SighashType::NONE, signature(SIGHASH_NONE));
+        match finalize(input, SighashPolicy::ALL_ONLY) {
+            Err(SpendFinalizerError::DisallowedSighashType(t)) => {
+                assert_eq!(t, SighashType::NONE)
+            }
+            r => panic!("expected SIGHASH_NONE to be refused, got {r:?}"),
+        }
+    }
+
+    #[test]
+    fn finalize_accepts_non_all_sighash_type_under_explicit_policy() {
+        let input = p2pkh_input(SighashType::NONE, signature(SIGHASH_NONE));
+        assert!(finalize(input, SighashPolicy::ANY).is_ok());
+    }
+
+    #[test]
+    fn finalize_rejects_empty_signature() {
+        let input = p2pkh_input(SighashType::ALL, vec![]);
+        assert!(matches!(
+            finalize(input, SighashPolicy::ALL_ONLY),
+            Err(SpendFinalizerError::InvalidSignature),
+        ));
+    }
+
+    #[test]
+    fn finalize_rejects_unparsable_sighash_type() {
+        let input = p2pkh_input(SighashType::ALL, signature(0x05));
+        assert!(matches!(
+            finalize(input, SighashPolicy::ALL_ONLY),
+            Err(SpendFinalizerError::InvalidSignature),
+        ));
+    }
+
+    /// A signature that is discarded rather than placed into the `script_sig` is not
+    /// checked, so that a Combiner cannot block finalization by contributing junk.
+    #[test]
+    fn finalize_ignores_discarded_multisig_signature() {
+        let input = p2ms_input(
+            SighashType::ALL,
+            &[(1, SIGHASH_ALL), (2, SIGHASH_ALL), (3, 0x05)],
+        );
+        assert!(finalize(input, SighashPolicy::ALL_ONLY).is_ok());
+    }
 }

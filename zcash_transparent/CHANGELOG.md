@@ -10,6 +10,41 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::sighash::SighashPolicy`
+- `zcash_transparent::pczt`:
+  - `Input::sign_with_sighash_policy`
+  - `Input::append_signature_with_sighash_policy`
+  - `Input::with_signable_input_with_sighash_policy`
+  - `Bundle::finalize_spends_with_sighash_policy`
+
+### Changed
+- `zcash_transparent::pczt`:
+  - `Input::sign` and `Input::append_signature` now verify the consistency of the
+    input before signing it, and sign only for `SighashType::ALL`. Previously the
+    `redeem_script` was used unchecked (both to locate the pubkey to sign with and
+    as the `script_code` committed to by the signature), and the sighash type was
+    taken verbatim from the PCZT. Use `Input::sign_with_sighash_policy` or
+    `Input::append_signature_with_sighash_policy` to permit other sighash types.
+  - `Input::with_signable_input` now applies those same checks, and returns
+    `Result<T, SignerError>` instead of `T`. Whoever signs the sighash it prepares
+    is authorizing whatever that sighash commits to, so preparing one over an
+    unverified `script_code`, or for a counterparty's chosen sighash type, was
+    equivalent to signing over it. Use
+    `Input::with_signable_input_with_sighash_policy` to permit other sighash types.
+  - `Bundle::finalize_spends` now requires every partial signature it uses to end
+    in a sighash-type byte matching its input's `sighash_type`, and finalizes only
+    `SighashType::ALL` signatures. Signatures that are discarded rather than placed
+    into a `script_sig` are not checked, so that a Combiner cannot block
+    finalization by contributing junk. Use
+    `Bundle::finalize_spends_with_sighash_policy` to permit other sighash types.
+  - `SignerError` has added variants:
+    - `DisallowedSighashType`
+    - `InvalidInput`
+  - `SpendFinalizerError` has added variants:
+    - `DisallowedSighashType`
+    - `MismatchedSighashType`
+
 ## [0.10.0] - 2026-07-23
 
 ### Changed
