@@ -83,3 +83,30 @@ fn delegates_ethereum_to_eip681() {
             .unwrap();
     assert!(matches!(request, PaymentRequest::Ethereum(_)));
 }
+
+#[cfg(feature = "json")]
+#[test]
+fn encodes_a_versioned_binding_representation() {
+    let encoded = payment_uri::parse_to_json(
+        "bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=20.3&label=Luke-Jr",
+    )
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(value["version"], payment_uri::JSON_VERSION);
+    assert_eq!(value["type"], "bitcoin");
+    assert_eq!(value["amount"], "20.3");
+
+    let encoded = payment_uri::parse_to_json(
+        "ethereum:0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359?value=1e18",
+    )
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(value["type"], "ethereum_native");
+    assert_eq!(
+        value["recipient_address"],
+        "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+    );
+    assert_eq!(value["value_hex"], "0xde0b6b3a7640000");
+}

@@ -3184,6 +3184,7 @@ dependencies = [
  "bs58",
  "eip681",
  "percent-encoding",
+ "serde_json",
 ]
 
 [[package]]

@@ -9,8 +9,15 @@ mod solana;
 
 use core::fmt;
 
+#[cfg(feature = "json")]
+use serde_json::{Value, json};
+
 pub use bitcoin::{Network, UtxoPaymentRequest};
 pub use solana::{SolanaRequest, SolanaTransactionRequest, SolanaTransferRequest};
+
+#[cfg(feature = "json")]
+/// Version of the JSON representation returned by [`parse_to_json`].
+pub const JSON_VERSION: u8 = 1;
 
 /// A non-negative decimal amount represented without floating-point loss.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -93,6 +100,85 @@ impl PaymentRequest {
         } else {
             Err(Error::UnsupportedScheme(scheme.to_owned()))
         }
+    }
+
+    #[cfg(feature = "json")]
+    fn to_json(&self) -> Value {
+        match self {
+            Self::Bitcoin(request) => utxo_json("bitcoin", request),
+            Self::Ethereum(request) => ethereum_json(request),
+            Self::Litecoin(request) => utxo_json("litecoin", request),
+            Self::Solana(SolanaRequest::Transfer(request)) => json!({
+                "version": JSON_VERSION,
+                "type": "solana_transfer",
+                "recipient": request.recipient(),
+                "amount": request.amount().map(DecimalAmount::as_str),
+                "spl_token": request.spl_token(),
+                "references": request.references(),
+                "label": request.label(),
+                "message": request.message(),
+                "memo": request.memo(),
+            }),
+            Self::Solana(SolanaRequest::Transaction(request)) => json!({
+                "version": JSON_VERSION,
+                "type": "solana_transaction",
+                "link": request.link(),
+            }),
+        }
+    }
+}
+
+/// Parses a payment request and returns its versioned JSON representation.
+#[cfg(feature = "json")]
+pub fn parse_to_json(input: &str) -> Result<String, Error> {
+    PaymentRequest::parse(input).map(|request| request.to_json().to_string())
+}
+
+#[cfg(feature = "json")]
+fn utxo_json(request_type: &str, request: &UtxoPaymentRequest) -> Value {
+    json!({
+        "version": JSON_VERSION,
+        "type": request_type,
+        "address": request.address(),
+        "network": match request.network() {
+            Network::Mainnet => "mainnet",
+            Network::Testnet => "testnet",
+            Network::Regtest => "regtest",
+        },
+        "amount": request.amount().map(DecimalAmount::as_str),
+        "label": request.label(),
+        "message": request.message(),
+    })
+}
+
+#[cfg(feature = "json")]
+fn ethereum_json(request: &eip681::TransactionRequest) -> Value {
+    match request {
+        eip681::TransactionRequest::NativeRequest(request) => json!({
+            "version": JSON_VERSION,
+            "type": "ethereum_native",
+            "schema_prefix": request.schema_prefix(),
+            "has_pay": request.has_pay(),
+            "chain_id": request.chain_id().map(|value| value.to_string()),
+            "recipient_address": request.recipient_address(),
+            "value_hex": request.value_atomic().map(|value| format!("{value:#x}")),
+            "gas_limit_hex": request.gas_limit().map(|value| format!("{value:#x}")),
+            "gas_price_hex": request.gas_price().map(|value| format!("{value:#x}")),
+        }),
+        eip681::TransactionRequest::Erc20Request(request) => json!({
+            "version": JSON_VERSION,
+            "type": "ethereum_erc20",
+            "schema_prefix": request.schema_prefix(),
+            "has_pay": request.has_pay(),
+            "chain_id": request.chain_id().map(|value| value.to_string()),
+            "token_contract_address": request.token_contract_address(),
+            "recipient_address": request.recipient_address(),
+            "value_hex": format!("{:#x}", request.value_atomic()),
+        }),
+        eip681::TransactionRequest::Unrecognised(_) => json!({
+            "version": JSON_VERSION,
+            "type": "ethereum_unrecognised",
+        }),
     }
 }
 
