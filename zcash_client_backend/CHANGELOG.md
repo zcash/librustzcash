@@ -77,6 +77,9 @@ workspace.
   server is not yet wired up: `zcash_client_backend::sync` still requests only
   shielded data, so a caller must set `BlockRange.poolTypes` itself to receive
   it.
+- `zcash_client_backend::scanning::full::scan_block` now detects transparent
+  spends, matching each block's transparent inputs against the outputs the
+  wallet holds; a coinbase transaction's null-outpoint input is excluded.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
@@ -86,7 +89,6 @@ workspace.
   discarded when the scanned blocks were persisted, and were recovered only when
   complete transaction data reached
   `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
-  `scanning::full::scan_block` still does not detect transparent spends.
 - `zcash_client_backend::decrypt::decrypt_transaction` now attempts outgoing
   ciphertext recovery with every outgoing viewing key an account's UFVK can
   produce — Orchard, Sapling and transparent-derived, in both the external and

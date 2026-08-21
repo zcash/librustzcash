@@ -22,6 +22,9 @@ use super::{
     PositionTracker, ScanError, ScanningKeys, SpendIdentifiers, find_received, find_spent,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use super::find_transparent_spends;
+
 #[doc(inline)]
 pub use super::ScanBlockError;
 use crate::{
@@ -462,6 +465,9 @@ where
     #[cfg(feature = "orchard")]
     let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "transparent-inputs")]
+    let mut transparent_spend_map = Vec::with_capacity(vtx.len());
+
     for (tx_index, batch) in vtx.into_iter().enumerate() {
         let BatchResult {
             tx,
@@ -523,8 +529,30 @@ where
             ironwood_spends
         };
 
+        // Detect spends of transparent outputs the wallet is tracking. A coinbase transaction's
+        // single input spends the null outpoint rather than a real prior output, so it is
+        // excluded: it can match no wallet output, and recording it would collide with the
+        // corresponding input of every other block's coinbase.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_spends, unlinked_prevouts) = tx
+            .transparent_bundle()
+            .filter(|bundle| !bundle.is_coinbase())
+            .map(|bundle| {
+                find_transparent_spends(
+                    bundle.vin.iter().map(|txin| txin.prevout().clone()),
+                    nullifiers.transparent(),
+                )
+            })
+            .unwrap_or_default();
+
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map.push((tx_index, txid, unlinked_prevouts));
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
+        #[cfg(feature = "transparent-inputs")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(transparent_spends.iter().map(|spend| spend.account_id()));
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
@@ -546,13 +574,6 @@ where
             )
         }
 
-        // TODO: Transparent spend detection for full blocks is not yet implemented; only
-        // received transparent outputs are scanned here. The compact scanner detects them, and
-        // `WalletTx` carries them, so what remains is to match this block's transparent inputs
-        // against `nullifiers.transparent()` as `compact::find_transparent_spends` does.
-        // https://github.com/zcash/librustzcash/issues/2395
-        let transparent_spends = vec![];
-
         let transparent_outputs = detect_wallet_transparent_outputs(
             params,
             &tx,
@@ -562,6 +583,10 @@ where
             &find_account_for_address,
         )
         .map_err(ScanBlockError::AddressLookup)?;
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_transparent = !(transparent_spends.is_empty() && transparent_outputs.is_empty());
+        #[cfg(not(feature = "transparent-inputs"))]
         let has_transparent = !transparent_outputs.is_empty();
 
         let (sapling_outputs, mut sapling_nc) = tx
@@ -655,7 +680,10 @@ where
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                #[cfg(feature = "transparent-inputs")]
                 transparent_spends,
+                #[cfg(not(feature = "transparent-inputs"))]
+                vec![],
                 transparent_outputs,
                 sapling_spends,
                 sapling_outputs,
@@ -697,11 +725,8 @@ where
             ironwood_note_commitments,
             ironwood_nullifier_map,
         ),
-        // Full-block scanning does not yet detect transparent spends, so it contributes no
-        // unlinked prevouts to resolve later.
-        // https://github.com/zcash/librustzcash/issues/2395
         #[cfg(feature = "transparent-inputs")]
-        vec![],
+        transparent_spend_map,
     ))
 }
 
