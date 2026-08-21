@@ -3,6 +3,7 @@ members = [
     "components/eip681",
     "components/equihash",
     "components/f4jumble",
+    "components/payment_uri",
     "components/zcash_address",
     "components/zcash_encoding",
     "components/zcash_protocol",
@@ -35,6 +36,7 @@ categories = ["cryptography::cryptocurrencies"]
 # part of a public API, and which can be updated without a SemVer bump.
 [workspace.dependencies]
 # Intra-workspace dependencies
+eip681 = { version = "0.1.0", path = "components/eip681" }
 equihash = { version = "0.3", path = "components/equihash", default-features = false }
 zcash_address = { version = "0.13.0", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.24.0", path = "zcash_client_backend", default-features = false }
