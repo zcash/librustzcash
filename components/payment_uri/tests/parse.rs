@@ -1,7 +1,7 @@
 use payment_uri::{Network, PaymentRequest, SolanaRequest};
 
 #[test]
-fn parses_bitcoin_request_and_rejects_unsafe_extensions() {
+fn parses_bitcoin_request() {
     let request = PaymentRequest::parse(
         "bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=20.3&label=Luke-Jr",
     )
@@ -12,11 +12,21 @@ fn parses_bitcoin_request_and_rejects_unsafe_extensions() {
     assert_eq!(request.network(), Network::Mainnet);
     assert_eq!(request.amount().unwrap().as_str(), "20.3");
     assert_eq!(request.label(), Some("Luke-Jr"));
+}
 
+#[test]
+fn rejects_unsupported_required_bitcoin_extension() {
     assert!(
         PaymentRequest::parse("bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?req-unknown=true")
             .is_err()
     );
+}
+
+#[test]
+fn rejects_duplicate_bitcoin_amount_parameter() {
+    // Bitcoin (BIP-321) parameter keys are case-insensitive, so "AMOUNT" collides with "amount"
+    // as a duplicate rather than being treated as a distinct, unrecognised key -- contrast with
+    // Litecoin's case-sensitive behavior below.
     assert!(
         PaymentRequest::parse("bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=1&AMOUNT=2")
             .is_err()
