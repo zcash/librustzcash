@@ -2332,18 +2332,25 @@ where
     );
 }
 
-/// Constructs a fake transparent-only transaction paying `value` to `taddr`.
+/// Constructs a fake transparent-only transaction spending `vin` and paying `value` to `taddr`.
 ///
-/// The transaction spends an arbitrary outpoint, so it is not structurally a coinbase
-/// transaction. The `lock_time` parameter has no consensus meaning here; distinct values may be
-/// used to give otherwise-identical transactions distinct txids.
+/// When `vin` is empty the transaction spends one arbitrary outpoint, so that it is never
+/// structurally a coinbase transaction. The `lock_time` parameter has no consensus meaning here;
+/// distinct values may be used to give otherwise-identical transactions distinct txids.
 fn fake_transparent_payment_tx(
     lock_time: u32,
+    vin: &[OutPoint],
     value: Zatoshis,
     taddr: &TransparentAddress,
 ) -> Transaction {
     let bundle = Bundle {
-        vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
+        vin: if vin.is_empty() {
+            vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)]
+        } else {
+            vin.iter()
+                .map(|outpoint| TxIn::from_parts(outpoint.clone(), Script::default(), 0))
+                .collect()
+        },
         vout: vec![TxOut::new(value, taddr.script().into())],
         authorization: Authorized,
     };
@@ -2535,12 +2542,17 @@ where
 /// Placing the payment behind the coinbase keeps the output it creates out of the coinbase
 /// maturity rule. `lock_time` has no consensus meaning here; distinct values give the payment
 /// transactions of otherwise-identical blocks distinct txids.
+///
+/// The scan is performed against the wallet's current tracked spend identifiers, as
+/// `scan_cached_blocks` does, so that a spend of an output the wallet already holds is detected.
+#[allow(clippy::too_many_arguments)]
 fn scan_transparent_payment_block<DbT>(
     wallet: &DbT,
     network: &LocalNetwork,
     account_id: <DbT as WalletRead>::AccountId,
     height: BlockHeight,
     lock_time: u32,
+    vin: &[OutPoint],
     value: Zatoshis,
     taddr: &TransparentAddress,
 ) -> (ScannedBlock<<DbT as WalletRead>::AccountId>, OutPoint)
@@ -2555,7 +2567,7 @@ where
     const MINER_REWARD: Zatoshis = Zatoshis::const_from_u64(625_000_000);
     const MINER_ADDR: TransparentAddress = TransparentAddress::PublicKeyHash([0xf5; 20]);
 
-    let payment = fake_transparent_payment_tx(lock_time, value, taddr);
+    let payment = fake_transparent_payment_tx(lock_time, vin, value, taddr);
     let outpoint = OutPoint::new(payment.txid().into(), 0);
     let block = Block::from_parts(
         BlockHeaderData {
@@ -2599,7 +2611,7 @@ where
         &header,
         vtx,
         &scanning_keys,
-        &SpendIdentifiers::empty(),
+        &SpendIdentifiers::unspent(wallet).unwrap(),
         Some(&prior_block_metadata),
         |addr| {
             wallet
@@ -2657,7 +2669,7 @@ where
     let value = Zatoshis::const_from_u64(100000);
     let network = *st.network();
     let (scanned, outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, value, &taddr);
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
 
     st.wallet_mut()
         .put_blocks(&ChainState::empty(h - 1, BlockHash([0; 32])), vec![scanned])
@@ -2691,6 +2703,168 @@ where
     );
 }
 
+/// Scans a full block that pays a wallet transparent address, then a full block that spends the
+/// resulting output, and verifies that the spend is detected.
+///
+/// The wallet already tracks the outpoint when the spending block is scanned, so the spend is
+/// matched directly against its tracked outputs rather than resolved through the spend map.
+pub fn scan_full_block_detects_transparent_spend<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().unwrap();
+    let account_id = account.id();
+    let h = account.birthday().height() + 1;
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+    let network = *st.network();
+
+    st.wallet_mut().update_chain_tip(h + 1).unwrap();
+
+    let (received, funded_outpoint) =
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+    st.wallet_mut()
+        .put_blocks(
+            &ChainState::empty(h - 1, BlockHash([0; 32])),
+            vec![received],
+        )
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must be recorded when the block creating it is scanned",
+    );
+
+    // Scanning the spending block must now detect the spend directly.
+    let (spending, _) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 1,
+        2,
+        std::slice::from_ref(&funded_outpoint),
+        value,
+        &taddr,
+    );
+    assert_matches!(
+        spending
+            .transactions()
+            .iter()
+            .flat_map(|wtx| wtx.transparent_spends())
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [spend] if spend.outpoint() == &funded_outpoint,
+        "the scanner must report the spend of the wallet's output",
+    );
+
+    st.wallet_mut()
+        .put_blocks(&ChainState::empty(h, BlockHash([0; 32])), vec![spending])
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(_)),
+        "the output must remain known to the wallet after being spent",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(h + 2)),
+        Ok(None),
+        "the output must be recorded as spent once its spend has been scanned",
+    );
+}
+
+/// Scans a full block that spends a wallet transparent output *before* the block that created it,
+/// and verifies that the spend is resolved once the output is discovered.
+///
+/// This is the out-of-order case: at the time the spending block is scanned the wallet does not
+/// know it holds the output, so the spend must be recorded against the outpoint and applied when
+/// the earlier block brings the output into the wallet.
+pub fn scan_full_block_detects_out_of_order_transparent_spend<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().unwrap();
+    let account_id = account.id();
+    let h = account.birthday().height() + 1;
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+    let network = *st.network();
+
+    st.wallet_mut().update_chain_tip(h + 1).unwrap();
+
+    // Build the paying block first so that its outpoint is known, but do not scan it yet.
+    let (received, funded_outpoint) =
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+
+    // Scan and persist the block that spends it. The wallet cannot recognize the spend: it does
+    // not yet know that it holds the output being spent.
+    let (spending, _) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 1,
+        2,
+        std::slice::from_ref(&funded_outpoint),
+        value,
+        &taddr,
+    );
+    assert!(
+        spending
+            .transactions()
+            .iter()
+            .all(|wtx| wtx.transparent_spends().is_empty()),
+        "the scanner cannot match a spend of an output the wallet has not yet seen",
+    );
+    st.wallet_mut()
+        .put_blocks(&ChainState::empty(h, BlockHash([0; 32])), vec![spending])
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(None),
+        "the wallet must not know of the output before the block creating it is scanned",
+    );
+
+    // Persisting the earlier block brings the output into the wallet, at which point the
+    // already-recorded spend must be applied to it.
+    st.wallet_mut()
+        .put_blocks(
+            &ChainState::empty(h - 1, BlockHash([0; 32])),
+            vec![received],
+        )
+        .unwrap();
+
+    // As in the compact-block case, asserting that the output is known is what keeps the
+    // "not unspent" assertion below from being satisfied by an output never recorded at all.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must have been recorded when the block creating it was scanned",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(h + 2)),
+        Ok(None),
+        "the spend observed before the output was discovered must have been resolved",
+    );
+}
+
 /// Verifies that the transparent outputs written while persisting a batch of scanned blocks are
 /// rolled back along with the rest of the batch when a later block in the batch is rejected.
 ///
@@ -2717,9 +2891,17 @@ where
     let value = Zatoshis::const_from_u64(100000);
     let network = *st.network();
     let (first, first_outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, value, &taddr);
-    let (discontinuous, discontinuous_outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h + 2, 2, value, &taddr);
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+    let (discontinuous, discontinuous_outpoint) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 2,
+        2,
+        &[],
+        value,
+        &taddr,
+    );
 
     assert_matches!(
         st.wallet_mut().put_blocks(

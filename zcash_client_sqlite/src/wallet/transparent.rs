@@ -2991,6 +2991,20 @@ mod tests {
     }
 
     #[test]
+    fn scan_full_block_detects_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_detects_transparent_spend(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_full_block_detects_out_of_order_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_detects_out_of_order_transparent_spend(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
     fn scan_detects_transparent_spend() {
         zcash_client_backend::data_api::testing::transparent::scan_detects_transparent_spend(
             TestDbFactory::default(),

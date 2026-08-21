@@ -62,7 +62,9 @@ workspace.
   discarded when the scanned blocks were persisted, and were recovered only when
   complete transaction data reached
   `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
-  `scanning::full::scan_block` still does not detect transparent spends.
+  `scanning::full::scan_block` detects transparent spends as well, matching each
+  block's transparent inputs against the outputs the wallet holds; a coinbase
+  transaction's null-outpoint input is excluded.
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` detects transparent
   outputs paying the wallet and spends of the wallet's transparent outputs,
   including spends observed before the block that created the spent output has
