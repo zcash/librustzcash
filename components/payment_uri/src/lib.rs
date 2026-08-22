@@ -361,11 +361,22 @@ mod tests {
             prop_assert_eq!(parsed.atomic_value(decimal_places as usize), Some(expected));
         }
 
-        /// Any string containing a byte outside `[0-9.]` must be rejected -- parsing must never
-        /// panic on arbitrary bytes, including non-UTF-8-adjacent and adversarial input.
+        /// Never panics on arbitrary input, and its accept/reject decision always matches the
+        /// grammar `parse` itself documents: one or more digits, optionally followed by `.` and
+        /// one or more digits, nothing else. Since `s` is any string at all, most generated
+        /// cases are malformed and must be rejected, but proptest can and does occasionally
+        /// generate a well-formed one (e.g. plain digit strings) by chance -- those must still
+        /// be *accepted*, so the assertion has to check both directions rather than assuming
+        /// arbitrary input is always invalid.
         #[test]
-        fn decimal_amount_never_panics_on_arbitrary_strings(s in ".*") {
-            let _ = DecimalAmount::parse(&s);
+        fn decimal_amount_matches_its_documented_grammar_for_arbitrary_strings(s in ".*") {
+            let well_formed = {
+                let (whole, fraction) = s.split_once('.').map_or((s.as_str(), None), |(w, f)| (w, Some(f)));
+                !whole.is_empty()
+                    && whole.bytes().all(|b| b.is_ascii_digit())
+                    && fraction.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()))
+            };
+            prop_assert_eq!(DecimalAmount::parse(&s).is_ok(), well_formed);
         }
     }
 }

@@ -324,8 +324,8 @@ fn litecoin_parameter_matching_is_case_sensitive_per_bip21() {
 }
 
 #[test]
-fn does_not_panic_on_adversarial_input() {
-    let adversarial = [
+fn rejects_adversarial_input() {
+    let always_invalid = [
         "",
         "bitcoin:",
         "bitcoin:%",
@@ -334,24 +334,44 @@ fn does_not_panic_on_adversarial_input() {
         "solana:",
         "solana:\u{0}",
         "solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?reference=\\..\\..\\etc\\passwd",
-        "solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?label=\u{1F600}\u{1F600}\u{1F600}",
-        "solana:https://exa\u{0}mple.com",
-        "solana:HTTPS://EXAMPLE.COM/SOLANA-PAY",
         "ethereum:",
         "ethereum:\u{0}",
-        &"bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=".repeat(10_000),
-        &format!("solana:{}", "a".repeat(100_000)),
         "🦀:not-a-real-scheme",
         "bitcoin://1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo",
         ":",
         "::::",
     ];
-    for input in adversarial {
-        // The only contract under test is "does not panic"; every one of these is expected to
-        // be rejected, but that's incidental -- a future relaxation that lets one parse
-        // successfully would still be fine as long as it doesn't do so by panicking.
-        let _ = PaymentRequest::parse(input);
+    for input in always_invalid {
+        assert!(
+            PaymentRequest::parse(input).is_err(),
+            "expected {input:?} to be rejected"
+        );
     }
+
+    // Two separate large-input cases, checked only for non-panic/non-hang: a query string
+    // this pathological (no '&' separators at all, just one huge repeated key=value blob)
+    // and an oversized single-field payload aren't values a fixed always_invalid list can
+    // assert a single Err/Ok answer for as confidently as the hand-picked cases above, but
+    // they must not panic or take unreasonable time either way.
+    let _ =
+        PaymentRequest::parse(&"bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=".repeat(10_000));
+    let _ = PaymentRequest::parse(&format!("solana:{}", "a".repeat(100_000)));
+
+    // These three are *not* rejected, and that's correct, not a gap: emoji are legitimate
+    // free-form label text; a NUL byte in a link's hostname doesn't make the link syntactically
+    // invalid by this crate's own contract (it parses and categorizes a transaction-request
+    // link, it doesn't itself resolve or connect to it -- see solana.rs's module doc); and
+    // URI schemes are case-insensitive per RFC 3986, so an uppercase "HTTPS" is exactly as
+    // valid as lowercase. Each is still asserted Ok here so a future change to any of this
+    // reasoning is a deliberate decision, not a silent regression.
+    assert!(
+        PaymentRequest::parse(
+            "solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?label=\u{1F600}\u{1F600}\u{1F600}"
+        )
+        .is_ok()
+    );
+    assert!(PaymentRequest::parse("solana:https://exa\u{0}mple.com").is_ok());
+    assert!(PaymentRequest::parse("solana:HTTPS://EXAMPLE.COM/SOLANA-PAY").is_ok());
 }
 
 #[cfg(feature = "json")]
