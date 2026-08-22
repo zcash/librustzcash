@@ -348,14 +348,15 @@ fn rejects_adversarial_input() {
         );
     }
 
-    // Two separate large-input cases, checked only for non-panic/non-hang: a query string
-    // this pathological (no '&' separators at all, just one huge repeated key=value blob)
-    // and an oversized single-field payload aren't values a fixed always_invalid list can
-    // assert a single Err/Ok answer for as confidently as the hand-picked cases above, but
-    // they must not panic or take unreasonable time either way.
-    let _ =
-        PaymentRequest::parse(&"bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=".repeat(10_000));
-    let _ = PaymentRequest::parse(&format!("solana:{}", "a".repeat(100_000)));
+    // Two large, fixed (non-random) inputs -- rejected deterministically, same as the list
+    // above, but kept separate because the point of including them is performance/hang safety
+    // (no '&' separators at all in the first, a 100KB single field in the second), not the
+    // specific rejection reason.
+    assert!(
+        PaymentRequest::parse(&"bitcoin:1FsSia9rv4NeEwvJ2GvXrX7LyxYspbN2mo?amount=".repeat(10_000))
+            .is_err()
+    );
+    assert!(PaymentRequest::parse(&format!("solana:{}", "a".repeat(100_000))).is_err());
 
     // These three are *not* rejected, and that's correct, not a gap: emoji are legitimate
     // free-form label text; a NUL byte in a link's hostname doesn't make the link syntactically
