@@ -1,9 +1,29 @@
+//! Solana Pay transfer and interactive transaction requests.
+//!
+//! Implements the [Solana Pay specification]: non-interactive `solana:<recipient>?...` transfer
+//! requests (native SOL or an SPL token, identified by its mint address), and interactive
+//! `solana:<https-url>` transaction requests, which this crate parses and categorizes but does
+//! not itself act on -- consumers decide whether to follow an interactive link.
+//!
+//! A transaction-request link only needs percent-encoding when it would otherwise contain
+//! characters (like a literal `?` introducing its own query string) that would be ambiguous
+//! against the outer `solana:` URI's own grammar; a bare link with no query component does not.
+//! Both forms appear as valid examples in the spec itself.
+//!
+//! Unlike BIP-21/BIP-321, which explicitly define query parameter keys as case-insensitive
+//! (Bitcoin) or case-sensitive (Litecoin), the Solana Pay spec says nothing about the case
+//! sensitivity of its keys -- it only ever shows them in lowercase. This module treats them as
+//! case-sensitive (no normalization is applied), matching the spec's own examples literally;
+//! `Amount=1` is therefore an unrecognised key, not a match for `amount`.
+//!
+//! [Solana Pay specification]: https://github.com/solana-foundation/solana-pay/blob/master/SPEC.md
+
 use std::collections::HashSet;
 
 use crate::{DecimalAmount, Error, decode};
 
 const SOL_DECIMAL_PLACES: usize = 9;
-const PUBLIC_KEY_BYTES: usize = 32;
+const PUBLIC_KEY_BYTES_LEN: usize = 32;
 
 /// A parsed Solana Pay request.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,6 +97,22 @@ impl SolanaTransactionRequest {
     }
 }
 
+/// Parses and validates a `solana:` transfer or interactive transaction request.
+///
+/// Examples of accepted input:
+/// - `solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=1&label=Michael` (native SOL)
+/// - `solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=0.01&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
+///   (SPL token transfer)
+/// - `solana:https://example.com/solana-pay` (interactive request, no query string, no
+///   escaping needed)
+/// - `solana:https%3A%2F%2Fexample.com%2Fsolana-pay%3Forder%3D12345` (interactive request
+///   whose own query string is percent-encoded so it doesn't collide with the outer URI)
+///
+/// Examples of rejected input:
+/// - `solana:https://example.com/solana-pay?order=12345` (an interactive link with an
+///   unescaped `?` is ambiguous with the outer URI's own query string, so it must be
+///   percent-encoded as above instead)
+/// - a `recipient`, `spl-token`, or `reference` value that isn't a well-formed base58 public key
 pub(crate) fn parse(input: &str) -> Result<SolanaRequest, Error> {
     let (_, payload) = input.split_once(':').ok_or(Error::MissingScheme)?;
     let decoded_payload = decode(payload)?;
@@ -147,7 +183,7 @@ fn validate_public_key(value: &str) -> Result<(), Error> {
     let decoded = bs58::decode(value)
         .into_vec()
         .map_err(|_| Error::InvalidAddress(value.to_owned()))?;
-    if decoded.len() == PUBLIC_KEY_BYTES {
+    if decoded.len() == PUBLIC_KEY_BYTES_LEN {
         Ok(())
     } else {
         Err(Error::InvalidAddress(value.to_owned()))
