@@ -18,6 +18,9 @@ eip681.workspace = true
 percent-encoding.workspace = true
 serde_json = { workspace = true, optional = true }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [features]
 ## Exposes the versioned JSON representation used by foreign-language bindings.
 json = ["dep:serde_json"]

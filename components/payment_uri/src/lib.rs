@@ -257,3 +257,115 @@ fn decode(value: &str) -> Result<String, Error> {
         .map(|decoded| decoded.into_owned())
         .map_err(|_| Error::InvalidEncoding(value.to_owned()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn decimal_amount_accepts_well_formed_values() {
+        for valid in ["0", "1", "20.3", "0.00000001", "000123", "1.0", "10.00"] {
+            let parsed = DecimalAmount::parse(valid).unwrap_or_else(|_| {
+                panic!("expected {valid:?} to parse");
+            });
+            assert_eq!(parsed.as_str(), valid);
+        }
+    }
+
+    #[test]
+    fn decimal_amount_rejects_malformed_values() {
+        for invalid in [
+            "",       // empty
+            ".",      // neither a whole nor fractional part
+            ".5",     // missing whole part
+            "1.",     // missing fractional part after the dot
+            "-1",     // sign not permitted
+            "+1",     // sign not permitted
+            "1e5",    // scientific notation not permitted
+            "1,5",    // comma is not a valid separator
+            "1.5.5",  // more than one decimal point
+            " 1",     // leading whitespace
+            "1 ",     // trailing whitespace
+            "1_000",  // digit-group separators not permitted
+            "0x1",    // hex not permitted
+            "\u{0}1", // embedded NUL
+        ] {
+            assert!(
+                DecimalAmount::parse(invalid).is_err(),
+                "expected {invalid:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn decimal_amount_fractional_digits_counts_only_the_fraction() {
+        assert_eq!(DecimalAmount::parse("5").unwrap().fractional_digits(), 0);
+        assert_eq!(DecimalAmount::parse("5.1").unwrap().fractional_digits(), 1);
+        assert_eq!(
+            DecimalAmount::parse("5.12345678")
+                .unwrap()
+                .fractional_digits(),
+            8
+        );
+    }
+
+    #[test]
+    fn decimal_amount_atomic_value_rejects_excess_precision() {
+        let amount = DecimalAmount::parse("1.123").unwrap();
+        assert_eq!(amount.atomic_value(3), Some(1_123));
+        assert_eq!(amount.atomic_value(2), None);
+    }
+
+    #[test]
+    fn decimal_amount_atomic_value_rejects_overflow() {
+        // u64::MAX is 18446744073709551615 (20 digits); this whole part alone already exceeds it
+        // before considering the *8 scale needed for 8 decimal places.
+        let amount = DecimalAmount::parse("99999999999999999999").unwrap();
+        assert_eq!(amount.atomic_value(8), None);
+    }
+
+    proptest! {
+        /// Any digit string this crate's own grammar accepts round-trips through `parse` and
+        /// `as_str` byte-for-byte -- parsing must not normalize, reformat, or lose precision.
+        #[test]
+        fn decimal_amount_round_trips_through_parse(
+            whole in "[0-9]{1,10}",
+            fraction in proptest::option::of("[0-9]{1,8}"),
+        ) {
+            let text = match &fraction {
+                Some(f) => format!("{whole}.{f}"),
+                None => whole.clone(),
+            };
+            let parsed = DecimalAmount::parse(&text).expect("well-formed by construction");
+            prop_assert_eq!(parsed.as_str(), text.as_str());
+        }
+
+        /// Any value with no more fractional digits than `decimal_places`, and a whole part small
+        /// enough not to overflow once scaled, must produce an atomic value satisfying the basic
+        /// arithmetic identity `atomic == whole * 10^decimal_places + fraction_padded`.
+        #[test]
+        fn decimal_amount_atomic_value_matches_arithmetic_identity(
+            whole in 0u64..1_000_000_000,
+            fraction_digits in 0usize..=8,
+        ) {
+            let decimal_places = 8;
+            let fraction: u64 = if fraction_digits == 0 { 0 } else { 12_345_678 % 10u64.pow(fraction_digits as u32) };
+            let text = if fraction_digits == 0 {
+                whole.to_string()
+            } else {
+                format!("{whole}.{fraction:0fraction_digits$}")
+            };
+            let parsed = DecimalAmount::parse(&text).expect("well-formed by construction");
+            let expected = whole * 10u64.pow(decimal_places) + fraction * 10u64.pow((decimal_places as usize - fraction_digits) as u32);
+            prop_assert_eq!(parsed.atomic_value(decimal_places as usize), Some(expected));
+        }
+
+        /// Any string containing a byte outside `[0-9.]` must be rejected -- parsing must never
+        /// panic on arbitrary bytes, including non-UTF-8-adjacent and adversarial input.
+        #[test]
+        fn decimal_amount_never_panics_on_arbitrary_strings(s in ".*") {
+            let _ = DecimalAmount::parse(&s);
+        }
+    }
+}
