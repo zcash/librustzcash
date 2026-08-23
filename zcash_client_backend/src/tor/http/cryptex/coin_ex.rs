@@ -52,6 +52,7 @@ impl Exchange for CoinEx {
                 "https://api.coinex.com/v2/spot/depth?market=ZECUSDT&limit=5&interval=0"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )
