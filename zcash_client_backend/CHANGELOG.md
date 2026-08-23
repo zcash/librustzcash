@@ -22,6 +22,12 @@ workspace.
     is applied only if the closure did not set `Accept`, so a closure that
     sets it overrides the default. Pass `|b| b` to preserve the previous
     behaviour.
+- `zcash_client_backend::tor::http`:
+  - `Client::{http_get, http_post}`, and therefore `Client::http_get_json`,
+    now always send the `Host` header derived from the request URL. A `Host`
+    set by the request-construction closure was previously serialized onto
+    the wire alongside it and took precedence for `HeaderMap::get`; it is now
+    discarded.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
