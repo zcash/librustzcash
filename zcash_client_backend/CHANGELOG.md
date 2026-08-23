@@ -19,6 +19,14 @@ workspace.
     sets it overrides the default. Pass `|b| b` to preserve the previous
     behaviour.
 
+### Fixed
+- `zcash_client_backend::tor::http`:
+  - `Client::{http_get, http_post}`, and therefore `Client::http_get_json`,
+    now always send the `Host` header derived from the request URL. A `Host`
+    set by the request-construction closure was previously serialized onto
+    the wire alongside it and took precedence for `HeaderMap::get`; it is now
+    discarded.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added
