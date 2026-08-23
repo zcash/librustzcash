@@ -52,6 +52,7 @@ impl Exchange for Binance {
                 "https://api.binance.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

@@ -47,6 +47,7 @@ impl Exchange for DigiFinex {
                 "https://openapi.digifinex.com/v3/ticker?symbol=zec_usdt"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

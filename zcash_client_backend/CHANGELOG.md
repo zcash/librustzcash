@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::tor::http`:
+  - `Client::http_get_json` takes an additional `request: impl Fn(Builder) ->
+    Builder` argument, positioned after `url` as in `Client::http_get`, for
+    setting request headers such as `User-Agent`. `Accept: application/json`
+    is applied only if the closure did not set `Accept`, so a closure that
+    sets it overrides the default. Pass `|b| b` to preserve the previous
+    behaviour.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added

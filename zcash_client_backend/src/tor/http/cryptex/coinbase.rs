@@ -40,6 +40,7 @@ impl Exchange for Coinbase {
                 "https://api.exchange.coinbase.com/products/ZEC-USD/ticker"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

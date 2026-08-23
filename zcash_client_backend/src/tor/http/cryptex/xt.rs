@@ -45,6 +45,7 @@ impl Exchange for Xt {
                 "https://sapi.xt.com/v4/public/ticker/book?symbol=zec_usdt"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

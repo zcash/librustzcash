@@ -90,6 +90,28 @@ pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
     Ok((is_https, host, port))
 }
 
+/// Applies the caller's `request` closure, then defaults `Accept` to `application/json`
+/// if the closure did not already set it.
+///
+/// The default is applied *after* the closure (rather than before) because
+/// [`Builder::header`] appends rather than replaces: setting `Accept` before running the
+/// closure would leave the default value in place (as the first of two `Accept` values)
+/// even if the closure also set `Accept`, silently defeating any attempt by the caller to
+/// override it.
+fn with_default_json_accept(request: impl Fn(Builder) -> Builder) -> impl Fn(Builder) -> Builder {
+    move |builder| {
+        let builder = request(builder);
+        if builder
+            .headers_ref()
+            .is_some_and(|headers| headers.contains_key(hyper::header::ACCEPT))
+        {
+            builder
+        } else {
+            builder.header(hyper::header::ACCEPT, "application/json")
+        }
+    }
+}
+
 impl Client {
     /// Makes an HTTP GET request over Tor.
     ///
@@ -268,8 +290,14 @@ impl Client {
 
     /// Makes an HTTP GET request over Tor, parsing the response as JSON.
     ///
-    /// This is a simple wapper around [`Self::http_get`]. Use that method if you need
-    /// more control over the request headers or response parsing.
+    /// This is a simple wrapper around [`Self::http_get`]. Use that method if you need
+    /// more control over the response parsing.
+    ///
+    /// The `request` closure runs first; this method then defaults `Accept` to
+    /// `application/json` only if the closure did not already set it, so a caller can
+    /// override the default `Accept` (or add other headers, such as `User-Agent`) by
+    /// setting them in the closure. See [`Self::http_get`] for the [`Builder`] methods you
+    /// must not call within it.
     ///
     /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
     /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
@@ -291,12 +319,13 @@ impl Client {
     pub async fn http_get_json<T: DeserializeOwned>(
         &self,
         url: Uri,
+        request: impl Fn(Builder) -> Builder,
         retry_limit: u8,
         retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_get(
             url,
-            |builder| builder.header(hyper::header::ACCEPT, "application/json"),
+            with_default_json_accept(request),
             |body| async {
                 Ok(serde_json::from_reader(
                     body.collect()
@@ -510,7 +539,8 @@ mod tests {
     use hyper::{Uri, body::Bytes};
 
     use super::{
-        HttpError, TimeoutPhase, make_http_request, parse_url, url_is_https, with_timeout,
+        HttpError, TimeoutPhase, make_http_request, parse_url, url_is_https,
+        with_default_json_accept, with_timeout,
     };
     use crate::tor::Error;
 
@@ -596,6 +626,60 @@ mod tests {
         let uri = "//example.com/".parse::<Uri>().unwrap();
         assert!(matches!(url_is_https(&uri), Err(HttpError::NonHttpUrl)));
     }
+
+    /// A caller that doesn't set `Accept` itself gets the default `application/json`.
+    #[test]
+    fn with_default_json_accept_sets_accept_by_default() {
+        let builder = with_default_json_accept(|b| b)(hyper::Request::builder());
+        assert_eq!(
+            builder
+                .headers_ref()
+                .and_then(|h| h.get(hyper::header::ACCEPT))
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+        );
+    }
+
+    /// The caller's closure runs before the default is applied, so a caller that sets
+    /// `Accept` itself gets that value instead of the default. (`Builder::header` appends
+    /// rather than replaces, so applying the default first would not achieve this: the
+    /// caller's value would just become a second, effectively-ignored `Accept` header.)
+    #[test]
+    fn with_default_json_accept_lets_caller_override_accept() {
+        let builder = with_default_json_accept(|b| b.header(hyper::header::ACCEPT, "text/plain"))(
+            hyper::Request::builder(),
+        );
+        assert_eq!(
+            builder
+                .headers_ref()
+                .and_then(|h| h.get(hyper::header::ACCEPT))
+                .and_then(|v| v.to_str().ok()),
+            Some("text/plain"),
+        );
+    }
+
+    /// The caller's closure can also set additional headers, such as `User-Agent`, that
+    /// `http_get_json` does not set itself.
+    #[test]
+    fn with_default_json_accept_allows_additional_headers() {
+        let builder =
+            with_default_json_accept(|b| b.header(hyper::header::USER_AGENT, "test-agent"))(
+                hyper::Request::builder(),
+            );
+        let headers = builder.headers_ref().unwrap();
+        assert_eq!(
+            headers
+                .get(hyper::header::ACCEPT)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+        );
+        assert_eq!(
+            headers
+                .get(hyper::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok()),
+            Some("test-agent"),
+        );
+    }
 }
 
 #[cfg(all(test, live_network_tests))]
@@ -620,6 +704,7 @@ mod live_network_tests {
             let get_response = client
                 .http_get_json::<serde_json::Value>(
                     "https://httpbin.org/get".parse().unwrap(),
+                    |b| b,
                     3,
                     |res| res.is_err().then_some(Retry::Same),
                 )
