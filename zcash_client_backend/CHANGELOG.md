@@ -29,6 +29,12 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
   `TxOut::to_txout` (behind `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentAddressObservation` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentInvolvement` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::transparent_address_observations` (behind
+  `transparent-inputs`)
 
 ### Changed
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
@@ -40,6 +46,11 @@ workspace.
   expiration rules for every payment recipient: a payment to an address that is
   known to have expired, or whose expiry height the transaction's expiry height
   would exceed, fails with `Error::RecipientAddressExpiry`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`,
+  `put_transparent_address_observations`. Implement it by recording each
+  supplied observation as an idempotent upsert keyed by the transaction, the
+  involvement direction, and the item index.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
