@@ -322,6 +322,7 @@ mod tests {
                 nu6_3: Some(activation),
                 #[cfg(zcash_unstable = "nu7")]
                 nu7: None,
+                nu_tachyon: None,
             },
         }
         .up(&tx)

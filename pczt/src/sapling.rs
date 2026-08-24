@@ -720,7 +720,7 @@ impl Bundle {
 pub enum ParseError {
     /// The operation requires the bundle's `anchor` to be set, but it was absent.
     ///
-    /// For a v6 transaction, an Updater can resolve this by setting the anchor; see
+    /// For a V6-compatible transaction, an Updater can resolve this by setting the anchor; see
     /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization).
     MissingAnchor,
     /// The bundle's remaining fields were structurally invalid.

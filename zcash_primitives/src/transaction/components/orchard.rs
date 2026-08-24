@@ -490,7 +490,7 @@ pub mod testing {
     /// The Orchard-slot [`BundleVersion`] for a transaction version: `orchard_v3()` in v6 (where
     /// the Orchard pool forbids cross-address transfers), `orchard_v2()` otherwise.
     fn orchard_bundle_version(v: TxVersion) -> BundleVersion {
-        if matches!(v, TxVersion::V6) {
+        if matches!(v, TxVersion::V6 | TxVersion::V7) {
             return BundleVersion::orchard_v3();
         }
         let _ = v;

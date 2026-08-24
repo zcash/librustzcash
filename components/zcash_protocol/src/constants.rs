@@ -41,6 +41,11 @@ pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
 pub const V6_VERSION_GROUP_ID: u32 = 0xD884B698;
 
+/// Transaction version 7, introduced by the NuTachyon network upgrade.
+pub const V7_TX_VERSION: u32 = 7;
+/// The placeholder version group ID for Zcash v7 transactions ("tach" in ASCII).
+pub const V7_VERSION_GROUP_ID: u32 = 0x74616368;
+
 /// The maximum size in bytes of a Zcash block, and therefore the maximum size of any single
 /// transaction within one.
 ///

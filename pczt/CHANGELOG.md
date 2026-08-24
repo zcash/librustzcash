@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- Support for creating and extracting V7 PCZTs under NuTachyon using the
+  V6-compatible transaction body.
+
 ## [0.9.3] - 2026-08-07
 
 ### Added

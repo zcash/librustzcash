@@ -1778,6 +1778,7 @@ impl TestBuilder<(), ()> {
         nu6_3: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
+        nu_tachyon: None,
     };
 
     /// Constructs a new test environment builder.

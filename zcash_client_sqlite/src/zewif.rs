@@ -1780,6 +1780,7 @@ mod tests {
             nu6_3: one,
             #[cfg(zcash_unstable = "nu7")]
             nu7: one,
+            nu_tachyon: None,
         }
     }
 

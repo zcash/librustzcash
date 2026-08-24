@@ -45,7 +45,9 @@ use zcash_protocol::constants::{
     V5_VERSION_GROUP_ID,
 };
 
-use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+use zcash_protocol::constants::{
+    V6_TX_VERSION, V6_VERSION_GROUP_ID, V7_TX_VERSION, V7_VERSION_GROUP_ID,
+};
 
 pub use zcash_protocol::TxId;
 
@@ -76,6 +78,10 @@ pub enum TxVersion {
     V5,
     /// Transaction version 6, specified in [ZIP 229](https://zips.z.cash/zip-0229).
     V6,
+    /// Transaction version 7, introduced by the NuTachyon network upgrade.
+    ///
+    /// V7 initially has the same fields and digest structure as V6.
+    V7,
 }
 
 impl TxVersion {
@@ -90,6 +96,7 @@ impl TxVersion {
                 (V4_TX_VERSION, V4_VERSION_GROUP_ID) => Ok(TxVersion::V4),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
                 (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
+                (V7_TX_VERSION, V7_VERSION_GROUP_ID) => Ok(TxVersion::V7),
                 _ => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Unknown transaction format",
@@ -119,6 +126,7 @@ impl TxVersion {
                 TxVersion::V4 => V4_TX_VERSION,
                 TxVersion::V5 => V5_TX_VERSION,
                 TxVersion::V6 => V6_TX_VERSION,
+                TxVersion::V7 => V7_TX_VERSION,
             }
     }
 
@@ -129,6 +137,7 @@ impl TxVersion {
             TxVersion::V4 => V4_VERSION_GROUP_ID,
             TxVersion::V5 => V5_VERSION_GROUP_ID,
             TxVersion::V6 => V6_VERSION_GROUP_ID,
+            TxVersion::V7 => V7_VERSION_GROUP_ID,
         }
     }
 
@@ -146,7 +155,7 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::V3 | TxVersion::V4 => true,
             TxVersion::V5 => false,
-            TxVersion::V6 => false,
+            TxVersion::V6 | TxVersion::V7 => false,
         }
     }
 
@@ -160,7 +169,7 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::V3 => false,
             TxVersion::V4 => true,
             TxVersion::V5 => true,
-            TxVersion::V6 => true,
+            TxVersion::V6 | TxVersion::V7 => true,
         }
     }
 
@@ -169,7 +178,7 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
             TxVersion::V5 => true,
-            TxVersion::V6 => true,
+            TxVersion::V6 | TxVersion::V7 => true,
         }
     }
 
@@ -177,7 +186,7 @@ impl TxVersion {
     pub fn has_ironwood(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-            TxVersion::V6 => true,
+            TxVersion::V6 | TxVersion::V7 => true,
         }
     }
 
@@ -185,7 +194,7 @@ impl TxVersion {
     pub fn has_zip233(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-            TxVersion::V6 => true,
+            TxVersion::V6 | TxVersion::V7 => true,
         }
     }
 
@@ -204,6 +213,7 @@ impl TxVersion {
             BranchId::Nu6_3 => TxVersion::V6,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => TxVersion::V6,
+            BranchId::NuTachyon => TxVersion::V7,
         }
     }
 
@@ -221,6 +231,7 @@ impl TxVersion {
                 Nu6_3 => true,
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => false, // ZIP 2003
+                NuTachyon => false,
             },
             TxVersion::V5 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
@@ -228,6 +239,7 @@ impl TxVersion {
                 Nu6_3 => true,
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true,
+                NuTachyon => true,
             },
             TxVersion::V6 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
@@ -235,7 +247,9 @@ impl TxVersion {
                 Nu6_3 => true, // Ironwood / NU6.3
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
+                NuTachyon => true,
             },
+            TxVersion::V7 => consensus_branch_id == NuTachyon,
         }
     }
 }
@@ -385,7 +399,7 @@ impl<A: Authorization> TransactionData<A> {
     /// including the Ironwood bundle.
     ///
     /// Both the Orchard and Ironwood bundle fields use [`orchard::Bundle`], but
-    /// they are distinct V6 transaction fields with distinct bundle versions.
+    /// they are distinct V6-compatible transaction fields with distinct bundle versions.
     /// The `orchard_bundle` argument must contain a bundle constructed for
     /// [`orchard::bundle::BundleVersion::orchard_v3`], while `ironwood_bundle`
     /// must contain a bundle constructed for
@@ -404,8 +418,61 @@ impl<A: Authorization> TransactionData<A> {
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
+        Self::from_parts_v6_or_v7(
+            TxVersion::V6,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount,
+            transparent_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+        )
+    }
+
+    /// Constructs a V7 [`TransactionData`] from the V6-compatible fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts_v7(
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Zatoshis,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+        ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> Self {
+        Self::from_parts_v6_or_v7(
+            TxVersion::V7,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount,
+            transparent_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts_v6_or_v7(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Zatoshis,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+        ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> Self {
+        debug_assert!(matches!(version, TxVersion::V6 | TxVersion::V7));
         TransactionData {
-            version: TxVersion::V6,
+            version,
             consensus_branch_id,
             lock_time,
             expiry_height,
@@ -509,7 +576,7 @@ impl<A: Authorization> TransactionData<A> {
 
     /// Computes this transaction's digest using the provided digest strategy.
     ///
-    /// Version 6 transactions include the Ironwood bundle digest as a separate
+    /// V6-compatible transactions include the Ironwood bundle digest as a separate
     /// Orchard-shaped digest with Ironwood personalization. Earlier transaction
     /// versions do not include Ironwood in their digest.
     pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
@@ -691,6 +758,7 @@ impl Transaction {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
+            TxVersion::V7 => Ok(Self::from_data_v6(data)),
         }
     }
 
@@ -743,6 +811,7 @@ impl Transaction {
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
+            TxVersion::V7 => Self::read_v6(reader.into_base_reader(), version),
         }
     }
 
@@ -909,7 +978,7 @@ impl Transaction {
         Ok(Self::from_data_v6(data))
     }
 
-    /// Utility function for reading header data common to v5 and v6 transactions.
+    /// Utility function for reading header data common to v5 and later transactions.
     fn read_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
             BranchId::try_from(value).map_err(|_e| {
@@ -961,6 +1030,7 @@ impl Transaction {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
             TxVersion::V5 => self.write_v5(writer),
             TxVersion::V6 => self.write_v6(writer),
+            TxVersion::V7 => self.write_v6(writer),
         }
     }
 
@@ -1036,7 +1106,7 @@ impl Transaction {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to the V6 transaction format.",
+                "Sprout components cannot be present when serializing to a V6-compatible transaction format.",
             ));
         }
         self.write_v6_header(&mut writer)?;
@@ -1206,6 +1276,7 @@ pub mod testing {
             BranchId::Nu6_3 => Just(TxVersion::V6).boxed(),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => Just(TxVersion::V6).boxed(),
+            BranchId::NuTachyon => Just(TxVersion::V7).boxed(),
         }
     }
 

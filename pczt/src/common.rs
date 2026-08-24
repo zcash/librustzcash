@@ -27,7 +27,7 @@ pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 /// Governs whether a non-empty shielded bundle's `anchor` must be set in order to parse
 /// it into the form used by the payment protocol crates.
 ///
-/// [ZIP 374](https://zips.z.cash/zip-0374) makes the anchor of a v6 transaction's
+/// [ZIP 374](https://zips.z.cash/zip-0374) makes the anchor of a V6-compatible transaction's
 /// shielded bundles deferrable until proving, so operations that do not depend on the
 /// anchor's value (for example computing a v6 sighash, which excludes anchors, or
 /// updating unrelated fields) can proceed with it absent.
@@ -67,7 +67,10 @@ impl AnchorRequirement {
     /// anchors for Sapling spends and Orchard-protocol actions, so those bundles must
     /// keep requiring them.
     pub(crate) fn for_pre_authorization(tx_version: u32) -> Self {
-        if tx_version == zcash_protocol::constants::V6_TX_VERSION {
+        if matches!(
+            tx_version,
+            zcash_protocol::constants::V6_TX_VERSION | zcash_protocol::constants::V7_TX_VERSION
+        ) {
             AnchorRequirement::NotRequired
         } else {
             AnchorRequirement::Required
