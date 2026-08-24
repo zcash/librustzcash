@@ -35,6 +35,12 @@ workspace.
   concurrently with shutdown is still accepted, and is then never dropped while
   any `Handle` remains, so neither the queuing methods' `None` nor the returned
   receiver reports shutdown (behind `sync-decryptor`)
+- `zcash_client_backend::wallet::TransparentAddressObservation` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentInvolvement` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::transparent_address_observations` (behind
+  `transparent-inputs`)
 
 ### Changed
 - Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
@@ -62,6 +68,11 @@ workspace.
   expiration rules for every payment recipient: a payment to an address that is
   known to have expired, or whose expiry height the transaction's expiry height
   would exceed, fails with `Error::RecipientAddressExpiry`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`,
+  `put_transparent_address_observations`. Implement it by recording each
+  supplied observation as an idempotent upsert keyed by the transaction, the
+  involvement direction, and the item index.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An

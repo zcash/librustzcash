@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- Schema: a migration adds the `transparent_tx_address_observations` table,
+  which records every transparent address named by a wallet-involved
+  transaction, in both involvement directions, and populates it from every
+  transaction for which complete data is already stored.
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
