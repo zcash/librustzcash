@@ -2197,10 +2197,7 @@ mod tests {
     ))]
     use {
         super::ReceiverRequirement::*,
-        crate::{
-            address::{Address, UnifiedAddress},
-            keys::UnifiedAddressRequest,
-        },
+        crate::{address::Address, keys::UnifiedAddressRequest},
         zcash_address::test_vectors,
         zip32::DiversifierIndex,
     };
@@ -2223,7 +2220,10 @@ mod tests {
         feature = "sapling",
         feature = "transparent-inputs"
     ))]
-    use zcash_address::unified::{self, Encoding};
+    use {
+        crate::address::UnifiedAddress,
+        zcash_address::unified::{self, Encoding},
+    };
 
     #[cfg(feature = "orchard")]
     use zip32::Scope;
@@ -2231,8 +2231,19 @@ mod tests {
     #[cfg(feature = "sapling")]
     use super::sapling;
 
+    // `UnifiedSpendingKey` is used both by the `unstable` serialization tests and by the
+    // derivation tests, which are enabled by a different set of features.
+    #[cfg(any(
+        feature = "unstable",
+        all(
+            feature = "transparent-inputs",
+            any(feature = "orchard", feature = "sapling")
+        )
+    ))]
+    use super::UnifiedSpendingKey;
+
     #[cfg(feature = "unstable")]
-    use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
+    use super::{Era, testing::arb_unified_spending_key};
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
     use subtle::ConstantTimeEq;
