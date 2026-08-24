@@ -544,8 +544,11 @@ pub enum AddressGenerationError {
     /// A requested address typecode was recognized, but the unified key being used to generate the
     /// address lacks an item of the requested type.
     KeyNotAvailable(Typecode),
-    /// A Unified address cannot be generated without at least one shielded receiver being
-    /// included.
+    /// The address request permits no receiver that the unified key being used to generate the
+    /// address can provide.
+    ///
+    /// Omitting both shielded receiver types is permitted only for a key that has no shielded
+    /// item; see [`ReceiverRequirements::TRANSPARENT_ONLY`].
     ShieldedReceiverRequired,
 }
 
@@ -595,7 +598,7 @@ impl fmt::Display for AddressGenerationError {
             AddressGenerationError::ShieldedReceiverRequired => {
                 write!(
                     f,
-                    "A Unified Address requires at least one shielded (Sapling or Orchard) receiver."
+                    "The address request permits no receiver that this Unified Viewing Key can provide."
                 )
             }
         }
@@ -619,6 +622,9 @@ pub enum ReceiverRequirementError {
     /// omission.
     Conflict,
     /// A set of receiver requirements would not include any shielded receiver.
+    ///
+    /// See [`ReceiverRequirements::TRANSPARENT_ONLY`] for the one set of requirements that
+    /// permits no shielded receiver.
     NoShieldedReceiver,
 }
 
@@ -631,7 +637,7 @@ impl Display for ReceiverRequirementError {
             ReceiverRequirementError::NoShieldedReceiver => {
                 write!(
                     f,
-                    "A unified address must include at least one shielded receiver"
+                    "These receiver requirements must permit at least one shielded receiver"
                 )
             }
         }
@@ -688,6 +694,13 @@ impl UnifiedAddressRequest {
     /// Constructs a new unified address request that requires an Orchard receiver and no others.
     pub const ORCHARD: Self = Self::Custom(ReceiverRequirements::ORCHARD);
 
+    /// Constructs a new unified address request that requires a transparent P2PKH receiver and
+    /// no others.
+    ///
+    /// See [`ReceiverRequirements::TRANSPARENT_ONLY`] for the constraints on the resulting
+    /// address.
+    pub const TRANSPARENT_ONLY: Self = Self::Custom(ReceiverRequirements::TRANSPARENT_ONLY);
+
     pub fn custom(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
@@ -717,7 +730,9 @@ impl ReceiverRequirements {
     /// Construct a new unified address request from its constituent parts.
     ///
     /// Returns an error if the resulting unified address would not include at least one shielded
-    /// receiver.
+    /// receiver. A unified address containing only a transparent receiver cannot be requested
+    /// this way; use [`Self::TRANSPARENT_ONLY`], which is applicable only to keys that have no
+    /// shielded item at all.
     pub fn new(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
@@ -743,9 +758,37 @@ impl ReceiverRequirements {
     /// Constructs a new unified address request that requires an Orchard receiver, and no others.
     pub const ORCHARD: ReceiverRequirements = { Self::unsafe_new(Require, Omit, Omit) };
 
+    /// Constructs a new unified address request that requires a transparent P2PKH receiver, and
+    /// no others.
+    ///
+    /// An address satisfying these requirements has no shielded receiver, and so is
+    /// representable only as a [ZIP 316] Revision 2 transparent-including (`tu`) unified
+    /// address. Consequently this is the appropriate request only for a key that has no
+    /// shielded item; requesting it from a key that has one produces an address that
+    /// needlessly discards the recipient's shielded receiving capability. It is not reachable
+    /// via [`Self::new`] or [`Self::unsafe_new`] for that reason.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub const TRANSPARENT_ONLY: ReceiverRequirements = Self {
+        orchard: Omit,
+        sapling: Omit,
+        p2pkh: Require,
+    };
+
     /// Constructs a new unified address request that includes only the receivers that are allowed
     /// both in itself and a given other request. Returns an error if requirements are incompatible
     /// or if no shielded receiver type is allowed.
+    ///
+    /// Intersection preserves [`Omit`], so its result permits no shielded receiver only if at
+    /// least one of the operands already permitted none. In that case the result is no less
+    /// honest than the operand it came from and is returned; otherwise the shielded-receiver
+    /// requirement of [`Self::new`] applies.
+    ///
+    /// This operation is commutative and idempotent, but it is not associative. The rule above
+    /// inspects the operands and not only the meet, so an intermediate result that permits no
+    /// shielded receiver can be rejected under one bracketing and admitted under another.
+    ///
+    /// [`Omit`]: ReceiverRequirement::Omit
     pub fn intersect(
         &self,
         other: &ReceiverRequirements,
@@ -753,12 +796,18 @@ impl ReceiverRequirements {
         let orchard = self.orchard.intersect(other.orchard)?;
         let sapling = self.sapling.intersect(other.sapling)?;
         let p2pkh = self.p2pkh.intersect(other.p2pkh)?;
-        Self::new(orchard, sapling, p2pkh)
+        match (orchard, sapling, p2pkh) {
+            (Omit, Omit, Require) if self.is_transparent_only() || other.is_transparent_only() => {
+                Ok(Self::TRANSPARENT_ONLY)
+            }
+            _ => Self::new(orchard, sapling, p2pkh),
+        }
     }
 
     /// Construct a new unified address request from its constituent parts.
     ///
-    /// Panics: at least one of `orchard` or `sapling` must be allowed.
+    /// Panics: at least one of `orchard` or `sapling` must be allowed. Use
+    /// [`Self::TRANSPARENT_ONLY`] to describe a key that has no shielded item.
     pub const fn unsafe_new(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
@@ -773,6 +822,11 @@ impl ReceiverRequirements {
             sapling,
             p2pkh,
         }
+    }
+
+    /// Returns whether these requirements permit no shielded receiver.
+    fn is_transparent_only(&self) -> bool {
+        self.orchard == Omit && self.sapling == Omit
     }
 
     /// Returns the [`ReceiverRequirement`] for inclusion of an Orchard receiver.
@@ -1294,7 +1348,12 @@ impl UnifiedFullViewingKey {
             orchard: self.orchard.as_ref().map(|o| o.to_ivk(Scope::External)),
             expiry_height: self.expiry_height,
             expiry_time: self.expiry_time,
+            // An item that this build cannot interpret has no derivable incoming viewing key
+            // form, so it cannot be carried over. Record its typecode: the derived key is a
+            // lossy description of the account, and callers that describe the account from it
+            // must not present it as complete.
             unknown: Vec::new(),
+            unconverted_typecodes: self.unknown.iter().map(|(typecode, _)| *typecode).collect(),
             unknown_metadata: vec![],
         }
     }
@@ -1532,6 +1591,13 @@ pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "orchard")]
     orchard: Option<orchard::keys::IncomingViewingKey>,
     unknown: Vec<(u32, Vec<u8>)>,
+    /// The typecodes of the data items of the full viewing key that this key was derived from
+    /// that could not be carried over, because this build cannot interpret them.
+    ///
+    /// These items are not part of this key's encoding, and take no part in equality or
+    /// subsumption. They record only that the account has receiving capability that this key
+    /// does not describe.
+    unconverted_typecodes: Vec<u32>,
     expiry_height: Option<consensus::BlockHeight>,
     expiry_time: Option<u64>,
     unknown_metadata: Vec<(u32, Vec<u8>)>,
@@ -1555,6 +1621,7 @@ impl core::fmt::Debug for UnifiedIncomingViewingKey {
                 .map(|(typecode, _)| *typecode)
                 .collect::<Vec<_>>(),
         )
+        .field("unconverted_typecodes", &self.unconverted_typecodes)
         .field("expiry_height", &self.expiry_height)
         .field("expiry_time", &self.expiry_time)
         .field(
@@ -1604,6 +1671,7 @@ impl UnifiedIncomingViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            unconverted_typecodes: vec![],
             expiry_height,
             expiry_time,
             unknown_metadata,
@@ -1701,6 +1769,9 @@ impl UnifiedIncomingViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            // A parsed key keeps every item that it cannot interpret in `unknown`, and so
+            // describes itself completely.
+            unconverted_typecodes: vec![],
             expiry_height,
             expiry_time,
             unknown_metadata,
@@ -2119,32 +2190,52 @@ impl UnifiedIncomingViewingKey {
         }
     }
 
+    /// Returns whether this key has a data item that this build cannot interpret.
+    ///
+    /// An item of a pool whose feature is disabled and an item of a pool that postdates this
+    /// crate are both uninterpretable, and either may be a shielded receiver.
+    fn has_uninterpretable_data_item(&self) -> bool {
+        !self.unknown.is_empty() || !self.unconverted_typecodes.is_empty()
+    }
+
     /// Constructs the [`ReceiverRequirements`] that requires a receiver for each data item of this UIVK.
     ///
-    /// Returns an error if the resulting request would not include a shielded receiver.
-    #[allow(unused_mut)]
+    /// A key that has nothing but a transparent item describes a transparent-only account, and
+    /// yields [`ReceiverRequirements::TRANSPARENT_ONLY`]; addresses generated from it are
+    /// representable as [ZIP 316] Revision 2 transparent-including (`tu`) unified addresses.
+    ///
+    /// Returns an error if this key has no item for which a receiver can be derived, and also
+    /// if the only receiver it can derive is transparent but the key has a data item that this
+    /// build cannot interpret. A metadata item never prevents address generation.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn to_receiver_requirements(
         &self,
     ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
-        let mut orchard = Omit;
-        #[cfg(feature = "orchard")]
-        if self.orchard.is_some() {
-            orchard = Require;
-        }
+        let orchard = if self.has_orchard() { Require } else { Omit };
+        let sapling = if self.has_sapling() { Require } else { Omit };
+        let p2pkh = if self.has_transparent() {
+            Require
+        } else {
+            Omit
+        };
 
-        let mut sapling = Omit;
-        #[cfg(feature = "sapling")]
-        if self.sapling.is_some() {
-            sapling = Require;
+        match (orchard, sapling, p2pkh) {
+            // Omitting the shielded receivers is the honest description of a key that has
+            // nothing but a transparent item, so `ReceiverRequirements::new`'s
+            // shielded-receiver requirement, which guards against callers discarding a key's
+            // shielded capability, does not apply here.
+            //
+            // `TRANSPARENT_ONLY` silently omits receivers, so it is sound only for a key that
+            // provably has nothing but transparent. A data item that this build cannot
+            // interpret defeats that proof: the item may be a shielded receiver, and a
+            // transparent-only address would discard the recipient's shielded receiving
+            // capability. Fall through instead, and let the ordinary error surface.
+            (Omit, Omit, Require) if !self.has_uninterpretable_data_item() => {
+                Ok(ReceiverRequirements::TRANSPARENT_ONLY)
+            }
+            _ => ReceiverRequirements::new(orchard, sapling, p2pkh),
         }
-
-        let mut p2pkh = Omit;
-        #[cfg(feature = "transparent-inputs")]
-        if self.transparent.is_some() {
-            p2pkh = Require;
-        }
-
-        ReceiverRequirements::new(orchard, sapling, p2pkh)
     }
 
     /// Returns the default external transparent address using the transparent account pubkey.
@@ -2709,6 +2800,296 @@ mod tests {
         .unwrap();
         let mixed_dis_a = uivk_a.decrypt_diversifiers(&mixed_ua);
         assert_eq!(mixed_dis_a.len(), 2);
+    }
+
+    /// A key with no shielded item describes a transparent-only account, and generates
+    /// transparent-only ZIP 316 Revision 2 (`tu`) Unified Addresses.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_only_key_generates_tu_address() {
+        use super::{
+            ReceiverRequirement::{Omit, Require},
+            UnifiedAddressRequest,
+        };
+        use crate::address::UnifiedAddress;
+        use zcash_protocol::consensus::NetworkConstants;
+
+        let account_pubkey = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
+            .unwrap()
+            .to_account_pubkey();
+        let ufvk = super::UnifiedFullViewingKey::new(
+            Some(account_pubkey),
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+
+        let requirements = uivk
+            .to_receiver_requirements()
+            .expect("a transparent item is a receiver requirement");
+        assert_eq!(requirements.orchard(), Omit);
+        assert_eq!(requirements.sapling(), Omit);
+        assert_eq!(requirements.p2pkh(), Require);
+
+        let (ufvk_addr, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("a transparent-only key has a default address");
+        let (uivk_addr, _) = uivk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("a transparent-only key has a default address");
+        assert_eq!(ufvk_addr, uivk_addr);
+
+        assert!(ufvk_addr.has_transparent());
+        assert!(!ufvk_addr.has_sapling());
+        assert!(!ufvk_addr.has_orchard());
+        assert_eq!(
+            ufvk_addr.transparent(),
+            ufvk.default_transparent_address()
+                .map(|(addr, _)| addr)
+                .as_ref()
+        );
+
+        // The address is encoded using the Revision 2 transparent-including HRP, and
+        // round-trips through that encoding.
+        let encoded = ufvk_addr.encode(&MAIN_NETWORK);
+        assert!(
+            encoded.starts_with(MAIN_NETWORK.hrp_unified_address_r2_ti()),
+            "{encoded} is not a transparent-including Revision 2 Unified Address",
+        );
+        assert_eq!(
+            UnifiedAddress::decode(&MAIN_NETWORK, &encoded).as_ref(),
+            Ok(&ufvk_addr)
+        );
+    }
+
+    /// A key that has a transparent item and a data item that this build cannot interpret is
+    /// not transparent-only: the uninterpretable item may be a shielded receiver, so no
+    /// address can be generated for all of the key's items.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn key_with_uninterpretable_data_item_is_not_transparent_only() {
+        use super::{
+            AddressGenerationError,
+            ReceiverRequirement::{Omit, Require},
+            ReceiverRequirementError, UnifiedAddressRequest,
+        };
+        use zcash_protocol::consensus::BlockHeight;
+
+        // A data typecode that this crate does not know. Metadata typecodes start at 0xC0, so
+        // this is a data item: a pool that postdates this crate.
+        const FUTURE_POOL_TYPECODE: u32 = 0x04;
+
+        let account_privkey =
+            AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO).unwrap();
+        let account_pubkey = account_privkey.to_account_pubkey();
+        let transparent_ivk = account_pubkey.derive_external_ivk().unwrap();
+
+        // The incoming viewing key form, which keeps an uninterpretable item in `unknown`.
+        let uivk = super::UnifiedIncomingViewingKey::new(
+            Some(transparent_ivk.clone()),
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            vec![(FUTURE_POOL_TYPECODE, vec![0u8; 32])],
+            None,
+            None,
+            vec![],
+        );
+
+        assert_eq!(
+            uivk.to_receiver_requirements().err(),
+            Some(ReceiverRequirementError::NoShieldedReceiver)
+        );
+        assert!(matches!(
+            uivk.default_address(UnifiedAddressRequest::AllAvailableKeys),
+            Err(AddressGenerationError::ShieldedReceiverRequired)
+        ));
+
+        // The full viewing key form. Deriving its incoming viewing key cannot carry the
+        // uninterpretable item over, so the derived key must record that it is incomplete;
+        // otherwise every consumer that describes an account through that derivation, as
+        // wallet backends do, sees a transparent-only key.
+        let ufvk = super::UnifiedFullViewingKey::from_checked_parts(
+            Some(account_pubkey),
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            vec![(FUTURE_POOL_TYPECODE, vec![0u8; 32])],
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+
+        assert_eq!(
+            ufvk.to_unified_incoming_viewing_key()
+                .to_receiver_requirements()
+                .err(),
+            Some(ReceiverRequirementError::NoShieldedReceiver)
+        );
+        assert!(matches!(
+            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys),
+            Err(AddressGenerationError::ShieldedReceiverRequired)
+        ));
+
+        // Metadata items are not receivers, so they never prevent address generation.
+        let with_metadata = super::UnifiedIncomingViewingKey::new(
+            Some(transparent_ivk),
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            vec![],
+            Some(BlockHeight::from_u32(1_000_000)),
+            Some(1730506496),
+            vec![(0xC5, vec![0u8; 4])],
+        );
+
+        let requirements = with_metadata
+            .to_receiver_requirements()
+            .expect("metadata items do not prevent address generation");
+        assert_eq!(requirements.orchard(), Omit);
+        assert_eq!(requirements.sapling(), Omit);
+        assert_eq!(requirements.p2pkh(), Require);
+    }
+
+    /// Decoding a genuine Orchard-and-transparent UFVK in a build that cannot interpret Orchard
+    /// keeps the Orchard item, and so must not describe the key as transparent-only.
+    #[test]
+    #[cfg(all(
+        feature = "sapling",
+        feature = "transparent-inputs",
+        not(feature = "orchard")
+    ))]
+    fn orchard_and_transparent_ufvk_is_not_transparent_only_without_orchard() {
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
+        use super::{AddressGenerationError, UnifiedAddressRequest};
+
+        let mut checked = 0;
+        for tv in TEST_VECTORS {
+            if tv.orchard_fvk_bytes.is_none()
+                || tv.sapling_fvk_bytes.is_some()
+                || tv.t_p2pkh_fvk_bytes.is_none()
+            {
+                continue;
+            }
+            checked += 1;
+
+            let ufvk =
+                UnifiedFullViewingKey::decode(&MAIN_NETWORK, tv.unified_fvk).unwrap_or_else(|e| {
+                    panic!("Failed to decode UFVK for account {}: {e}", tv.account)
+                });
+
+            // The Orchard item is still part of the key: it re-encodes byte-identically.
+            assert_eq!(
+                ufvk.encode(&MAIN_NETWORK),
+                tv.unified_fvk,
+                "UFVK round-trip failed for account {}",
+                tv.account
+            );
+
+            assert!(
+                matches!(
+                    ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys),
+                    Err(AddressGenerationError::ShieldedReceiverRequired)
+                ),
+                "account {} produced an address that discards its Orchard receiver",
+                tv.account
+            );
+        }
+
+        assert!(
+            checked > 0,
+            "no test vector has an Orchard item, a transparent item, and no Sapling item"
+        );
+    }
+
+    /// Requirements that permit no shielded receiver cannot arise from constructing a request
+    /// or from intersecting two requests; [`ReceiverRequirements::TRANSPARENT_ONLY`] is the
+    /// only way to name them.
+    #[test]
+    #[cfg(all(feature = "transparent-inputs", feature = "sapling"))]
+    fn shielded_less_requirements_unreachable_by_construction_or_intersection() {
+        use super::{
+            ReceiverRequirement::{Allow, Omit, Require},
+            ReceiverRequirementError, ReceiverRequirements, UnifiedAddressRequest,
+        };
+
+        let account_pubkey = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
+            .unwrap()
+            .to_account_pubkey();
+        let ufvk = super::UnifiedFullViewingKey::new(
+            Some(account_pubkey),
+            Some(
+                sapling::spending_key(&seed(), 1, AccountId::ZERO)
+                    .to_diversifiable_full_viewing_key(),
+            ),
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+
+        // The requirements derived from the key require its Sapling receiver.
+        let requirements = uivk.to_receiver_requirements().unwrap();
+        assert_eq!(requirements.sapling(), Require);
+
+        // A shielded-less request cannot be constructed through the ordinary request path.
+        assert_eq!(
+            UnifiedAddressRequest::custom(Omit, Omit, Require).err(),
+            Some(ReceiverRequirementError::NoShieldedReceiver)
+        );
+        assert_eq!(
+            ReceiverRequirements::new(Omit, Omit, Require).err(),
+            Some(ReceiverRequirementError::NoShieldedReceiver)
+        );
+
+        // Nor can it be reached by intersection with the key's own requirements.
+        assert_eq!(
+            requirements
+                .intersect(&ReceiverRequirements::TRANSPARENT_ONLY)
+                .err(),
+            Some(ReceiverRequirementError::Conflict)
+        );
+
+        // Intersection does not introduce a shielded-less requirement from two operands that
+        // each permit a shielded receiver ...
+        assert_eq!(
+            ReceiverRequirements::unsafe_new(Omit, Allow, Allow)
+                .intersect(&ReceiverRequirements::unsafe_new(Allow, Omit, Allow))
+                .err(),
+            Some(ReceiverRequirementError::NoShieldedReceiver)
+        );
+
+        // ... but preserves it when an operand is already transparent-only.
+        let intersected = ReceiverRequirements::TRANSPARENT_ONLY
+            .intersect(&ReceiverRequirements::ALLOW_ALL)
+            .expect("a transparent-only operand keeps the intersection transparent-only");
+        assert_eq!(intersected.orchard(), Omit);
+        assert_eq!(intersected.sapling(), Omit);
+        assert_eq!(intersected.p2pkh(), Require);
+
+        // The address generated for all of the key's available items retains the Sapling
+        // receiver.
+        let (addr, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        assert!(addr.has_sapling());
+        assert!(addr.has_transparent());
+
+        // `TRANSPARENT_ONLY` is a deliberate escape hatch: requesting it against a key that
+        // has a shielded item is documented misuse, not a rejected request.
+        let (addr, _) = ufvk
+            .default_address(UnifiedAddressRequest::TRANSPARENT_ONLY)
+            .unwrap();
+        assert!(!addr.has_sapling());
+        assert!(addr.has_transparent());
     }
 
     #[cfg(feature = "unstable")]

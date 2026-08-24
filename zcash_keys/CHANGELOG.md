@@ -27,6 +27,8 @@ workspace.
 - `zcash_keys::keys::P2shPolicy`
 - `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
+- `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`
+- `zcash_keys::keys::UnifiedAddressRequest::TRANSPARENT_ONLY`
 - ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
   `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
   - Address expiry height and expiry time metadata fields.
@@ -50,6 +52,20 @@ workspace.
   (transparent-including) encoding.
 - The `Sapling` and `Unified` variants of `zcash_keys::address::Address` now
   wrap their payloads in `Box` to reduce the enum's stack footprint.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::to_receiver_requirements`
+  returns `ReceiverRequirements::TRANSPARENT_ONLY` for a key having a transparent
+  item, no shielded item, and no data item that the build cannot interpret,
+  instead of `Err(ReceiverRequirementError::NoShieldedReceiver)`. Address
+  generation from such a key, including via
+  `UnifiedAddressRequest::AllAvailableKeys`, now produces a transparent-only
+  ZIP 316 Revision 2 (`tu`) Unified Address. A key having a data item that the
+  build cannot interpret, such as an item of a pool whose feature is disabled,
+  still returns `Err(ReceiverRequirementError::NoShieldedReceiver)`.
+- `zcash_keys::keys::ReceiverRequirements::intersect` permits a result having no
+  shielded receiver when an operand already had none.
+- `zcash_keys::keys::transparent::gap_limits::generate_address_list` propagates
+  `Err(AddressGenerationError::ShieldedReceiverRequired)` for an external-scope
+  address, instead of returning a bare transparent address for that error.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer
