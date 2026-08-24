@@ -102,6 +102,16 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // Rebuild the accounts table: drop FVK cache columns, add IVK cache columns.
         // Use PRAGMA legacy_alter_table to preserve views and foreign key references.
+        //
+        // The `zcashd_legacy_address_index` column was originally added as a nullable column,
+        // where NULL meant "not a zcashd legacy address". A wallet migrated by that edition of
+        // the `support_zcashd_wallet_import` migration therefore holds NULL in that column, and
+        // the `NOT NULL` constraint below rejects it; the column default cannot repair such a
+        // row, because the selected value is present and explicitly NULL. NULL and the
+        // `LEGACY_ADDRESS_INDEX_NULL` sentinel (-1) carry the same meaning, so coalesce to the
+        // sentinel. This rebuild is also where those wallets acquire the three-column
+        // `hd_account` index that they lack, because the indices below are recreated
+        // unconditionally.
         transaction.execute_batch(
             "CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +163,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 hd_seed_fingerprint, hd_account_index,
                 ufvk, uivk,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-                recover_until_height, has_spend_key, zcashd_legacy_address_index
+                recover_until_height, has_spend_key,
+                COALESCE(zcashd_legacy_address_index, -1)
             FROM accounts;
 
             PRAGMA legacy_alter_table = ON;
@@ -211,7 +222,10 @@ mod tests {
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
+        wallet::{
+            encoding::LEGACY_ADDRESS_INDEX_NULL,
+            init::{WalletMigrator, migrations::tests::test_migrate},
+        },
     };
 
     use super::{DEPENDENCIES, MIGRATION_ID};
@@ -294,5 +308,149 @@ mod tests {
             named_params![":sapling_ivk": sapling_ivk_cached],
         );
         assert_matches!(duplicate_result, Err(_));
+    }
+
+    /// The `support_zcashd_wallet_import` migration originally added
+    /// `zcashd_legacy_address_index` as a nullable column, and left the `hd_account` index
+    /// covering only two columns. A wallet migrated by that edition keeps both properties
+    /// forever, because the migration is recorded as applied. This migration must accept such a
+    /// wallet and bring it to the current schema.
+    #[test]
+    fn migrate_repairs_null_zcashd_legacy_address_index() {
+        let network = Network::TestNetwork;
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+
+        let seed_bytes = vec![0xab; 32];
+
+        // Migrate to database state just prior to this migration.
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes.clone()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
+
+        // Insert a test account.
+        let usk =
+            UnifiedSpendingKey::from_seed(&network, &seed_bytes, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let ufvk_str = ufvk.encode(&network);
+        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
+
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (uuid, account_kind, hd_seed_fingerprint,
+                 hd_account_index, ufvk, uivk, has_spend_key, birthday_height)
+                 VALUES (X'0000000000000000000000000000AAAA', 0,
+                 X'00000000000000000000000000000000000000000000000000000000000000AB',
+                 0, :ufvk, :uivk, 1, 1)",
+                named_params![":ufvk": ufvk_str, ":uivk": uivk_str],
+            )
+            .unwrap();
+
+        // Reproduce the schema and data that the original edition of the
+        // `support_zcashd_wallet_import` migration produced: `zcashd_legacy_address_index` is
+        // nullable and NULL for every account that existed when that migration ran, and
+        // `hd_account` still covers only `(hd_seed_fingerprint, hd_account_index)`.
+        db_data
+            .conn
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+
+                CREATE TABLE accounts_stranded (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    uuid BLOB NOT NULL,
+                    account_kind INTEGER NOT NULL DEFAULT 0,
+                    key_source TEXT,
+                    hd_seed_fingerprint BLOB,
+                    hd_account_index INTEGER,
+                    ufvk TEXT,
+                    uivk TEXT NOT NULL,
+                    orchard_fvk_item_cache BLOB,
+                    sapling_fvk_item_cache BLOB,
+                    p2pkh_fvk_item_cache BLOB,
+                    birthday_height INTEGER NOT NULL,
+                    birthday_sapling_tree_size INTEGER,
+                    birthday_orchard_tree_size INTEGER,
+                    recover_until_height INTEGER,
+                    has_spend_key INTEGER NOT NULL DEFAULT 1,
+                    zcashd_legacy_address_index INTEGER,
+                    CHECK (
+                      (
+                        account_kind = 0
+                        AND hd_seed_fingerprint IS NOT NULL
+                        AND hd_account_index IS NOT NULL
+                        AND ufvk IS NOT NULL
+                      )
+                      OR
+                      (
+                        account_kind = 1
+                        AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
+                      )
+                    )
+                );
+
+                INSERT INTO accounts_stranded (
+                    id, name, uuid, account_kind, key_source,
+                    hd_seed_fingerprint, hd_account_index, ufvk, uivk,
+                    orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                    birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                    recover_until_height, has_spend_key, zcashd_legacy_address_index
+                )
+                SELECT
+                    id, name, uuid, account_kind, key_source,
+                    hd_seed_fingerprint, hd_account_index, ufvk, uivk,
+                    orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                    birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                    recover_until_height, has_spend_key, NULL
+                FROM accounts;
+
+                PRAGMA legacy_alter_table = ON;
+                DROP TABLE accounts;
+                ALTER TABLE accounts_stranded RENAME TO accounts;
+                PRAGMA legacy_alter_table = OFF;
+
+                CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);
+                CREATE UNIQUE INDEX accounts_ufvk ON accounts (ufvk);
+                CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk);
+                CREATE UNIQUE INDEX hd_account
+                    ON accounts (hd_seed_fingerprint, hd_account_index);
+
+                PRAGMA foreign_keys = ON;",
+            )
+            .unwrap();
+
+        // Run the migration.
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
+
+        // The account survived, with the NULL replaced by the sentinel.
+        let legacy_address_index: i64 = db_data
+            .conn
+            .query_row(
+                "SELECT zcashd_legacy_address_index FROM accounts
+                 WHERE uuid = X'0000000000000000000000000000AAAA'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_address_index, LEGACY_ADDRESS_INDEX_NULL);
+
+        // The `hd_account` index now covers `zcashd_legacy_address_index`.
+        let hd_account_index_sql: String = db_data
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'hd_account'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(hd_account_index_sql.contains("zcashd_legacy_address_index"));
     }
 }
