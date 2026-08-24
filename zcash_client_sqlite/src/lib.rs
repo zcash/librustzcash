@@ -3939,11 +3939,11 @@ mod tests {
     use {
         crate::{AccountRef, wallet::transparent},
         ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-        rusqlite::named_params,
     };
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests},
+        rusqlite::named_params,
         std::collections::BTreeSet,
         zcash_client_backend::data_api::TransactionDataRequest,
     };
@@ -4482,6 +4482,152 @@ mod tests {
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == account.id()),
         );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn import_transparent_only_account_ufvk() {
+        use crate::wallet::encoding::KeyScope;
+        use ::transparent::keys::AccountPrivKey;
+        use zcash_protocol::consensus::{NetworkConstants, Parameters};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let network = *st.network();
+        let account_pubkey =
+            AccountPrivKey::from_seed(&network, &[7u8; 32], zip32::AccountId::ZERO)
+                .unwrap()
+                .to_account_pubkey();
+        let ufvk = UnifiedFullViewingKey::new(
+            Some(account_pubkey),
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "transparent-only",
+                &ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .expect("a transparent-only UFVK can be imported");
+
+        // The account was persisted with its (Revision 2-encoded) UFVK.
+        let stored = st
+            .wallet()
+            .get_account(account.id())
+            .unwrap()
+            .expect("the account was persisted");
+        assert_eq!(
+            stored
+                .ufvk()
+                .expect("the account has a UFVK")
+                .encode(&network),
+            ufvk.encode(&network),
+        );
+
+        // The account's default address was stored, and is a transparent-only Revision 2
+        // Unified Address. Matching on `AllAvailableKeys` also pins the stored row's
+        // `receiver_flags` to exactly P2PKH: a row with any shielded flag would not match.
+        let ua = st
+            .wallet()
+            .get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .expect("the default address was stored");
+        // The default address is derived at the smallest valid diversifier index.
+        assert_eq!(
+            ua.transparent(),
+            ufvk.default_transparent_address()
+                .map(|(addr, _)| addr)
+                .as_ref(),
+        );
+        assert!(ua.has_transparent());
+        assert!(!ua.has_sapling());
+        assert!(!ua.has_orchard());
+
+        // It round-trips through the `tu` encoding.
+        let encoded = ua.encode_receiver_preserving(&network);
+        assert!(
+            encoded.starts_with(network.network_type().hrp_unified_address_r2_ti()),
+            "{encoded} is not a transparent-including Revision 2 Unified Address",
+        );
+        assert_eq!(
+            Address::decode(&network, &encoded).expect("the stored address is decodable"),
+            Address::from(ua.clone()),
+        );
+
+        // The transparent gap-limit machinery ran for the external key scope: a gap limit's
+        // worth of external addresses are present, including the default address.
+        let gap_limits = st.wallet().db().gap_limits;
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(account.id(), false, false)
+            .unwrap();
+        assert_eq!(
+            receivers.len(),
+            usize::try_from(gap_limits.external()).unwrap()
+        );
+        assert!(receivers.contains_key(ua.transparent().unwrap()));
+
+        // Every external-scope address row is stored in the transparent-including Revision 2
+        // encoding, not as a bare transparent address.
+        let expected_hrp = network.network_type().hrp_unified_address_r2_ti();
+        let stored_addresses = st
+            .wallet()
+            .conn()
+            .prepare(
+                "SELECT a.address
+                 FROM addresses a
+                 JOIN accounts acc ON acc.id = a.account_id
+                 WHERE acc.uuid = :uuid AND a.key_scope = :key_scope",
+            )
+            .unwrap()
+            .query_map(
+                named_params![
+                    ":uuid": account.id().expose_uuid(),
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            stored_addresses.len(),
+            usize::try_from(gap_limits.external()).unwrap()
+        );
+        for address in &stored_addresses {
+            assert!(
+                address.starts_with(expected_hrp),
+                "stored address {address} is not a transparent-including Revision 2 Unified Address",
+            );
+        }
+
+        // Further addresses can be allocated for the account.
+        st.wallet_mut().update_chain_tip(birthday.height()).unwrap();
+        let next = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("a further address can be allocated")
+            .0;
+        assert!(next.has_transparent());
+        assert_ne!(next.transparent(), ua.transparent());
     }
 
     #[test]

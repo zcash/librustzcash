@@ -10,26 +10,23 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
-  `util::testing::FixedClock`) are now re-exports of the same-named types in
-  `zcash_client_backend::util`.
-
 ### Added
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
 
+### Changed
+- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
+  `util::testing::FixedClock`) are now re-exports of the same-named types in
+  `zcash_client_backend::util`.
+- `WalletWrite::import_account_ufvk` accepts a transparent-only unified full
+  viewing key; it previously failed with
+  `AddressGenerationError::ShieldedReceiverRequired`. The resulting account's
+  default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
+  Address.
+
 ### Fixed
-- Upgrading a wallet database whose `support_zcashd_wallet_import` migration
-  ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
-  accounts_new.zcashd_legacy_address_index`. In such a database every account
-  that existed at that time has a NULL `accounts.zcashd_legacy_address_index`;
-  the migration that rebuilds the `accounts` table now maps those to the
-  sentinel value that column has carried since, and gives the database the
-  `hd_account` uniqueness index over `(hd_seed_fingerprint, hd_account_index,
-  zcashd_legacy_address_index)`.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a
@@ -60,6 +57,14 @@ workspace.
   the notes of the largest single group instead of all of them.
 - `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
   no longer fail on wallets containing accounts imported by UIVK.
+- Upgrading a wallet database whose `support_zcashd_wallet_import` migration
+  ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
+  accounts_new.zcashd_legacy_address_index`. In such a database every account
+  that existed at that time has a NULL `accounts.zcashd_legacy_address_index`;
+  the migration that rebuilds the `accounts` table now maps those to the
+  sentinel value that column has carried since, and gives the database the
+  `hd_account` uniqueness index over `(hd_seed_fingerprint, hd_account_index,
+  zcashd_legacy_address_index)`.
 
 ## [0.22.0] - 2026-08-18
 
