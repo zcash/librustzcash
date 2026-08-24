@@ -549,7 +549,7 @@ pub enum AddressGenerationError {
     ///
     /// Omitting both shielded receiver types is permitted only for a key that has no shielded
     /// item; see [`ReceiverRequirements::TRANSPARENT_ONLY`].
-    ShieldedReceiverRequired,
+    NoSatisfiableReceiver,
 }
 
 impl fmt::Display for AddressGenerationError {
@@ -595,7 +595,7 @@ impl fmt::Display for AddressGenerationError {
                     "The Unified Viewing Key does not contain a key for typecode {t:?}."
                 )
             }
-            AddressGenerationError::ShieldedReceiverRequired => {
+            AddressGenerationError::NoSatisfiableReceiver => {
                 write!(
                     f,
                     "The address request permits no receiver that this Unified Viewing Key can provide."
@@ -1971,7 +1971,7 @@ impl UnifiedIncomingViewingKey {
     ) -> Result<UnifiedAddress, AddressGenerationError> {
         let request = self
             .receiver_requirements(request)
-            .map_err(|_| AddressGenerationError::ShieldedReceiverRequired)?;
+            .map_err(|_| AddressGenerationError::NoSatisfiableReceiver)?;
 
         // If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
@@ -2070,7 +2070,7 @@ impl UnifiedIncomingViewingKey {
             self.expiry_height,
             self.expiry_time,
         )
-        .ok_or(AddressGenerationError::ShieldedReceiverRequired)
+        .ok_or(AddressGenerationError::NoSatisfiableReceiver)
     }
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will produce
@@ -2165,7 +2165,7 @@ impl UnifiedIncomingViewingKey {
         match request {
             UnifiedAddressRequest::AllAvailableKeys => self
                 .to_receiver_requirements()
-                .map_err(|_| AddressGenerationError::ShieldedReceiverRequired),
+                .map_err(|_| AddressGenerationError::NoSatisfiableReceiver),
             UnifiedAddressRequest::Custom(req) => {
                 if req.orchard() == Require && !self.has_orchard() {
                     return Err(AddressGenerationError::ReceiverTypeNotSupported(
@@ -2906,7 +2906,7 @@ mod tests {
         );
         assert!(matches!(
             uivk.default_address(UnifiedAddressRequest::AllAvailableKeys),
-            Err(AddressGenerationError::ShieldedReceiverRequired)
+            Err(AddressGenerationError::NoSatisfiableReceiver)
         ));
 
         // The full viewing key form. Deriving its incoming viewing key cannot carry the
@@ -2935,7 +2935,7 @@ mod tests {
         );
         assert!(matches!(
             ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys),
-            Err(AddressGenerationError::ShieldedReceiverRequired)
+            Err(AddressGenerationError::NoSatisfiableReceiver)
         ));
 
         // Metadata items are not receivers, so they never prevent address generation.
@@ -2997,7 +2997,7 @@ mod tests {
             assert!(
                 matches!(
                     ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys),
-                    Err(AddressGenerationError::ShieldedReceiverRequired)
+                    Err(AddressGenerationError::NoSatisfiableReceiver)
                 ),
                 "account {} produced an address that discards its Orchard receiver",
                 tv.account

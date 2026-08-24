@@ -172,7 +172,7 @@ fn generate_external_address(
         })?;
 
     // A key that has nothing but a transparent item now yields a transparent-only unified
-    // address, so `ShieldedReceiverRequired` here means that the key has a data item that this
+    // address, so `NoSatisfiableReceiver` here means that the key has a data item that this
     // build cannot interpret, or that the request names a pool the key does not have. Emitting
     // a bare transparent address in either case would silently discard receiving capability
     // that the recipient has, so the error propagates.

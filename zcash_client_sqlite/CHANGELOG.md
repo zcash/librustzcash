@@ -22,7 +22,7 @@ workspace.
   `zcash_client_backend::util`.
 - `WalletWrite::import_account_ufvk` accepts a transparent-only unified full
   viewing key; it previously failed with
-  `AddressGenerationError::ShieldedReceiverRequired`. The resulting account's
+  `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
   default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
   Address.
 

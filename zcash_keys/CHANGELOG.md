@@ -64,8 +64,10 @@ workspace.
 - `zcash_keys::keys::ReceiverRequirements::intersect` permits a result having no
   shielded receiver when an operand already had none.
 - `zcash_keys::keys::transparent::gap_limits::generate_address_list` propagates
-  `Err(AddressGenerationError::ShieldedReceiverRequired)` for an external-scope
+  `Err(AddressGenerationError::NoSatisfiableReceiver)` for an external-scope
   address, instead of returning a bare transparent address for that error.
+- `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
+  renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer
