@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
+  `util::testing::FixedClock`) are now re-exports of the same-named types in
+  `zcash_client_backend::util`.
+
 ### Added
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
