@@ -2,28 +2,46 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
-use core::num::NonZeroU32;
+use core::num::{NonZeroU8, NonZeroU32};
+use std::convert::Infallible;
+
+use incrementalmerkletree::frontier::Frontier;
+use zcash_primitives::block::BlockHash;
 
 use crate::{
     SAPLING_TABLES_PREFIX,
     error::SqliteClientError,
     testing::{BlockCache, db::TestDbFactory},
-};
-use zcash_client_backend::data_api::{
-    WalletWrite,
-    anchor_retention::AnchorRetentionInterval,
-    chain::{ChainState, error::Error},
-    testing::{
-        AddressType,
-        pool::{InputTrust, ShieldedPoolTester, dsl::TestDsl},
-        sapling::SaplingPoolTester,
+    wallet::{
+        common::unscanned_tip_exists,
+        get_target_and_anchor_heights,
+        scanning::{priority_code, suggest_scan_ranges},
     },
+};
+use zcash_client_backend::{
+    data_api::{
+        Account as _, TargetValue, WalletWrite,
+        anchor_retention::AnchorRetentionInterval,
+        chain::{ChainState, CommitmentTreeRoot, error::Error},
+        scanning::{ScanPriority, spanning_tree::testing::scan_range},
+        testing::{
+            AddressType, InitialChainState, TestBuilder,
+            pool::{
+                InputTrust, ShieldedPoolTester,
+                dsl::{TestDsl, TestScenario},
+            },
+            sapling::SaplingPoolTester,
+        },
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
+    fees::StandardFeeRule,
+    wallet::OvkPolicy,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use rusqlite::named_params;
 use zcash_protocol::{
-    consensus::{NetworkUpgrade, Parameters},
+    consensus::{BlockHeight, NetworkUpgrade, Parameters},
     value::Zatoshis,
 };
 #[cfg(feature = "orchard")]
@@ -1020,5 +1038,304 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
     zcash_client_backend::data_api::testing::pool::proposal_records_and_serializes_proposed_version(
         TestDbFactory::default(),
         BlockCache::new(),
+    );
+}
+
+/// Builds a wallet whose birthday lies within the second (incomplete) note commitment tree
+/// shard of each pool, with the first shard having been completed ten blocks before the
+/// birthday. This is the steady state of a wallet on a live chain: the completed prior shard
+/// gives `update_chain_tip` a tip shard to complete, so that advancing the chain tip queues a
+/// `ChainTip` range rather than the `Historic` range used for linear scanning.
+fn tip_shard_scenario<T: ShieldedPoolTester>() -> TestDsl<TestScenario<T, BlockCache, TestDbFactory>>
+{
+    // The frontiers at the block prior to the birthday sit 1234 notes into the second shard.
+    let frontier_tree_size: u32 = (0x1 << 16) + 1234;
+    let builder = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory::default())
+        .with_block_cache(BlockCache::new())
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 76;
+            let shard_end_height = birthday_height - 10;
+
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(shard_end_height, root))
+                .collect::<Vec<_>>();
+
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(shard_end_height, root))
+                .collect::<Vec<_>>();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([0; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .with_account_having_current_birthday();
+
+    TestDsl::from(builder).build::<T>()
+}
+
+/// Receives a single note into the (incomplete) tip shard and scans the block containing it,
+/// so that the wallet is scanned to its view of the chain tip. Checks that the note is not
+/// stabilized and is spendable according to both the wallet summary and note selection, and
+/// returns the height at which it was received.
+fn receive_note_in_tip_shard<T: ShieldedPoolTester + ShieldedPoolPersistence>(
+    st: &mut TestDsl<TestScenario<T, BlockCache, TestDbFactory>>,
+    value: Zatoshis,
+) -> BlockHeight {
+    let account_id = st.get_account().id();
+    let (h, _, _) = st.add_a_single_note_checking_balance(value);
+
+    // The note is in the (incomplete) tip shard and has not been stabilized, so its
+    // spendability is governed by the shard scan state.
+    let witness_stabilized: bool = st
+        .wallet()
+        .conn()
+        .query_row(
+            &format!(
+                "SELECT witness_stabilized FROM {}_received_notes",
+                T::TABLES_PREFIX
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!witness_stabilized);
+
+    // Scanned to the tip: the note is spendable at one confirmation, both according to the
+    // wallet summary and to note selection.
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+    let spendable = T::select_spendable_notes(
+        st,
+        account_id,
+        TargetValue::AtLeast(value),
+        TargetHeight::from(h + 1),
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(spendable.len(), 1);
+
+    h
+}
+
+/// Advances the wallet's view of the chain tip by `blocks` without scanning, and asserts that
+/// a `ChainTip` range beginning just above the previously scanned height was queued.
+fn advance_chain_tip_without_scanning<T: ShieldedPoolTester + ShieldedPoolPersistence>(
+    st: &mut TestDsl<TestScenario<T, BlockCache, TestDbFactory>>,
+    max_scanned: BlockHeight,
+    blocks: u32,
+) -> BlockHeight {
+    let new_tip = max_scanned + blocks;
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+    let queued = suggest_scan_ranges(st.wallet().conn(), ScanPriority::ChainTip).unwrap();
+    assert_eq!(
+        queued,
+        vec![scan_range(
+            (max_scanned + 1).into()..(new_tip + 1).into(),
+            ScanPriority::ChainTip
+        )]
+    );
+
+    // The premise of the fix: `update_chain_tip` raises the target height to `new_tip + 1` but
+    // creates no checkpoints, and the anchor is clamped to the newest checkpoint at or below
+    // `target - min_confirmations`, so it remains at the old scan frontier, strictly below the
+    // start of the queued `ChainTip` range.
+    let (target_height, anchor_height) =
+        get_target_and_anchor_heights(st.wallet().conn(), ConfirmationsPolicy::default().trusted())
+            .unwrap()
+            .expect("chain tip and anchor are known");
+    assert_eq!(target_height, TargetHeight::from(new_tip + 1));
+    assert_eq!(anchor_height, max_scanned);
+    assert!(anchor_height < queued[0].block_range().start);
+
+    new_tip
+}
+
+/// Asserts that the per-pool gate (`unscanned_tip_exists`, shared by the wallet summary and
+/// note selection), the wallet summary's spendable balance, and note selection all agree on
+/// whether the wallet's single note is spendable under `policy`.
+fn assert_gates_agree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
+    st: &TestDsl<TestScenario<T, BlockCache, TestDbFactory>>,
+    policy: ConfirmationsPolicy,
+    value: Zatoshis,
+    expect_spendable: bool,
+) {
+    let account_id = st.get_account().id();
+    let (target_height, anchor_height) =
+        get_target_and_anchor_heights(st.wallet().conn(), policy.trusted())
+            .unwrap()
+            .expect("chain tip and anchor are known");
+
+    let tip_unscanned =
+        unscanned_tip_exists(st.wallet().conn(), anchor_height, T::TABLES_PREFIX).unwrap();
+    assert_eq!(tip_unscanned, !expect_spendable);
+
+    let (expected_spendable, expected_pending) = if expect_spendable {
+        (value, Zatoshis::ZERO)
+    } else {
+        (Zatoshis::ZERO, value)
+    };
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        expected_spendable
+    );
+    assert_eq!(
+        st.get_pending_shielded_balance(account_id, policy),
+        expected_pending
+    );
+
+    let spendable = T::select_spendable_notes(
+        st,
+        account_id,
+        TargetValue::AtLeast(value),
+        target_height,
+        policy,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(spendable.len(), usize::from(expect_spendable));
+    if let Some(note) = spendable.first() {
+        assert_eq!(T::note_value(note.note()), value);
+    }
+}
+
+/// A non-stabilized note in the tip shard remains spendable, both according to the wallet
+/// summary and to note selection, after the wallet's view of the chain tip is advanced without
+/// the intervening blocks having been scanned. The `ChainTip` range queued by `update_chain_tip`
+/// lies entirely above the anchor and so cannot affect the witness at the anchor.
+///
+/// This is the mobile-wallet failure mode in which the UI reports a spendable balance and a
+/// subsequent proposal fails with `InsufficientFunds { available: 0 }`.
+pub(crate) fn tip_shard_notes_remain_spendable_after_chain_tip_update<
+    T: ShieldedPoolTester + ShieldedPoolPersistence,
+>() {
+    let mut st = tip_shard_scenario::<T>();
+    let account = st.get_account();
+    let account_id = account.id();
+
+    let value = Zatoshis::const_from_u64(100_000);
+    let h = receive_note_in_tip_shard(&mut st, value);
+
+    // Advance the chain tip without scanning; the tip-shard `ChainTip` range now overlaps the
+    // note's shard, but begins above the anchor.
+    advance_chain_tip_without_scanning(&mut st, h, 50);
+
+    // The per-pool gate, the summary and note selection all still report the note as
+    // spendable. The default policy requires more confirmations than the minimum, which the
+    // note has (relative to the advanced tip) even though it did not at the time it was
+    // scanned.
+    for policy in [ConfirmationsPolicy::MIN, ConfirmationsPolicy::default()] {
+        assert_gates_agree(&st, policy, value, true);
+    }
+
+    // A transfer proposal therefore succeeds.
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            StandardFeeRule::Zip317,
+            ConfirmationsPolicy::default(),
+            &to,
+            Zatoshis::const_from_u64(60_000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+    assert_eq!(proposal.steps().len(), 1);
+    assert_eq!(
+        proposal
+            .steps()
+            .head
+            .shielded_inputs()
+            .map(|i| i.notes().len()),
+        Some(1)
+    );
+
+    // Executing the proposal (which constructs the witness at the anchor) also succeeds.
+    st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    )
+    .unwrap();
+}
+
+/// An unscanned range that begins at or below the anchor height still renders a non-stabilized
+/// note in the affected shard unspendable, according to both the wallet summary and note
+/// selection, since it may contain note commitments that are part of the tree state at the
+/// anchor.
+pub(crate) fn unscanned_range_below_anchor_blocks_spendability<
+    T: ShieldedPoolTester + ShieldedPoolPersistence,
+>() {
+    let mut st = tip_shard_scenario::<T>();
+
+    let value = Zatoshis::const_from_u64(100_000);
+    let h = receive_note_in_tip_shard(&mut st, value);
+    advance_chain_tip_without_scanning(&mut st, h, 50);
+    assert_gates_agree(&st, ConfirmationsPolicy::MIN, value, true);
+
+    // Simulate the state following a rewind in which the block at the anchor height (the block
+    // in which the note was received) must be re-verified: the scan queue entry covering that
+    // block is marked `Verify`, so a range starting at or below the anchor is now unscanned.
+    let updated = st
+        .wallet()
+        .conn()
+        .execute(
+            "UPDATE scan_queue SET priority = :priority
+             WHERE block_range_start <= :height AND block_range_end > :height",
+            rusqlite::named_params![
+                ":priority": priority_code(&ScanPriority::Verify),
+                ":height": u32::from(h),
+            ],
+        )
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    // The per-pool gate, the summary and note selection all now report the note as not
+    // spendable.
+    for policy in [ConfirmationsPolicy::MIN, ConfirmationsPolicy::default()] {
+        assert_gates_agree(&st, policy, value, false);
+    }
+
+    // A transfer proposal therefore fails for lack of spendable funds.
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    st.expect_insufficient_funds_with(
+        &to,
+        Zatoshis::const_from_u64(60_000),
+        ConfirmationsPolicy::default(),
+        Zatoshis::ZERO,
+        Zatoshis::const_from_u64(70_000),
     );
 }

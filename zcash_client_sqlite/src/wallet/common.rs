@@ -144,26 +144,81 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
     )
 }
 
-fn unscanned_tip_exists(
+/// Returns a SQL subquery selecting the rows of `v_{table_prefix}_shard_scan_ranges` whose
+/// `block_range_start` is at or below `:anchor_height`.
+///
+/// This is the single definition of which scan queue entries can affect a witness at the anchor;
+/// every spendability gate ([`unscanned_tip_exists`], [`shard_scan_state_at_anchor`],
+/// [`shard_unscanned_ranges_at_anchor`]) is built from it so that [`get_wallet_summary`] and note
+/// selection cannot disagree.
+///
+/// A witness depends only on the tree state at the anchor, i.e. on blocks at or below it, all of
+/// which have been scanned (the anchor is clamped to a checkpoint, and checkpoints exist only for
+/// scanned blocks). A range starting above the anchor — e.g. the `ChainTip` range queued by
+/// [`update_chain_tip`] before any of it is scanned — therefore must not disqualify notes, even
+/// though it overlaps the tip shard. A range starting at or below the anchor may cover blocks
+/// that are part of the tree at the anchor, and still disqualifies the shards it overlaps.
+///
+/// The parent query must bind `:anchor_height`; if it is `NULL`, the subquery yields no rows.
+///
+/// [`update_chain_tip`]: crate::wallet::scanning::update_chain_tip
+/// [`get_wallet_summary`]: crate::wallet::get_wallet_summary
+pub(crate) fn shard_scan_ranges_at_anchor(table_prefix: &str) -> String {
+    format!(
+        "SELECT * FROM v_{table_prefix}_shard_scan_ranges
+         WHERE block_range_start <= :anchor_height"
+    )
+}
+
+/// Returns a SQL subquery computing, per shard, the maximum priority of the scan queue entries
+/// selected by [`shard_scan_ranges_at_anchor`]. A note whose shard's `max_priority` exceeds
+/// `Scanned` (or is `NULL`, when no anchor is bound) has no available witness.
+pub(crate) fn shard_scan_state_at_anchor(table_prefix: &str) -> String {
+    format!(
+        "SELECT
+             start_position,
+             end_position_exclusive,
+             MAX(priority) AS max_priority
+         FROM ({})
+         GROUP BY start_position, end_position_exclusive",
+        shard_scan_ranges_at_anchor(table_prefix)
+    )
+}
+
+/// [`shard_scan_ranges_at_anchor`] restricted to unscanned entries ending after the wallet
+/// birthday, i.e. `v_{table_prefix}_shard_unscanned_ranges` restricted to the anchor.
+pub(crate) fn shard_unscanned_ranges_at_anchor(table_prefix: &str) -> String {
+    format!(
+        "SELECT * FROM ({})
+         WHERE priority > {}
+         AND block_range_end > (SELECT MIN(birthday_height) FROM accounts)",
+        shard_scan_ranges_at_anchor(table_prefix),
+        priority_code(&ScanPriority::Scanned),
+    )
+}
+
+/// Returns whether the shard containing the anchor height has unscanned entries at or below the
+/// anchor. Every witness needs the tree frontier at the anchor, so if that shard is incomplete
+/// no non-stabilized note of the pool is spendable.
+pub(crate) fn unscanned_tip_exists(
     conn: &Connection,
     anchor_height: BlockHeight,
     table_prefix: &'static str,
-) -> Result<bool, rusqlite::Error> {
-    // v_sapling_shard_unscanned_ranges only returns ranges ending on or after wallet birthday, so
-    // we don't need to refer to the birthday in this query.
+) -> Result<bool, SqliteClientError> {
     conn.query_row(
         &format!(
             "SELECT EXISTS (
-                 SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges range
-                 WHERE range.block_range_start <= :anchor_height
-                 AND :anchor_height BETWEEN
+                 SELECT 1 FROM ({}) range
+                 WHERE :anchor_height BETWEEN
                     range.subtree_start_height
                     AND IFNULL(range.subtree_end_height, :anchor_height)
-             )"
+             )",
+            shard_unscanned_ranges_at_anchor(table_prefix)
         ),
-        named_params![":anchor_height": u32::from(anchor_height),],
+        named_params![":anchor_height": u32::from(anchor_height)],
         |row| row.get::<_, bool>(0),
     )
+    .map_err(SqliteClientError::from)
 }
 
 /// Retrieves the set of nullifiers for "potentially spendable" notes that the wallet is tracking.
@@ -489,7 +544,7 @@ where
          FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-         LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+         LEFT OUTER JOIN ({shard_scan_state}) scan_state
             ON rn.commitment_tree_position >= scan_state.start_position
             AND rn.commitment_tree_position < scan_state.end_position_exclusive
          LEFT OUTER JOIN transparent_received_output_spends ros
@@ -511,7 +566,8 @@ where
          GROUP BY rn.id",
         tx_unexpired_condition("t"),
         spent_notes_clause(table_prefix),
-        output_eligible_condition(lock_filter, "rn")
+        output_eligible_condition(lock_filter, "rn"),
+        shard_scan_state = shard_scan_state_at_anchor(table_prefix),
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -528,11 +584,15 @@ where
 
     let account_uuid = account.0;
     let target_height_arg = u32::from(target_height);
+    // When the request carries no anchor, no shard scan state is produced and no
+    // non-stabilized note is considered to have an available witness.
+    let anchor_height_arg = note_request.anchor_height().map(u32::from);
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),
         (":target_height", &target_height_arg),
+        (":anchor_height", &anchor_height_arg),
         (":exclude", &excluded_ptr),
         (":min_value", &min_value),
     ];
@@ -575,6 +635,10 @@ where
                 tx_trusted,
                 tx_shielding_inputs_trusted,
             ) => {
+                // The shard scan priority only accounts for scan ranges that begin at or below
+                // the anchor height (see `shard_scan_state_at_anchor`); a `None` value indicates
+                // either that the note is not positioned in the tree or that no anchor was
+                // requested, in which case no witness can be produced.
                 let shard_witness_available = witness_stabilized
                     || max_shard_priority.is_some_and(|p| p <= ScanPriority::Scanned);
 
@@ -756,7 +820,7 @@ where
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+             LEFT OUTER JOIN ({shard_scan_state}) scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
              LEFT OUTER JOIN transparent_received_output_spends ros
@@ -779,8 +843,8 @@ where
              AND (
                  rn.witness_stabilized = 1
                  OR (
-                     :tip_unscanned = 0 -- the tip shard has no unscanned ranges
-                     AND scan_state.max_priority <= :scanned_priority -- the note shard is fully scanned or ignored
+                     :tip_unscanned = 0 -- the anchor shard has no unscanned ranges below the anchor
+                     AND scan_state.max_priority <= :scanned_priority -- the note shard is fully scanned or ignored below the anchor
                  )
              )
              AND rn.id NOT IN rarray(:exclude)
@@ -790,6 +854,7 @@ where
          )
          {selection_tail}",
         spent_notes_clause(table_prefix),
+        shard_scan_state = shard_scan_state_at_anchor(table_prefix),
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -937,16 +1002,16 @@ pub(crate) fn select_unspent_note_meta(
          AND commitment_tree_position IS NOT NULL
          AND rn.id NOT IN ({})
          AND NOT EXISTS (
-            SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
-            -- select all the unscanned ranges involving the shard containing this note
+            -- select all the unscanned ranges relevant at the anchor that involve the shard
+            -- containing this note
+            SELECT 1 FROM ({}) unscanned
             WHERE rn.commitment_tree_position >= unscanned.start_position
             AND rn.commitment_tree_position < unscanned.end_position_exclusive
-            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-            AND unscanned.block_range_start <= :anchor_height
             -- exclude unscanned ranges that end below the wallet birthday
             AND unscanned.block_range_end > :wallet_birthday
          )",
-         spent_notes_clause(table_prefix)
+        spent_notes_clause(table_prefix),
+        shard_unscanned_ranges_at_anchor(table_prefix),
     ))?;
 
     let res = stmt

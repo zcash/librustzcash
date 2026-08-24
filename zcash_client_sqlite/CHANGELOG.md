@@ -17,6 +17,18 @@ workspace.
   previously conflated with `transactions_without_wallet_relevance`.
 
 ### Fixed
+- Notes in the note commitment tree shard at the chain tip are no longer
+  reported as unspendable, and excluded from note selection, merely because
+  `WalletWrite::update_chain_tip` has queued a scan range (between the
+  previously scanned height and the new chain tip) that has not yet been
+  scanned. Only unscanned ranges that begin at or below the anchor height can
+  affect the witness of a note at the anchor, so only those now disqualify a
+  note whose witness has not been stabilized. Previously, every advance of the
+  chain tip caused the spendable balance of every non-stabilized note in the
+  tip shard to drop to zero until the tip range was scanned, so that a spend
+  proposed against a just-reported balance could fail with
+  `InsufficientFunds { available: 0 }`. The wallet summary and note selection
+  now share the same shard scan state query, so they cannot disagree on this.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a

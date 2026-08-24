@@ -2767,35 +2767,15 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     {
         let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
-        // If the shard containing the anchor height contains any unscanned ranges that start
-        // below or including that height, none of our shielded balance is currently spendable.
-        #[tracing::instrument(skip_all)]
-        fn is_any_spendable(
-            conn: &rusqlite::Connection,
-            anchor_height: BlockHeight,
-            table_prefix: &'static str,
-        ) -> Result<bool, SqliteClientError> {
-            conn.query_row(
-                &format!(
-                    "SELECT NOT EXISTS(
-                         SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges
-                         WHERE :anchor_height
-                            BETWEEN subtree_start_height
-                            AND IFNULL(subtree_end_height, :anchor_height)
-                         AND block_range_start <= :anchor_height
-                     )"
-                ),
-                named_params![":anchor_height": u32::from(anchor_height)],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|e| e.into())
-        }
+        // If the shard containing the anchor height contains any unscanned ranges relevant at
+        // the anchor (see `common::shard_scan_ranges_at_anchor`), none of our shielded balance
+        // is currently spendable. This is the same check that note selection performs.
+        let any_spendable = anchor_height.map_or(Ok(false), |h| {
+            common::unscanned_tip_exists(tx, h, table_prefix).map(|unscanned| !unscanned)
+        })?;
 
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-
-        let any_spendable =
-            anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
@@ -2809,7 +2789,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+             LEFT OUTER JOIN ({shard_scan_state}) scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
              LEFT OUTER JOIN transparent_received_output_spends ros
@@ -2824,10 +2804,14 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
              GROUP BY rn.id",
             common::tx_unexpired_condition("t"),
             common::spent_notes_clause(table_prefix),
+            shard_scan_state = common::shard_scan_state_at_anchor(table_prefix),
         ))?;
 
         let mut rows = stmt_select_notes.query(named_params![
             ":target_height": u32::from(target_height),
+            // With no anchor, the shard scan state is empty and every non-stabilized note
+            // is reported as pending spendability, consistent with `any_spendable`.
+            ":anchor_height": anchor_height.map(u32::from),
         ])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
@@ -2846,9 +2830,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .map(KeyScope::decode)
                 .transpose()?;
 
-            // If `max_priority` is null, this means that the note is not positioned; the note
-            // will not be spendable, so we assign the scan priority to `ChainTip` as a priority
-            // that is greater than `Scanned`
+            // If `max_priority` is null, this means that the note is not positioned (or that no
+            // anchor is available); the note will not be spendable, so we assign the scan
+            // priority to `ChainTip` as a priority that is greater than `Scanned`. Otherwise it
+            // is the maximum priority among the scan ranges overlapping the note's shard that
+            // begin at or below the anchor height; see `common::shard_scan_state_at_anchor` for
+            // why ranges above the anchor are excluded, and note that the identical gate is
+            // applied by note selection.
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
             let max_priority = max_priority_raw.map_or_else(
                 || Ok(ScanPriority::ChainTip),

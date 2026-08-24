@@ -599,6 +599,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn tip_shard_notes_remain_spendable_after_chain_tip_update() {
+        testing::pool::tip_shard_notes_remain_spendable_after_chain_tip_update::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    fn unscanned_range_below_anchor_blocks_spendability() {
+        testing::pool::unscanned_range_below_anchor_blocks_spendability::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>()
     }
