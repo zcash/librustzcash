@@ -25,11 +25,14 @@ use ReceiverRequirement::*;
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::consensus::NetworkConstants;
 
+#[cfg(feature = "transparent-inputs")]
 #[cfg(all(
     feature = "transparent-inputs",
     any(test, feature = "test-dependencies")
 ))]
 use ::transparent::address::TransparentAddress;
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::zip48::{P2shFullViewingKey, P2shIncomingViewingKey};
 
 #[cfg(feature = "unstable")]
 use {
@@ -288,7 +291,7 @@ impl UnifiedSpendingKey {
     pub fn to_unified_full_viewing_key(&self) -> UnifiedFullViewingKey {
         UnifiedFullViewingKey {
             #[cfg(feature = "transparent-inputs")]
-            transparent: Some(self.transparent.to_account_pubkey()),
+            transparent: Some(TransparentFvk::P2pkh(self.transparent.to_account_pubkey())),
             #[cfg(feature = "sapling")]
             sapling: Some(self.sapling.to_diversifiable_full_viewing_key()),
             #[cfg(feature = "orchard")]
@@ -852,7 +855,7 @@ impl AsRef<[u8; 32]> for OutgoingViewingKey {
 #[derive(Clone)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<::transparent::keys::AccountPubKey>,
+    transparent: Option<TransparentFvk>,
     #[cfg(feature = "sapling")]
     sapling: Option<sapling::DiversifiableFullViewingKey>,
     #[cfg(feature = "orchard")]
@@ -863,11 +866,35 @@ pub struct UnifiedFullViewingKey {
     unknown_metadata: Vec<(u32, Vec<u8>)>,
 }
 
+/// The transparent component of a [`UnifiedFullViewingKey`].
+///
+/// ZIP 316 permits a unified viewing key to contain at most one transparent item, and
+/// requires consumers to reject a key that carries both a P2PKH and a P2SH item.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, PartialEq, Eq)]
+enum TransparentFvk {
+    P2pkh(::transparent::keys::AccountPubKey),
+    P2sh(P2shFullViewingKey),
+}
+
+/// The transparent component of a [`UnifiedIncomingViewingKey`].
+///
+/// ZIP 316 permits a unified viewing key to contain at most one transparent item, and
+/// requires consumers to reject a key that carries both a P2PKH and a P2SH item.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, PartialEq, Eq)]
+enum TransparentIvk {
+    P2pkh(::transparent::keys::ExternalIvk),
+    P2sh(P2shIncomingViewingKey),
+}
+
 impl core::fmt::Debug for UnifiedFullViewingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = f.debug_struct("UnifiedFullViewingKey");
         #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &self.transparent.as_ref().map(|_| "..."));
+        d.field("p2pkh", &self.p2pkh().map(|_| "..."));
+        #[cfg(feature = "transparent-inputs")]
+        d.field("p2sh", &self.p2sh());
         #[cfg(feature = "sapling")]
         d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
         #[cfg(feature = "orchard")]
@@ -911,7 +938,7 @@ impl UnifiedFullViewingKey {
     ) -> Result<UnifiedFullViewingKey, DerivationError> {
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
-            transparent,
+            transparent.map(TransparentFvk::P2pkh),
             #[cfg(feature = "sapling")]
             sapling,
             #[cfg(feature = "orchard")]
@@ -961,10 +988,9 @@ impl UnifiedFullViewingKey {
 
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
+    #[allow(clippy::too_many_arguments)]
     fn from_checked_parts(
-        #[cfg(feature = "transparent-inputs")] transparent: Option<
-            ::transparent::keys::AccountPubKey,
-        >,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<TransparentFvk>,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         unknown: Vec<(u32, Vec<u8>)>,
@@ -972,13 +998,19 @@ impl UnifiedFullViewingKey {
         expiry_time: Option<u64>,
         unknown_metadata: Vec<(u32, Vec<u8>)>,
     ) -> Result<UnifiedFullViewingKey, DerivationError> {
-        // Verify that IVK derivation succeeds; we don't want to construct a UFVK
-        // that can't derive transparent addresses.
+        // Verify that the incoming viewing key form of the transparent component is
+        // derivable; we don't want to construct a UFVK that can't derive transparent
+        // addresses.
         #[cfg(feature = "transparent-inputs")]
-        let _ = transparent
-            .as_ref()
-            .map(|t| t.derive_external_ivk())
-            .transpose()?;
+        match transparent.as_ref() {
+            Some(TransparentFvk::P2pkh(k)) => {
+                let _ = k.derive_external_ivk()?;
+            }
+            Some(TransparentFvk::P2sh(p)) => {
+                let _ = p.to_incoming_viewing_key()?;
+            }
+            None => {}
+        }
 
         Ok(UnifiedFullViewingKey {
             #[cfg(feature = "transparent-inputs")]
@@ -1051,13 +1083,24 @@ impl UnifiedFullViewingKey {
                 Uitem::Data(unified::Fvk::P2pkh(data)) => {
                     #[cfg(feature = "transparent-inputs")]
                     {
-                        transparent = Some(
+                        transparent = Some(TransparentFvk::P2pkh(
                             ::transparent::keys::AccountPubKey::deserialize(data)
                                 .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
-                        );
+                        ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
                     unknown.push((u32::from(unified::Typecode::P2PKH), data.to_vec()));
+                }
+                Uitem::Data(unified::Fvk::P2sh(data)) => {
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        transparent = Some(TransparentFvk::P2sh(
+                            P2shFullViewingKey::parse(data)
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2SH))?,
+                        ));
+                    }
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    unknown.push((u32::from(unified::Typecode::P2SH), data.to_vec()));
                 }
                 Uitem::Data(unified::Fvk::Unknown { typecode, data }) => {
                     unknown.push((*typecode, data.clone()));
@@ -1121,12 +1164,12 @@ impl UnifiedFullViewingKey {
                 .map(unified::Fvk::Sapling),
         );
         #[cfg(feature = "transparent-inputs")]
-        let data_items = data_items.chain(
-            self.transparent
-                .as_ref()
-                .map(|tfvk| tfvk.serialize().try_into().unwrap())
-                .map(unified::Fvk::P2pkh),
-        );
+        let data_items = data_items.chain(self.transparent.as_ref().map(|t| match t {
+            TransparentFvk::P2pkh(k) => {
+                unified::Fvk::P2pkh(k.serialize().try_into().expect("key is 65 bytes"))
+            }
+            TransparentFvk::P2sh(p) => unified::Fvk::P2sh(p.to_bytes()),
+        }));
 
         let meta_items = core::iter::empty()
             .chain(self.unknown_metadata.iter().map(|(typecode, data)| {
@@ -1155,9 +1198,15 @@ impl UnifiedFullViewingKey {
     pub fn to_unified_incoming_viewing_key(&self) -> UnifiedIncomingViewingKey {
         UnifiedIncomingViewingKey {
             #[cfg(feature = "transparent-inputs")]
-            transparent: self.transparent.as_ref().map(|t| {
-                t.derive_external_ivk()
-                    .expect("Transparent IVK derivation was checked at construction.")
+            transparent: self.transparent.as_ref().map(|t| match t {
+                TransparentFvk::P2pkh(k) => TransparentIvk::P2pkh(
+                    k.derive_external_ivk()
+                        .expect("Transparent IVK derivation was checked at construction."),
+                ),
+                TransparentFvk::P2sh(p) => TransparentIvk::P2sh(
+                    p.to_incoming_viewing_key()
+                        .expect("P2SH IVK derivation was checked at construction."),
+                ),
             }),
             #[cfg(feature = "sapling")]
             sapling: self.sapling.as_ref().map(|s| s.to_external_ivk()),
@@ -1170,11 +1219,37 @@ impl UnifiedFullViewingKey {
         }
     }
 
-    /// Returns the transparent component of the unified key at the
-    /// BIP44 path `m/44'/<coin_type>'/<account>'`.
+    /// Returns the P2PKH component of the unified key at the
+    /// BIP44 path `m/44'/<coin_type>'/<account>'`, if present.
     #[cfg(feature = "transparent-inputs")]
+    #[deprecated(note = "Use `UnifiedFullViewingKey::p2pkh` instead.")]
     pub fn transparent(&self) -> Option<&::transparent::keys::AccountPubKey> {
-        self.transparent.as_ref()
+        self.p2pkh()
+    }
+
+    /// Returns the P2PKH component of the unified key at the
+    /// BIP44 path `m/44'/<coin_type>'/<account>'`, if present.
+    ///
+    /// Returns `None` if the key has no transparent component, or carries a P2SH viewing
+    /// key item instead; the two are mutually exclusive.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn p2pkh(&self) -> Option<&::transparent::keys::AccountPubKey> {
+        match self.transparent.as_ref() {
+            Some(TransparentFvk::P2pkh(k)) => Some(k),
+            Some(TransparentFvk::P2sh(_)) | None => None,
+        }
+    }
+
+    /// Returns the P2SH viewing key item of this unified key, if present.
+    ///
+    /// Returns `None` if the key has no transparent component, or carries a P2PKH
+    /// viewing key instead; the two are mutually exclusive.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn p2sh(&self) -> Option<&P2shFullViewingKey> {
+        match self.transparent.as_ref() {
+            Some(TransparentFvk::P2sh(p)) => Some(p),
+            Some(TransparentFvk::P2pkh(_)) | None => None,
+        }
     }
 
     /// Returns the Sapling diversifiable full viewing key component of this unified key.
@@ -1314,7 +1389,7 @@ impl UnifiedFullViewingKey {
     pub fn default_transparent_address(
         &self,
     ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
-        self.transparent().map(|k| {
+        self.p2pkh().map(|k| {
             k.derive_external_ivk()
                 .expect("ability to derive the external IVK was checked at construction")
                 .default_address()
@@ -1363,7 +1438,7 @@ impl UnifiedFullViewingKey {
         if let Some(ovk) = input_sources
             .contains(&PoolType::Transparent)
             .then(|| {
-                self.transparent().map(|k| {
+                self.p2pkh().map(|k| {
                     OutgoingViewingKey(match scope {
                         zip32::Scope::External => k.external_ovk().as_bytes(),
                         zip32::Scope::Internal => k.internal_ovk().as_bytes(),
@@ -1383,7 +1458,7 @@ impl UnifiedFullViewingKey {
 #[derive(Clone)]
 pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<::transparent::keys::ExternalIvk>,
+    transparent: Option<TransparentIvk>,
     #[cfg(feature = "sapling")]
     sapling: Option<::sapling::zip32::IncomingViewingKey>,
     #[cfg(feature = "orchard")]
@@ -1398,7 +1473,9 @@ impl core::fmt::Debug for UnifiedIncomingViewingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = f.debug_struct("UnifiedIncomingViewingKey");
         #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &self.transparent);
+        d.field("p2pkh", &self.p2pkh().map(|_| "..."));
+        #[cfg(feature = "transparent-inputs")]
+        d.field("p2sh", &self.p2sh());
         #[cfg(feature = "sapling")]
         d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
         #[cfg(feature = "orchard")]
@@ -1453,7 +1530,7 @@ impl UnifiedIncomingViewingKey {
     ) -> UnifiedIncomingViewingKey {
         UnifiedIncomingViewingKey {
             #[cfg(feature = "transparent-inputs")]
-            transparent,
+            transparent: transparent.map(TransparentIvk::P2pkh),
             #[cfg(feature = "sapling")]
             sapling,
             #[cfg(feature = "orchard")]
@@ -1520,13 +1597,24 @@ impl UnifiedIncomingViewingKey {
                 Uitem::Data(unified::Ivk::P2pkh(data)) => {
                     #[cfg(feature = "transparent-inputs")]
                     {
-                        transparent = Some(
+                        transparent = Some(TransparentIvk::P2pkh(
                             ::transparent::keys::ExternalIvk::deserialize(data)
                                 .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
-                        );
+                        ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
                     unknown.push((u32::from(unified::Typecode::P2PKH), data.to_vec()));
+                }
+                Uitem::Data(unified::Ivk::P2sh(data)) => {
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        transparent = Some(TransparentIvk::P2sh(
+                            P2shIncomingViewingKey::parse(data)
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2SH))?,
+                        ));
+                    }
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    unknown.push((u32::from(unified::Typecode::P2SH), data.to_vec()));
                 }
                 Uitem::Data(unified::Ivk::Unknown { typecode, data }) => {
                     unknown.push((*typecode, data.clone()));
@@ -1589,12 +1677,12 @@ impl UnifiedIncomingViewingKey {
                 .map(unified::Ivk::Sapling),
         );
         #[cfg(feature = "transparent-inputs")]
-        let data_items = data_items.chain(
-            self.transparent
-                .as_ref()
-                .map(|tivk| tivk.serialize().try_into().unwrap())
-                .map(unified::Ivk::P2pkh),
-        );
+        let data_items = data_items.chain(self.transparent.as_ref().map(|t| match t {
+            TransparentIvk::P2pkh(k) => {
+                unified::Ivk::P2pkh(k.serialize().try_into().expect("key is 65 bytes"))
+            }
+            TransparentIvk::P2sh(p) => unified::Ivk::P2sh(p.to_bytes()),
+        }));
 
         let meta_items = core::iter::empty()
             .chain(self.unknown_metadata.iter().map(|(typecode, data)| {
@@ -1629,10 +1717,35 @@ impl UnifiedIncomingViewingKey {
         return self.transparent.is_some();
     }
 
-    /// Returns the Transparent external IVK, if present.
+    /// Returns the transparent external IVK, if present.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &Option<::transparent::keys::ExternalIvk> {
-        &self.transparent
+    #[deprecated(note = "Use `UnifiedIncomingViewingKey::p2pkh` instead.")]
+    pub fn transparent(&self) -> Option<&::transparent::keys::ExternalIvk> {
+        self.p2pkh()
+    }
+
+    /// Returns the transparent external IVK, if present.
+    ///
+    /// Returns `None` if the key has no transparent component, or carries a P2SH viewing
+    /// key item instead; the two are mutually exclusive.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn p2pkh(&self) -> Option<&::transparent::keys::ExternalIvk> {
+        match self.transparent.as_ref() {
+            Some(TransparentIvk::P2pkh(k)) => Some(k),
+            Some(TransparentIvk::P2sh(_)) | None => None,
+        }
+    }
+
+    /// Returns the P2SH viewing key item of this key, if present.
+    ///
+    /// Returns `None` if the key has no transparent component, or carries a P2PKH
+    /// viewing key instead; the two are mutually exclusive.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn p2sh(&self) -> Option<&P2shIncomingViewingKey> {
+        match self.transparent.as_ref() {
+            Some(TransparentIvk::P2sh(p)) => Some(p),
+            Some(TransparentIvk::P2pkh(_)) | None => None,
+        }
     }
 
     /// Returns whether this uivk has a Sapling key item.
@@ -1703,7 +1816,7 @@ impl UnifiedIncomingViewingKey {
         }
 
         #[cfg(feature = "transparent-inputs")]
-        match (other.transparent(), &self.transparent) {
+        match (&other.transparent, &self.transparent) {
             (Some(e), Some(n)) if e != n => {
                 return false;
             }
@@ -1807,8 +1920,14 @@ impl UnifiedIncomingViewingKey {
                 // address; if we're unable to do so, then no Unified Address exists at this
                 // diversifier.
                 let j = to_transparent_child_index(_j);
+                let derived = match tivk {
+                    TransparentIvk::P2pkh(k) => j.and_then(|j| k.derive_address(j).ok()),
+                    // Deriving a receiver from a P2SH viewing key item requires evaluating
+                    // its wallet policy, which this implementation does not do.
+                    TransparentIvk::P2sh(_) => None,
+                };
 
-                transparent = match (request.p2pkh, j.and_then(|j| tivk.derive_address(j).ok())) {
+                transparent = match (request.p2pkh, derived) {
                     (Require | Allow, Some(addr)) => Ok(Some(addr)),
                     (Require, None) => {
                         Err(AddressGenerationError::InvalidTransparentChildIndex(_j))
@@ -1991,7 +2110,7 @@ impl UnifiedIncomingViewingKey {
     pub fn default_transparent_address(
         &self,
     ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
-        self.transparent.as_ref().map(|k| k.default_address())
+        self.p2pkh().map(|k| k.default_address())
     }
 }
 
@@ -2108,33 +2227,36 @@ mod tests {
         use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
 
         for tv in TEST_VECTORS {
-            // Skip vectors containing P2SH items, which are not yet supported by
-            // the Rust FVK parser.
-            if tv.p2sh_fvk_bytes.is_some() {
-                continue;
-            }
-
             let ufvk =
                 UnifiedFullViewingKey::decode(&MAIN_NETWORK, tv.unified_fvk).unwrap_or_else(|e| {
                     panic!("Failed to decode UFVK for account {}: {e}", tv.account)
                 });
 
-            // Verify round-trip for vectors without metadata items. Vectors with
-            // expiry_height or expiry_time include metadata that UnifiedFullViewingKey
-            // does not currently preserve, so the re-encoding will differ.
-            if tv.expiry_height.is_none() && tv.expiry_time.is_none() {
-                let reencoded = ufvk.encode(&MAIN_NETWORK);
-                assert_eq!(
-                    reencoded, tv.unified_fvk,
-                    "UFVK round-trip failed for account {}",
-                    tv.account
-                );
-            }
+            let reencoded = ufvk.encode(&MAIN_NETWORK);
+            assert_eq!(
+                reencoded, tv.unified_fvk,
+                "UFVK round-trip failed for account {}",
+                tv.account
+            );
+
+            assert_eq!(
+                ufvk.expiry_height(),
+                tv.expiry_height
+                    .map(zcash_protocol::consensus::BlockHeight::from_u32),
+                "expiry height mismatch for account {}",
+                tv.account
+            );
+            assert_eq!(
+                ufvk.expiry_time(),
+                tv.expiry_time,
+                "expiry time mismatch for account {}",
+                tv.account
+            );
 
             // Verify key data matches the test vector bytes.
             if let Some(ref expected) = tv.t_p2pkh_fvk_bytes {
                 let actual = ufvk
-                    .transparent()
+                    .p2pkh()
                     .expect("transparent key present in test vector")
                     .serialize();
                 assert_eq!(
@@ -2170,6 +2292,23 @@ mod tests {
                     tv.account
                 );
             }
+
+            assert_eq!(
+                ufvk.p2sh().map(|p| p.to_bytes()).as_deref(),
+                tv.p2sh_fvk_bytes,
+                "P2SH FVK item mismatch for account {}",
+                tv.account
+            );
+
+            // The UIVK form of the P2SH item derived from the UFVK must match the
+            // vector's UIVK item.
+            let derived_uivk = ufvk.to_unified_incoming_viewing_key();
+            assert_eq!(
+                derived_uivk.p2sh().map(|p| p.to_bytes()).as_deref(),
+                tv.p2sh_ivk_bytes,
+                "derived P2SH IVK item mismatch for account {}",
+                tv.account
+            );
         }
     }
 
@@ -2244,26 +2383,53 @@ mod tests {
         use zcash_protocol::consensus::NetworkType;
 
         for tv in TEST_VECTORS {
-            // Skip vectors containing P2SH items, which are not yet supported by
-            // the Rust IVK parser.
-            if tv.p2sh_ivk_bytes.is_some() {
-                continue;
-            }
-
             let decoded =
                 UnifiedIncomingViewingKey::parse(&unified::Uivk::decode(tv.unified_ivk).unwrap().2)
                     .unwrap_or_else(|e| {
                         panic!("Failed to decode UIVK for account {}: {e}", tv.account)
                     });
 
-            // Verify round-trip for vectors without metadata items. Vectors with
-            // expiry_height or expiry_time include metadata that UnifiedIncomingViewingKey
-            // does not currently preserve, so the re-encoding will differ.
-            if tv.expiry_height.is_none() && tv.expiry_time.is_none() {
-                let reencoded = decoded.render().encode(&NetworkType::Main);
+            let reencoded = decoded.render().encode(&NetworkType::Main);
+            assert_eq!(
+                reencoded, tv.unified_ivk,
+                "UIVK round-trip failed for account {}",
+                tv.account
+            );
+
+            // ZIP 316 requires the source UFVK's expiry metadata to be retained
+            // unmodified in the derived UIVK.
+            assert_eq!(
+                decoded.expiry_height(),
+                tv.expiry_height
+                    .map(zcash_protocol::consensus::BlockHeight::from_u32),
+                "expiry height mismatch for account {}",
+                tv.account
+            );
+            assert_eq!(
+                decoded.expiry_time(),
+                tv.expiry_time,
+                "expiry time mismatch for account {}",
+                tv.account
+            );
+
+            // The Unified Address derived from the decoded UIVK must match the vector.
+            // Deriving the transparent receiver of a P2SH viewing key item requires
+            // evaluating its BIP 388 wallet policy, which this crate does not yet do, so
+            // the addresses of such keys cannot yet be checked against the vectors.
+            // TODO: assert these vectors too, once P2SH receiver derivation is supported.
+            if tv.p2sh_ivk_bytes.is_none() {
+                let ua = decoded
+                    .address(
+                        DiversifierIndex::from(tv.diversifier_index),
+                        UnifiedAddressRequest::AllAvailableKeys,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!("UA derivation failed for account {}: {e:?}", tv.account)
+                    });
                 assert_eq!(
-                    reencoded, tv.unified_ivk,
-                    "UIVK round-trip failed for account {}",
+                    ua.encode_receiver_preserving(&MAIN_NETWORK),
+                    tv.derived_ua,
+                    "derived UA mismatch for account {}",
                     tv.account
                 );
             }
@@ -2271,8 +2437,7 @@ mod tests {
             // Verify key data matches the test vector bytes.
             if let Some(ref expected) = tv.t_p2pkh_ivk_bytes {
                 let actual = decoded
-                    .transparent
-                    .as_ref()
+                    .p2pkh()
                     .expect("transparent key present in test vector")
                     .serialize();
                 assert_eq!(
@@ -2310,6 +2475,13 @@ mod tests {
                     tv.account
                 );
             }
+
+            assert_eq!(
+                decoded.p2sh().map(|p| p.to_bytes()).as_deref(),
+                tv.p2sh_ivk_bytes,
+                "P2SH IVK item mismatch for account {}",
+                tv.account
+            );
         }
     }
 
@@ -2478,6 +2650,64 @@ mod tests {
         assert_eq!(mixed_dis_a.len(), 2);
     }
 
+    /// ZIP 316 permits at most one transparent item in a unified viewing key, so a key
+    /// carrying a P2SH item has no P2PKH component, and vice versa.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn p2sh_and_p2pkh_components_are_mutually_exclusive() {
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
+
+        let with_p2sh = TEST_VECTORS
+            .iter()
+            .find(|tv| tv.p2sh_fvk_bytes.is_some())
+            .expect("a test vector carries a P2SH viewing key item");
+        let ufvk =
+            super::UnifiedFullViewingKey::decode(&MAIN_NETWORK, with_p2sh.unified_fvk).unwrap();
+        assert!(ufvk.p2sh().is_some());
+        assert!(ufvk.p2pkh().is_none());
+
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+        assert!(uivk.p2sh().is_some());
+        assert!(uivk.p2pkh().is_none());
+        assert!(uivk.has_transparent());
+
+        let with_p2pkh = TEST_VECTORS
+            .iter()
+            .find(|tv| tv.t_p2pkh_fvk_bytes.is_some())
+            .expect("a test vector carries a P2PKH viewing key");
+        let ufvk =
+            super::UnifiedFullViewingKey::decode(&MAIN_NETWORK, with_p2pkh.unified_fvk).unwrap();
+        assert!(ufvk.p2pkh().is_some());
+        assert!(ufvk.p2sh().is_none());
+    }
+
+    /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
+    /// interpreted, so it is retained as an unknown item and recorded as unconverted in
+    /// the derived incoming viewing key. Otherwise that derived key describes the account
+    /// as having no transparent receiving capability at all.
+    #[test]
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn p2sh_item_is_unconverted_without_transparent_inputs() {
+        use zcash_address::unified::{Encoding, Fvk, Revision, Ufvk, Uitem};
+
+        /// The typecode ZIP 316 assigns to a P2SH viewing key item.
+        const P2SH_TYPECODE: u32 = 0x01;
+
+        let payload = vec![0u8; 8];
+        let ufvk =
+            Ufvk::try_from_items(Revision::R2, vec![Uitem::Data(Fvk::P2sh(payload.clone()))])
+                .unwrap();
+
+        let parsed = super::UnifiedFullViewingKey::parse(&ufvk).unwrap();
+        assert_eq!(parsed.unknown, vec![(P2SH_TYPECODE, payload)]);
+        assert_eq!(
+            parsed
+                .to_unified_incoming_viewing_key()
+                .unconverted_typecodes,
+            vec![P2SH_TYPECODE]
+        );
+    }
+
     #[cfg(feature = "unstable")]
     #[test]
     fn usk_debug_redaction() {
@@ -2521,7 +2751,7 @@ mod tests {
 
         let debug_str = format!("{ufvk:?}");
         #[cfg(feature = "transparent-inputs")]
-        assert!(debug_str.contains("transparent: Some(\"...\")"));
+        assert!(debug_str.contains("p2pkh: Some(\"...\")"));
         #[cfg(feature = "sapling")]
         assert!(debug_str.contains("sapling: Some(\"...\")"));
         #[cfg(feature = "orchard")]

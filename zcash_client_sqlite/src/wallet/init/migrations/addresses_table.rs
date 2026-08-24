@@ -129,7 +129,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 #[cfg(feature = "transparent-inputs")]
                 {
                     let expected_address = ufvk
-                        .transparent()
+                        .p2pkh()
                         .and_then(|k| k.derive_external_ivk().ok().map(|k| k.default_address().0));
                     if Some(decoded_transparent_address) != expected_address {
                         return Err(WalletMigrationError::CorruptedData(format!(

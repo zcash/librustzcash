@@ -219,7 +219,7 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
             .map_err(SqliteClientError::CorruptedData)?;
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
-        ufvk.transparent()
+        ufvk.p2pkh()
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
                     .map(|tivk| tivk.default_address())

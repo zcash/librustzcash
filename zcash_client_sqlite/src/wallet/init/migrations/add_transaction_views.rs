@@ -447,7 +447,7 @@ mod tests {
             ))
             .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
-            .transparent()
+            .p2pkh()
             .and_then(|k| {
                 k.derive_external_ivk()
                     .ok()

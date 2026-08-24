@@ -184,7 +184,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let sapling_item = ufvk_parsed.sapling().map(|k| k.to_bytes());
 
                     #[cfg(feature = "transparent-inputs")]
-                    let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
+                    let transparent_item = ufvk_parsed.p2pkh().map(|k| k.serialize());
                     #[cfg(not(feature = "transparent-inputs"))]
                     let transparent_item: Option<Vec<u8>> = None;
 

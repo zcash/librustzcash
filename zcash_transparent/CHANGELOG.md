@@ -18,6 +18,10 @@ workspace.
   - `Input::append_signature_with_sighash_policy`
   - `Input::with_signable_input_with_sighash_policy`
   - `Bundle::finalize_spends_with_sighash_policy`
+- `zcash_transparent::zip48::P2shKey`
+- `zcash_transparent::zip48::P2shFullViewingKey`
+- `zcash_transparent::zip48::P2shIncomingViewingKey`
+- `zcash_transparent::zip48::P2shViewingKeyError`
 
 ### Changed
 - `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns

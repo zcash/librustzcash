@@ -4,8 +4,8 @@ use zcash_protocol::address::Revision;
 use zcash_protocol::constants;
 
 use super::{
-    Container, DataTypecode, Encoding, ParseError, Uitem,
-    private::{SealedContainer, SealedItem},
+    Container, DataTypecode, Encoding, P2shItemKind, ParseError, Uitem,
+    private::{SealedContainer, SealedItem, validate_p2sh_item},
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -41,6 +41,17 @@ pub enum Ivk {
     /// pruned extended public key.
     P2pkh([u8; 65]),
 
+    /// The payload of a P2SH viewing key item: the canonical encoding of a [BIP 388]
+    /// wallet policy (a descriptor template using `/*` multipath notation, followed by a
+    /// key information vector), as specified for [ZIP 316] Revision 2.
+    ///
+    /// The payload is structurally validated during parsing; interpretation of the
+    /// policy is the responsibility of the consumer.
+    ///
+    /// [BIP 388]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    P2sh(Vec<u8>),
+
     Unknown {
         typecode: u32,
         data: Vec<u8>,
@@ -53,6 +64,7 @@ impl fmt::Debug for Ivk {
             Ivk::Orchard(_) => f.debug_tuple("Ivk::Orchard").field(&"...").finish(),
             Ivk::Sapling(_) => f.debug_tuple("Ivk::Sapling").field(&"...").finish(),
             Ivk::P2pkh(_) => f.debug_tuple("Ivk::P2pkh").field(&"...").finish(),
+            Ivk::P2sh(_) => f.debug_tuple("Ivk::P2sh").field(&"...").finish(),
             Ivk::Unknown { typecode, .. } => f
                 .debug_struct("Ivk::Unknown")
                 .field("typecode", typecode)
@@ -64,10 +76,15 @@ impl fmt::Debug for Ivk {
 
 impl SealedItem for Ivk {
     fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
+        if typecode == DataTypecode::P2sh {
+            validate_p2sh_item(P2shItemKind::IncomingViewing, data)
+                .map_err(ParseError::InvalidP2shItem)?;
+            return Ok(Ivk::P2sh(data.to_vec()));
+        }
         let data = data.to_vec();
         match typecode {
             DataTypecode::P2pkh => data.try_into().map(Ivk::P2pkh),
-            DataTypecode::P2sh => Err(data),
+            DataTypecode::P2sh => unreachable!("handled above"),
             DataTypecode::Sapling => data.try_into().map(Ivk::Sapling),
             DataTypecode::Orchard => data.try_into().map(Ivk::Orchard),
             DataTypecode::Unknown(tc) => Ok(Ivk::Unknown { typecode: tc, data }),
@@ -83,6 +100,7 @@ impl SealedItem for Ivk {
     fn typecode(&self) -> DataTypecode {
         match self {
             Ivk::P2pkh(_) => DataTypecode::P2pkh,
+            Ivk::P2sh(_) => DataTypecode::P2sh,
             Ivk::Sapling(_) => DataTypecode::Sapling,
             Ivk::Orchard(_) => DataTypecode::Orchard,
             Ivk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
@@ -92,6 +110,7 @@ impl SealedItem for Ivk {
     fn data(&self) -> &[u8] {
         match self {
             Ivk::P2pkh(data) => data,
+            Ivk::P2sh(data) => data,
             Ivk::Sapling(data) => data,
             Ivk::Orchard(data) => data,
             Ivk::Unknown { data, .. } => data,
@@ -508,5 +527,84 @@ mod tests {
             format!("{uivk:?}"),
             "Uivk { revision: R0, items: [Data(Ivk::Sapling(\"...\")), Data(Ivk::Unknown { typecode: 9, data: \"...\" })] }"
         );
+    }
+
+    #[test]
+    fn p2sh_ivk_item_parsing() {
+        use crate::kind::unified::{P2shItemError, ParseError, private::SealedItem};
+
+        /// Chain code plus compressed pubkey.
+        const KEY_INFO_LEN: usize = 65;
+        let payload = |template: &str, n_keys: usize| {
+            let mut payload = vec![];
+            zcash_encoding::CompactSize::write(&mut payload, template.len()).unwrap();
+            payload.extend_from_slice(template.as_bytes());
+            zcash_encoding::CompactSize::write(&mut payload, n_keys).unwrap();
+            payload.extend_from_slice(&vec![0u8; n_keys * KEY_INFO_LEN]);
+            payload
+        };
+
+        let valid = payload("sh(sortedmulti(2,@0/*,@1/*,@2/*))", 3);
+        assert_eq!(
+            Ivk::parse(DataTypecode::P2sh, &valid),
+            Ok(Ivk::P2sh(valid.clone()))
+        );
+
+        // A UIVK template must use `/*` notation, not the `/**` multipath notation.
+        let fvk_notation = payload("sh(sortedmulti(2,@0/**,@1/**,@2/**))", 3);
+        assert_eq!(
+            Ivk::parse(DataTypecode::P2sh, &fvk_notation),
+            Err(ParseError::InvalidP2shItem(P2shItemError::Multipath))
+        );
+    }
+
+    #[test]
+    fn r0_uivk_treats_p2sh_item_as_unrecognised() {
+        // ZIP 316 gives Typecode 0x01 no meaning in a Revision 0 UIVK, so a consumer
+        // must retain it as an unrecognised item rather than interpret it as a P2SH
+        // viewing key item. This holds whether or not the payload happens to be a
+        // well-formed BIP 388 wallet policy.
+        const P2SH_TYPECODE: u32 = 0x01;
+        /// Chain code plus compressed pubkey.
+        const KEY_INFO_LEN: usize = 65;
+
+        let policy = |template: &str, n_keys: usize| {
+            let mut payload = vec![];
+            zcash_encoding::CompactSize::write(&mut payload, template.len()).unwrap();
+            payload.extend_from_slice(template.as_bytes());
+            zcash_encoding::CompactSize::write(&mut payload, n_keys).unwrap();
+            payload.extend_from_slice(&vec![0u8; n_keys * KEY_INFO_LEN]);
+            payload
+        };
+
+        for payload in [
+            policy("sh(sortedmulti(2,@0/*,@1/*,@2/*))", 3),
+            b"not a wallet policy".to_vec(),
+        ] {
+            let uivk = Uivk::try_from_items(
+                Revision::R0,
+                vec![
+                    Uitem::Data(Ivk::Unknown {
+                        typecode: P2SH_TYPECODE,
+                        data: payload.clone(),
+                    }),
+                    Uitem::Data(Ivk::Sapling([0; 64])),
+                ],
+            )
+            .unwrap();
+
+            let (_, revision, decoded) = Uivk::decode(&uivk.encode(&NetworkType::Main)).unwrap();
+            assert_eq!(revision, Revision::R0);
+            assert!(decoded.items().contains(&Ivk::Unknown {
+                typecode: P2SH_TYPECODE,
+                data: payload,
+            }));
+            assert!(
+                !decoded
+                    .items()
+                    .iter()
+                    .any(|ivk| matches!(ivk, Ivk::P2sh(_)))
+            );
+        }
     }
 }

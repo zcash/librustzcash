@@ -366,7 +366,7 @@ impl IvkItemCache {
         let sapling = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
 
         #[cfg(feature = "transparent-inputs")]
-        let p2pkh = uivk.transparent().as_ref().map(|k| k.serialize());
+        let p2pkh = uivk.p2pkh().map(|k| k.serialize());
         #[cfg(not(feature = "transparent-inputs"))]
         let p2pkh = None;
 

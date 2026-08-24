@@ -24,6 +24,10 @@ workspace.
 - `zcash_keys::address::UnifiedAddress::encode_receiver_preserving`
 - `zcash_keys::address::Address::to_receiver_preserving_zcash_address`
 - `zcash_keys::address::Address::encode_receiver_preserving`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2pkh`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2pkh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
 - ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
   `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
   - Address expiry height and expiry time metadata fields.
@@ -31,6 +35,16 @@ workspace.
   - Automatic R2 revision selection when metadata items are present.
 
 ### Changed
+- `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent` are deprecated in favour of
+  `p2pkh`, and now both return `Option<&_>`. A unified viewing key carries at most one
+  transparent item, so a key that carries a P2SH viewing key item returns `None` from
+  `p2pkh`, and one that carries a P2PKH viewing key returns `None` from `p2sh`.
+- Without the `transparent-inputs` feature, a P2SH viewing key item is retained as an
+  unknown item instead of being parsed. A `UnifiedIncomingViewingKey` derived from a
+  `UnifiedFullViewingKey` that carries one now records that it does not describe the
+  account completely, so `to_receiver_requirements` no longer reports such a key as
+  describing a shielded-only or transparent-only account.
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set should disable default features and enable
   only the features they need.

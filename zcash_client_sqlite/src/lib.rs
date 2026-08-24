@@ -4501,7 +4501,7 @@ mod tests {
         // the existing IVK items are not a subset of the new (smaller) FVK's items.
         #[cfg(feature = "transparent-inputs")]
         {
-            assert!(ufvk.transparent().is_some());
+            assert!(ufvk.p2pkh().is_some());
             let subset_ufvk = UnifiedFullViewingKey::new(
                 None,
                 ufvk.sapling().cloned(),
@@ -4527,7 +4527,7 @@ mod tests {
             assert!(ufvk.orchard().is_some());
             let subset_ufvk = UnifiedFullViewingKey::new(
                 #[cfg(feature = "transparent-inputs")]
-                ufvk.transparent().cloned(),
+                ufvk.p2pkh().cloned(),
                 ufvk.sapling().cloned(),
                 None,
             )

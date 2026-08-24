@@ -164,8 +164,7 @@ fn generate_external_address(
 ) -> Result<(Address, TransparentAddress), AddressGenerationError> {
     let ua = uivk.address(index.into(), ua_request);
     let transparent_address = uivk
-        .transparent()
-        .as_ref()
+        .p2pkh()
         .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))?
         .derive_address(index)
         .map_err(|_| {
@@ -204,7 +203,7 @@ pub fn generate_address_list(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<Vec<(Address, TransparentAddress, NonHardenedChildIndex)>, AddressGenerationError> {
-    let account_pubkey = if let Some(k) = account_ufvk.and_then(|ufvk| ufvk.transparent()) {
+    let account_pubkey = if let Some(k) = account_ufvk.and_then(|ufvk| ufvk.p2pkh()) {
         k
     } else if matches!(
         key_scope,

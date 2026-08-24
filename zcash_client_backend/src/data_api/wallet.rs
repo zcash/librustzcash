@@ -2071,7 +2071,7 @@ where
                         address_index,
                     } => {
                         let pubkey = ufvk
-                            .transparent()
+                            .p2pkh()
                             .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
                             .derive_address_pubkey(*scope, *address_index)
                             .expect("spending key derivation should not fail");
@@ -3226,7 +3226,7 @@ where
                 for (index, scope, address_index) in inputs_to_update {
                     updater.update_input_with(index, |mut input_updater| {
                         let pubkey = ufvk
-                            .transparent()
+                            .p2pkh()
                             .expect("we derived this successfully in build_proposed_transaction")
                             .derive_address_pubkey(scope, address_index)
                             .expect("spending key derivation should not fail");

@@ -17,6 +17,11 @@ workspace.
 - `zcash_address::unified::MetadataItem`
 - `zcash_address::unified::Uitem`
 - `zcash_address::unified::Revision` (re-exported from `zcash_protocol`)
+- `zcash_address::unified::Fvk::P2sh`
+- `zcash_address::unified::Ivk::P2sh`
+- `zcash_address::unified::P2shItemKind`
+- `zcash_address::unified::P2shItemError`
+- `zcash_address::unified::ParseError::InvalidP2shItem`
 - ZIP 316 Revision 2 support:
   - Metadata item parsing and serialization (expiry height, expiry time).
   - Revision-aware encoding/decoding with distinct HRPs for R0 and R2.
@@ -26,6 +31,8 @@ workspace.
     addresses. Transparent receivers are permitted in R2 `unified::Address`
     containers.
   - R2 Unified Viewing Keys allow transparent-only configurations.
+  - P2SH viewing key items (BIP 388 wallet policies) are accepted in R2
+    UFVKs and UIVKs, with structural validation of the policy payload.
 
 ### Changed
 - `zcash_address::unified::Typecode` now distinguishes data and metadata items
