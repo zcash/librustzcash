@@ -29,6 +29,8 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::wallet::transparent_address_observations` (behind
   `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTx::transparent_address_observations`
+  (behind `transparent-inputs`)
 
 ### Changed
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
@@ -51,7 +53,8 @@ workspace.
   disabled the argument is absent, and the unconstrained error type must be
   named at the call site (`scan_block::<_, _, _, Infallible>(..)`).
 - `zcash_client_backend::wallet::WalletTx::new` takes a `transparent_spends`
-  argument before `transparent_outputs`.
+  argument before `transparent_outputs`, and, behind `transparent-inputs`, a
+  `transparent_address_observations` argument after it.
 - `zcash_client_backend::scanning::Nullifiers` is renamed to `SpendIdentifiers`,
   and additionally tracks the outpoints of the wallet's unspent transparent
   outputs; `SpendIdentifiers::unspent` populates them and

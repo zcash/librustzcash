@@ -409,6 +409,15 @@ where
                 .queue_tx_retrieval(std::iter::once(tx.txid()), None)
                 .map_err(PutBlocksError::Storage)?;
 
+            // The scan has determined that this transaction involves the wallet, so record the
+            // transparent addresses its data names. Which involvement directions the scan could
+            // observe depends on whether the block was compact or full; the record is an
+            // idempotent upsert, so a later observation at higher fidelity completes it.
+            #[cfg(feature = "transparent-inputs")]
+            wallet_db
+                .put_transparent_address_observations(tx_ref, tx.transparent_address_observations())
+                .map_err(PutBlocksError::Storage)?;
+
             // Mark notes and transparent outputs as spent, and remove them from the scanning
             // cache. Only spends of outputs the wallet already knew of appear here; those it
             // could not yet recognize are handled by the spend map below.
