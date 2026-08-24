@@ -24,6 +24,9 @@ workspace.
 - `zcash_keys::address::UnifiedAddress::encode_receiver_preserving`
 - `zcash_keys::address::Address::to_receiver_preserving_zcash_address`
 - `zcash_keys::address::Address::encode_receiver_preserving`
+- `zcash_keys::keys::P2shPolicy`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
 - ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
   `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
   - Address expiry height and expiry time metadata fields.

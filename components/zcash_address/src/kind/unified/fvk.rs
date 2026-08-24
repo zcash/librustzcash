@@ -4,8 +4,8 @@ use zcash_protocol::address::Revision;
 use zcash_protocol::constants;
 
 use super::{
-    Container, DataTypecode, Encoding, ParseError, Uitem,
-    private::{SealedContainer, SealedItem},
+    Container, DataTypecode, Encoding, P2shItemKind, ParseError, Uitem,
+    private::{SealedContainer, SealedItem, validate_p2sh_item},
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -36,6 +36,17 @@ pub enum Fvk {
     /// pruned extended public key.
     P2pkh([u8; 65]),
 
+    /// The payload of a P2SH viewing key item: the canonical encoding of a [BIP 388]
+    /// wallet policy (a descriptor template using `/**` multipath notation, followed by
+    /// a key information vector), as specified for [ZIP 316] Revision 2.
+    ///
+    /// The payload is structurally validated during parsing; interpretation of the
+    /// policy is the responsibility of the consumer.
+    ///
+    /// [BIP 388]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    P2sh(Vec<u8>),
+
     Unknown {
         typecode: u32,
         data: Vec<u8>,
@@ -48,6 +59,7 @@ impl fmt::Debug for Fvk {
             Fvk::Orchard(_) => f.debug_tuple("Fvk::Orchard").field(&"...").finish(),
             Fvk::Sapling(_) => f.debug_tuple("Fvk::Sapling").field(&"...").finish(),
             Fvk::P2pkh(_) => f.debug_tuple("Fvk::P2pkh").field(&"...").finish(),
+            Fvk::P2sh(_) => f.debug_tuple("Fvk::P2sh").field(&"...").finish(),
             Fvk::Unknown { typecode, .. } => f
                 .debug_struct("Fvk::Unknown")
                 .field("typecode", typecode)
@@ -59,10 +71,15 @@ impl fmt::Debug for Fvk {
 
 impl SealedItem for Fvk {
     fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
+        if typecode == DataTypecode::P2sh {
+            validate_p2sh_item(P2shItemKind::FullViewing, data)
+                .map_err(ParseError::InvalidP2shItem)?;
+            return Ok(Fvk::P2sh(data.to_vec()));
+        }
         let data = data.to_vec();
         match typecode {
             DataTypecode::P2pkh => data.try_into().map(Fvk::P2pkh),
-            DataTypecode::P2sh => Err(data),
+            DataTypecode::P2sh => unreachable!("handled above"),
             DataTypecode::Sapling => data.try_into().map(Fvk::Sapling),
             DataTypecode::Orchard => data.try_into().map(Fvk::Orchard),
             DataTypecode::Unknown(tc) => Ok(Fvk::Unknown { typecode: tc, data }),
@@ -78,6 +95,7 @@ impl SealedItem for Fvk {
     fn typecode(&self) -> DataTypecode {
         match self {
             Fvk::P2pkh(_) => DataTypecode::P2pkh,
+            Fvk::P2sh(_) => DataTypecode::P2sh,
             Fvk::Sapling(_) => DataTypecode::Sapling,
             Fvk::Orchard(_) => DataTypecode::Orchard,
             Fvk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
@@ -87,6 +105,7 @@ impl SealedItem for Fvk {
     fn data(&self) -> &[u8] {
         match self {
             Fvk::P2pkh(data) => data,
+            Fvk::P2sh(data) => data,
             Fvk::Sapling(data) => data,
             Fvk::Orchard(data) => data,
             Fvk::Unknown { data, .. } => data,
@@ -567,5 +586,117 @@ mod tests {
         assert_eq!(meta.len(), 2);
         assert_eq!(*meta[0], MetadataItem::ExpiryHeight(500_000));
         assert_eq!(*meta[1], MetadataItem::ExpiryTime(1_700_000_000));
+    }
+
+    /// Builds a P2SH viewing key item payload from a descriptor template and a number of
+    /// zeroed key information entries.
+    fn p2sh_item_payload(template: &str, n_keys: usize) -> Vec<u8> {
+        /// Chain code plus compressed pubkey.
+        const KEY_INFO_LEN: usize = 65;
+        let mut payload = vec![];
+        zcash_encoding::CompactSize::write(&mut payload, template.len()).unwrap();
+        payload.extend_from_slice(template.as_bytes());
+        zcash_encoding::CompactSize::write(&mut payload, n_keys).unwrap();
+        payload.extend_from_slice(&vec![0u8; n_keys * KEY_INFO_LEN]);
+        payload
+    }
+
+    #[test]
+    fn p2sh_fvk_item_parsing() {
+        use crate::kind::unified::{P2shItemError, ParseError, private::SealedItem};
+
+        let valid = p2sh_item_payload("sh(sortedmulti(2,@0/**,@1/**,@2/**))", 3);
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &valid),
+            Ok(Fvk::P2sh(valid.clone()))
+        );
+
+        // A UFVK template must use `/**` multipath notation, not `/*`.
+        let ivk_notation = p2sh_item_payload("sh(sortedmulti(2,@0/*,@1/*,@2/*))", 3);
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &ivk_notation),
+            Err(ParseError::InvalidP2shItem(P2shItemError::Multipath))
+        );
+
+        // The number of placeholders must equal the number of key entries.
+        let missing_key = p2sh_item_payload("sh(sortedmulti(2,@0/**,@1/**))", 3);
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &missing_key),
+            Err(ParseError::InvalidP2shItem(
+                P2shItemError::PlaceholderCount {
+                    placeholders: 2,
+                    keys: 3,
+                }
+            ))
+        );
+
+        // Each key entry must be referenced exactly once.
+        let duplicate_placeholder = p2sh_item_payload("sh(sortedmulti(2,@0/**,@0/**))", 2);
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &duplicate_placeholder),
+            Err(ParseError::InvalidP2shItem(
+                P2shItemError::PlaceholderCount {
+                    placeholders: 2,
+                    keys: 2,
+                }
+            ))
+        );
+
+        // Trailing bytes after the key information vector are rejected.
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &trailing),
+            Err(ParseError::InvalidP2shItem(P2shItemError::Malformed))
+        );
+
+        // The descriptor template must be US-ASCII.
+        let mut non_ascii = vec![];
+        zcash_encoding::CompactSize::write(&mut non_ascii, 1usize).unwrap();
+        non_ascii.push(0xFF);
+        zcash_encoding::CompactSize::write(&mut non_ascii, 0usize).unwrap();
+        assert_eq!(
+            Fvk::parse(DataTypecode::P2sh, &non_ascii),
+            Err(ParseError::InvalidP2shItem(P2shItemError::TemplateEncoding))
+        );
+    }
+
+    #[test]
+    fn r0_ufvk_treats_p2sh_item_as_unrecognised() {
+        // ZIP 316 gives Typecode 0x01 no meaning in a Revision 0 UFVK, so a consumer
+        // must retain it as an unrecognised item rather than interpret it as a P2SH
+        // viewing key item. This holds whether or not the payload happens to be a
+        // well-formed BIP 388 wallet policy.
+        const P2SH_TYPECODE: u32 = 0x01;
+
+        for payload in [
+            p2sh_item_payload("sh(sortedmulti(2,@0/**,@1/**,@2/**))", 3),
+            b"not a wallet policy".to_vec(),
+        ] {
+            let ufvk = Ufvk::try_from_items(
+                Revision::R0,
+                vec![
+                    Uitem::Data(Fvk::Unknown {
+                        typecode: P2SH_TYPECODE,
+                        data: payload.clone(),
+                    }),
+                    Uitem::Data(Fvk::Sapling([0; 128])),
+                ],
+            )
+            .unwrap();
+
+            let (_, revision, decoded) = Ufvk::decode(&ufvk.encode(&NetworkType::Main)).unwrap();
+            assert_eq!(revision, Revision::R0);
+            assert!(decoded.items().contains(&Fvk::Unknown {
+                typecode: P2SH_TYPECODE,
+                data: payload,
+            }));
+            assert!(
+                !decoded
+                    .items()
+                    .iter()
+                    .any(|fvk| matches!(fvk, Fvk::P2sh(_)))
+            );
+        }
     }
 }

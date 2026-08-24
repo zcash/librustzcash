@@ -315,6 +315,75 @@ impl<T: private::SealedItem> Uitem<T> {
     }
 }
 
+/// The kinds of unified viewing key container in which a P2SH viewing key item can
+/// occur, determining the multipath notation its descriptor template must use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum P2shItemKind {
+    /// An item in a Unified Full Viewing Key, whose descriptor template must use the
+    /// `/**` multipath notation for each key placeholder.
+    FullViewing,
+    /// An item in a Unified Incoming Viewing Key, whose descriptor template must use the
+    /// `/*` notation for each key placeholder.
+    IncomingViewing,
+}
+
+/// Errors in the structure of a ZIP 316 Revision 2 P2SH viewing key item.
+///
+/// The item payload encodes a [BIP 388] wallet policy: a descriptor template followed by
+/// a vector of key information entries. Only the structure of the payload is validated;
+/// full validation of the descriptor template against the BIP 388 grammar is the
+/// responsibility of consumers that interpret the policy.
+///
+/// [BIP 388]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum P2shItemError {
+    /// The item payload is not a well-formed encoding of a descriptor template and key
+    /// information vector.
+    Malformed,
+    /// The descriptor template is not US-ASCII.
+    TemplateEncoding,
+    /// The key placeholders in the descriptor template do not correspond one-to-one
+    /// with the entries of the key information vector.
+    PlaceholderCount {
+        /// The number of `@N` key placeholders in the descriptor template.
+        placeholders: usize,
+        /// The number of entries in the key information vector.
+        keys: usize,
+    },
+    /// A key placeholder is not followed by the multipath notation required for the
+    /// containing key kind (`/**` in a UFVK, `/*` in a UIVK).
+    Multipath,
+}
+
+impl fmt::Display for P2shItemError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            P2shItemError::Malformed => {
+                write!(f, "malformed wallet policy container encoding")
+            }
+            P2shItemError::TemplateEncoding => {
+                write!(f, "descriptor template is not US-ASCII")
+            }
+            P2shItemError::PlaceholderCount { placeholders, keys } => {
+                write!(
+                    f,
+                    "template has {placeholders} key placeholders but {keys} key entries"
+                )
+            }
+            P2shItemError::Multipath => {
+                write!(
+                    f,
+                    "a key placeholder does not use the required multipath notation"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for P2shItemError {}
+
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
@@ -347,6 +416,8 @@ pub enum ParseError {
         expected: usize,
         actual: usize,
     },
+    /// A P2SH viewing key item is structurally invalid.
+    InvalidP2shItem(P2shItemError),
 }
 
 impl fmt::Display for ParseError {
@@ -386,6 +457,9 @@ impl fmt::Display for ParseError {
                     f,
                     "Metadata typecode 0x{typecode:02X} has invalid length: expected {expected}, got {actual}"
                 )
+            }
+            ParseError::InvalidP2shItem(e) => {
+                write!(f, "Invalid P2SH viewing key item: {e}")
             }
         }
     }
@@ -623,6 +697,18 @@ pub(crate) mod private {
 
                 match Typecode::try_from(tc_val)? {
                     Typecode::Data(dtc) => {
+                        // ZIP 316 gives Typecode 0x01 no meaning in a Revision 0 viewing
+                        // key, so a consumer must treat it as unrecognised instead of as
+                        // a P2SH viewing key item. In an address, 0x01 is a P2SH receiver
+                        // in every revision.
+                        let dtc = if revision == Revision::R0
+                            && !Self::IS_ADDRESS
+                            && dtc == super::DataTypecode::P2sh
+                        {
+                            super::DataTypecode::Unknown(u32::from(dtc))
+                        } else {
+                            dtc
+                        };
                         result.push(Uitem::Data(Self::Item::parse(dtc, &data)?));
                     }
                     Typecode::Metadata(mtc) => {
@@ -724,6 +810,111 @@ pub(crate) mod private {
 
             Ok(result)
         }
+    }
+
+    /// Validates the structure of a ZIP 316 Revision 2 P2SH viewing key item payload: a
+    /// [BIP 388] wallet policy consisting of a descriptor template and a key information
+    /// vector.
+    ///
+    /// This checks the container framing, that the template is US-ASCII, that the `@N`
+    /// key placeholders correspond one-to-one with the key information entries, and that
+    /// each placeholder is followed by the multipath prefix `kind` requires (`/**` for a
+    /// UFVK, `/*` for a UIVK). Only that prefix is checked; what follows it is not
+    /// validated as a BIP 388 path component. This function does not validate the
+    /// template against the full BIP 388 descriptor grammar, nor the key material
+    /// itself; that is the responsibility of consumers that interpret the policy.
+    ///
+    /// [BIP 388]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki
+    pub(crate) fn validate_p2sh_item(
+        kind: super::P2shItemKind,
+        data: &[u8],
+    ) -> Result<(), super::P2shItemError> {
+        use super::{P2shItemError, P2shItemKind};
+
+        /// The length of one key information entry: a 32-byte BIP 32 chain code followed
+        /// by a 33-byte SEC1 compressed public key.
+        const KEY_INFO_LEN: usize = 65;
+
+        let mut cursor = corez::io::Cursor::new(data);
+        let template_len = CompactSize::read(&mut cursor)
+            .ok()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or(P2shItemError::Malformed)?;
+        let template_start = usize::try_from(cursor.position()).expect("cursor fits in usize");
+        let template_end = template_start
+            .checked_add(template_len)
+            .filter(|end| *end <= data.len())
+            .ok_or(P2shItemError::Malformed)?;
+        let template = &data[template_start..template_end];
+        cursor.set_position(template_end as u64);
+
+        let n_keys = CompactSize::read(&mut cursor)
+            .ok()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or(P2shItemError::Malformed)?;
+        let keys_start = usize::try_from(cursor.position()).expect("cursor fits in usize");
+        if n_keys
+            .checked_mul(KEY_INFO_LEN)
+            .and_then(|len| keys_start.checked_add(len))
+            != Some(data.len())
+        {
+            return Err(P2shItemError::Malformed);
+        }
+
+        if !template.is_ascii() {
+            return Err(P2shItemError::TemplateEncoding);
+        }
+
+        // Check that the `@N` key placeholders reference each key information entry
+        // exactly once, and that each uses the required multipath notation.
+        let mut placeholders = 0usize;
+        let mut seen = alloc::vec![false; n_keys];
+        let mut i = 0;
+        while i < template.len() {
+            if template[i] != b'@' {
+                i += 1;
+                continue;
+            }
+            let digits_start = i + 1;
+            let digits_end = template[digits_start..]
+                .iter()
+                .position(|b| !b.is_ascii_digit())
+                .map(|n| digits_start + n)
+                .unwrap_or(template.len());
+            let index: usize = core::str::from_utf8(&template[digits_start..digits_end])
+                .ok()
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse().ok())
+                .ok_or(P2shItemError::Malformed)?;
+            if index >= n_keys || seen[index] {
+                return Err(P2shItemError::PlaceholderCount {
+                    placeholders: placeholders + 1,
+                    keys: n_keys,
+                });
+            }
+            seen[index] = true;
+            placeholders += 1;
+
+            let suffix = &template[digits_end..];
+            let multipath_ok = match kind {
+                P2shItemKind::FullViewing => suffix.starts_with(b"/**"),
+                P2shItemKind::IncomingViewing => {
+                    suffix.starts_with(b"/*") && !suffix.starts_with(b"/**")
+                }
+            };
+            if !multipath_ok {
+                return Err(P2shItemError::Multipath);
+            }
+            i = digits_end;
+        }
+        if placeholders != n_keys {
+            return Err(P2shItemError::PlaceholderCount {
+                placeholders,
+                keys: n_keys,
+            });
+        }
+
+        Ok(())
     }
 
     /// Parses a metadata item, enforcing the MUST-understand rules for the container's
