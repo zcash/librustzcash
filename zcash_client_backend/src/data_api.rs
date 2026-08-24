@@ -3874,6 +3874,15 @@ pub trait WalletWrite:
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
     ///
+    /// Each scanned transaction's shielded outputs and transparent outputs that pay a wallet
+    /// account are recorded as received. Outputs the wallet sent to an external recipient are
+    /// not; those are recorded when complete transaction data reaches
+    /// [`wallet::decrypt_and_store_transaction`].
+    ///
+    /// The operation is atomic: implementations must apply the whole batch or none of it. After
+    /// an error the caller may assume that no part of any block in `blocks` was persisted, and
+    /// that the call may be retried.
+    ///
     /// ### Arguments
     /// - `from_state` must be the chain state for the block height prior to the first
     ///   block in `blocks`.
