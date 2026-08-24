@@ -10,11 +10,6 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
-  `util::testing::FixedClock`) are now re-exports of the same-named types in
-  `zcash_client_backend::util`.
-
 ### Added
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
@@ -27,6 +22,16 @@ workspace.
   [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+
+### Changed
+- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
+  `util::testing::FixedClock`) are now re-exports of the same-named types in
+  `zcash_client_backend::util`.
+- `WalletWrite::import_account_ufvk` accepts a transparent-only unified full
+  viewing key; it previously failed with
+  `AddressGenerationError::ShieldedReceiverRequired`. The resulting account's
+  default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
+  Address.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
