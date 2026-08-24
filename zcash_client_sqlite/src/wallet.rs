@@ -5953,6 +5953,8 @@ pub(crate) fn query_transparent_spend_locator_map(
             index,
             vec![],
             vec![],
+            #[cfg(feature = "transparent-inputs")]
+            vec![],
             vec![],
             vec![],
             #[cfg(feature = "orchard")]
@@ -6013,6 +6015,8 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             txid,
             index,
             vec![],
+            vec![],
+            #[cfg(feature = "transparent-inputs")]
             vec![],
             vec![],
             vec![],

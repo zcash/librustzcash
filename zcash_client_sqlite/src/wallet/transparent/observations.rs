@@ -162,7 +162,9 @@ mod tests {
     use rusqlite::named_params;
     use zcash_client_backend::{
         data_api::testing::TestBuilder,
-        wallet::{TransparentAddressObservation, transparent_address_observations},
+        wallet::{
+            TransparentAddressObservation, TransparentInvolvement, transparent_address_observations,
+        },
     };
     use zcash_keys::encoding::AddressCodec;
     use zcash_primitives::{
@@ -255,10 +257,15 @@ mod tests {
         .unwrap()
     }
 
-    /// Observing the same transaction repeatedly converges to a single row per
-    /// `(transaction, direction, item index)`, whatever the fidelity of each observation.
+    /// The index state does not depend on the order in which a transaction is observed, nor on
+    /// how many times it is observed.
+    ///
+    /// A compact-block scan can express only the output direction, since a compact input
+    /// carries no `scriptSig`; a full block and stored complete transaction data express both.
+    /// Every feed writes the same output rows, so any sequence that includes a complete-data
+    /// feed converges to the complete state, and a later compact observation cannot undo it.
     #[test]
-    fn put_observations_is_idempotent() {
+    fn feed_order_is_confluent() {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -267,45 +274,63 @@ mod tests {
 
         let recipient = TransparentAddress::PublicKeyHash([0x22; 20]);
         let tx = test_transaction(recipient, OutPoint::new([0x33; 32], 7));
-        let observations = transparent_address_observations(&tx);
-        assert_eq!(observations.len(), 2);
 
-        let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
-        conn.execute(
-            "INSERT INTO transactions (id_tx, txid, min_observed_height) VALUES (1, X'00', 1)",
-            [],
-        )
-        .unwrap();
-        let tx_ref = TxRef(1);
+        // The complete-data feed, shared by full-block scanning and enhancement.
+        let complete = transparent_address_observations(&tx);
+        assert_eq!(complete.len(), 2);
 
-        // The output-only fidelity of a compact-block observation, then the full-data
-        // observation, then the full-data observation again.
-        let outputs_only = observations
+        // The compact-block feed, which sees each output's value and script but no `scriptSig`.
+        let compact = complete
             .iter()
-            .filter(|o| {
-                matches!(
-                    o.involvement(),
-                    zcash_client_backend::wallet::TransparentInvolvement::Output(_)
-                )
-            })
+            .filter(|o| matches!(o.involvement(), TransparentInvolvement::Output(_)))
             .cloned()
             .collect::<Vec<TransparentAddressObservation>>();
+        assert_eq!(compact.len(), 1);
 
-        put_observations(&conn, &network, tx_ref, &outputs_only).unwrap();
-        let after_compact = stored_observations(&conn, tx_ref);
-        assert_eq!(after_compact.len(), 1);
+        let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
 
-        put_observations(&conn, &network, tx_ref, &observations).unwrap();
-        let after_full = stored_observations(&conn, tx_ref);
-        put_observations(&conn, &network, tx_ref, &observations).unwrap();
-        assert_eq!(stored_observations(&conn, tx_ref), after_full);
+        // Each feed sequence is applied against its own transaction row, so that the resulting
+        // index states can be compared directly.
+        let apply = |tx_ref: TxRef, feeds: &[&[TransparentAddressObservation]]| {
+            conn.execute(
+                "INSERT INTO transactions (id_tx, txid, min_observed_height)
+                 VALUES (:id_tx, :txid, 1)",
+                named_params! { ":id_tx": tx_ref.0, ":txid": vec![u8::try_from(tx_ref.0).unwrap()] },
+            )
+            .unwrap();
+            for feed in feeds {
+                put_observations(&conn, &network, tx_ref, feed).unwrap();
+            }
+            stored_observations(&conn, tx_ref)
+        };
 
-        assert_eq!(after_full.len(), 2);
-        assert_eq!(after_full[0].0, Involvement::Output.encode());
-        assert_eq!(after_full[0].2, recipient.encode(&network));
-        assert_eq!(after_full[0].3, Some(100_000));
-        assert_eq!(after_full[1].0, Involvement::Input.encode());
-        assert_eq!(after_full[1].4, Some(7));
+        let compact_only = apply(TxRef(1), &[&compact]);
+        let complete_only = apply(TxRef(2), &[&complete]);
+        let compact_then_complete = apply(TxRef(3), &[&compact, &complete]);
+        let complete_then_compact = apply(TxRef(4), &[&complete, &compact]);
+        let repeated = apply(TxRef(5), &[&complete, &complete, &compact, &complete]);
+
+        // Every sequence that includes a complete-data feed reaches the same state.
+        assert_eq!(compact_then_complete, complete_only);
+        assert_eq!(complete_then_compact, complete_only);
+        assert_eq!(repeated, complete_only);
+
+        // The compact feed writes exactly the output rows of the complete feed.
+        assert_eq!(
+            compact_only,
+            complete_only
+                .iter()
+                .filter(|row| row.0 == Involvement::Output.encode())
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+
+        assert_eq!(complete_only.len(), 2);
+        assert_eq!(complete_only[0].0, Involvement::Output.encode());
+        assert_eq!(complete_only[0].2, recipient.encode(&network));
+        assert_eq!(complete_only[0].3, Some(100_000));
+        assert_eq!(complete_only[1].0, Involvement::Input.encode());
+        assert_eq!(complete_only[1].4, Some(7));
 
         conn.commit().unwrap();
     }

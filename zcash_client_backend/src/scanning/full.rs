@@ -45,7 +45,10 @@ use super::IronwoodDomain;
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use {
+    crate::wallet::transparent_address_observations,
+    transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+};
 
 /// The default number of outputs at which a batch runner immediately flushes a batch.
 pub(crate) const DEFAULT_BATCH_SIZE_THRESHOLD: usize = 200;
@@ -685,6 +688,16 @@ where
                 #[cfg(not(feature = "transparent-inputs"))]
                 vec![],
                 transparent_outputs,
+                // A full block carries complete transaction data, so both involvement
+                // directions are observable: the addresses paid by the outputs, and the
+                // addresses the inputs' `scriptSig`s reveal. Addresses the wallet does not
+                // control are recorded too, since a transaction that involves the wallet may
+                // name an address it learns to control only later. Every input of every other
+                // transaction in the block would have to be hashed to derive observations that
+                // are then discarded, so this is computed only once the transaction is known to
+                // involve the wallet.
+                #[cfg(feature = "transparent-inputs")]
+                transparent_address_observations(&tx),
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
@@ -953,6 +966,134 @@ mod tests {
 
     use super::{PositionTracker, tree_sizes_around};
     use crate::scanning::ScanError;
+
+    /// Scanning a full block records, for each transaction the wallet is involved in, the
+    /// transparent addresses that transaction's data names — in both directions, since a full
+    /// block carries the `scriptSig`s that an input reveals its address through.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn scan_block_records_transparent_address_observations() {
+        use std::convert::Infallible;
+
+        use nonempty::NonEmpty;
+        use transparent::{
+            address::{Script, TransparentAddress},
+            bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
+            keys::TransparentKeyScope,
+        };
+        use zcash_primitives::{
+            block::{Block, BlockHash, BlockHeaderData},
+            transaction::{Authorized, TransactionData, TxVersion},
+        };
+        use zcash_protocol::{
+            consensus::{BranchId, MAIN_NETWORK},
+            value::Zatoshis,
+        };
+        use zcash_script::script;
+
+        use crate::{
+            data_api::BlockMetadata,
+            scanning::{
+                ScanningKeys, SpendIdentifiers,
+                full::{decrypt_block, scan_block},
+            },
+            wallet::TransparentInvolvement,
+        };
+
+        // A compressed public key encoding, and a P2PKH `scriptSig` revealing it.
+        let mut pubkey = vec![0x02];
+        pubkey.extend_from_slice(&[0x11; 32]);
+        let mut script_sig = vec![71];
+        script_sig.extend_from_slice(&[0x30; 71]);
+        script_sig.push(u8::try_from(pubkey.len()).unwrap());
+        script_sig.extend_from_slice(&pubkey);
+
+        let recipient = TransparentAddress::PublicKeyHash([0x22; 20]);
+        let prevout = OutPoint::new([0x33; 32], 7);
+        let tx = TransactionData::<Authorized>::from_parts(
+            TxVersion::V5,
+            BranchId::Nu5,
+            0,
+            BlockHeight::from(0),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
+            Some(Bundle::<TransparentAuthorized> {
+                vin: vec![TxIn::from_parts(
+                    prevout.clone(),
+                    Script(script::Code(script_sig)),
+                    0,
+                )],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(100_000),
+                    Script::from(&recipient.script()),
+                )],
+                authorization: TransparentAuthorized,
+            }),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .expect("transaction data is complete");
+
+        let height = BlockHeight::from(1_000_000);
+        let header = BlockHeaderData {
+            version: 4,
+            prev_block: BlockHash([0; 32]),
+            merkle_root: [0; 32],
+            final_sapling_root: [0; 32],
+            time: 0,
+            bits: 0,
+            nonce: [0; 32],
+            solution: vec![],
+        }
+        .freeze()
+        .unwrap();
+        let block = Block::from_parts(header, NonEmpty::singleton(tx), height);
+
+        let scanning_keys = ScanningKeys::<u32, ()>::empty();
+        let (header, vtx) = decrypt_block(&MAIN_NETWORK, block, &scanning_keys);
+        let scanned = scan_block(
+            &MAIN_NETWORK,
+            height,
+            &header,
+            vtx,
+            &scanning_keys,
+            &SpendIdentifiers::empty(),
+            Some(&BlockMetadata::from_parts(
+                height - 1,
+                BlockHash([0; 32]),
+                Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
+            )),
+            // The output's recipient is treated as a wallet address, which is what makes the
+            // transaction wallet-involving and so eligible to be observed at all.
+            |addr| {
+                Ok::<_, Infallible>(
+                    (*addr == recipient).then_some((0u32, Some(TransparentKeyScope::EXTERNAL))),
+                )
+            },
+        )
+        .expect("scanning the block succeeds");
+
+        assert_eq!(scanned.transactions().len(), 1);
+        let observations = scanned.transactions()[0].transparent_address_observations();
+
+        // Both directions are observable from complete transaction data.
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[0].address(), &recipient);
+        assert_eq!(
+            observations[0].involvement(),
+            &TransparentInvolvement::Output(Zatoshis::const_from_u64(100_000))
+        );
+        assert_eq!(
+            observations[1].involvement(),
+            &TransparentInvolvement::Input(prevout)
+        );
+    }
 
     // The behaviour of `tree_sizes_around` is independent of the shielded protocol (the
     // protocol is only echoed back in errors), so these properties are checked for a

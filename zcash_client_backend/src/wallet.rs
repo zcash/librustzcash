@@ -176,6 +176,8 @@ pub struct WalletTx<AccountId> {
     block_index: TxIndex,
     transparent_spends: Vec<WalletTransparentSpend<AccountId>>,
     transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_address_observations: Vec<TransparentAddressObservation>,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
     #[cfg(feature = "orchard")]
@@ -196,6 +198,9 @@ impl<AccountId> WalletTx<AccountId> {
         block_index: TxIndex,
         transparent_spends: Vec<WalletTransparentSpend<AccountId>>,
         transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
+        #[cfg(feature = "transparent-inputs")] transparent_address_observations: Vec<
+            TransparentAddressObservation,
+        >,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
         #[cfg(feature = "orchard")] orchard_spends: Vec<
@@ -212,6 +217,8 @@ impl<AccountId> WalletTx<AccountId> {
             block_index,
             transparent_spends,
             transparent_outputs,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_address_observations,
             sapling_spends,
             sapling_outputs,
             #[cfg(feature = "orchard")]
@@ -246,6 +253,18 @@ impl<AccountId> WalletTx<AccountId> {
     /// Returns a record for each transparent coin received or produced by the wallet.
     pub fn transparent_outputs(&self) -> &[WalletTransparentOutput<AccountId>] {
         &self.transparent_outputs
+    }
+
+    /// Returns a record of every transparent address that this transaction's transparent data
+    /// names, whether or not the wallet controls it.
+    ///
+    /// The set covers only the involvement directions the data this record was built from can
+    /// express: scanning a compact block yields output observations, since a compact input
+    /// carries no `scriptSig` and so names no address, while scanning a full block yields both
+    /// directions.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_address_observations(&self) -> &[TransparentAddressObservation] {
+        &self.transparent_address_observations
     }
 
     /// Returns a record for each Sapling note belonging to the wallet that was spent in the
