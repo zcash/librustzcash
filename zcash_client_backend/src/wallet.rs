@@ -18,7 +18,7 @@ use zcash_protocol::{
     consensus::{BlockHeight, TxIndex},
     value::{BalanceError, Zatoshis},
 };
-#[cfg(feature = "transparent-key-import")]
+#[cfg(feature = "transparent-inputs")]
 use zcash_script::script;
 use zip32::Scope;
 
@@ -463,6 +463,169 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     pub fn value(&self) -> Zatoshis {
         self.txout.value()
     }
+}
+
+/// The way in which a transaction's transparent data names an address, and the data that the
+/// involvement carries.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransparentInvolvement {
+    /// The observed address is paid by the transaction output at the observed index, which has
+    /// the given value.
+    Output(Zatoshis),
+    /// The observed address is revealed by the `scriptSig` of the transaction input at the
+    /// observed index, which spends the given outpoint.
+    Input(OutPoint),
+}
+
+/// A record that a transaction's transparent data names a particular address.
+///
+/// An observation is recorded for every address a wallet-involved transaction names, whether or
+/// not the wallet controls that address, so that the involvement can be recognized if a key
+/// covering the address is added to the wallet afterwards.
+///
+/// An observation is identified by the transaction it belongs to, the direction of its
+/// [`Self::involvement`], and its [`Self::item_index`]; the address and the involvement data
+/// are functions of that identity, so observing the same transaction twice yields identical
+/// records.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransparentAddressObservation {
+    address: TransparentAddress,
+    item_index: u32,
+    involvement: TransparentInvolvement,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentAddressObservation {
+    /// Constructs an observation of the address paid by the transaction output at `item_index`.
+    pub fn output(item_index: u32, address: TransparentAddress, value: Zatoshis) -> Self {
+        Self {
+            address,
+            item_index,
+            involvement: TransparentInvolvement::Output(value),
+        }
+    }
+
+    /// Constructs an observation of the address revealed by the `scriptSig` of the transaction
+    /// input at `item_index`, which spends `prevout`.
+    pub fn input(item_index: u32, address: TransparentAddress, prevout: OutPoint) -> Self {
+        Self {
+            address,
+            item_index,
+            involvement: TransparentInvolvement::Input(prevout),
+        }
+    }
+
+    /// Returns the observed address.
+    pub fn address(&self) -> &TransparentAddress {
+        &self.address
+    }
+
+    /// Returns the index of the output or input that names the address, within the
+    /// transaction's `vout` or `vin` respectively.
+    pub fn item_index(&self) -> u32 {
+        self.item_index
+    }
+
+    /// Returns the direction of the involvement, and the data that it carries.
+    pub fn involvement(&self) -> &TransparentInvolvement {
+        &self.involvement
+    }
+}
+
+/// The serialized length of a compressed secp256k1 public key.
+#[cfg(feature = "transparent-inputs")]
+const COMPRESSED_PUBKEY_LEN: usize = 33;
+
+/// The serialized length of an uncompressed secp256k1 public key.
+#[cfg(feature = "transparent-inputs")]
+const UNCOMPRESSED_PUBKEY_LEN: usize = 65;
+
+/// The number of pushes in a P2PKH `scriptSig`: the signature, then the public key.
+#[cfg(feature = "transparent-inputs")]
+const P2PKH_SIG_PUSH_COUNT: usize = 2;
+
+/// Returns the address that a `scriptSig` reveals as the recipient of the output it spends, if
+/// the script has a shape from which the address can be recovered.
+///
+/// Both recognized shapes end with the material that the spent `scriptPubKey` commits to: a
+/// P2PKH `scriptSig` is `<sig> <pubkey>`, whose address is the HASH160 of the public key; any
+/// other push-only `scriptSig` is read as a P2SH spend, whose address is the HASH160 of its
+/// final push (the redeem script). A `scriptSig` that is empty or not push-only yields `None`.
+///
+/// The two shapes are distinguished without reference to the output being spent, which the
+/// wallet need not hold: a two-push `scriptSig` whose final push is a valid public key encoding
+/// is read as P2PKH. A P2SH redeem script that is itself a valid public key encoding, spent by a
+/// single-signature `scriptSig`, is therefore misread as P2PKH; no standard redeem script has
+/// that shape. A misread names an address of the wrong kind, which matches nothing the wallet
+/// holds, so the input direction misses that spend permanently — unless the transaction that
+/// created the spent output is itself stored, since its output observation names the address
+/// correctly.
+#[cfg(feature = "transparent-inputs")]
+fn address_from_script_sig(
+    script_sig: &::transparent::address::Script,
+) -> Option<TransparentAddress> {
+    let pushes = script::Sig::parse(&script_sig.0).ok()?.0;
+    let last = pushes.last()?.value();
+
+    // Equivalent to `CPubKey::GetLen` composed with `CPubKey::ValidSize`: the leading byte of a
+    // serialized public key determines the length the encoding must have.
+    let is_pubkey = match last.first() {
+        Some(2 | 3) => last.len() == COMPRESSED_PUBKEY_LEN,
+        Some(4 | 6 | 7) => last.len() == UNCOMPRESSED_PUBKEY_LEN,
+        _ => false,
+    };
+
+    Some(if pushes.len() == P2PKH_SIG_PUSH_COUNT && is_pubkey {
+        TransparentAddress::PublicKeyHash(::transparent::util::hash160::hash(&last))
+    } else {
+        TransparentAddress::ScriptHash(::transparent::util::hash160::hash(&last))
+    })
+}
+
+/// Returns an observation for every address named by the given transaction's transparent data:
+/// one for each output whose `scriptPubKey` describes an address, and one for each non-coinbase
+/// input whose `scriptSig` reveals the address of the output it spends.
+///
+/// Outputs and inputs whose scripts name no address are omitted. Script data that does not
+/// parse names no address; it is chain data the wallet does not control, so it is skipped
+/// rather than reported as an error.
+#[cfg(feature = "transparent-inputs")]
+pub fn transparent_address_observations(
+    tx: &zcash_primitives::transaction::Transaction,
+) -> Vec<TransparentAddressObservation> {
+    let mut observations = vec![];
+
+    let Some(bundle) = tx.transparent_bundle() else {
+        return observations;
+    };
+
+    for (output_index, txout) in bundle.vout.iter().enumerate() {
+        if let Some(address) = txout.recipient_address() {
+            observations.push(TransparentAddressObservation::output(
+                u32::try_from(output_index).expect("a transaction has fewer than 2^32 outputs"),
+                address,
+                txout.value(),
+            ));
+        }
+    }
+
+    // A coinbase transaction's single input carries arbitrary data in its `scriptSig` and
+    // spends the null outpoint, so it reveals no address and references no prior output.
+    if !bundle.is_coinbase() {
+        for (input_index, txin) in bundle.vin.iter().enumerate() {
+            if let Some(address) = address_from_script_sig(txin.script_sig()) {
+                observations.push(TransparentAddressObservation::input(
+                    u32::try_from(input_index).expect("a transaction has fewer than 2^32 inputs"),
+                    address,
+                    txin.prevout().clone(),
+                ));
+            }
+        }
+    }
+
+    observations
 }
 
 impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<AccountId> {
@@ -1354,5 +1517,242 @@ mod output_ref_tests {
                 && a.output_index() == b.output_index();
             prop_assert_eq!(a == b, components_equal);
         }
+    }
+}
+
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod transparent_observation_tests {
+    use ::transparent::{
+        address::{Script, TransparentAddress},
+        bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
+        util::hash160,
+    };
+    use zcash_primitives::transaction::{Authorized, Transaction, TransactionData, TxVersion};
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        value::Zatoshis,
+    };
+    use zcash_script::script;
+
+    use proptest::prelude::*;
+
+    use super::{
+        TransparentAddressObservation, TransparentInvolvement, address_from_script_sig,
+        transparent_address_observations,
+    };
+
+    /// The `OP_CHECKSIG` opcode, which is not a push and so makes a `scriptSig` unreadable.
+    const OP_CHECKSIG: u8 = 0xAC;
+
+    /// A validly-encoded compressed public key: the `0x02` prefix followed by 32 bytes.
+    fn pubkey_bytes() -> Vec<u8> {
+        let mut bytes = vec![0x02];
+        bytes.extend_from_slice(&[0x11; 32]);
+        bytes
+    }
+
+    /// Builds a push-only script from the given data pushes. Each push is at most 75 bytes, so
+    /// each is encoded as its own length byte followed by its data.
+    fn push_script(pushes: &[&[u8]]) -> Script {
+        let mut code = vec![];
+        for data in pushes {
+            assert!(
+                data.len() < 76,
+                "test pushes use the single-byte length form"
+            );
+            code.push(u8::try_from(data.len()).expect("checked above"));
+            code.extend_from_slice(data);
+        }
+        Script(script::Code(code))
+    }
+
+    fn tx_from_bundle(bundle: Bundle<TransparentAuthorized>) -> Transaction {
+        TransactionData::<Authorized>::from_parts(
+            TxVersion::V5,
+            BranchId::Nu5,
+            0,
+            BlockHeight::from(0),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
+            Some(bundle),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .expect("transaction data is complete")
+    }
+
+    /// A two-push `scriptSig` whose final push is a valid public key encoding is read as a
+    /// P2PKH spend, so the revealed address is the HASH160 of that public key.
+    #[test]
+    fn script_sig_address_reads_p2pkh_shape() {
+        let pubkey = pubkey_bytes();
+        let script_sig = push_script(&[&[0x30; 71], &pubkey]);
+
+        assert_eq!(
+            address_from_script_sig(&script_sig),
+            Some(TransparentAddress::PublicKeyHash(hash160::hash(&pubkey)))
+        );
+    }
+
+    /// Any other push-only `scriptSig` is read as a P2SH spend, so the revealed address is the
+    /// HASH160 of its final push, which is the redeem script.
+    #[test]
+    fn script_sig_address_reads_p2sh_shape() {
+        let redeem_script = vec![0xAB; 40];
+        let script_sig = push_script(&[&[0x30; 71], &[0x30; 71], &redeem_script]);
+
+        assert_eq!(
+            address_from_script_sig(&script_sig),
+            Some(TransparentAddress::ScriptHash(hash160::hash(
+                &redeem_script
+            )))
+        );
+    }
+
+    /// A `scriptSig` that is empty, or that contains an opcode that is not a push, reveals no
+    /// address. Both are chain data the wallet does not control, so neither is an error.
+    #[test]
+    fn script_sig_address_rejects_unusable_scripts() {
+        assert_eq!(address_from_script_sig(&Script(script::Code(vec![]))), None);
+        assert_eq!(
+            address_from_script_sig(&Script(script::Code(vec![OP_CHECKSIG]))),
+            None
+        );
+    }
+
+    /// Both involvement directions are extracted from a complete transaction, indexed by
+    /// position within `vout` and `vin` respectively.
+    #[test]
+    fn observations_cover_both_directions() {
+        let recipient = TransparentAddress::PublicKeyHash([0x22; 20]);
+        let pubkey = pubkey_bytes();
+        let prevout = OutPoint::new([0x33; 32], 7);
+        let value = Zatoshis::const_from_u64(1000);
+
+        let bundle = Bundle::<TransparentAuthorized> {
+            vin: vec![TxIn::from_parts(
+                prevout.clone(),
+                push_script(&[&[0x30; 71], &pubkey]),
+                0,
+            )],
+            vout: vec![TxOut::new(value, Script::from(&recipient.script()))],
+            authorization: TransparentAuthorized,
+        };
+
+        assert_eq!(
+            transparent_address_observations(&tx_from_bundle(bundle)),
+            vec![
+                TransparentAddressObservation::output(0, recipient, value),
+                TransparentAddressObservation::input(
+                    0,
+                    TransparentAddress::PublicKeyHash(hash160::hash(&pubkey)),
+                    prevout,
+                ),
+            ]
+        );
+    }
+
+    proptest! {
+        /// Script data comes from the chain, so `address_from_script_sig` must be total over
+        /// arbitrary bytes: it may recognize no address, but it may not panic, and whatever it
+        /// recognizes must be the HASH160 of the script's final push.
+        #[test]
+        fn script_sig_address_is_total(code in prop::collection::vec(any::<u8>(), 0..300)) {
+            let script = Script(script::Code(code.clone()));
+            let recognized = address_from_script_sig(&script);
+
+            match script::Sig::parse(&script.0).ok().map(|sig| sig.0) {
+                // A push-only script with at least one push always names an address, and that
+                // address is the HASH160 of its final push.
+                Some(pushes) if !pushes.is_empty() => {
+                    let expected = hash160::hash(&pushes.last().unwrap().value());
+                    prop_assert_eq!(
+                        recognized.map(|address| match address {
+                            TransparentAddress::PublicKeyHash(h) => h,
+                            TransparentAddress::ScriptHash(h) => h,
+                        }),
+                        Some(expected)
+                    );
+                }
+                // Anything else names none.
+                _ => prop_assert_eq!(recognized, None),
+            }
+        }
+
+        /// Observation extraction is likewise total: arbitrary `scriptSig` bytes on a
+        /// transaction's inputs yield observations or none, never a panic, and every observation
+        /// index addresses a real item of the transaction.
+        #[test]
+        fn observations_are_total(
+            script_sigs in prop::collection::vec(
+                prop::collection::vec(any::<u8>(), 0..80),
+                0..4,
+            ),
+            output_count in 0usize..4,
+        ) {
+            let bundle = Bundle::<TransparentAuthorized> {
+                vin: script_sigs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, code)| {
+                        TxIn::from_parts(
+                            OutPoint::new([u8::try_from(i).unwrap(); 32], 0),
+                            Script(script::Code(code.clone())),
+                            0,
+                        )
+                    })
+                    .collect(),
+                vout: (0..output_count)
+                    .map(|i| {
+                        TxOut::new(
+                            Zatoshis::const_from_u64(1),
+                            Script::from(
+                                &TransparentAddress::PublicKeyHash([u8::try_from(i).unwrap(); 20])
+                                    .script(),
+                            ),
+                        )
+                    })
+                    .collect(),
+                authorization: TransparentAuthorized,
+            };
+            let is_coinbase = bundle.is_coinbase();
+            let tx = tx_from_bundle(bundle);
+
+            for observation in transparent_address_observations(&tx) {
+                let index = usize::try_from(observation.item_index()).unwrap();
+                match observation.involvement() {
+                    TransparentInvolvement::Output(_) => prop_assert!(index < output_count),
+                    TransparentInvolvement::Input(_) => {
+                        prop_assert!(!is_coinbase);
+                        prop_assert!(index < script_sigs.len());
+                    }
+                }
+            }
+        }
+    }
+
+    /// A coinbase transaction's single input carries arbitrary data and spends the null
+    /// outpoint, so it contributes no input observation.
+    #[test]
+    fn observations_skip_coinbase_inputs() {
+        let recipient = TransparentAddress::PublicKeyHash([0x44; 20]);
+        let value = Zatoshis::const_from_u64(500);
+
+        let bundle = Bundle::<TransparentAuthorized> {
+            vin: vec![TxIn::from_parts(
+                OutPoint::NULL,
+                push_script(&[&[0x01, 0x02, 0x03]]),
+                0,
+            )],
+            vout: vec![TxOut::new(value, Script::from(&recipient.script()))],
+            authorization: TransparentAuthorized,
+        };
+
+        assert_eq!(
+            transparent_address_observations(&tx_from_bundle(bundle)),
+            vec![TransparentAddressObservation::output(0, recipient, value)]
+        );
     }
 }

@@ -162,7 +162,10 @@ use {
     ReceiverRequirement::*,
     rusqlite::types::Value,
     std::rc::Rc,
-    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
+    zcash_client_backend::{
+        data_api::DecryptedTransaction,
+        wallet::{WalletTransparentOutput, transparent_address_observations},
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -3691,6 +3694,19 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         Some(sent_tx.created()),
         Some(sent_tx.target_height()),
         sent_tx.target_height().into(),
+    )?;
+
+    // The wallet created this transaction, so it involves the wallet and its complete data is in
+    // hand: both involvement directions are recorded, as for any other transaction the wallet
+    // stores. An output paying an address of this wallet that no account has derived yet — the
+    // middle hop of a ZIP 320 pair, or an address beyond another account's gap — is recognized
+    // when that address is derived.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::observations::put_observations(
+        conn,
+        params,
+        tx_ref,
+        &transparent_address_observations(sent_tx.tx()),
     )?;
 
     let mut detectable_via_scanning = false;

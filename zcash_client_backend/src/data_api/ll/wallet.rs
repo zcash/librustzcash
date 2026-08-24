@@ -967,6 +967,14 @@ where
         wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
 
+    // Complete transaction data is in hand, so both involvement directions can be recorded: the
+    // addresses paid by the outputs, and the addresses revealed by the inputs' `scriptSig`s.
+    #[cfg(feature = "transparent-inputs")]
+    wallet_db.put_transparent_address_observations(
+        tx_ref,
+        &crate::wallet::transparent_address_observations(d_tx.tx()),
+    )?;
+
     // Record how the transaction classifies against ZIP 318, so that a wallet can label a
     // migration transaction in its history without a migration plan, which does not survive a
     // seed restore. This is the one moment at which the parsed transaction and the decrypted

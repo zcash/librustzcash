@@ -91,6 +91,8 @@ use {
 };
 
 pub(crate) mod ephemeral;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod observations;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,

@@ -130,7 +130,7 @@ use {
             ll::wallet::generate_transparent_gap_addresses,
         },
         fees::StandardFeeRule,
-        wallet::TransparentAddressMetadata,
+        wallet::{TransparentAddressMetadata, TransparentAddressObservation},
     },
     zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
@@ -3019,6 +3019,20 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )?;
 
         Ok((account_uuid, key_scope.as_transparent()))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn put_transparent_address_observations(
+        &mut self,
+        tx_ref: Self::TxRef,
+        observations: &[TransparentAddressObservation],
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::observations::put_observations(
+            self.conn.borrow(),
+            &self.params,
+            tx_ref,
+            observations,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]

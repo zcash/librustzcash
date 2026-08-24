@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- Schema: a migration adds the `transparent_tx_address_observations` table,
+  which records every transparent address named by a wallet-involved
+  transaction, in both involvement directions, and populates it from every
+  transaction for which complete data is already stored.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
