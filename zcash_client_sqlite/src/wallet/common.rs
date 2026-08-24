@@ -146,23 +146,6 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
 
 /// Returns a SQL subquery selecting the rows of `v_{table_prefix}_shard_scan_ranges` whose
 /// `block_range_start` is at or below `:anchor_height`.
-///
-/// This is the single definition of which scan queue entries can affect a witness at the anchor;
-/// every spendability gate ([`unscanned_tip_exists`], [`shard_scan_state_at_anchor`],
-/// [`shard_unscanned_ranges_at_anchor`]) is built from it so that [`get_wallet_summary`] and note
-/// selection cannot disagree.
-///
-/// A witness depends only on the tree state at the anchor, i.e. on blocks at or below it, all of
-/// which have been scanned (the anchor is clamped to a checkpoint, and checkpoints exist only for
-/// scanned blocks). A range starting above the anchor — e.g. the `ChainTip` range queued by
-/// [`update_chain_tip`] before any of it is scanned — therefore must not disqualify notes, even
-/// though it overlaps the tip shard. A range starting at or below the anchor may cover blocks
-/// that are part of the tree at the anchor, and still disqualifies the shards it overlaps.
-///
-/// The parent query must bind `:anchor_height`; if it is `NULL`, the subquery yields no rows.
-///
-/// [`update_chain_tip`]: crate::wallet::scanning::update_chain_tip
-/// [`get_wallet_summary`]: crate::wallet::get_wallet_summary
 pub(crate) fn shard_scan_ranges_at_anchor(table_prefix: &str) -> String {
     format!(
         "SELECT * FROM v_{table_prefix}_shard_scan_ranges
@@ -992,7 +975,8 @@ pub(crate) fn select_unspent_note_meta(
     //
     // TODO: Deduplicate this in the future by introducing a view?
     let mut stmt = conn.prepare_cached(&format!(
-        "SELECT rn.id AS id, txid, {output_index_col},
+        "WITH unscanned_at_anchor AS ({})
+         SELECT rn.id AS id, txid, {output_index_col},
                 commitment_tree_position, value
          FROM {table_prefix}_received_notes rn
          INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
@@ -1002,16 +986,15 @@ pub(crate) fn select_unspent_note_meta(
          AND commitment_tree_position IS NOT NULL
          AND rn.id NOT IN ({})
          AND NOT EXISTS (
-            -- select all the unscanned ranges relevant at the anchor that involve the shard
-            -- containing this note
-            SELECT 1 FROM ({}) unscanned
+            -- select all the unscanned ranges involving the shard containing this note
+            SELECT 1 FROM unscanned_at_anchor unscanned
             WHERE rn.commitment_tree_position >= unscanned.start_position
             AND rn.commitment_tree_position < unscanned.end_position_exclusive
             -- exclude unscanned ranges that end below the wallet birthday
             AND unscanned.block_range_end > :wallet_birthday
          )",
-        spent_notes_clause(table_prefix),
         shard_unscanned_ranges_at_anchor(table_prefix),
+        spent_notes_clause(table_prefix),
     ))?;
 
     let res = stmt
