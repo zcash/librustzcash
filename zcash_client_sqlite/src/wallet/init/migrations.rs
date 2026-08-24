@@ -161,6 +161,7 @@ migration_modules!(
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
     transparent_spend_locator_map,
+    transparent_tx_address_observations,
     tree_retained_checkpoints,
     tx_observation_height,
     tx_retrieval_queue,
@@ -317,6 +318,8 @@ pub(super) fn all_migrations<
     //                                                                       /                            /
     //                                                                   fix_v_transactions_multi_account_totals
     //
+    // `transparent_tx_address_observations` depends on every leaf of the graph above, and so it
+    // follows all of them.
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -443,6 +446,9 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(witness_settled_height::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(transparent_tx_address_observations::Migration {
             _params: params.clone(),
         }),
     ]
@@ -800,7 +806,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     // Used only by the orchard-gated note-generation strategies below.
     #[cfg(feature = "orchard")]
@@ -855,6 +861,57 @@ pub(crate) mod tests {
         let runtime_ids: HashSet<Uuid> = migrations.iter().map(|m| m.id()).collect();
         let listed_ids: HashSet<Uuid> = super::ALL_MIGRATION_IDS.iter().copied().collect();
         assert_eq!(runtime_ids, listed_ids);
+    }
+
+    /// A migration that runs the wallet's own code over stored data reads the schema as the whole
+    /// migration graph leaves it, so its place in the order of application must be fixed against
+    /// every other migration. Each other migration must therefore be one that it depends on,
+    /// directly or through other migrations, or one that depends on it in the same way.
+    ///
+    /// A migration that is neither may be applied on either side of it, and the wallet code then
+    /// runs against a schema that lacks that migration whenever it is applied afterwards. This
+    /// is the state in which a newly added leaf migration leaves the graph, until the leaf is
+    /// added to the dependencies of the migrations checked here.
+    #[test]
+    fn migrations_running_wallet_code_are_ordered_against_every_migration() {
+        let migrations =
+            super::all_migrations(&Network::TestNetwork, test_clock(), test_rng(), None);
+        let dependencies: HashMap<Uuid, HashSet<Uuid>> = migrations
+            .iter()
+            .map(|m| (m.id(), m.dependencies()))
+            .collect();
+
+        // The migrations that `id` depends on, directly or through other migrations. Each step
+        // moves from a set of migrations to the union of their dependencies, and the dependency
+        // graph is acyclic, so the steps end at an empty set.
+        let transitive_dependencies = |id: Uuid| -> HashSet<Uuid> {
+            std::iter::successors(Some(dependencies[&id].clone()), |reached| {
+                let next: HashSet<Uuid> = reached
+                    .iter()
+                    .flat_map(|dependency| dependencies[dependency].iter().copied())
+                    .collect();
+                (!next.is_empty()).then_some(next)
+            })
+            .flatten()
+            .collect()
+        };
+
+        for id in [super::transparent_tx_address_observations::MIGRATION_ID] {
+            let applied_before = transitive_dependencies(id);
+            let unordered: Vec<Uuid> = dependencies
+                .keys()
+                .copied()
+                .filter(|other| {
+                    *other != id
+                        && !applied_before.contains(other)
+                        && !transitive_dependencies(*other).contains(&id)
+                })
+                .collect();
+            assert!(
+                unordered.is_empty(),
+                "migration {id} neither depends on nor is depended on by {unordered:?}",
+            );
+        }
     }
 
     /// A synthetic set of Orchard note payload values, for exercising migrations that touch the
