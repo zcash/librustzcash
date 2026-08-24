@@ -6013,6 +6013,8 @@ pub(crate) fn find_or_create_spending_tx_for_outpoint(
             index,
             vec![],
             vec![],
+            #[cfg(feature = "transparent-inputs")]
+            vec![],
             vec![],
             vec![],
             #[cfg(feature = "orchard")]
@@ -6074,6 +6076,8 @@ pub(crate) fn find_or_create_spending_tx_for_nullifier<N: AsRef<[u8]>>(
             txid,
             index,
             vec![],
+            vec![],
+            #[cfg(feature = "transparent-inputs")]
             vec![],
             vec![],
             vec![],
