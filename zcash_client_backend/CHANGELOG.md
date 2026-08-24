@@ -41,6 +41,8 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::wallet::transparent_address_observations` (behind
   `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTx::transparent_address_observations`
+  (behind `transparent-inputs`)
 
 ### Changed
 - Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
@@ -110,6 +112,12 @@ workspace.
   outpoints of its unspent transparent outputs; construct it with
   `SpendIdentifiers::unspent` where `Nullifiers::unspent` was used, and maintain
   it across a batch with `SpendIdentifiers::update_with`.
+  argument before `transparent_outputs`, and, behind `transparent-inputs`, a
+  `transparent_address_observations` argument after it.
+- `zcash_client_backend::scanning::Nullifiers` is renamed to `SpendIdentifiers`,
+  and additionally tracks the outpoints of the wallet's unspent transparent
+  outputs; `SpendIdentifiers::unspent` populates them and
+  `SpendIdentifiers::update_with` maintains them across a batch.
 - `zcash_client_backend::data_api::WalletRead` has two new required methods
   behind `transparent-inputs`, `get_unspent_transparent_outpoints` and
   `get_transparent_receiver_accounts`. Both are called on the scan path, so
