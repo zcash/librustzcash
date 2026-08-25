@@ -17,9 +17,8 @@ use transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
 };
-use zcash_client_backend::{
-    data_api::scanning::{ScanPriority, ScanRange},
-    wallet::{TransparentAddressObservation, TransparentInvolvement, WalletTransparentOutput},
+use zcash_client_backend::wallet::{
+    TransparentAddressObservation, TransparentInvolvement, WalletTransparentOutput,
 };
 use zcash_keys::{
     encoding::AddressCodec,
@@ -33,13 +32,13 @@ use zcash_protocol::{
 };
 
 use super::{
-    GapAdvance, get_wallet_transparent_output, mark_transparent_utxo_spent, put_transparent_output,
-    queue_transparent_spend_detection,
+    GapAdvance, get_wallet_transparent_output, lower_account_birthday, mark_transparent_utxo_spent,
+    put_transparent_output, queue_transparent_spend_detection,
 };
 use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
-    wallet::{KeyScope, queue_tx_retrieval, scanning::replace_queue_entries, update_tx_fee},
+    wallet::{KeyScope, queue_tx_retrieval, update_tx_fee},
 };
 
 /// The direction in which a transaction's transparent data names an address, as encoded in the
@@ -401,11 +400,6 @@ fn reconcile_output<P: consensus::Parameters>(
         GapAdvance::Deferred,
     )?;
 
-    // The wallet was paid at this address when the transaction was mined, so it was active then.
-    if let Some(height) = involvement.mined_height {
-        lower_account_birthday(conn, involvement.account_uuid, height)?;
-    }
-
     // A transparent spend is only found when the wallet knows which outpoint to watch, so an
     // output recognized here must be added to the watch set.
     queue_transparent_spend_detection(
@@ -485,9 +479,10 @@ fn reconcile_input<P: consensus::Parameters>(
     };
 
     // The transaction spends the wallet's funds, so the wallet was active when it was mined,
-    // whether or not the output it spent can be recovered.
+    // whether or not the output it spent can be recovered. Recovering the output records it
+    // through `put_transparent_output`, which accounts for the height at which it was received.
     if let Some(height) = involvement.mined_height {
-        lower_account_birthday(conn, involvement.account_uuid, height)?;
+        lower_account_birthday(conn, params, involvement.account_uuid, height)?;
     }
 
     // Record the spend. If the spent output is not yet held, this records the spend against the
@@ -508,9 +503,6 @@ fn reconcile_input<P: consensus::Parameters>(
     };
 
     let prevout_mined_height = mined_height(conn, *prevout.txid())?;
-    if let Some(height) = prevout_mined_height {
-        lower_account_birthday(conn, involvement.account_uuid, height)?;
-    }
     let output = WalletTransparentOutput::from_parts(
         prevout.clone(),
         txout,
@@ -541,66 +533,6 @@ fn reconcile_input<P: consensus::Parameters>(
     } else {
         ReconcileOutcome::Unchanged
     })
-}
-
-/// Lowers the birthday of the given account to `height`, and queues the range this widens for
-/// scanning. Does nothing if the account's birthday is already at or below `height`.
-///
-/// Involvement mined below an account's birthday means the birthday is wrong: the account was
-/// active earlier than the wallet was told, and every height floor derived from the birthday —
-/// including the range over which the wallet requests transparent address history — sits too
-/// high. Lowering the birthday moves all of them at once.
-///
-/// The widened range is queued at [`ScanPriority::Historic`] in full, rather than for its
-/// transparent part alone: activity earlier than the recorded birthday means the account may
-/// have history in every pool over that range. A range already recorded as scanned is queued
-/// again, because it was scanned without this account among the keys in use.
-///
-/// The note commitment tree sizes stored alongside the birthday are the sizes as of the birthday
-/// height, and cannot be determined offline for a height the wallet has not scanned, so they are
-/// cleared. They inform the reporting of scan progress, which falls back to estimating from
-/// scanned block data when they are absent, and it is that data the queued rescan restores.
-fn lower_account_birthday(
-    conn: &rusqlite::Transaction<'_>,
-    account_uuid: AccountUuid,
-    height: BlockHeight,
-) -> Result<(), SqliteClientError> {
-    let current = conn
-        .query_row(
-            "SELECT birthday_height FROM accounts WHERE uuid = :uuid",
-            named_params! { ":uuid": account_uuid.expose_uuid() },
-            |row| row.get::<_, u32>(0).map(BlockHeight::from),
-        )
-        .optional()?;
-
-    let Some(current) = current.filter(|current| height < *current) else {
-        return Ok(());
-    };
-
-    conn.execute(
-        "UPDATE accounts
-         SET birthday_height = :height,
-             birthday_sapling_tree_size = NULL,
-             birthday_orchard_tree_size = NULL
-         WHERE uuid = :uuid AND birthday_height > :height",
-        named_params! {
-            ":height": u32::from(height),
-            ":uuid": account_uuid.expose_uuid(),
-        },
-    )?;
-
-    let widened = height..current;
-    replace_queue_entries::<SqliteClientError>(
-        conn,
-        &widened,
-        std::iter::once(ScanRange::from_parts(
-            widened.clone(),
-            ScanPriority::Historic,
-        )),
-        true,
-    )?;
-
-    Ok(())
 }
 
 /// Returns the height at which the given transaction was mined, if the wallet knows it.
@@ -725,7 +657,7 @@ mod tests {
         data_api::{
             Account as _, AccountBirthday, AccountPurpose, WalletWrite,
             chain::ChainState,
-            scanning::ScanPriority,
+            scanning::{ScanPriority, ScanRange},
             testing::{TestBuilder, TestState},
         },
         wallet::{
@@ -741,7 +673,7 @@ mod tests {
         transaction::{Authorized, Transaction, TransactionData, TxVersion},
     };
     use zcash_protocol::{
-        consensus::{self, BlockHeight, BranchId},
+        consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters as _},
         local_consensus::LocalNetwork,
         value::{MAX_MONEY, Zatoshis},
     };
@@ -758,7 +690,7 @@ mod tests {
         },
         wallet::{
             get_account_ref,
-            scanning::priority_code,
+            scanning::{insert_queue_entries, priority_code, suggest_scan_ranges},
             transparent::{find_gap_start, generate_gap_addresses, reconcile_and_extend_gaps},
         },
     };
@@ -1852,6 +1784,246 @@ mod tests {
                 )
                 .unwrap()
                 > 0
+        );
+    }
+
+    /// Recognizing involvement below Sapling activation still lowers the birthday — every height
+    /// floor derived from it must follow the evidence — but queues no scanning below activation,
+    /// where no shielded pool exists for the account to have history in.
+    #[test]
+    fn birthday_lowering_clamps_the_queued_range_to_activation() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let activation = u32::from(
+            network
+                .activation_height(NetworkUpgrade::Sapling)
+                .expect("the test network activates Sapling"),
+        );
+
+        let claimed_birthday_height = activation + 100;
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                BlockHeight::from(claimed_birthday_height - 1),
+                BlockHash([1; 32]),
+            ),
+            None,
+        );
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0x9C; 32], AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let below_activation = activation - 5;
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            store_tx(
+                &conn,
+                &network,
+                &paying_tx(
+                    external_address(&ufvk, 0),
+                    17_000,
+                    OutPoint::new([0xF0; 32], 0),
+                ),
+                Some(below_activation),
+            );
+            conn.commit().unwrap();
+        }
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap();
+
+        let conn = &st.wallet().db().conn;
+
+        // The birthday follows the evidence, below activation.
+        assert_eq!(
+            crate::wallet::account_birthday(conn, account.id()).unwrap(),
+            BlockHeight::from(below_activation),
+        );
+
+        // No scan work is queued below activation.
+        let historic = priority_code(&ScanPriority::Historic);
+        let queued = scan_queue(conn);
+        assert!(
+            queued
+                .iter()
+                .all(|(start, _, priority)| *priority != historic || *start >= activation),
+            "no Historic range starts below Sapling activation: {queued:?}",
+        );
+        assert!(
+            queued.iter().any(|(start, end, priority)| {
+                *priority == historic && *start == activation && *end >= claimed_birthday_height
+            }),
+            "the range from activation to the claimed birthday is queued: {queued:?}",
+        );
+    }
+
+    /// Lowering a birthday leaves no `Ignored` range between the new birthday and the previous
+    /// one. An `Ignored` entry reaching above the previous birthday is queued in full: were only
+    /// the part of it below that birthday queued, the remainder would survive as a region
+    /// `suggest_scan_ranges` never offers, which no later lowering revisits because the birthday
+    /// no longer sits above it.
+    #[test]
+    fn birthday_lowering_requeues_ignored_ranges_in_full() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let activation = u32::from(st.test_account().unwrap().birthday().height());
+
+        let claimed_birthday_height = activation + 1000;
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                BlockHeight::from(claimed_birthday_height - 1),
+                BlockHash([4; 32]),
+            ),
+            None,
+        );
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0xD3; 32], AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap();
+        let chain_end = claimed_birthday_height + 500;
+        st.wallet_mut()
+            .db_mut()
+            .update_chain_tip(BlockHeight::from(chain_end - 1))
+            .unwrap();
+
+        // A queue whose ignored region reaches above the recorded birthday, as it does wherever
+        // the wallet's scanning floor once stood higher than that birthday. The region is
+        // recorded in two adjacent entries, the shape a queue takes when successive writers each
+        // skipped their own part of it.
+        let ignored_split = claimed_birthday_height + 100;
+        let ignored_end = claimed_birthday_height + 200;
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute("DELETE FROM scan_queue", []).unwrap();
+            insert_queue_entries(
+                &conn,
+                [
+                    ScanRange::from_parts(
+                        BlockHeight::from(activation)..BlockHeight::from(ignored_split),
+                        ScanPriority::Ignored,
+                    ),
+                    ScanRange::from_parts(
+                        BlockHeight::from(ignored_split)..BlockHeight::from(ignored_end),
+                        ScanPriority::Ignored,
+                    ),
+                    ScanRange::from_parts(
+                        BlockHeight::from(ignored_end)..BlockHeight::from(chain_end),
+                        ScanPriority::Scanned,
+                    ),
+                ]
+                .iter(),
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+
+        let earlier = claimed_birthday_height - 300;
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &paying_tx(
+                external_address(&ufvk, 0),
+                29_000,
+                OutPoint::new([0xD3; 32], 0),
+            ),
+            Some(BlockHeight::from(earlier)),
+        )
+        .unwrap();
+
+        let conn = &st.wallet().db().conn;
+        assert_eq!(
+            crate::wallet::account_birthday(conn, account.id()).unwrap(),
+            BlockHeight::from(earlier),
+        );
+
+        // Every height from the new birthday through the end of the formerly-ignored region is
+        // offered for scanning, so `sync` skips none of it.
+        let offered = suggest_scan_ranges(conn, ScanPriority::Historic).unwrap();
+        assert!(
+            offered.iter().any(|range| {
+                u32::from(range.block_range().start) <= earlier
+                    && u32::from(range.block_range().end) >= ignored_end
+            }),
+            "the widened range covers the whole formerly-ignored region: {offered:?}",
+        );
+
+        // The queue outside that region is untouched: what lies below the new birthday is still
+        // ignored, and what was scanned above the region is still recorded as scanned.
+        let queued = scan_queue(conn);
+        assert!(
+            queued.contains(&(activation, earlier, priority_code(&ScanPriority::Ignored))),
+            "the range below the new birthday is still ignored: {queued:?}",
+        );
+        assert!(
+            queued.contains(&(
+                ignored_end,
+                chain_end,
+                priority_code(&ScanPriority::Scanned)
+            )),
+            "the scanned range above the widened one is untouched: {queued:?}",
+        );
+    }
+
+    /// Store-time recognition lowers the birthday too, not only reconciliation: a transaction
+    /// arriving for an address the wallet already holds is the same evidence of earlier activity
+    /// as one recognized when the address arrives.
+    #[test]
+    fn store_time_recognition_lowers_the_birthday() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let activation = u32::from(st.test_account().unwrap().birthday().height());
+
+        let claimed_birthday_height = activation + 100;
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                BlockHeight::from(claimed_birthday_height - 1),
+                BlockHash([2; 32]),
+            ),
+            None,
+        );
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0xB7; 32], AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        // The account is imported first, so its addresses are already in the book: recognition
+        // happens when the transaction arrives, not when the address does.
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap();
+        st.wallet_mut()
+            .db_mut()
+            .update_chain_tip(BlockHeight::from(claimed_birthday_height + 10))
+            .unwrap();
+
+        let earlier = claimed_birthday_height - 40;
+        let tx = paying_tx(
+            external_address(&ufvk, 0),
+            23_000,
+            OutPoint::new([0xE1; 32], 0),
+        );
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &tx,
+            Some(BlockHeight::from(earlier)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            crate::wallet::account_birthday(&st.wallet().db().conn, account.id()).unwrap(),
+            BlockHeight::from(earlier),
         );
     }
 
