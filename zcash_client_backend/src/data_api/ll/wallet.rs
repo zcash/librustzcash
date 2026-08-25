@@ -1175,7 +1175,17 @@ where
     Ok(())
 }
 
-pub(crate) fn detect_wallet_transparent_outputs<P, AccountId, E>(
+/// Returns the transparent outputs of `tx` that the wallet has a record to make for: those
+/// paying an address of a wallet account, and, when `funding_account` is given, those paying
+/// anyone else.
+///
+/// Each returned output carries the account that received it (`None` for a recipient outside the
+/// wallet), the key scope at which the receiving address was derived, and `funding_account`. An
+/// output whose script names no address the wallet understands is omitted.
+///
+/// `find_account_for_address` resolves a transparent address to the wallet account controlling
+/// it, and the key scope at which it was derived.
+pub fn detect_wallet_transparent_outputs<P, AccountId, E>(
     params: &P,
     tx: &Transaction,
     mined_height: Option<BlockHeight>,
@@ -1525,36 +1535,11 @@ where
         // Send side: record the output as sent for the wallet account that
         // funded the transaction, if any. If the recipient is also a wallet
         // account, the send is recorded as an internal transfer.
-        if let Some(&from_account) = output.funding_account() {
-            let recipient = match output.recipient_account() {
-                #[cfg(feature = "transparent-inputs")]
-                Some(&receiving_account) => Recipient::InternalTransparent {
-                    receiving_account,
-                    recipient_address: *output.recipient_address(),
-                },
-                #[cfg(not(feature = "transparent-inputs"))]
-                Some(_) => Recipient::External {
-                    recipient_address: Receiver::Transparent(*output.recipient_address())
-                        .to_zcash_address(params.network_type()),
-                    output_pool: PoolType::TRANSPARENT,
-                },
-                None => {
-                    let receiver = Receiver::Transparent(*output.recipient_address());
-
-                    #[cfg(feature = "transparent-inputs")]
-                    let recipient_address =
-                        external_address(wallet_db, params, from_account, receiver)?;
-
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    let recipient_address = receiver.to_zcash_address(params.network_type());
-
-                    Recipient::External {
-                        recipient_address,
-                        output_pool: PoolType::TRANSPARENT,
-                    }
-                }
-            };
-
+        if let Some((from_account, recipient)) =
+            transparent_sent_output_recipient(params, output, |account, receiver| {
+                wallet_db.select_receiving_address(account, receiver)
+            })?
+        {
             wallet_db.put_sent_output(
                 from_account,
                 tx_ref,
@@ -1567,6 +1552,62 @@ where
     }
 
     Ok(())
+}
+
+/// Returns the account that funded a transparent output and the recipient to record against it,
+/// or `None` if no wallet account is known to have funded it.
+///
+/// An output paying an address of a wallet account is an internal transfer; one paying any other
+/// address is a send to an external recipient, reported at the wallet address containing the
+/// paid receiver where `select_receiving_address` finds one and at the bare transparent address
+/// otherwise.
+///
+/// `select_receiving_address` returns the most likely wallet address containing the given
+/// receiver, or `None` if the receiver belongs to no address of that account. It is consulted in
+/// every feature configuration. The `transparent-inputs` feature governs only whether an output
+/// can be recognized as paying a wallet account: without it none is, so every output is recorded
+/// as a send to an external recipient, still reported at the address containing the receiver.
+pub fn transparent_sent_output_recipient<AccountId, P, E>(
+    params: &P,
+    output: &WalletTransparentOutput<AccountId>,
+    select_receiving_address: impl FnOnce(
+        AccountId,
+        &Receiver,
+    ) -> Result<Option<zcash_address::ZcashAddress>, E>,
+) -> Result<Option<(AccountId, Recipient<AccountId>)>, E>
+where
+    AccountId: Copy,
+    P: consensus::Parameters,
+{
+    let Some(&from_account) = output.funding_account() else {
+        return Ok(None);
+    };
+
+    let recipient = match output.recipient_account() {
+        #[cfg(feature = "transparent-inputs")]
+        Some(&receiving_account) => Recipient::InternalTransparent {
+            receiving_account,
+            recipient_address: *output.recipient_address(),
+        },
+        #[cfg(not(feature = "transparent-inputs"))]
+        Some(_) => Recipient::External {
+            recipient_address: Receiver::Transparent(*output.recipient_address())
+                .to_zcash_address(params.network_type()),
+            output_pool: PoolType::TRANSPARENT,
+        },
+        None => {
+            let receiver = Receiver::Transparent(*output.recipient_address());
+            let recipient_address = select_receiving_address(from_account, &receiver)?
+                .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+
+            Recipient::External {
+                recipient_address,
+                output_pool: PoolType::TRANSPARENT,
+            }
+        }
+    };
+
+    Ok(Some((from_account, recipient)))
 }
 
 /// Returns the most likely account address that corresponds to the given [`Receiver`].

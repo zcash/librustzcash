@@ -10,6 +10,11 @@
 //!
 //! See the `transparent_tx_address_observations` table documentation for how this index divides
 //! labour with the two outpoint-keyed spend maps.
+//!
+//! The module also carries what recognition of a spend implies for the spending transaction.
+//! Linking a spend of a wallet output to a stored transaction is the moment the wallet learns
+//! which account funded that transaction, and [`attribute_funded_outputs`] then records for its
+//! outputs what storing it with that knowledge would have recorded.
 
 use rusqlite::{OptionalExtension, named_params};
 
@@ -17,8 +22,9 @@ use transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
 };
-use zcash_client_backend::wallet::{
-    TransparentAddressObservation, TransparentInvolvement, WalletTransparentOutput,
+use zcash_client_backend::{
+    data_api::ll::wallet::{detect_wallet_transparent_outputs, transparent_sent_output_recipient},
+    wallet::{TransparentAddressObservation, TransparentInvolvement, WalletTransparentOutput},
 };
 use zcash_keys::{
     encoding::AddressCodec,
@@ -26,19 +32,23 @@ use zcash_keys::{
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    TxId,
+    PoolType, TxId,
     consensus::{self, BlockHeight, BranchId},
     value::Zatoshis,
 };
 
 use super::{
-    GapAdvance, get_wallet_transparent_output, lower_account_birthday, mark_transparent_utxo_spent,
+    GapAdvance, find_account_uuid_for_transparent_address, get_wallet_transparent_output,
+    list_funding_accounts, lower_account_birthday, mark_transparent_utxo_spent,
     put_transparent_output, queue_transparent_spend_detection,
 };
 use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
-    wallet::{KeyScope, queue_tx_retrieval, update_tx_fee},
+    wallet::{
+        KeyScope, encoding::pool_code, put_sent_output, queue_tx_retrieval,
+        select_receiving_address, update_tx_fee,
+    },
 };
 
 /// The direction in which a transaction's transparent data names an address, as encoded in the
@@ -488,7 +498,15 @@ fn reconcile_input<P: consensus::Parameters>(
     // Record the spend. If the spent output is not yet held, this records the spend against the
     // outpoint so that it is linked when the output is recovered, whether that happens below or
     // later.
-    mark_transparent_utxo_spent(conn, involvement.tx_ref, prevout)?;
+    //
+    // Linking the spend establishes that a wallet account funded this transaction, which is what
+    // makes its outputs the wallet's sends; the transaction was stored before that was knowable,
+    // so nothing recorded them then. Where the link is deferred to the recovery below, the
+    // attribution is deferred with it, and `put_transparent_output` replays it at the moment the
+    // link is made.
+    if mark_transparent_utxo_spent(conn, involvement.tx_ref, prevout)? {
+        attribute_funded_outputs(conn, params, involvement.tx_ref)?;
+    }
 
     // Recover the spent output from the transaction that created it, if the wallet holds that
     // transaction; otherwise ask for it. The spend recorded above is what links the two, so the
@@ -533,6 +551,142 @@ fn reconcile_input<P: consensus::Parameters>(
     } else {
         ReconcileOutcome::Unchanged
     })
+}
+
+/// Records the sent outputs of a stored transaction that the wallet now knows one of its accounts
+/// funded.
+///
+/// Storing a transaction whose funding account is known records, for each of its transparent
+/// outputs, the account that paid for it and the recipient it paid. A transaction stored while
+/// the wallet could not yet recognize the outputs it spends carries no such record, and nothing
+/// revisits it when those spends become known. This replays that step over the stored transaction
+/// data, so that a transaction reports its funding account whatever order the evidence arrived
+/// in. Every path that links such a spend without itself recording the transaction's recipients
+/// calls this; a wallet creating a transaction records the recipients it intended, and does not.
+///
+/// Only an output for which the wallet has recorded no recipient is written. What is derived here
+/// is a reconstruction from chain data, and must never displace what a wallet recorded when it
+/// created the transaction and knew each output's intended recipient. Writing only what is
+/// missing also makes repeated calls a no-op.
+///
+/// A transaction whose stored bytes are absent or do not parse contributes nothing; see
+/// [`parse_stored`].
+///
+/// Block scanning also links spends, and calls nothing here, because a link it makes can never
+/// reveal a funding account that storing the transaction would have missed: the query that makes
+/// the link and the query that resolves a funding account match a prevout against
+/// `transparent_received_outputs` under one and the same condition. Scanning a transaction the
+/// wallet has no data for records an intent to retrieve it, and storing what arrives resolves the
+/// same account; scanning one whose data the wallet already holds can only follow the recognition
+/// of the spent output, which is a call site of this function.
+///
+/// The shielded half of the same defect is left unrepaired here. A shielded output the wallet
+/// received from elsewhere is recorded as sent only when the funding account is known at store
+/// time, so a transaction that shields a transparent output the wallet did not yet recognize
+/// keeps a shielded output with no recorded sender, and neither this function nor the repair
+/// migration touches it. Reconstructing it needs the transaction decrypted under the wallet's
+/// viewing keys rather than read from its transparent bundle; the wallet holds both the stored
+/// bytes and the keys, so it is reachable offline, and simply not done here.
+pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+) -> Result<(), SqliteClientError> {
+    let Some((raw, tx_mined_height)) = conn
+        .query_row(
+            "SELECT raw, mined_height FROM transactions WHERE id_tx = :id_tx",
+            named_params! { ":id_tx": tx_ref.0 },
+            |row| {
+                Ok((
+                    row.get::<_, Option<Vec<u8>>>("raw")?,
+                    row.get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+
+    let Some(tx) = raw.as_deref().and_then(parse_stored) else {
+        return Ok(());
+    };
+
+    // A transparent output records at most one funding account; where several wallet accounts
+    // contributed inputs, the largest contributor is reported, as everywhere else this crate
+    // resolves a funding account.
+    let Some(funding_account) = list_funding_accounts(conn, tx_ref.0)?
+        .into_iter()
+        .next()
+        .map(|(account, _)| account)
+    else {
+        return Ok(());
+    };
+
+    let outputs = detect_wallet_transparent_outputs::<_, AccountUuid, SqliteClientError>(
+        params,
+        &tx,
+        tx_mined_height,
+        Some(funding_account),
+        |address| {
+            Ok(
+                find_account_uuid_for_transparent_address(conn, params, address)?
+                    .map(|(account, key_scope)| (account, key_scope.as_transparent())),
+            )
+        },
+    )?;
+
+    for output in &outputs {
+        if has_recorded_recipient(conn, tx_ref, output.index())? {
+            continue;
+        }
+
+        let Some((from_account, recipient)) =
+            transparent_sent_output_recipient(params, output, |account, receiver| {
+                select_receiving_address(conn, params, account, receiver)
+            })?
+        else {
+            continue;
+        };
+
+        put_sent_output(
+            conn,
+            params,
+            from_account,
+            tx_ref,
+            output.index(),
+            &recipient,
+            output.value(),
+            None,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Returns whether the wallet has recorded a recipient for the given transparent output of the
+/// given transaction.
+fn has_recorded_recipient(
+    conn: &rusqlite::Connection,
+    tx_ref: TxRef,
+    output_index: usize,
+) -> Result<bool, SqliteClientError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sent_notes
+            WHERE transaction_id = :transaction_id
+            AND output_pool = :output_pool
+            AND output_index = :output_index
+        )",
+        named_params! {
+            ":transaction_id": tx_ref.0,
+            ":output_pool": pool_code(PoolType::TRANSPARENT),
+            ":output_index": i64::try_from(output_index)
+                .expect("a transparent output index fits in an i64"),
+        },
+        |row| row.get(0),
+    )?)
 }
 
 /// Returns the height at which the given transaction was mined, if the wallet knows it.
@@ -673,6 +827,7 @@ mod tests {
         transaction::{Authorized, Transaction, TransactionData, TxVersion},
     };
     use zcash_protocol::{
+        TxId,
         consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters as _},
         local_consensus::LocalNetwork,
         value::{MAX_MONEY, Zatoshis},
@@ -968,6 +1123,79 @@ mod tests {
             .expect("the external scope is derivable")
             .derive_address(NonHardenedChildIndex::from_index(index).expect("valid index"))
             .expect("the address is derivable")
+    }
+
+    /// The transparent change address derived for the given account UFVK at the given internal
+    /// child index.
+    fn internal_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
+        ufvk.transparent()
+            .expect("the test account has a transparent key")
+            .derive_internal_ivk()
+            .expect("the internal scope is derivable")
+            .derive_address(NonHardenedChildIndex::from_index(index).expect("valid index"))
+            .expect("the address is derivable")
+    }
+
+    /// A transaction spending `prevout` and paying each `(recipient, value)` in order. Its
+    /// `scriptSig` reveals an address no test wallet controls, so the transaction is recognized
+    /// only through the output it spends.
+    fn spending_tx_paying(prevout: OutPoint, outputs: &[(TransparentAddress, u64)]) -> Transaction {
+        transaction(
+            vec![TxIn::from_parts(
+                prevout,
+                push_script(&[&[0x30; 71], &pubkey_bytes()]),
+                0,
+            )],
+            outputs
+                .iter()
+                .map(|(recipient, value)| {
+                    TxOut::new(
+                        Zatoshis::const_from_u64(*value),
+                        Script::from(&recipient.script()),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Reads the transparent rows of `v_tx_outputs` for the given transaction, as
+    /// `(output_index, from_account_uuid, to_account_uuid)`.
+    fn tx_output_accounts(
+        conn: &rusqlite::Connection,
+        txid: TxId,
+    ) -> Vec<(u32, Option<uuid::Uuid>, Option<uuid::Uuid>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT output_index, from_account_uuid, to_account_uuid
+                 FROM v_tx_outputs
+                 WHERE txid = :txid AND output_pool = 0
+                 ORDER BY output_index",
+            )
+            .unwrap();
+        stmt.query_map(named_params! { ":txid": txid.as_ref() }, |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    /// The transparent outputs an external-receipt consumer selects: those the wallet received
+    /// for which it holds no record of a sender, and which are not flagged as change.
+    fn unattributed_receipts(conn: &rusqlite::Connection) -> Vec<(Vec<u8>, u32)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, ro.output_index
+                 FROM v_received_outputs ro
+                 JOIN transactions t ON t.id_tx = ro.transaction_id
+                 WHERE ro.pool = 0 AND ro.sent_note_id IS NULL AND ro.is_change = 0
+                 ORDER BY t.txid, ro.output_index",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     }
 
     /// Reads the transparent outputs the wallet has recorded as received, as
@@ -2276,6 +2504,259 @@ mod tests {
             )
             .unwrap(),
             "the transaction with no computable fee still has none",
+        );
+    }
+
+    /// The state a wallet is left in when a transaction reaches it before the output that
+    /// transaction spends: the transaction is stored and its payment to a wallet account is
+    /// recorded, but no account is known to have funded it, so the spend is held against the
+    /// outpoint and nothing records which account paid for its outputs.
+    ///
+    /// Returns the spending transaction and the guest account's key.
+    fn store_spend_before_its_prevout<C>(
+        st: &mut TestState<C, TestDb, LocalNetwork>,
+        host_address: TransparentAddress,
+        stranger: TransparentAddress,
+    ) -> (Transaction, UnifiedFullViewingKey) {
+        let network = *st.network();
+        let birthday_height = u32::from(st.test_account().unwrap().birthday().height());
+
+        // An account the wallet has not yet imported, which funds the spending transaction.
+        let guest_usk = UnifiedSpendingKey::from_seed(&network, &[0x2E; 32], AccountId::ZERO)
+            .expect("the seed is a valid spending key seed");
+        let guest_ufvk = guest_usk.to_unified_full_viewing_key();
+
+        let funding_tx = paying_tx(
+            external_address(&guest_ufvk, 0),
+            400_000,
+            OutPoint::new([0xF5; 32], 0),
+        );
+        let spend_tx = spending_tx_paying(
+            OutPoint::new(funding_tx.txid().into(), 0),
+            &[
+                (internal_address(&guest_ufvk, 0), 250_000),
+                (host_address, 100_000),
+                (stranger, 40_000),
+            ],
+        );
+
+        st.wallet_mut()
+            .db_mut()
+            .update_chain_tip(BlockHeight::from(birthday_height + 20))
+            .unwrap();
+
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            store_tx(&conn, &network, &funding_tx, Some(birthday_height + 5));
+            conn.commit().unwrap();
+        }
+
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &spend_tx,
+            Some(BlockHeight::from(birthday_height + 6)),
+        )
+        .unwrap();
+
+        (spend_tx, guest_ufvk)
+    }
+
+    /// Recognizing the output a stored transaction spends links the spend, which is the moment
+    /// the wallet learns which account funded that transaction. The funding attribution of its
+    /// outputs has to be re-derived then: `store_decrypted_tx` derived none when the transaction
+    /// was stored, because the spent output was not yet the wallet's, and nothing revisits a
+    /// stored transaction on its own.
+    ///
+    /// The spending transaction's `scriptSig` names no wallet address here, so the only thing
+    /// that recognizes it is the recovery of the output it spends.
+    #[test]
+    fn late_spend_linkage_attributes_the_spending_transaction() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_address = external_address(&host.usk().to_unified_full_viewing_key(), 0);
+        let stranger = TransparentAddress::PublicKeyHash([0x77; 20]);
+
+        let (spend_tx, guest_ufvk) =
+            store_spend_before_its_prevout(&mut st, host_address, stranger);
+        let spend_txid = spend_tx.txid();
+
+        // The wallet holds the payment to the host account as a receipt from nobody: this is the
+        // shape an external-receipt consumer misreads as a payment requiring a cost basis.
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            vec![(1, None, Some(host_uuid))],
+        );
+        assert!(
+            unattributed_receipts(&st.wallet().db().conn)
+                .contains(&(spend_txid.as_ref().to_vec(), 1)),
+        );
+
+        // Importing the account that was paid by the spent output recognizes that output, which
+        // links the spend and reveals which account funded the spending transaction.
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        let conn = &st.wallet().db().conn;
+
+        // Every output of the spending transaction now reports the account that funded it: the
+        // change returned to that account, the transfer to another account of the same wallet,
+        // and the payment to a recipient outside the wallet, which is a sent output with no
+        // receiving account.
+        assert_eq!(
+            tx_output_accounts(conn, spend_txid),
+            vec![
+                (0, Some(guest_uuid), Some(guest_uuid)),
+                (1, Some(guest_uuid), Some(host_uuid)),
+                (2, Some(guest_uuid), None),
+            ],
+        );
+
+        // Neither wallet-received output is an external receipt any longer.
+        assert!(
+            unattributed_receipts(conn)
+                .iter()
+                .all(|(txid, _)| txid != spend_txid.as_ref()),
+            "no output of the spending transaction is reported as a receipt from nobody: {:?}",
+            unattributed_receipts(conn),
+        );
+    }
+
+    /// The attribution replay is idempotent, and repairs a wallet in which the spend is already
+    /// linked but the attribution is missing — which is the state every wallet upgraded before
+    /// the replay existed is in.
+    #[test]
+    fn attribution_replay_is_idempotent_and_repairs() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let birthday = host.birthday().clone();
+        let host_address = external_address(&host.usk().to_unified_full_viewing_key(), 0);
+        let stranger = TransparentAddress::PublicKeyHash([0x77; 20]);
+
+        let (spend_tx, guest_ufvk) =
+            store_spend_before_its_prevout(&mut st, host_address, stranger);
+        let spend_txid = spend_tx.txid();
+
+        st.wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap();
+
+        let attributed = tx_output_accounts(&st.wallet().db().conn, spend_txid);
+        assert_eq!(attributed.len(), 3);
+
+        let reconcile = |st: &TestState<_, TestDb, _>| {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            reconcile_and_extend_gaps(
+                &conn,
+                &network,
+                &GapLimits::default(),
+                ReconcileScope::AllAddresses,
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        };
+
+        reconcile(&st);
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            attributed,
+            "a second pass records nothing further",
+        );
+
+        // A wallet whose spend was linked before the replay existed holds the linkage without
+        // the attribution. Reconciliation restores it.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "DELETE FROM sent_notes
+                 WHERE transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+                named_params! { ":txid": spend_txid.as_ref() },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+        assert!(
+            unattributed_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(txid, _)| txid == spend_txid.as_ref()),
+        );
+
+        reconcile(&st);
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            attributed,
+        );
+    }
+
+    /// A transaction recognized through the address its `scriptSig` reveals is attributed too:
+    /// the direction in which the wallet learns of the spend does not change what the spend
+    /// establishes about who funded the transaction.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn input_involvement_attributes_the_spending_transaction() {
+        use secp256k1::{Secp256k1, SecretKey};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let account = st.test_account().unwrap();
+        let account_uuid = account.account().id();
+        let birthday_height = u32::from(account.birthday().height());
+
+        let secp = Secp256k1::new();
+        let pubkey = secp256k1::PublicKey::from_secret_key(
+            &secp,
+            &SecretKey::from_slice(&[0x6C; 32]).unwrap(),
+        );
+        let address = TransparentAddress::from_pubkey(&pubkey);
+
+        // The transaction that paid the standalone address, and the transaction that spends its
+        // output; the wallet stores both without ever having recognized either.
+        let funding_tx = paying_tx(address, 80_000, OutPoint::new([0xB4; 32], 0));
+        let spend_tx = spending_tx(&pubkey, OutPoint::new(funding_tx.txid().into(), 0), 70_000);
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            store_tx(&conn, &network, &funding_tx, Some(birthday_height + 3));
+            store_tx(&conn, &network, &spend_tx, Some(birthday_height + 4));
+            conn.commit().unwrap();
+        }
+
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_uuid, pubkey)
+            .unwrap();
+
+        // The spend of the recovered output makes the spending transaction's own output a send
+        // from the importing account to a recipient outside the wallet.
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_tx.txid()),
+            vec![(0, Some(account_uuid.expose_uuid()), None)],
         );
     }
 }

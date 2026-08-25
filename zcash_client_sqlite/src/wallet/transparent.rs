@@ -2144,6 +2144,14 @@ pub(crate) fn mark_transparent_utxo_spent(
 
     // Since we know that the output is spent, we no longer need to search for
     // it to find out if it has been spent.
+    //
+    // Both paths that record a received output — `observations::reconcile_output` and
+    // `zcash_client_backend`'s `put_received_transparent_output` — queue the outpoint for spend
+    // detection AFTER `put_transparent_output` returns, so an entry this deletes on their behalf
+    // is put back. That ordering is load-bearing. A spend known only by locator gives the
+    // spending transaction a row carrying no transaction data, and this queue is the only thing
+    // that goes on to ask for it; the data is what supplies the transaction's own outputs their
+    // funding account. Queueing before the output is stored would drop the request silently.
     let mut stmt_remove_spend_detection = conn.prepare_cached(
         "DELETE FROM transparent_spend_search_queue
          WHERE output_index = :prevout_idx
@@ -3125,6 +3133,13 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
+
+        // Linking the spend establishes that a wallet account funded the spending transaction,
+        // which is what makes that transaction's own outputs the wallet's sends. It was stored
+        // before this output was recognized, so nothing could record them then, and nothing
+        // revisits a stored transaction on its own.
+        #[cfg(feature = "transparent-inputs")]
+        observations::attribute_funded_outputs(conn, params, spending_transaction_id)?;
     }
 
     // The wallet was paid at this address when the transaction was mined, so it was active then.
