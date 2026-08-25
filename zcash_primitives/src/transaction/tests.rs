@@ -71,7 +71,7 @@ fn suggested_version_for_v5_branches_is_not_v6() {
 
 #[test]
 #[cfg(zcash_unstable = "nutachyon")]
-fn v7_is_enabled_by_nu_tachyon_and_roundtrips_the_v6_body() {
+fn v7_is_enabled_by_nu_tachyon_and_roundtrips() {
     assert_eq!(
         TxVersion::suggested_for_branch(BranchId::NuTachyon),
         TxVersion::V7
