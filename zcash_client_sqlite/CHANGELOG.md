@@ -86,6 +86,17 @@ workspace.
   the notes of the largest single group instead of all of them.
 - `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
   no longer fail on wallets containing accounts imported by UIVK.
+- A transaction the wallet stores that names a transparent address the wallet
+  did not control at the time is recognized when an address covering it is
+  added afterwards, by account creation or import, by
+  `WalletWrite::import_standalone_transparent_{address, pubkey, pubkeys,
+  script}`, or by gap-limit advancement. Recognition records the received
+  output and any spend of it, marks the address used and advances the gap,
+  watches the output for a spend, requests the transactions that funded the
+  containing transaction, and sets the fee of any transaction whose fee the
+  recovered output completes. A transaction that only spends from the wallet is
+  recognized through the address its `scriptSig` reveals. The migration that
+  adds the index applies this to a wallet's entire stored history.
 
 ## [0.22.0] - 2026-08-18
 
