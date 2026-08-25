@@ -183,6 +183,8 @@ use {
     zcash_script::{descriptor::sh, script::Evaluable},
 };
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod attribution;
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
