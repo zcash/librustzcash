@@ -441,7 +441,7 @@ fn orchard_action_count(
     bundle_type.num_actions(flags, num_spends, num_outputs)
 }
 
-/// A builder for V6-compatible (NU6.3 onward) transactions constructed as PCZTs with their
+/// A builder for V6 and later transactions constructed as PCZTs with their
 /// Orchard-family anchors DEFERRED to proving time, per [ZIP 374].
 ///
 /// [`Builder`] requires each shielded pool's anchor in its [`BuildConfig`] and a Merkle
@@ -450,8 +450,8 @@ fn orchard_action_count(
 /// deferred-anchor support ([`orchard::builder::Builder::new_with_anchor_deferred`]), and the
 /// emitted PCZT carries ABSENT anchor and witness fields, which the PCZT Updater role
 /// (`set_{orchard,ironwood}_anchor` / `set_*_spend_witnesses`) fills in at proving time,
-/// after the transaction has been finalized and SIGNED. This is sound exactly for V6-compatible
-/// transaction format, whose txid and sighash exclude shielded anchors (they are
+/// after the transaction has been finalized and SIGNED. This is sound exactly for V6 and later
+/// transaction formats, whose txid and sighash exclude Sapling and Orchard-family anchors (they are
 /// committed only by the authorizing-data digest), so neither the transaction id nor any
 /// signature commits to the deferred values; [`Self::new`] refuses any earlier format.
 /// The witness-to-anchor consistency check that [`Builder`] performs per spend at
@@ -484,8 +484,8 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
     /// delta; override it with [`Self::with_expiry_height`].
     ///
     /// Returns [`Error::AnchorDeferralUnsupported`] if the consensus branch in effect at
-    /// `target_height` does not use a V6-compatible transaction format, whose txid and sighash
-    /// exclude shielded anchors; under any earlier format the anchors cannot outlive
+    /// `target_height` uses a transaction format older than V6, whose txid and sighash include
+    /// Sapling and Orchard-family anchors; under those formats the anchors cannot outlive
     /// signing.
     pub fn new<FE>(
         params: P,
@@ -899,7 +899,7 @@ impl<P, U> Builder<P, U> {
 
         {
             // Ironwood is available only when the target version carries an Ironwood bundle
-            // (V6-compatible) and the consensus branch is one in which Ironwood is active.
+            // and the consensus branch is one in which Ironwood is active.
             let ironwood_branch = match self.consensus_branch_id {
                 BranchId::Nu6_3 => true,
                 #[cfg(zcash_unstable = "nu7")]
@@ -950,14 +950,14 @@ impl<P: consensus::Parameters> Builder<P, ()> {
         // Orchard builder construction on NU5 activation.
         let bundle_version =
             bundle_version_for_branch(consensus_branch_id, orchard::ValuePool::Orchard);
-        // Default transaction version for the branch (V6-compatible from NU6.3 onward).
+        // Default transaction version for the branch.
         let tx_version = TxVersion::suggested_for_branch(consensus_branch_id);
 
         let orchard_builder = bundle_version.and_then(|v| build_config.orchard_builder(v));
         let orchard_bundle_version = orchard_builder.as_ref().and(bundle_version);
 
         // The Ironwood builder exists exactly when the branch's transaction version
-        // carries an Ironwood bundle (V6-compatible, i.e. NU6.3 onward).
+        // carries an Ironwood bundle.
         let ironwood_builder = if tx_version.has_ironwood() {
             build_config.ironwood_builder()
         } else {
@@ -1762,9 +1762,6 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             None => (None, orchard::builder::BundleMetadata::empty()),
         };
 
-        // The Ironwood bundle is only carried by V6-compatible transactions; otherwise it is
-        // left empty (and `check_version_compatibility` above rejects an in-use Ironwood
-        // builder paired with a non-V6-compatible version).
         let (ironwood_bundle, ironwood_meta) = if self.tx_version.has_ironwood() {
             match self
                 .ironwood_builder

@@ -27,8 +27,8 @@ pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 /// Governs whether a non-empty shielded bundle's `anchor` must be set in order to parse
 /// it into the form used by the payment protocol crates.
 ///
-/// [ZIP 374](https://zips.z.cash/zip-0374) makes the anchor of a V6-compatible transaction's
-/// shielded bundles deferrable until proving, so operations that do not depend on the
+/// [ZIP 374](https://zips.z.cash/zip-0374) makes Sapling and Orchard-family bundle anchors
+/// deferrable in V6 and later transactions, so operations that do not depend on the
 /// anchor's value (for example computing a v6 sighash, which excludes anchors, or
 /// updating unrelated fields) can proceed with it absent.
 #[cfg(any(

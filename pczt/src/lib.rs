@@ -157,8 +157,7 @@ pub mod v1 {
         type Error = super::EncodingError;
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
-            // The v1 format predates V6-compatible transaction formats; a parser of the v1
-            // encoding could parse such a PCZT but never extract a transaction from it.
+            // The v1 encoding cannot represent V6 or V7 transactions.
             if matches!(
                 pczt.global.tx_version,
                 zcash_protocol::constants::V6_TX_VERSION | zcash_protocol::constants::V7_TX_VERSION
@@ -553,13 +552,13 @@ impl Pczt {
         }?;
 
         match version {
-            // Only V6-compatible transaction formats carry an Ironwood bundle.
+            // Only V6 and later transaction formats carry an Ironwood bundle.
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
                 if ironwood != crate::orchard::EMPTY_IRONWOOD {
                     return Err(ExtractError::IronwoodNotSupported.into());
                 }
             }
-            // V6-compatible transaction formats do not exist prior to NU6.3 (the first
+            // V6 and later transaction formats do not exist prior to NU6.3 (the first
             // upgrade under which the Orchard protocol is at revision V3).
             TxVersion::V6 | TxVersion::V7 => {
                 if orchard_protocol_revision < OrchardProtocolRevision::V3 {
@@ -696,7 +695,7 @@ pub(crate) fn sighash(
     match tx_data.version() {
         TxVersion::V5 => v5_signature_hash(tx_data, signable_input, txid_parts),
         TxVersion::V6 | TxVersion::V7 => v6_signature_hash(tx_data, signable_input, txid_parts),
-        _ => unreachable!("PCZT only supports v5 and V6-compatible transaction data"),
+        _ => unreachable!("PCZT only supports V5 and later transaction data"),
     }
     .as_ref()
     .try_into()

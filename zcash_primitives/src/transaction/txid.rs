@@ -469,7 +469,7 @@ pub(crate) fn to_hash_v6(
 
 /// Combines transaction component digests into a transaction ID.
 ///
-/// V6-compatible transactions include the Ironwood bundle digest as a separate
+/// V6 and later transactions include the Ironwood bundle digest as a separate
 /// Orchard-shaped digest using Ironwood personalization. If any shielded bundle digest is
 /// absent, this substitutes the protocol-defined empty bundle digest for that pool.
 pub fn to_txid(

@@ -399,7 +399,7 @@ impl<A: Authorization> TransactionData<A> {
     /// including the Ironwood bundle.
     ///
     /// Both the Orchard and Ironwood bundle fields use [`orchard::Bundle`], but
-    /// they are distinct V6-compatible transaction fields with distinct bundle versions.
+    /// they are distinct V6 transaction fields with distinct bundle versions.
     /// The `orchard_bundle` argument must contain a bundle constructed for
     /// [`orchard::bundle::BundleVersion::orchard_v3`], while `ironwood_bundle`
     /// must contain a bundle constructed for
@@ -432,7 +432,7 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
-    /// Constructs a V7 [`TransactionData`] from the V6-compatible fields.
+    /// Constructs a V7 [`TransactionData`] from the fields it currently shares with V6.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v7(
         consensus_branch_id: BranchId,
@@ -576,7 +576,7 @@ impl<A: Authorization> TransactionData<A> {
 
     /// Computes this transaction's digest using the provided digest strategy.
     ///
-    /// V6-compatible transactions include the Ironwood bundle digest as a separate
+    /// V6 and later transactions include the Ironwood bundle digest as a separate
     /// Orchard-shaped digest with Ironwood personalization. Earlier transaction
     /// versions do not include Ironwood in their digest.
     pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
@@ -1106,7 +1106,7 @@ impl Transaction {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to a V6-compatible transaction format.",
+                "Sprout components cannot be present when serializing to V6 or later transaction formats.",
             ));
         }
         self.write_v6_header(&mut writer)?;

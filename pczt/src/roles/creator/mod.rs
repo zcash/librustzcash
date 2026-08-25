@@ -91,7 +91,7 @@ impl Creator {
     /// The transaction version is implied by the consensus branch ID: the v6
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
     /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
-    /// [`Option::Some`]. For V6-compatible transactions, either anchor may be
+    /// [`Option::Some`]. For V6 and later transactions, either anchor may be
     /// [`Option::None`] and restored later.
     ///
     /// # Errors

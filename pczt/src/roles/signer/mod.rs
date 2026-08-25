@@ -597,7 +597,7 @@ mod tests {
         }
     }
 
-    /// [ZIP 374] "Anchors and pre-authorization" requires that, for a V6-compatible transaction,
+    /// [ZIP 374] "Anchors and pre-authorization" requires that, for a v6 transaction,
     /// signing (including the IO Finalizer's dummy-spend signing) works even while a
     /// shielded bundle's anchor is absent. The Ironwood bundle here is built by
     /// hand (rather than via the transaction builder, which requires a concrete
