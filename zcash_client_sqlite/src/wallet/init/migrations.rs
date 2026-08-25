@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    repair_funding_attribution,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -407,6 +408,9 @@ pub(super) fn all_migrations<
         Box::new(standalone_address::Migration),
         Box::new(fix_v_transactions_multi_account_totals::Migration),
         Box::new(transparent_tx_address_observations::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(repair_funding_attribution::Migration {
             _params: params.clone(),
         }),
     ]

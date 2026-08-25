@@ -689,6 +689,36 @@ fn has_recorded_recipient(
     )?)
 }
 
+/// Repairs the funding attribution of every stored transaction that the wallet records as
+/// spending one of its transparent outputs.
+///
+/// A wallet whose spends were linked before the attribution replay existed holds the linkage
+/// without the attribution, and nothing revisits a stored transaction on its own. This restores
+/// the invariant over the wallet's whole history; it writes nothing for a transaction that is
+/// already attributed.
+pub(crate) fn repair_funding_attribution<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+) -> Result<(), SqliteClientError> {
+    let spending_txs = {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT ts.transaction_id
+             FROM transparent_received_output_spends ts
+             JOIN transactions t ON t.id_tx = ts.transaction_id
+             WHERE t.raw IS NOT NULL",
+        )?;
+
+        stmt.query_map([], |row| row.get::<_, i64>(0).map(TxRef))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    for tx_ref in spending_txs {
+        attribute_funded_outputs(conn, params, tx_ref)?;
+    }
+
+    Ok(())
+}
+
 /// Returns the height at which the given transaction was mined, if the wallet knows it.
 fn mined_height(
     conn: &rusqlite::Connection,
@@ -799,7 +829,7 @@ fn recompute_dependent_fees(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use ::transparent::{
         address::{Script, TransparentAddress},
         bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
@@ -1116,7 +1146,7 @@ mod tests {
 
     /// The transparent address derived for the given account UFVK at the given external child
     /// index.
-    fn external_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
+    pub(crate) fn external_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
         ufvk.transparent()
             .expect("the test account has a transparent key")
             .derive_external_ivk()
@@ -1160,7 +1190,7 @@ mod tests {
 
     /// Reads the transparent rows of `v_tx_outputs` for the given transaction, as
     /// `(output_index, from_account_uuid, to_account_uuid)`.
-    fn tx_output_accounts(
+    pub(crate) fn tx_output_accounts(
         conn: &rusqlite::Connection,
         txid: TxId,
     ) -> Vec<(u32, Option<uuid::Uuid>, Option<uuid::Uuid>)> {
@@ -1182,7 +1212,7 @@ mod tests {
 
     /// The transparent outputs an external-receipt consumer selects: those the wallet received
     /// for which it holds no record of a sender, and which are not flagged as change.
-    fn unattributed_receipts(conn: &rusqlite::Connection) -> Vec<(Vec<u8>, u32)> {
+    pub(crate) fn unattributed_receipts(conn: &rusqlite::Connection) -> Vec<(Vec<u8>, u32)> {
         let mut stmt = conn
             .prepare(
                 "SELECT t.txid, ro.output_index
@@ -2513,7 +2543,7 @@ mod tests {
     /// outpoint and nothing records which account paid for its outputs.
     ///
     /// Returns the spending transaction and the guest account's key.
-    fn store_spend_before_its_prevout<C>(
+    pub(crate) fn store_spend_before_its_prevout<C>(
         st: &mut TestState<C, TestDb, LocalNetwork>,
         host_address: TransparentAddress,
         stranger: TransparentAddress,
