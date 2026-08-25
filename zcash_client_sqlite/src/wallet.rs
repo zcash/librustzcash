@@ -182,6 +182,8 @@ use {
     zcash_keys::keys::zcashd,
 };
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod attribution;
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
