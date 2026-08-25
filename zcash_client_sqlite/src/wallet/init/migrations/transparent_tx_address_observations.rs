@@ -13,9 +13,10 @@
 //! resolve out-of-order discovery of a spend whose output arrives later, are keyed by outpoint,
 //! and in the locator case are pruned below the fully scanned height.
 //!
-//! Every transaction for which the wallet already stores complete data is parsed here, so that
-//! an existing wallet gains the index for its whole history rather than only for transactions
-//! observed after the upgrade.
+//! Every transaction for which the wallet already stores complete data is parsed here, and the
+//! resulting index is then checked in full against the wallet's address book. An existing wallet
+//! therefore recovers the involvement it could never have recognized, rather than gaining the
+//! index only for transactions observed after the upgrade.
 
 use std::collections::HashSet;
 
@@ -27,7 +28,10 @@ use super::{standalone_address, transparent_spend_locator_map};
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::transparent::observations;
+use crate::{
+    GapLimits,
+    wallet::transparent::{observations, reconcile_and_extend_gaps},
+};
 
 /// Adds the `transparent_tx_address_observations` index of transparent addresses named by
 /// wallet-involved transactions.
@@ -88,7 +92,20 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         )?;
 
         #[cfg(feature = "transparent-inputs")]
-        observations::backfill_observations(transaction, &self._params)?;
+        {
+            observations::backfill_observations(transaction, &self._params)?;
+
+            // Having recorded what the wallet has already seen, check it against the addresses
+            // the wallet already holds. This recovers involvement that could never have been
+            // recognized before: a transaction stored before the address it names entered the
+            // wallet was checked against the address book only once, when it was stored.
+            reconcile_and_extend_gaps(
+                transaction,
+                &self._params,
+                &GapLimits::default(),
+                observations::ReconcileScope::AllAddresses,
+            )?;
+        }
 
         Ok(())
     }
