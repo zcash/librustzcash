@@ -131,7 +131,7 @@ use {
     },
     zcash_keys::keys::transparent::{
         NonHardenedChildIndex, TransparentKeyScope,
-        gap_limits::{AddressStore, GapLimits},
+        gap_limits::{AddressStore, GapLimits, ReconcileOutcome},
     },
 };
 
@@ -2377,8 +2377,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         address: TransparentAddress,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_address(self.conn.0, &self.params, account, address)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_address(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            address,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2387,8 +2393,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkey(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkey,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2397,8 +2409,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkeys(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkeys,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2407,7 +2425,13 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
+        wallet::import_standalone_transparent_script(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            script,
+        )
     }
 
     fn get_next_available_address(
@@ -3243,6 +3267,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             output,
             observation_height,
             known_unspent,
+            wallet::transparent::GapAdvance::Immediate,
         )?;
 
         Ok((account_uuid, key_scope.as_transparent()))
@@ -3741,6 +3766,26 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             account_id,
             key_scope,
             list,
+        )
+    }
+
+    fn reconcile_stored_addresses(
+        &mut self,
+        _account_id: Self::AccountRef,
+        _key_scope: TransparentKeyScope,
+        added: &[(Address, TransparentAddress, NonHardenedChildIndex)],
+    ) -> Result<ReconcileOutcome, Self::Error> {
+        // The shared reconciliation helper is address-keyed, and derives each address's account
+        // and key scope from its `addresses` row rather than taking them as arguments: its other
+        // callers — standalone receiver import, and the whole-book pass that account creation
+        // and the index migration run — have no single `(account, key scope)` to supply. The
+        // uniqueness index on `cached_transparent_receiver_address` makes that derivation a
+        // function, so the trait's arguments carry no information the row does not.
+        wallet::transparent::observations::reconcile_address_range(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            added,
         )
     }
 }
