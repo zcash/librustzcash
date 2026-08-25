@@ -7393,12 +7393,10 @@ version = "0.30.1"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
- "block-buffer 0.11.0-rc.3",
  "bls12_381",
  "chacha20poly1305",
  "corez",
  "criterion 0.5.1",
- "crypto-common 0.2.0-rc.1",
  "document-features",
  "equihash",
  "ff",

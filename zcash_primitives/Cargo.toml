@@ -53,8 +53,6 @@ proptest = { workspace = true, optional = true }
 transparent.workspace = true
 
 # - Transparent inputs
-block-buffer.workspace = true # remove after edition2024 upgrade
-crypto-common.workspace = true # remove after edition2024 upgrade
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
