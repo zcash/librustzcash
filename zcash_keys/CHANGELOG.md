@@ -9,6 +9,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::transparent::gap_limits::ReconcileOutcome`
+
+### Changed
+- `zcash_keys::keys::transparent::gap_limits::AddressStore` has a new required
+  method, `reconcile_stored_addresses`, which has no default implementation.
+- `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses` derives
+  successive windows of addresses until a window reconciles without moving the
+  account's gap, rather than deriving a single window.
+
 ## [0.17.0-pre.0] - 2026-10-01
 
 This release supports the NU7 upgrade on testnet.

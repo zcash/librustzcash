@@ -155,6 +155,50 @@ pub trait AddressStore {
         key_scope: TransparentKeyScope,
         list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
     ) -> Result<(), Self::Error>;
+
+    /// Checks addresses that have just been added to the wallet against transaction involvement
+    /// the wallet has already observed, and records whatever that reveals.
+    ///
+    /// A wallet recognizes transparent involvement by joining the transactions it stores against
+    /// the addresses it holds, and both sides of that join change over time: a transaction may
+    /// arrive after the address it pays is held, and an address may be added after a transaction
+    /// naming it is stored. Checking each newly stored transaction against the address book
+    /// maintains only the first case; an implementation of this method maintains the second.
+    /// Without one, a transaction stored before its address entered the wallet is never
+    /// recognized.
+    ///
+    /// `added` is the list just passed to [`Self::store_address_range`], in the same form. An
+    /// implementation must consider every entry, including entries that were already stored:
+    /// storing a range is idempotent and carries no record of which entries were new.
+    ///
+    /// Returns [`ReconcileOutcome::AddressesUsed`] if, as a result of this check, any address in
+    /// `added` is now known to have received an output in a mined transaction, carrying the
+    /// highest child index among those addresses. Returns [`ReconcileOutcome::Unchanged`]
+    /// otherwise. [`generate_gap_addresses`] uses the answer to decide whether the account's gap
+    /// start has moved, and so whether a further window of addresses must be derived and checked
+    /// in turn.
+    ///
+    /// This method must be idempotent: repeated calls with the same addresses must not record
+    /// anything beyond what the first call recorded.
+    fn reconcile_stored_addresses(
+        &mut self,
+        account_id: Self::AccountRef,
+        key_scope: TransparentKeyScope,
+        added: &[(Address, TransparentAddress, NonHardenedChildIndex)],
+    ) -> Result<ReconcileOutcome, Self::Error>;
+}
+
+/// What checking newly stored addresses against previously observed transaction involvement
+/// revealed, as reported by [`AddressStore::reconcile_stored_addresses`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ReconcileOutcome {
+    /// No address that was checked is newly known to have received an output in a mined
+    /// transaction, so the account's transparent address gap is where it was.
+    Unchanged,
+    /// At least one address that was checked is newly known to have received an output in a
+    /// mined transaction. The value is the highest child index among those addresses; the
+    /// account's transparent address gap now starts beyond it.
+    AddressesUsed(NonHardenedChildIndex),
 }
 
 fn generate_external_address(
@@ -254,6 +298,14 @@ pub enum GapAddressesError<SE> {
 /// of the first gap of unused addresses, then generates enough addresses to maintain the
 /// configured gap limit. If no gap exists (i.e., the address space is exhausted), this is a
 /// no-op.
+///
+/// Each window of addresses is checked against previously observed transaction involvement via
+/// [`AddressStore::reconcile_stored_addresses`], and a window in which that check finds an
+/// address used moves the gap, so a further window is derived and checked in turn. This
+/// continues until a window is checked without moving the gap. The gap start is read afresh
+/// each round, and the next round runs only if it lies beyond the highest address the previous
+/// round found used. That address lies within the previous window, so the gap start strictly
+/// increases; the non-hardened child index space is finite, so the number of rounds is bounded.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_gap_addresses<DbT, SE>(
     wallet_db: &mut DbT,
@@ -274,10 +326,18 @@ where
             AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
         ))?;
 
-    if let Some(gap_start) = wallet_db
+    let mut highest_used: Option<NonHardenedChildIndex> = None;
+    while let Some(gap_start) = wallet_db
         .find_gap_start(account_id, key_scope, gap_limit)
         .map_err(GapAddressesError::Storage)?
     {
+        // Reconciliation reported an address used at or beyond this gap start, so the store
+        // disagrees with it. Deriving a window that overlaps the previous one could repeat
+        // forever, so stop here; that window has already been stored and checked.
+        if highest_used.is_some_and(|used| gap_start <= used) {
+            break;
+        }
+
         let address_list = generate_address_list(
             account_uivk,
             account_ufvk,
@@ -287,9 +347,18 @@ where
             require_key,
         )
         .map_err(GapAddressesError::AddressGeneration)?;
+
         wallet_db
-            .store_address_range(account_id, key_scope, address_list)
+            .store_address_range(account_id, key_scope, address_list.clone())
             .map_err(GapAddressesError::Storage)?;
+
+        match wallet_db
+            .reconcile_stored_addresses(account_id, key_scope, &address_list)
+            .map_err(GapAddressesError::Storage)?
+        {
+            ReconcileOutcome::Unchanged => break,
+            ReconcileOutcome::AddressesUsed(highest) => highest_used = Some(highest),
+        }
     }
 
     Ok(())
