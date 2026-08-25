@@ -767,19 +767,19 @@ pub(crate) mod tests {
     use secrecy::Secret;
     use tempfile::NamedTempFile;
     use uuid::Uuid;
-    use zcash_client_backend::data_api::{
-        AccountBirthday, AccountPurpose, AccountSource, chain::ChainState,
-    };
-    use zcash_keys::keys::{UnifiedIncomingViewingKey, UnifiedSpendingKey};
-    use zcash_primitives::block::BlockHash;
-    use zcash_protocol::consensus::{Network, NetworkUpgrade, Parameters};
+    use zcash_keys::keys::{UnifiedAddressRequest, UnifiedIncomingViewingKey, UnifiedSpendingKey};
+    use zcash_protocol::consensus::{BlockHeight, Network, NetworkUpgrade, Parameters};
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::GapLimits;
+    use {::transparent::keys::NonHardenedChildIndex, zcash_keys::encoding::AddressCodec as _};
+
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::{self, init::WalletMigrator},
+        wallet::{
+            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
+            init::WalletMigrator,
+        },
     };
     use schemerz::Migration;
 
@@ -983,13 +983,17 @@ pub(crate) mod tests {
     /// back to checking the network of the account's `uivk` in that case, rather than choking
     /// on the `NULL` `ufvk` as it did prior to this fix.
     ///
-    /// The account is imported through the real `wallet::add_account` path a UIVK import
-    /// takes (`ViewingKey::Incoming`, as in `lib.rs`'s `ivk_only_account_upgrade_paths`),
-    /// against a wallet migrated only to the most recent published release rather than the
-    /// crate's current (possibly unreleased) schema. This reproduces the state a real
-    /// upgrading wallet is in, and, since the subsequent `init_or_migrate` call then has
-    /// migrations left to apply, also confirms that those migrations tolerate a `NULL`
-    /// `ufvk`.
+    /// The wallet is migrated only to the most recent published release, then given the rows
+    /// that release stores for a view-only UIVK import. The subsequent `init_or_migrate` call
+    /// therefore still has migrations to apply, which must also tolerate the `NULL` `ufvk`.
+    ///
+    /// Those rows are written as raw SQL rather than by calling `wallet::add_account`.
+    /// Applying the current `add_account` to a historical schema is a combination no wallet
+    /// is ever in: an application migrates to the current schema before it performs any
+    /// wallet operation. It also fails as soon as a runtime path reached from `add_account`
+    /// touches a table that a later migration introduces. All this test needs from
+    /// `add_account` is the data state it leaves behind, so the fixture writes that state
+    /// directly.
     #[test]
     fn uivk_only_account_is_network_compatible() {
         let data_file = NamedTempFile::new().unwrap();
@@ -1017,27 +1021,68 @@ pub(crate) mod tests {
         let birthday_height = Network::TestNetwork
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
-        let birthday = AccountBirthday::from_parts(
-            ChainState::empty(birthday_height - 1, BlockHash([0; 32])),
-            None,
+
+        let account_id = insert_uivk_only_account(
+            &db_data.conn,
+            *Uuid::new_v4().as_bytes(),
+            &uivk,
+            &Network::TestNetwork,
+            birthday_height,
         );
 
+        // The account's default Unified Address is the only `addresses` row that
+        // `add_account` writes for a UIVK-only account: a UIVK carries a single transparent
+        // receiver instead of an extended pubkey, so no transparent gap addresses can be
+        // derived from it. The row is part of the fixture because `standalone_address`, one
+        // of the migrations still pending at V_0_22_0_RC6, rebuilds the `addresses` table
+        // and copies every existing row through tightened CHECK constraints.
+        let (address, d_idx) = uivk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+
+        // Mirrors the transparent bookkeeping in `wallet::upsert_address`, which upholds the
+        // `addresses` table's transparent-index consistency constraint.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_child_index, cached_transparent_receiver_address) = match (
+            NonHardenedChildIndex::try_from(d_idx).ok(),
+            address.transparent(),
+        ) {
+            (Some(idx), Some(receiver)) => (
+                Some(idx.index()),
+                Some(receiver.encode(&Network::TestNetwork)),
+            ),
+            _ => (None, None),
+        };
+        #[cfg(not(feature = "transparent-inputs"))]
+        let (transparent_child_index, cached_transparent_receiver_address): (
+            Option<u32>,
+            Option<String>,
+        ) = (None, None);
+
         db_data
-            .transactionally(|wdb| {
-                wallet::add_account(
-                    wdb.conn.0,
-                    &wdb.params,
-                    "uivk-only",
-                    &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
-                        key_source: None,
-                    },
-                    wallet::ViewingKey::Incoming(Box::new(uivk)),
-                    &birthday,
-                    #[cfg(feature = "transparent-inputs")]
-                    &GapLimits::default(),
-                )
-            })
+            .conn
+            .execute(
+                "INSERT INTO addresses (
+                     account_id, key_scope, diversifier_index_be, address,
+                     transparent_child_index, cached_transparent_receiver_address,
+                     exposed_at_height, receiver_flags
+                 )
+                 VALUES (
+                     :account_id, :key_scope, :diversifier_index_be, :address,
+                     :transparent_child_index, :cached_transparent_receiver_address,
+                     :exposed_at_height, :receiver_flags
+                 )",
+                named_params![
+                    ":account_id": account_id,
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                    ":diversifier_index_be": &encode_diversifier_index_be(d_idx)[..],
+                    ":address": address.encode(&Network::TestNetwork),
+                    ":transparent_child_index": transparent_child_index,
+                    ":cached_transparent_receiver_address": cached_transparent_receiver_address,
+                    ":exposed_at_height": u32::from(birthday_height),
+                    ":receiver_flags": ReceiverFlags::from(&address).bits(),
+                ],
+            )
             .unwrap();
 
         // Re-running the migrator is exactly what a wallet upgrade does; it must succeed
@@ -1098,32 +1143,39 @@ pub(crate) mod tests {
         );
     }
 
-    /// Inserts a UIVK-only account row directly, mirroring the shape `wallet::add_account`
-    /// writes for an [`AccountPurpose::ViewOnly`](zcash_client_backend::data_api::AccountPurpose)
-    /// import: `account_kind = 1` (imported), no HD derivation metadata, and a `NULL` `ufvk`.
-    /// This bypasses `add_account` itself, which is not usable here: it always encodes the
-    /// stored `uivk` with the wallet's own [`consensus::Parameters`], so it structurally
-    /// cannot produce a row whose key is encoded for a different network. The IVK-cache
-    /// columns are deliberately left `NULL`; they are irrelevant to
-    /// `verify_network_compatibility`, so this is not a faithful general-purpose account
-    /// fixture.
+    /// Inserts the `accounts` row that `wallet::add_account` writes for an
+    /// [`AccountPurpose::ViewOnly`](zcash_client_backend::data_api::AccountPurpose) UIVK
+    /// import: `account_kind = 1` (imported), no HD derivation metadata, no spend key, and a
+    /// `NULL` `ufvk`. Returns the new row's `id`.
+    ///
+    /// Writing the row directly gives these tests control over the two things `add_account`
+    /// fixes for them: the network the stored `uivk` is encoded for (`add_account` always
+    /// uses the wallet's own [`consensus::Parameters`]), and the schema version the row is
+    /// written against. The IVK-cache and birthday-tree-size columns are left `NULL`; nothing
+    /// under test reads them, so this is not a faithful general-purpose account fixture.
     fn insert_uivk_only_account(
         conn: &Connection,
         uuid: [u8; 16],
         uivk: &UnifiedIncomingViewingKey,
         uivk_network: &Network,
-    ) {
-        conn.execute(
-            "INSERT INTO accounts (uuid, account_kind, ufvk, uivk, has_spend_key, birthday_height)
-             VALUES (:uuid, :account_kind, NULL, :uivk, 0, :birthday_height)",
+        birthday_height: BlockHeight,
+    ) -> i64 {
+        conn.query_row(
+            "INSERT INTO accounts (
+                 name, uuid, account_kind, ufvk, uivk, has_spend_key, birthday_height
+             )
+             VALUES (:name, :uuid, :account_kind, NULL, :uivk, 0, :birthday_height)
+             RETURNING id",
             named_params![
+                ":name": "uivk-only",
                 ":uuid": &uuid[..],
                 ":account_kind": 1,
                 ":uivk": uivk.encode(uivk_network),
-                ":birthday_height": 0,
+                ":birthday_height": u32::from(birthday_height),
             ],
+            |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
     }
 
     /// A UIVK-only account whose stored `uivk` was encoded for a different network must still
@@ -1152,7 +1204,13 @@ pub(crate) mod tests {
                 .unwrap()
                 .to_unified_full_viewing_key()
                 .to_unified_incoming_viewing_key();
-        insert_uivk_only_account(&db_data.conn, [7; 16], &uivk, &Network::MainNetwork);
+        insert_uivk_only_account(
+            &db_data.conn,
+            [7; 16],
+            &uivk,
+            &Network::MainNetwork,
+            BlockHeight::from_u32(0),
+        );
 
         assert_matches!(
             WalletMigrator::new()
