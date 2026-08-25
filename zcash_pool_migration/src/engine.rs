@@ -4917,6 +4917,7 @@ pub(crate) mod tests {
             nu6_3: Some(BlockHeight::from_u32(10)),
             #[cfg(zcash_unstable = "nu7")]
             nu7: None,
+            #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
     }

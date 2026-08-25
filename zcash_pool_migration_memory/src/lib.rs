@@ -103,6 +103,7 @@ pub fn regtest_network(nu6_3_active: bool) -> LocalNetwork {
         nu6_3,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
+        #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
 }

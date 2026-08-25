@@ -11,8 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `TxVersion::V7` and `TransactionData::from_parts_v7`. V7 is enabled by
-  NuTachyon and initially uses the V6 transaction body and digest structure.
+- Experimental `TxVersion::V7` and `TransactionData::from_parts_v7` support
+  behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon and initially
+  uses the V6 transaction body and digest structure.
 
 ## [0.30.1] - 2026-08-18
 

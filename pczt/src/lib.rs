@@ -30,9 +30,12 @@ use getset::Getters;
 
 use zcash_protocol::PoolType;
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
-use zcash_protocol::constants::{
-    V6_TX_VERSION, V6_VERSION_GROUP_ID, V7_TX_VERSION, V7_VERSION_GROUP_ID,
-};
+use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nutachyon"
+))]
+use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 #[cfg(all(
     any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
     zcash_unstable = "nu7",
@@ -158,10 +161,12 @@ pub mod v1 {
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
             // The v1 encoding cannot represent V6 or V7 transactions.
-            if matches!(
-                pczt.global.tx_version,
-                zcash_protocol::constants::V6_TX_VERSION | zcash_protocol::constants::V7_TX_VERSION
-            ) {
+            if match pczt.global.tx_version {
+                zcash_protocol::constants::V6_TX_VERSION => true,
+                #[cfg(zcash_unstable = "nutachyon")]
+                zcash_protocol::constants::V7_TX_VERSION => true,
+                _ => false,
+            } {
                 return Err(super::EncodingError::UnsupportedTxVersion);
             }
 
@@ -460,11 +465,13 @@ impl Pczt {
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
         // Fast pre-checks for the conditions that most commonly rule out the
         // v1 encoding, avoiding the speculative clone below.
-        if !matches!(
-            self.global.tx_version,
-            zcash_protocol::constants::V6_TX_VERSION | zcash_protocol::constants::V7_TX_VERSION
-        ) && self.ironwood == orchard::EMPTY_IRONWOOD
-        {
+        let requires_v2 = match self.global.tx_version {
+            zcash_protocol::constants::V6_TX_VERSION => true,
+            #[cfg(zcash_unstable = "nutachyon")]
+            zcash_protocol::constants::V7_TX_VERSION => true,
+            _ => false,
+        };
+        if !requires_v2 && self.ironwood == orchard::EMPTY_IRONWOOD {
             // The full v1-representability conditions live in the bundle
             // conversions; attempting the conversion is the single source of
             // truth for them.
@@ -544,6 +551,7 @@ impl Pczt {
         let version = match (global.tx_version, global.version_group_id) {
             (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
             (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
+            #[cfg(zcash_unstable = "nutachyon")]
             (V7_TX_VERSION, V7_VERSION_GROUP_ID) => Ok(TxVersion::V7),
             (version, version_group_id) => Err(ExtractError::UnsupportedTxVersion {
                 version,
@@ -560,7 +568,13 @@ impl Pczt {
             }
             // V6 and later transaction formats do not exist prior to NU6.3 (the first
             // upgrade under which the Orchard protocol is at revision V3).
-            TxVersion::V6 | TxVersion::V7 => {
+            TxVersion::V6 => {
+                if orchard_protocol_revision < OrchardProtocolRevision::V3 {
+                    return Err(ExtractError::UnsupportedConsensusBranchId.into());
+                }
+            }
+            #[cfg(zcash_unstable = "nutachyon")]
+            TxVersion::V7 => {
                 if orchard_protocol_revision < OrchardProtocolRevision::V3 {
                     return Err(ExtractError::UnsupportedConsensusBranchId.into());
                 }
@@ -605,6 +619,7 @@ impl Pczt {
                 orchard_bundle,
                 ironwood_bundle,
             ),
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => TransactionData::from_parts_v7(
                 consensus_branch_id,
                 lock_time,
@@ -694,7 +709,9 @@ pub(crate) fn sighash(
 ) -> [u8; 32] {
     match tx_data.version() {
         TxVersion::V5 => v5_signature_hash(tx_data, signable_input, txid_parts),
-        TxVersion::V6 | TxVersion::V7 => v6_signature_hash(tx_data, signable_input, txid_parts),
+        TxVersion::V6 => v6_signature_hash(tx_data, signable_input, txid_parts),
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => v6_signature_hash(tx_data, signable_input, txid_parts),
         _ => unreachable!("PCZT only supports V5 and later transaction data"),
     }
     .as_ref()
@@ -824,6 +841,7 @@ impl core::error::Error for ParseError {}
 
 #[cfg(all(test, any(feature = "io-finalizer", feature = "signer")))]
 mod extraction_tests {
+    #[cfg(zcash_unstable = "nutachyon")]
     use zcash_primitives::transaction::TxVersion;
     use zcash_protocol::consensus::BranchId;
 
@@ -868,6 +886,7 @@ mod extraction_tests {
     }
 
     #[test]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn nu_tachyon_pczt_extracts_as_v7() {
         let pczt = Creator::new(
             BranchId::NuTachyon.into(),

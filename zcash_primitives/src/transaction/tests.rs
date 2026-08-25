@@ -14,13 +14,12 @@ use {
     alloc::vec::Vec,
     blake2b_simd::Hash as Blake2bHash,
     core::ops::Deref,
-    zcash_protocol::{
-        consensus::BranchId,
-        constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID},
-        value::Zatoshis,
-    },
+    zcash_protocol::{consensus::BranchId, value::Zatoshis},
     zcash_script::script,
 };
+
+#[cfg(all(test, zcash_unstable = "nutachyon"))]
+use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
 #[cfg(all(test, not(zcash_unstable = "nu7")))]
 use {
@@ -71,6 +70,7 @@ fn suggested_version_for_v5_branches_is_not_v6() {
 }
 
 #[test]
+#[cfg(zcash_unstable = "nutachyon")]
 fn v7_is_enabled_by_nu_tachyon_and_roundtrips_the_v6_body() {
     assert_eq!(
         TxVersion::suggested_for_branch(BranchId::NuTachyon),
@@ -925,6 +925,7 @@ proptest! {
     }
 }
 
+#[cfg(zcash_unstable = "nutachyon")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]

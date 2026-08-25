@@ -58,7 +58,9 @@ fn sapling_spends_noncompact_personalization(version: TxVersion) -> &'static [u8
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
             ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
         }
-        TxVersion::V6 | TxVersion::V7 => ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
+        TxVersion::V6 => ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
     }
 }
 
@@ -67,14 +69,18 @@ fn sapling_auth_personalization(version: TxVersion) -> &'static [u8; 16] {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
             ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION
         }
-        TxVersion::V6 | TxVersion::V7 => ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION,
+        TxVersion::V6 => ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION,
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION,
     }
 }
 
 fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-        TxVersion::V6 | TxVersion::V7 => true,
+        TxVersion::V6 => true,
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => true,
     }
 }
 
@@ -88,7 +94,9 @@ fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
             (ValuePool::Orchard, OrchardTxVersion::V5)
         }
-        TxVersion::V6 | TxVersion::V7 => (ValuePool::Orchard, OrchardTxVersion::V6),
+        TxVersion::V6 => (ValuePool::Orchard, OrchardTxVersion::V6),
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => (ValuePool::Orchard, OrchardTxVersion::V6),
     }
 }
 
@@ -164,7 +172,9 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
             nh.write_all(&s_spend.cv().to_bytes()).unwrap();
             let write_anchor = match version {
                 TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => true,
-                TxVersion::V6 | TxVersion::V7 => false,
+                TxVersion::V6 => false,
+                #[cfg(zcash_unstable = "nutachyon")]
+                TxVersion::V7 => false,
             };
             if write_anchor {
                 nh.write_all(&s_spend.anchor().to_repr()).unwrap();

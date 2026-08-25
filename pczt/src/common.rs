@@ -67,13 +67,11 @@ impl AnchorRequirement {
     /// anchors for Sapling spends and Orchard-protocol actions, so those bundles must
     /// keep requiring them.
     pub(crate) fn for_pre_authorization(tx_version: u32) -> Self {
-        if matches!(
-            tx_version,
-            zcash_protocol::constants::V6_TX_VERSION | zcash_protocol::constants::V7_TX_VERSION
-        ) {
-            AnchorRequirement::NotRequired
-        } else {
-            AnchorRequirement::Required
+        match tx_version {
+            zcash_protocol::constants::V6_TX_VERSION => AnchorRequirement::NotRequired,
+            #[cfg(zcash_unstable = "nutachyon")]
+            zcash_protocol::constants::V7_TX_VERSION => AnchorRequirement::NotRequired,
+            _ => AnchorRequirement::Required,
         }
     }
 
