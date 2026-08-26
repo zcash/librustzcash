@@ -23,7 +23,14 @@ use transparent::{
     bundle::{OutPoint, TxOut},
 };
 use zcash_client_backend::{
-    data_api::ll::wallet::{detect_wallet_transparent_outputs, transparent_sent_output_recipient},
+    data_api::ll::{
+        ReceivedShieldedOutput,
+        wallet::{
+            detect_wallet_transparent_outputs, shielded_sent_output_recipient,
+            transparent_sent_output_recipient,
+        },
+    },
+    decrypt_transaction,
     wallet::{TransparentAddressObservation, TransparentInvolvement, WalletTransparentOutput},
 };
 use zcash_keys::{
@@ -46,8 +53,8 @@ use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
     wallet::{
-        KeyScope, encoding::pool_code, put_sent_output, queue_tx_retrieval,
-        select_receiving_address, update_tx_fee,
+        KeyScope, chain_tip_height, encoding::pool_code, get_unified_full_viewing_keys,
+        put_sent_output, queue_tx_retrieval, select_receiving_address, update_tx_fee,
     },
 };
 
@@ -580,13 +587,12 @@ fn reconcile_input<P: consensus::Parameters>(
 /// same account; scanning one whose data the wallet already holds can only follow the recognition
 /// of the spent output, which is a call site of this function.
 ///
-/// The shielded half of the same defect is left unrepaired here. A shielded output the wallet
-/// received from elsewhere is recorded as sent only when the funding account is known at store
-/// time, so a transaction that shields a transparent output the wallet did not yet recognize
-/// keeps a shielded output with no recorded sender, and neither this function nor the repair
-/// migration touches it. Reconstructing it needs the transaction decrypted under the wallet's
-/// viewing keys rather than read from its transparent bundle; the wallet holds both the stored
-/// bytes and the keys, so it is reachable offline, and simply not done here.
+/// Shielded outputs are replayed as well, by decrypting the stored bytes under every viewing key
+/// the wallet holds; see [`attribute_shielded_outputs`]. What decryption cannot open is the
+/// residual: an output paying an account whose keys the wallet does not have, and one whose
+/// outgoing viewing key it does not hold, name a recipient the wallet has no way to learn. That
+/// is precisely what storing the transaction would have left unrecorded, so the replay reaches
+/// the state store-time processing reaches, not a lesser one.
 pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
@@ -638,7 +644,7 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
     )?;
 
     for output in &outputs {
-        if has_recorded_recipient(conn, tx_ref, output.index())? {
+        if has_recorded_recipient(conn, tx_ref, PoolType::TRANSPARENT, output.index())? {
             continue;
         }
 
@@ -662,14 +668,141 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
         )?;
     }
 
+    attribute_shielded_outputs(conn, params, tx_ref, &tx, tx_mined_height, funding_account)?;
+
     Ok(())
 }
 
-/// Returns whether the wallet has recorded a recipient for the given transparent output of the
-/// given transaction.
+/// Returns whether the transaction produces any shielded output, in any pool the wallet stores.
+fn has_shielded_outputs(tx: &Transaction) -> bool {
+    let sapling = tx
+        .sapling_bundle()
+        .is_some_and(|bundle| !bundle.shielded_outputs().is_empty());
+
+    #[cfg(feature = "orchard")]
+    let shielded = sapling
+        || tx
+            .orchard_bundle()
+            .is_some_and(|bundle| !bundle.actions().is_empty())
+        || tx
+            .ironwood_bundle()
+            .is_some_and(|bundle| !bundle.actions().is_empty());
+
+    #[cfg(not(feature = "orchard"))]
+    let shielded = sapling;
+
+    shielded
+}
+
+/// Records the sent outputs of the shielded bundles of a stored transaction that the wallet now
+/// knows `funding_account` funded.
+///
+/// What a transaction's shielded bundles paid is recoverable only by trial decryption, so this
+/// re-runs it over the stored bytes under every viewing key the wallet holds — the same function
+/// the store-time path decrypts with — and records for each output what that path would have
+/// recorded with the funding account in hand.
+fn attribute_shielded_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+    tx: &Transaction,
+    mined_height: Option<BlockHeight>,
+    funding_account: AccountUuid,
+) -> Result<(), SqliteClientError> {
+    // Trial decryption costs a key lookup and a pass over every output under every key, so a
+    // transaction with no shielded output — the common shape for one recognized through a
+    // transparent spend — is settled without paying either.
+    if !has_shielded_outputs(tx) {
+        return Ok(());
+    }
+
+    let ufvks = get_unified_full_viewing_keys(conn, params)?;
+    if ufvks.is_empty() {
+        return Ok(());
+    }
+
+    let d_tx = decrypt_transaction(params, mined_height, chain_tip_height(conn)?, tx, &ufvks);
+
+    put_missing_sent_outputs(
+        conn,
+        params,
+        tx_ref,
+        d_tx.sapling_outputs(),
+        funding_account,
+    )?;
+
+    #[cfg(feature = "orchard")]
+    {
+        put_missing_sent_outputs(
+            conn,
+            params,
+            tx_ref,
+            d_tx.orchard_outputs(),
+            funding_account,
+        )?;
+        put_missing_sent_outputs(
+            conn,
+            params,
+            tx_ref,
+            d_tx.ironwood_outputs(),
+            funding_account,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Records the send that each of the given decrypted outputs represents, skipping any output for
+/// which the wallet has already recorded a recipient.
+fn put_missing_sent_outputs<P, Output>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+    outputs: &[Output],
+    funding_account: AccountUuid,
+) -> Result<(), SqliteClientError>
+where
+    P: consensus::Parameters,
+    Output: ReceivedShieldedOutput<AccountId = AccountUuid>,
+{
+    for output in outputs {
+        let pool = PoolType::Shielded(output.to_wallet_note().pool());
+        if has_recorded_recipient(conn, tx_ref, pool, output.index())? {
+            continue;
+        }
+
+        let Some((from_account, recipient, value)) =
+            shielded_sent_output_recipient(output, Some(funding_account), |account, receiver| {
+                Ok::<_, SqliteClientError>(
+                    select_receiving_address(conn, params, account, &receiver)?
+                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type())),
+                )
+            })?
+        else {
+            continue;
+        };
+
+        put_sent_output(
+            conn,
+            params,
+            from_account,
+            tx_ref,
+            output.index(),
+            &recipient,
+            value,
+            output.memo(),
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Returns whether the wallet has recorded a recipient for the given output of the given
+/// transaction, in the given pool.
 fn has_recorded_recipient(
     conn: &rusqlite::Connection,
     tx_ref: TxRef,
+    pool: PoolType,
     output_index: usize,
 ) -> Result<bool, SqliteClientError> {
     Ok(conn.query_row(
@@ -681,9 +814,9 @@ fn has_recorded_recipient(
         )",
         named_params! {
             ":transaction_id": tx_ref.0,
-            ":output_pool": pool_code(PoolType::TRANSPARENT),
+            ":output_pool": pool_code(pool),
             ":output_index": i64::try_from(output_index)
-                .expect("a transparent output index fits in an i64"),
+                .expect("an output index fits in an i64"),
         },
         |row| row.get(0),
     )?)
@@ -835,8 +968,12 @@ pub(crate) mod tests {
         bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
     };
     use assert_matches::assert_matches;
+    use rand_core::OsRng;
     use rusqlite::named_params;
-    use transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope};
+    use transparent::{
+        builder::TransparentSigningSet,
+        keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
+    };
     use zcash_client_backend::{
         data_api::{
             Account as _, AccountBirthday, AccountPurpose, WalletWrite,
@@ -854,12 +991,17 @@ pub(crate) mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        transaction::{Authorized, Transaction, TransactionData, TxVersion},
+        transaction::{
+            Authorized, Transaction, TransactionData, TxVersion,
+            builder::{BuildConfig, Builder, BundlePadding},
+            fees::zip317,
+        },
     };
     use zcash_protocol::{
-        TxId,
+        PoolType, ShieldedPool, TxId,
         consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters as _},
         local_consensus::LocalNetwork,
+        memo::MemoBytes,
         value::{MAX_MONEY, Zatoshis},
     };
     use zcash_script::script;
@@ -874,6 +1016,7 @@ pub(crate) mod tests {
             db::{TestDb, TestDbFactory},
         },
         wallet::{
+            encoding::pool_code,
             get_account_ref,
             scanning::{insert_queue_entries, priority_code, suggest_scan_ranges},
             transparent::{find_gap_start, generate_gap_addresses, reconcile_and_extend_gaps},
@@ -2787,6 +2930,686 @@ pub(crate) mod tests {
         assert_eq!(
             tx_output_accounts(&st.wallet().db().conn, spend_tx.txid()),
             vec![(0, Some(account_uuid.expose_uuid()), None)],
+        );
+    }
+
+    /// The P2PKH output a test transaction spends: the key that controls it, the outpoint that
+    /// names it, and its value.
+    pub(crate) struct SpentP2pkh {
+        signing_key: secp256k1::SecretKey,
+        outpoint: OutPoint,
+        value: u64,
+    }
+
+    /// The shielded output a test transaction pays, in whichever pool the test exercises.
+    pub(crate) enum ShieldedPayment {
+        Sapling(
+            Option<sapling::keys::OutgoingViewingKey>,
+            sapling::PaymentAddress,
+            u64,
+        ),
+        #[cfg(feature = "orchard")]
+        Orchard(
+            Option<orchard::keys::OutgoingViewingKey>,
+            orchard::Address,
+            u64,
+        ),
+        #[cfg(feature = "orchard")]
+        Ironwood(
+            Option<orchard::keys::OutgoingViewingKey>,
+            orchard::Address,
+            u64,
+        ),
+    }
+
+    impl ShieldedPayment {
+        /// The value the output pays.
+        fn value(&self) -> u64 {
+            match self {
+                ShieldedPayment::Sapling(_, _, value) => *value,
+                #[cfg(feature = "orchard")]
+                ShieldedPayment::Orchard(_, _, value) => *value,
+                #[cfg(feature = "orchard")]
+                ShieldedPayment::Ironwood(_, _, value) => *value,
+            }
+        }
+    }
+
+    /// Builds a transaction that spends `prevout` — a P2PKH output of `signing_key`'s address,
+    /// worth `prevout_value` — paying a Sapling output and any number of transparent outputs, and
+    /// returning what is left after the fee to `change_address`.
+    ///
+    /// The fee the builder requires is fixed by the shape of the transaction rather than by its
+    /// values, so the same shape is assembled twice: once to measure the fee, and once with the
+    /// change that balances it.
+    pub(crate) fn shielding_tx(
+        network: &LocalNetwork,
+        target_height: BlockHeight,
+        spent: &SpentP2pkh,
+        shielded_output: &ShieldedPayment,
+        transparent_outputs: &[(TransparentAddress, u64)],
+        change_address: TransparentAddress,
+    ) -> Transaction {
+        let SpentP2pkh {
+            signing_key,
+            outpoint: prevout,
+            value: prevout_value,
+        } = spent;
+        let (signing_key, prevout_value) = (*signing_key, *prevout_value);
+
+        let assemble = |change_value: u64| {
+            let mut signing_set = TransparentSigningSet::new();
+            let pubkey = signing_set.add_key(signing_key);
+            let source = TransparentAddress::from_pubkey(&pubkey);
+
+            let mut builder = Builder::new(
+                *network,
+                target_height,
+                BuildConfig::Standard {
+                    sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                    orchard_anchor: Some(orchard::Anchor::empty_tree()),
+                    ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            );
+            builder
+                .add_transparent_p2pkh_input(
+                    pubkey,
+                    prevout.clone(),
+                    TxOut::new(
+                        Zatoshis::from_u64(prevout_value).unwrap(),
+                        Script::from(&source.script()),
+                    ),
+                )
+                .unwrap();
+            match shielded_output {
+                ShieldedPayment::Sapling(ovk, recipient, value) => builder
+                    .add_sapling_output::<zip317::FeeError>(
+                        *ovk,
+                        *recipient,
+                        Zatoshis::from_u64(*value).unwrap(),
+                        MemoBytes::empty(),
+                    )
+                    .unwrap(),
+                #[cfg(feature = "orchard")]
+                ShieldedPayment::Orchard(ovk, recipient, value) => builder
+                    .add_orchard_output::<zip317::FeeError>(
+                        ovk.clone(),
+                        *recipient,
+                        Zatoshis::from_u64(*value).unwrap(),
+                        MemoBytes::empty(),
+                    )
+                    .unwrap(),
+                #[cfg(feature = "orchard")]
+                ShieldedPayment::Ironwood(ovk, recipient, value) => builder
+                    .add_ironwood_output::<zip317::FeeError>(
+                        ovk.clone(),
+                        *recipient,
+                        Zatoshis::from_u64(*value).unwrap(),
+                        MemoBytes::empty(),
+                    )
+                    .unwrap(),
+            }
+            for (address, value) in transparent_outputs {
+                builder
+                    .add_transparent_output(address, Zatoshis::from_u64(*value).unwrap())
+                    .unwrap();
+            }
+            builder
+                .add_transparent_output(&change_address, Zatoshis::from_u64(change_value).unwrap())
+                .unwrap();
+
+            (builder, signing_set)
+        };
+
+        let fee = u64::from(
+            assemble(1)
+                .0
+                .get_fee(&zip317::FeeRule::standard())
+                .expect("the fee of a balanced shape is computable"),
+        );
+        let paid =
+            shielded_output.value() + transparent_outputs.iter().map(|(_, v)| v).sum::<u64>();
+        let (builder, signing_set) = assemble(prevout_value - paid - fee);
+
+        builder
+            .mock_build(&signing_set, &[], &[], OsRng)
+            .unwrap()
+            .transaction()
+            .clone()
+    }
+
+    /// The wallet's Sapling receiving address and outgoing viewing key for an account key.
+    pub(crate) fn sapling_receiver(
+        ufvk: &UnifiedFullViewingKey,
+    ) -> (sapling::PaymentAddress, sapling::keys::OutgoingViewingKey) {
+        let dfvk = ufvk.sapling().expect("the test account has a Sapling key");
+        (dfvk.default_address().1, dfvk.fvk().ovk)
+    }
+
+    /// The reported shape: a transaction shielding a transparent account's funds, which reaches
+    /// the wallet before the output it spends is recognized. Its Sapling output pays
+    /// `sapling_recipient` under `sapling_ovk`, it pays the host account transparently so that
+    /// the wallet stores it at all, and it returns change to the transparent account.
+    ///
+    /// Returns the shielding transaction, the height it is stored at, and the guest account's key.
+    pub(crate) fn store_shielding_spend_before_its_prevout<C>(
+        st: &mut TestState<C, TestDb, LocalNetwork>,
+        host_address: TransparentAddress,
+        shielded_output: &ShieldedPayment,
+    ) -> (Transaction, BlockHeight, UnifiedFullViewingKey) {
+        let network = *st.network();
+        let birthday_height = u32::from(st.test_account().unwrap().birthday().height());
+        let mined_height = BlockHeight::from(birthday_height + 6);
+
+        // The transparent account whose funds are shielded, which the wallet does not yet hold.
+        let guest_usk =
+            UnifiedSpendingKey::from_seed(&network, &[0x9D; 32], AccountId::ZERO).unwrap();
+        let guest_ufvk = guest_usk.to_unified_full_viewing_key();
+        let signing_key = guest_usk
+            .transparent()
+            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+            .unwrap();
+
+        let funding_tx = paying_tx(
+            external_address(&guest_ufvk, 0),
+            500_000,
+            OutPoint::new([0xF9; 32], 0),
+        );
+        let spend_tx = shielding_tx(
+            &network,
+            mined_height,
+            &SpentP2pkh {
+                signing_key,
+                outpoint: OutPoint::new(funding_tx.txid().into(), 0),
+                value: 500_000,
+            },
+            shielded_output,
+            &[(host_address, 100_000)],
+            internal_address(&guest_ufvk, 0),
+        );
+
+        st.wallet_mut()
+            .db_mut()
+            .update_chain_tip(BlockHeight::from(birthday_height + 20))
+            .unwrap();
+
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            store_tx(&conn, &network, &funding_tx, Some(birthday_height + 5));
+            conn.commit().unwrap();
+        }
+
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &spend_tx,
+            Some(mined_height),
+        )
+        .unwrap();
+
+        (spend_tx, mined_height, guest_ufvk)
+    }
+
+    /// Reads the rows of `v_tx_outputs` for the given transaction in the given pool, as
+    /// `(output_index, from_account_uuid, to_account_uuid)`.
+    pub(crate) fn pool_output_accounts(
+        conn: &rusqlite::Connection,
+        txid: TxId,
+        pool: PoolType,
+    ) -> Vec<(u32, Option<uuid::Uuid>, Option<uuid::Uuid>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT output_index, from_account_uuid, to_account_uuid
+                 FROM v_tx_outputs
+                 WHERE txid = :txid AND output_pool = :pool
+                 ORDER BY output_index",
+            )
+            .unwrap();
+        stmt.query_map(
+            named_params! { ":txid": txid.as_ref(), ":pool": pool_code(pool) },
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    /// The `(from_account_uuid, to_account_uuid)` pairs `v_tx_outputs` reports for the given
+    /// transaction in the given pool.
+    ///
+    /// The index is dropped because a shielded bundle is padded with dummy outputs, so the index
+    /// of the real one is not fixed by the transaction's shape.
+    pub(crate) fn pool_output_parties(
+        conn: &rusqlite::Connection,
+        txid: TxId,
+        pool: PoolType,
+    ) -> Vec<(Option<uuid::Uuid>, Option<uuid::Uuid>)> {
+        pool_output_accounts(conn, txid, pool)
+            .into_iter()
+            .map(|(_, from, to)| (from, to))
+            .collect()
+    }
+
+    /// The shielded outputs an external-receipt consumer selects: those the wallet received for
+    /// which it holds no record of a sender, and which are not flagged as change.
+    pub(crate) fn unattributed_shielded_receipts(
+        conn: &rusqlite::Connection,
+    ) -> Vec<(Vec<u8>, u32)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, ro.output_index
+                 FROM v_received_outputs ro
+                 JOIN transactions t ON t.id_tx = ro.transaction_id
+                 WHERE ro.pool != 0 AND ro.sent_note_id IS NULL AND ro.is_change = 0
+                 ORDER BY t.txid, ro.output_index",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    /// The reported case, end to end: a transaction shields a transparent account's funds into
+    /// another account of the same wallet. Its principal output is the shielded one, and until
+    /// the wallet recognizes the transparent output the transaction spends, nothing records who
+    /// sent it — so a transfer between two of the wallet's own accounts reads as a payment from
+    /// a stranger, for which a cost basis would have to be found.
+    #[test]
+    fn shielding_transfer_is_attributed_in_both_pools() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_ufvk = host.usk().to_unified_full_viewing_key();
+        let host_address = external_address(&host_ufvk, 0);
+        let (host_sapling, _) = sapling_receiver(&host_ufvk);
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Sapling(None, host_sapling, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+
+        // The wallet holds the Sapling output as a receipt from nobody: the shape that prompts
+        // for a cost basis.
+        assert_eq!(
+            pool_output_parties(
+                &st.wallet().db().conn,
+                spend_txid,
+                PoolType::Shielded(ShieldedPool::Sapling),
+            ),
+            vec![(None, Some(host_uuid))],
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(txid, _)| txid == spend_txid.as_ref()),
+        );
+
+        // Importing the transparent account recognizes the output the transaction spends, which
+        // reveals which account funded it.
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        let conn = &st.wallet().db().conn;
+
+        // The Sapling output now reports the account that funded it, and the account it paid.
+        assert_eq!(
+            pool_output_parties(conn, spend_txid, PoolType::Shielded(ShieldedPool::Sapling)),
+            vec![(Some(guest_uuid), Some(host_uuid))],
+        );
+
+        // So does every transparent output: the payment to the host account, and the change
+        // returned to the transparent account.
+        assert_eq!(
+            tx_output_accounts(conn, spend_txid),
+            vec![
+                (0, Some(guest_uuid), Some(host_uuid)),
+                (1, Some(guest_uuid), Some(guest_uuid)),
+            ],
+        );
+
+        // Nothing of this transaction is an external receipt any longer.
+        assert!(
+            unattributed_shielded_receipts(conn)
+                .iter()
+                .chain(unattributed_receipts(conn).iter())
+                .all(|(txid, _)| txid != spend_txid.as_ref()),
+        );
+    }
+
+    /// A shielded output the wallet can open only with an outgoing viewing key is attributed to
+    /// the account whose key opened it, which is not necessarily the account that funded the
+    /// transaction. It pays a recipient outside the wallet, so it is a send with no receiving
+    /// account.
+    ///
+    /// The two accounts are kept distinct here so that the recorded sender discriminates between
+    /// them: an implementation that reported the funding account instead would pass a fixture in
+    /// which one account plays both parts.
+    #[test]
+    fn outgoing_shielded_output_is_recovered_with_the_key_that_opens_it() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let birthday = host.birthday().clone();
+        let host_address = external_address(&host.usk().to_unified_full_viewing_key(), 0);
+
+        // The account whose outgoing viewing key the output was encrypted under, which is neither
+        // the account that funded the transaction nor the account it pays.
+        let sender_usk =
+            UnifiedSpendingKey::from_seed(&network, &[0x4E; 32], AccountId::ZERO).unwrap();
+        let sender_ufvk = sender_usk.to_unified_full_viewing_key();
+        let (_, sender_ovk) = sapling_receiver(&sender_ufvk);
+        let stranger_usk =
+            UnifiedSpendingKey::from_seed(&network, &[0x1B; 32], AccountId::ZERO).unwrap();
+        let (stranger_sapling, _) = sapling_receiver(&stranger_usk.to_unified_full_viewing_key());
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Sapling(Some(sender_ovk), stranger_sapling, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        // No key the wallet holds opens the output, so it records nothing about it.
+        assert!(pool_output_parties(&st.wallet().db().conn, spend_txid, sapling).is_empty());
+
+        // Holding the key that opens it is not enough on its own: nothing has yet established
+        // that a wallet account funded the transaction, so no replay has run.
+        let sender_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "sender",
+                &sender_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+        assert!(pool_output_parties(&st.wallet().db().conn, spend_txid, sapling).is_empty());
+
+        // Recognizing the transparent output the transaction spends does establish it.
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        assert_ne!(
+            sender_uuid, guest_uuid,
+            "the fixture separates the key holder from the funding account",
+        );
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, sapling),
+            vec![(Some(sender_uuid), None)],
+            "the sender is the account whose key opened the output, not the one that funded it",
+        );
+
+        // The funding account is what the transparent outputs of the same transaction report, so
+        // the two are both present and distinguishable.
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid)
+                .iter()
+                .map(|(_, from, _)| *from)
+                .collect::<Vec<_>>(),
+            vec![Some(guest_uuid), Some(guest_uuid)],
+        );
+    }
+
+    /// The extended replay is idempotent, and repairs a wallet holding the state the transparent
+    /// repair alone left: the transparent outputs attributed, the shielded output not.
+    #[test]
+    fn shielded_attribution_replay_is_idempotent_and_repairs() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_ufvk = host.usk().to_unified_full_viewing_key();
+        let host_address = external_address(&host_ufvk, 0);
+        let (host_sapling, _) = sapling_receiver(&host_ufvk);
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Sapling(None, host_sapling, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+
+        st.wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap();
+
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+        let guest_uuid = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT uuid FROM accounts WHERE name = 'guest'",
+                [],
+                |row| row.get::<_, uuid::Uuid>(0),
+            )
+            .unwrap();
+        let attributed = pool_output_accounts(&st.wallet().db().conn, spend_txid, sapling);
+        assert_eq!(
+            attributed
+                .iter()
+                .map(|(_, from, to)| (*from, *to))
+                .collect::<Vec<_>>(),
+            vec![(Some(guest_uuid), Some(host_uuid))],
+        );
+
+        let reconcile = |st: &TestState<_, TestDb, _>| {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            reconcile_and_extend_gaps(
+                &conn,
+                &network,
+                &GapLimits::default(),
+                ReconcileScope::AllAddresses,
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        };
+
+        reconcile(&st);
+        assert_eq!(
+            pool_output_accounts(&st.wallet().db().conn, spend_txid, sapling),
+            attributed,
+            "a second pass records nothing further",
+        );
+
+        // The state the transparent repair alone reaches: shielded attribution absent, the rest
+        // intact.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "DELETE FROM sent_notes
+                 WHERE output_pool != :transparent
+                 AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+                named_params! {
+                    ":transparent": pool_code(PoolType::TRANSPARENT),
+                    ":txid": spend_txid.as_ref(),
+                },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(txid, _)| txid == spend_txid.as_ref()),
+        );
+
+        reconcile(&st);
+        assert_eq!(
+            pool_output_accounts(&st.wallet().db().conn, spend_txid, sapling),
+            attributed,
+        );
+    }
+
+    /// The replay covers every shielded pool the wallet stores, not the Sapling pool alone. The
+    /// classification is one generic function, but the pools are dispatched to it one by one, and
+    /// a pool left out of that dispatch is a pool whose outputs are never attributed.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn shielding_transfer_is_attributed_in_the_orchard_pool() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_ufvk = host.usk().to_unified_full_viewing_key();
+        let host_address = external_address(&host_ufvk, 0);
+        let host_orchard = host_ufvk
+            .orchard()
+            .expect("the test account has an Orchard key")
+            .address_at(0u32, zip32::Scope::External);
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Orchard(None, host_orchard, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+
+        let orchard_pool = PoolType::Shielded(ShieldedPool::Orchard);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, orchard_pool),
+            vec![(None, Some(host_uuid))],
+            "the wallet holds the output as a receipt from nobody",
+        );
+
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, orchard_pool),
+            vec![(Some(guest_uuid), Some(host_uuid))],
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(txid, _)| txid != spend_txid.as_ref()),
+        );
+    }
+
+    /// The dispatch reaches the Ironwood pool as well. That pool is only present once NU6.3 has
+    /// activated, which the default test network never does, so the wallet is built on a network
+    /// that activates it alongside Sapling.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn shielding_transfer_is_attributed_in_the_ironwood_pool() {
+        let activation = BlockHeight::from_u32(100_000);
+        let ironwood_active_network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_ufvk = host.usk().to_unified_full_viewing_key();
+        let host_address = external_address(&host_ufvk, 0);
+        let host_orchard = host_ufvk
+            .orchard()
+            .expect("the test account has an Orchard key")
+            .address_at(0u32, zip32::Scope::External);
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Ironwood(None, host_orchard, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+
+        let ironwood = PoolType::Shielded(ShieldedPool::Ironwood);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, ironwood),
+            vec![(None, Some(host_uuid))],
+            "the wallet holds the output as a receipt from nobody",
+        );
+
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, ironwood),
+            vec![(Some(guest_uuid), Some(host_uuid))],
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(txid, _)| txid != spend_txid.as_ref()),
         );
     }
 }

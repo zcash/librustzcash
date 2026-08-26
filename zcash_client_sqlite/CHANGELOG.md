@@ -91,6 +91,14 @@ workspace.
   existing wallet already treats as spending one of its transparent outputs. On
   a wallet upgraded before that record existed, those transactions' outputs are
   no longer reported as receipts from an unknown sender.
+- The funding-account record now covers a transaction's shielded outputs as
+  well as its transparent ones, in every pool, recovered by decrypting the
+  stored transaction under the viewing keys the wallet holds. A transaction
+  shielding transparent funds into another account of the same wallet
+  previously reported its shielded output — the principal one — with a NULL
+  `from_account_uuid` and a NULL `sent_note_id`. An output no held key can
+  decrypt still records nothing, as it does when the transaction is first
+  stored. The repair migration applies this to existing wallets.
 
 ## [0.22.0] - 2026-08-18
 

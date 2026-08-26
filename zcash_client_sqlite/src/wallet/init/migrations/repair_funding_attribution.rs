@@ -1,17 +1,18 @@
 //! Records the funding attribution that a late-linked transparent spend never produced.
 //!
-//! Storing a transaction whose funding account is known records, for each of its transparent
-//! outputs, the account that paid for it and the recipient it paid. A transaction that reached
-//! the wallet before the output it spends was recognized carries no such record: the spend was
-//! held against the outpoint, and the row linking it to the transaction was written only when
-//! the output was discovered, at which point nothing revisited the transaction. Its outputs were
-//! reported forever as receipts from an unknown sender, so a transfer between two accounts of one
-//! wallet appeared as an external payment.
+//! Storing a transaction whose funding account is known records, for each of its outputs, the
+//! account that paid for it and the recipient it paid. A transaction that reached the wallet
+//! before the output it spends was recognized carries no such record: the spend was held against
+//! the outpoint, and the row linking it to the transaction was written only when the output was
+//! discovered, at which point nothing revisited the transaction. Its outputs were reported
+//! forever as receipts from an unknown sender, so a transfer between two accounts of one wallet
+//! appeared as an external payment.
 //!
 //! Every stored transaction the wallet records as spending one of its transparent outputs is
-//! re-attributed here, from the transaction data the wallet holds. An output for which a
-//! recipient is already recorded is left alone, so a wallet whose attribution is complete is
-//! unchanged.
+//! re-attributed here, from the transaction data the wallet holds; what a shielded bundle paid
+//! is recovered by decrypting the stored bytes under the viewing keys the wallet holds. An
+//! output for which a recipient is already recorded is left alone, so a wallet whose attribution
+//! is complete is unchanged.
 
 use std::collections::HashSet;
 
@@ -25,8 +26,8 @@ use crate::wallet::init::WalletMigrationError;
 #[cfg(feature = "transparent-inputs")]
 use crate::wallet::transparent::observations;
 
-/// Records the account that funded each transparent output of a stored transaction whose spend
-/// of a wallet output was linked after that transaction was stored.
+/// Records the account that funded each output of a stored transaction whose spend of a wallet
+/// output was linked after that transaction was stored.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x5b29cad6_5691_4eec_a26a_deca8e77fd27);
 
 /// `transparent_tx_address_observations` links spends to stored transactions across a wallet's
@@ -182,6 +183,139 @@ mod tests {
         repair(&st);
         assert_eq!(
             tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            repaired,
+        );
+    }
+
+    /// The repair completes a partially attributed transaction: the shielding transaction's
+    /// transparent outputs already carry the account that funded them, and its shielded output —
+    /// the principal one — does not.
+    ///
+    /// The fixture is built through the wallet's own writers and then stripped of its shielded
+    /// attribution alone, because the writers do not produce that state; the repair must add
+    /// what is missing without disturbing what is recorded.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn repairs_a_shielded_output_of_a_linked_spend() {
+        use schemerz_rusqlite::RusqliteMigration as _;
+        use zcash_client_backend::data_api::{
+            Account as _, AccountPurpose, WalletWrite,
+            testing::{TestBuilder, TestState},
+        };
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{PoolType, ShieldedPool};
+
+        use crate::{
+            testing::db::TestDbFactory,
+            wallet::{
+                encoding::pool_code,
+                transparent::observations::tests::{
+                    ShieldedPayment, external_address, pool_output_parties, sapling_receiver,
+                    store_shielding_spend_before_its_prevout, tx_output_accounts,
+                    unattributed_shielded_receipts,
+                },
+            },
+        };
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let host_uuid = host.account().id().expose_uuid();
+        let birthday = host.birthday().clone();
+        let host_ufvk = host.usk().to_unified_full_viewing_key();
+        let host_address = external_address(&host_ufvk, 0);
+        let (host_sapling, _) = sapling_receiver(&host_ufvk);
+
+        let (spend_tx, _, guest_ufvk) = store_shielding_spend_before_its_prevout(
+            &mut st,
+            host_address,
+            &ShieldedPayment::Sapling(None, host_sapling, 300_000),
+        );
+        let spend_txid = spend_tx.txid();
+
+        let guest_uuid = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id()
+            .expose_uuid();
+
+        // Strip the shielded attribution alone, leaving the transparent half in place, so that
+        // the transaction is partially attributed.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "DELETE FROM sent_notes
+                 WHERE output_pool != :transparent
+                 AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+                rusqlite::named_params! {
+                    ":transparent": pool_code(PoolType::TRANSPARENT),
+                    ":txid": spend_txid.as_ref(),
+                },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+        let transparent_attribution = vec![
+            (0, Some(guest_uuid), Some(host_uuid)),
+            (1, Some(guest_uuid), Some(guest_uuid)),
+        ];
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            transparent_attribution,
+            "the transparent half of the fixture is already attributed",
+        );
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, sapling),
+            vec![(None, Some(host_uuid))],
+            "the shielded half of the fixture is not",
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(txid, _)| txid == spend_txid.as_ref()),
+        );
+
+        let migration = super::Migration { _params: network };
+        let repair = |st: &TestState<_, crate::testing::db::TestDb, _>| {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            migration.up(&conn).unwrap();
+            conn.commit().unwrap();
+        };
+
+        repair(&st);
+
+        let repaired = vec![(Some(guest_uuid), Some(host_uuid))];
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, sapling),
+            repaired,
+        );
+        assert_eq!(
+            tx_output_accounts(&st.wallet().db().conn, spend_txid),
+            transparent_attribution,
+            "the transparent half is unchanged",
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(txid, _)| txid != spend_txid.as_ref()),
+        );
+
+        // Running the repair again records nothing further.
+        repair(&st);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, spend_txid, sapling),
             repaired,
         );
     }

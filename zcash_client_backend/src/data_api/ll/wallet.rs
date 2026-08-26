@@ -1362,71 +1362,35 @@ where
     Output: ReceivedShieldedOutput<AccountId = <DbT as LowLevelWalletRead>::AccountId>,
 {
     for output in outputs {
-        let sent_output = match output.transfer_type() {
-            TransferType::Outgoing => {
-                let note = output.to_wallet_note();
-
-                let recipient = Recipient::External {
-                    recipient_address: external_address(
-                        wallet_db,
-                        params.expect("present when outgoing is possible (store_decrypted_tx)"),
-                        output.account_id(),
-                        note.receiver(),
-                    )?,
-                    output_pool: PoolType::Shielded(note.pool()),
-                };
-
-                Some((output.account_id(), recipient, note.value()))
-            }
+        // Record the wallet's receipt of the output first. An outgoing output is one the wallet
+        // recovered with its own outgoing viewing key, so it is not received here.
+        match output.transfer_type() {
             TransferType::AccountInternal => {
                 let spent_in = detect_note_spent_in(wallet_db, output)?;
                 put_received_note(wallet_db, output, tx_ref, spent_in)?;
-
-                let note = output.to_wallet_note();
-                let value = note.value();
-
-                let recipient = Recipient::InternalShielded {
-                    receiving_account: output.account_id(),
-                    external_address: None,
-                    note: Box::new(note),
-                };
-
-                Some((output.account_id(), recipient, value))
             }
             TransferType::Incoming => {
                 let spent_in = detect_note_spent_in(wallet_db, output)?;
                 put_received_note(wallet_db, output, tx_ref, spent_in)?;
                 on_external_account(output.account_id());
-
-                if let Some(account_id) = funding_account {
-                    let note = output.to_wallet_note();
-                    let value = note.value();
-
-                    // Even if the recipient address is external, record the send as internal.
-                    let recipient = Recipient::InternalShielded {
-                        receiving_account: output.account_id(),
-                        external_address: Some(external_address(
-                            wallet_db,
-                            params.expect(
-                                "present when funding_account is known (store_decrypted_tx)",
-                            ),
-                            output.account_id(),
-                            note.receiver(),
-                        )?),
-                        note: Box::new(note),
-                    };
-
-                    Some((account_id, recipient, value))
-                } else {
-                    None
-                }
             }
+            TransferType::Outgoing => {}
             TransferType::WalletInternal => unreachable!(
                 "TransferType::WalletInternal is only produced for transparent outputs"
             ),
-        };
+        }
 
-        if let Some((from_account_uuid, recipient, value)) = sent_output {
+        if let Some((from_account_uuid, recipient, value)) =
+            shielded_sent_output_recipient(output, funding_account, |account, receiver| {
+                external_address(
+                    wallet_db,
+                    params
+                        .expect("present whenever an output names an address (store_decrypted_tx)"),
+                    account,
+                    receiver,
+                )
+            })?
+        {
             wallet_db.put_sent_output(
                 from_account_uuid,
                 tx_ref,
@@ -1439,6 +1403,81 @@ where
     }
 
     Ok(())
+}
+
+/// The record a wallet makes for an output one of its accounts sent: the account that funded the
+/// output, the recipient it paid, and its value.
+pub type SentOutput<AccountId> = (AccountId, Recipient<AccountId>, Zatoshis);
+
+/// Returns the account to record as having sent a decrypted shielded output, the recipient to
+/// record against it, and its value; or `None` where the wallet has no send to record.
+///
+/// An output recovered with an outgoing viewing key is a send from the account holding that key
+/// to an external recipient. One decrypted with an account's internal key is a transfer within
+/// that account. One decrypted with an account's external key is a send only when a wallet
+/// account is known to have funded the transaction, and is then recorded as a transfer to the
+/// receiving account, carrying the address it paid even though that address is external.
+///
+/// `external_address` returns the wallet address to report a receiver at. It is called only for
+/// an output that names one: an outgoing output, and an incoming output of a transaction with a
+/// known funding account.
+///
+/// # Panics
+///
+/// Panics if `output` reports [`TransferType::WalletInternal`], which is produced only for
+/// transparent outputs.
+pub fn shielded_sent_output_recipient<Output, E>(
+    output: &Output,
+    funding_account: Option<Output::AccountId>,
+    external_address: impl FnOnce(Output::AccountId, Receiver) -> Result<zcash_address::ZcashAddress, E>,
+) -> Result<Option<SentOutput<Output::AccountId>>, E>
+where
+    Output: ReceivedShieldedOutput,
+    Output::AccountId: Copy,
+{
+    Ok(match output.transfer_type() {
+        TransferType::Outgoing => {
+            let note = output.to_wallet_note();
+
+            let recipient = Recipient::External {
+                recipient_address: external_address(output.account_id(), note.receiver())?,
+                output_pool: PoolType::Shielded(note.pool()),
+            };
+
+            Some((output.account_id(), recipient, note.value()))
+        }
+        TransferType::AccountInternal => {
+            let note = output.to_wallet_note();
+            let value = note.value();
+
+            let recipient = Recipient::InternalShielded {
+                receiving_account: output.account_id(),
+                external_address: None,
+                note: Box::new(note),
+            };
+
+            Some((output.account_id(), recipient, value))
+        }
+        TransferType::Incoming => match funding_account {
+            Some(account_id) => {
+                let note = output.to_wallet_note();
+                let value = note.value();
+
+                // Even if the recipient address is external, record the send as internal.
+                let recipient = Recipient::InternalShielded {
+                    receiving_account: output.account_id(),
+                    external_address: Some(external_address(output.account_id(), note.receiver())?),
+                    note: Box::new(note),
+                };
+
+                Some((account_id, recipient, value))
+            }
+            None => None,
+        },
+        TransferType::WalletInternal => {
+            unreachable!("TransferType::WalletInternal is only produced for transparent outputs")
+        }
+    })
 }
 
 /// Records the wallet's receipt of `output` if its recipient address belongs to a wallet
