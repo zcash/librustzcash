@@ -6,6 +6,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rusqlite::Connection;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -55,7 +56,6 @@ use crate::{
 use {
     crate::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
-    core::ops::Range,
     zcash_client_backend::fees::StandardFeeRule,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };

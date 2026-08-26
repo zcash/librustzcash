@@ -1829,6 +1829,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.prune_scan_queue_below(height, retain_with_priority))
     }
 
+    fn queue_rescan(
+        &mut self,
+        range: Range<BlockHeight>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.queue_rescan(range))
+    }
+
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
@@ -2247,6 +2254,13 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         retain_with_priority: Option<ScanPriority>,
     ) -> Result<u64, <Self as WalletRead>::Error> {
         wallet::scanning::prune_scan_queue_below(self.conn.0, height, retain_with_priority)
+    }
+
+    fn queue_rescan(
+        &mut self,
+        range: Range<BlockHeight>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::scanning::queue_rescan(self.conn.0, range)
     }
 
     #[allow(clippy::type_complexity)]
