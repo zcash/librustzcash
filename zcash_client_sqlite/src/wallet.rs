@@ -183,6 +183,7 @@ use {
     zcash_script::{descriptor::sh, script::Evaluable},
 };
 
+pub(crate) mod attribution;
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;

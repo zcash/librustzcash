@@ -88,9 +88,9 @@ workspace.
   funding account was known at the moment the transaction was stored. Outputs
   that already carry a recorded recipient are left unchanged.
 - A migration writes the funding-account record for every stored transaction an
-  existing wallet already treats as spending one of its transparent outputs. On
-  a wallet upgraded before that record existed, those transactions' outputs are
-  no longer reported as receipts from an unknown sender.
+  existing wallet already treats as spending anything it received, in any pool.
+  On a wallet upgraded before that record existed, those transactions' outputs
+  are no longer reported as receipts from an unknown sender.
 - The funding-account record now covers a transaction's shielded outputs as
   well as its transparent ones, in every pool, recovered by decrypting the
   stored transaction under the viewing keys the wallet holds. A transaction
@@ -99,6 +99,12 @@ workspace.
   `from_account_uuid` and a NULL `sent_note_id`. An output no held key can
   decrypt still records nothing, as it does when the transaction is first
   stored. The repair migration applies this to existing wallets.
+- Linking a spend of a wallet shielded note to a transaction the wallet already
+  stores now writes the funding-account record too. Only transparent spends
+  triggered it before. A transaction funded from a shielded note — Sapling,
+  Orchard or Ironwood — whose nullifier was linked after its data was stored
+  therefore reported a NULL `from_account_uuid` for the payment it made to
+  another account of the same wallet, while its change carried one.
 
 ## [0.22.0] - 2026-08-18
 

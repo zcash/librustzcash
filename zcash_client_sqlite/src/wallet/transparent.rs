@@ -1194,82 +1194,6 @@ pub(crate) fn utxo_query_height(
     }
 }
 
-/// Returns the wallet accounts that contributed inputs to the transaction with the
-/// given internal id, paired with the total value each account contributed. Results
-/// are ordered by total contributed value descending; ties are broken in favor of
-/// the account whose oldest contributed input has the lowest mined height (with
-/// unmined inputs sorting last), then by `accounts.id`.
-///
-/// The inner `UNION ALL` must carry one branch per pool in which the wallet can record a
-/// received output: transparent, Sapling, Orchard, and Ironwood. A missing branch does not
-/// produce an error, it silently under-counts the accounts that funded the transaction, so
-/// a pool added to the schema without a branch here changes which account this reports.
-///
-/// The pools are enumerated here rather than read from the cross-pool `v_received_outputs`
-/// view because that view has to be materialized in full to be joined by output id, which
-/// scans every received-note table. This query is run once per candidate output, so it is
-/// written to be satisfied from the spend tables' `transaction_id` indexes instead.
-fn list_funding_accounts(
-    conn: &rusqlite::Connection,
-    creating_tx_id: i64,
-) -> Result<Vec<(AccountUuid, Zatoshis)>, SqliteClientError> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT a.uuid, contribs.total_value
-         FROM accounts a
-         JOIN (
-             SELECT account_id,
-                    SUM(value) AS total_value,
-                    MIN(IFNULL(mined_height, 0x7FFFFFFF)) AS oldest_mined
-             FROM (
-                 SELECT tro.account_id, tro.value_zat AS value, t.mined_height AS mined_height
-                 FROM transparent_received_outputs tro
-                 JOIN transparent_received_output_spends tros
-                   ON tros.transparent_received_output_id = tro.id
-                 JOIN transactions t ON t.id_tx = tro.transaction_id
-                 WHERE tros.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT srn.account_id, srn.value, t.mined_height
-                 FROM sapling_received_notes srn
-                 JOIN sapling_received_note_spends srns
-                   ON srns.sapling_received_note_id = srn.id
-                 JOIN transactions t ON t.id_tx = srn.transaction_id
-                 WHERE srns.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT orn.account_id, orn.value, t.mined_height
-                 FROM orchard_received_notes orn
-                 JOIN orchard_received_note_spends orns
-                   ON orns.orchard_received_note_id = orn.id
-                 JOIN transactions t ON t.id_tx = orn.transaction_id
-                 WHERE orns.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT irn.account_id, irn.value, t.mined_height
-                 FROM ironwood_received_notes irn
-                 JOIN ironwood_received_note_spends irns
-                   ON irns.ironwood_received_note_id = irn.id
-                 JOIN transactions t ON t.id_tx = irn.transaction_id
-                 WHERE irns.transaction_id = :creating_tx_id
-             )
-             GROUP BY account_id
-         ) contribs ON contribs.account_id = a.id
-         ORDER BY contribs.total_value DESC, contribs.oldest_mined ASC, a.id ASC",
-    )?;
-
-    stmt.query_and_then(
-        named_params![":creating_tx_id": creating_tx_id],
-        |row| -> Result<(AccountUuid, Zatoshis), SqliteClientError> {
-            let account = AccountUuid(row.get(0)?);
-            let raw_value: i64 = row.get(1)?;
-            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-                SqliteClientError::CorruptedData(format!(
-                    "Invalid funding contribution value: {raw_value}"
-                ))
-            })?;
-            Ok((account, value))
-        },
-    )?
-    .collect()
-}
-
 fn to_unspent_transparent_output(
     conn: &rusqlite::Connection,
     row: &Row,
@@ -1292,7 +1216,7 @@ fn to_unspent_transparent_output(
     // `WalletTransparentOutput` records at most a single funding account; when
     // multiple wallet accounts contributed inputs to the creating transaction we
     // pick the largest contributor.
-    let funding_account = list_funding_accounts(conn, creating_tx_id)?
+    let funding_account = crate::wallet::attribution::list_funding_accounts(conn, creating_tx_id)?
         .into_iter()
         .next()
         .map(|(account, _)| account);
@@ -3139,7 +3063,11 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         // before this output was recognized, so nothing could record them then, and nothing
         // revisits a stored transaction on its own.
         #[cfg(feature = "transparent-inputs")]
-        observations::attribute_funded_outputs(conn, params, spending_transaction_id)?;
+        crate::wallet::attribution::attribute_funded_outputs(
+            conn,
+            params,
+            spending_transaction_id,
+        )?;
     }
 
     // The wallet was paid at this address when the transaction was mined, so it was active then.

@@ -411,9 +411,20 @@ pub(super) fn all_migrations<
             _params: params.clone(),
         }),
         Box::new(repair_funding_attribution::Migration {
-            _params: params.clone(),
+            params: params.clone(),
         }),
     ]
+}
+
+/// Constructs the attribution repair migration, for tests that drive it directly.
+#[cfg(test)]
+pub(crate) fn repair_funding_attribution_migration<P>(
+    params: P,
+) -> impl RusqliteMigration<Error = WalletMigrationError>
+where
+    P: consensus::Parameters,
+{
+    repair_funding_attribution::Migration { params }
 }
 
 /// All states of the migration DAG that have been exposed in a public crate release, in

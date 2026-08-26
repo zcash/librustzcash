@@ -1,18 +1,17 @@
-//! Records the funding attribution that a late-linked transparent spend never produced.
+//! Records the funding attribution that a late-linked spend never produced.
 //!
 //! Storing a transaction whose funding account is known records, for each of its outputs, the
 //! account that paid for it and the recipient it paid. A transaction that reached the wallet
-//! before the output it spends was recognized carries no such record: the spend was held against
-//! the outpoint, and the row linking it to the transaction was written only when the output was
-//! discovered, at which point nothing revisited the transaction. Its outputs were reported
-//! forever as receipts from an unknown sender, so a transfer between two accounts of one wallet
-//! appeared as an external payment.
+//! before the output or note it spends was recognized carries no such record: the spend was
+//! linked to the transaction only when what it spent was discovered, at which point nothing
+//! revisited the transaction. Its outputs were reported forever as receipts from an unknown
+//! sender, so a transfer between two accounts of one wallet appeared as an external payment.
 //!
-//! Every stored transaction the wallet records as spending one of its transparent outputs is
-//! re-attributed here, from the transaction data the wallet holds; what a shielded bundle paid
-//! is recovered by decrypting the stored bytes under the viewing keys the wallet holds. An
-//! output for which a recipient is already recorded is left alone, so a wallet whose attribution
-//! is complete is unchanged.
+//! Every stored transaction the wallet records as spending anything it received, in any of the
+//! four pools, is re-attributed here, from the transaction data the wallet holds; what a
+//! shielded bundle paid is recovered by decrypting the stored bytes under the viewing keys the
+//! wallet holds. An output for which a recipient is already recorded is left alone, so a wallet
+//! whose attribution is complete is unchanged.
 
 use std::collections::HashSet;
 
@@ -20,22 +19,25 @@ use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_protocol::consensus;
 
-use super::transparent_tx_address_observations;
-use crate::wallet::init::WalletMigrationError;
-
-#[cfg(feature = "transparent-inputs")]
-use crate::wallet::transparent::observations;
+use super::{ironwood_received_notes, transparent_tx_address_observations};
+use crate::wallet::{attribution, init::WalletMigrationError};
 
 /// Records the account that funded each output of a stored transaction whose spend of a wallet
-/// output was linked after that transaction was stored.
+/// note or output was linked after that transaction was stored, whatever pool the spend is in.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x5b29cad6_5691_4eec_a26a_deca8e77fd27);
 
-/// `transparent_tx_address_observations` links spends to stored transactions across a wallet's
-/// whole history, so the repair must follow it in order to cover everything it links.
-pub(super) const DEPENDENCIES: &[Uuid] = &[transparent_tx_address_observations::MIGRATION_ID];
+/// `transparent_tx_address_observations` links transparent spends to stored transactions across
+/// a wallet's whole history, so the repair must follow it in order to cover everything it links.
+///
+/// `ironwood_received_notes` supplies the last of the four spend tables the pool-complete
+/// selection reads.
+pub(super) const DEPENDENCIES: &[Uuid] = &[
+    transparent_tx_address_observations::MIGRATION_ID,
+    ironwood_received_notes::MIGRATION_ID,
+];
 
 pub(super) struct Migration<P> {
-    pub(super) _params: P,
+    pub(super) params: P,
 }
 
 impl<P> schemerz::Migration<Uuid> for Migration<P> {
@@ -48,16 +50,20 @@ impl<P> schemerz::Migration<Uuid> for Migration<P> {
     }
 
     fn description(&self) -> &'static str {
-        "Attributes the outputs of stored transactions whose transparent spends were linked late."
+        "Attributes the outputs of stored transactions whose spends of any pool were linked late."
     }
 }
 
 impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        observations::repair_funding_attribution(_transaction, &self._params)?;
+    /// The repair carries no `transparent-inputs` gate. Shielded notes are received, spent, and
+    /// linked late whatever a build's transparent support, and the replay reads those spends and
+    /// decrypts under the wallet's viewing keys, neither of which needs the feature. Only the
+    /// part of the replay that reads a transparent bundle sits behind the feature, inside
+    /// [`attribution`].
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
+        attribution::repair_funding_attribution(transaction, &self.params)?;
 
         Ok(())
     }
@@ -155,7 +161,7 @@ mod tests {
                 .any(|(txid, _)| txid == spend_txid.as_ref()),
         );
 
-        let migration = super::Migration { _params: network };
+        let migration = super::Migration { params: network };
         let repair = |st: &TestState<_, crate::testing::db::TestDb, _>| {
             let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
             migration.up(&conn).unwrap();
@@ -287,7 +293,7 @@ mod tests {
                 .any(|(txid, _)| txid == spend_txid.as_ref()),
         );
 
-        let migration = super::Migration { _params: network };
+        let migration = super::Migration { params: network };
         let repair = |st: &TestState<_, crate::testing::db::TestDb, _>| {
             let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
             migration.up(&conn).unwrap();
