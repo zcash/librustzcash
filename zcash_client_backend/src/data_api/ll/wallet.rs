@@ -311,8 +311,9 @@ pub struct PutBlocksRows {
 ///
 /// This governs the shielded nullifier maps and the transparent spend map alike; the
 /// argument above is indifferent to which kind of output identifier is being tracked.
-pub fn put_blocks_rows<DbT, SE, TE>(
+pub fn put_blocks_rows<DbT, P, SE, TE>(
     wallet_db: &mut DbT,
+    params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
@@ -320,6 +321,7 @@ pub fn put_blocks_rows<DbT, SE, TE>(
 where
     DbT: PutBlocksRowsDbT<SE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
+    P: consensus::Parameters,
 {
     if blocks.is_empty() {
         return Ok(PutBlocksRows::default());
@@ -433,9 +435,6 @@ where
                 tx.ironwood_spends().iter().map(|spend| spend.nf()),
             )
             .map_err(PutBlocksError::Storage)?;
-
-            // TODO: Pass in the actual network parameters even though we don't need them.
-            let params: Option<&consensus::Network> = None;
 
             put_shielded_outputs(
                 wallet_db,
@@ -666,8 +665,9 @@ where
 ///   boundary block containing no shielded outputs in any pool would otherwise leave a permanent
 ///   hole in the retained grid, and the anchor there could never be proved against. `None`
 ///   disables anchor retention.
-pub fn put_blocks<DbT, SE, TE>(
+pub fn put_blocks<DbT, P, SE, TE>(
     wallet_db: &mut DbT,
+    params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
@@ -676,9 +676,11 @@ pub fn put_blocks<DbT, SE, TE>(
 where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
+    P: consensus::Parameters,
 {
     let rows = put_blocks_rows(
         wallet_db,
+        params,
         #[cfg(feature = "transparent-inputs")]
         gap_limits,
         from_state,
@@ -1066,7 +1068,7 @@ where
 
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.sapling_outputs(),
@@ -1083,7 +1085,7 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.orchard_outputs(),
@@ -1102,7 +1104,7 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.ironwood_outputs(),
@@ -1337,7 +1339,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn put_shielded_outputs<DbT, P, Output>(
     wallet_db: &mut DbT,
-    params: Option<&P>,
+    params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     funding_account: Option<DbT::AccountId>,
     outputs: &[Output],
@@ -1381,14 +1383,8 @@ where
         }
 
         if let Some((from_account_uuid, recipient, value)) =
-            shielded_sent_output_recipient(output, funding_account, |account, receiver| {
-                external_address(
-                    wallet_db,
-                    params
-                        .expect("present whenever an output names an address (store_decrypted_tx)"),
-                    account,
-                    receiver,
-                )
+            shielded_sent_output_recipient(params, output, funding_account, |account, receiver| {
+                wallet_db.select_receiving_address(account, receiver)
             })?
         {
             wallet_db.put_sent_output(
@@ -1418,20 +1414,26 @@ pub type SentOutput<AccountId> = (AccountId, Recipient<AccountId>, Zatoshis);
 /// account is known to have funded the transaction, and is then recorded as a transfer to the
 /// receiving account, carrying the address it paid even though that address is external.
 ///
-/// `external_address` returns the wallet address to report a receiver at. It is called only for
-/// an output that names one: an outgoing output, and an incoming output of a transaction with a
-/// known funding account.
+/// A recipient outside the wallet is reported at the wallet address containing the paid receiver
+/// where `select_receiving_address` finds one, and at the receiver's own encoding otherwise.
+/// `select_receiving_address` is consulted only for an output that names a recipient address: an
+/// outgoing output, and an incoming output of a transaction with a known funding account.
 ///
 /// # Panics
 ///
 /// Panics if `output` reports [`TransferType::WalletInternal`], which is produced only for
 /// transparent outputs.
-pub fn shielded_sent_output_recipient<Output, E>(
+pub fn shielded_sent_output_recipient<P, Output, E>(
+    params: &P,
     output: &Output,
     funding_account: Option<Output::AccountId>,
-    external_address: impl FnOnce(Output::AccountId, Receiver) -> Result<zcash_address::ZcashAddress, E>,
+    select_receiving_address: impl FnOnce(
+        Output::AccountId,
+        &Receiver,
+    ) -> Result<Option<zcash_address::ZcashAddress>, E>,
 ) -> Result<Option<SentOutput<Output::AccountId>>, E>
 where
+    P: consensus::Parameters,
     Output: ReceivedShieldedOutput,
     Output::AccountId: Copy,
 {
@@ -1439,8 +1441,10 @@ where
         TransferType::Outgoing => {
             let note = output.to_wallet_note();
 
+            let receiver = note.receiver();
             let recipient = Recipient::External {
-                recipient_address: external_address(output.account_id(), note.receiver())?,
+                recipient_address: select_receiving_address(output.account_id(), &receiver)?
+                    .unwrap_or_else(|| receiver.to_zcash_address(params.network_type())),
                 output_pool: PoolType::Shielded(note.pool()),
             };
 
@@ -1464,9 +1468,13 @@ where
                 let value = note.value();
 
                 // Even if the recipient address is external, record the send as internal.
+                let receiver = note.receiver();
                 let recipient = Recipient::InternalShielded {
                     receiving_account: output.account_id(),
-                    external_address: Some(external_address(output.account_id(), note.receiver())?),
+                    external_address: Some(
+                        select_receiving_address(output.account_id(), &receiver)?
+                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type())),
+                    ),
                     note: Box::new(note),
                 };
 
@@ -1647,24 +1655,6 @@ where
     };
 
     Ok(Some((from_account, recipient)))
-}
-
-/// Returns the most likely account address that corresponds to the given [`Receiver`].
-fn external_address<DbT, P>(
-    wallet_db: &DbT,
-    params: &P,
-    account_id: DbT::AccountId,
-    receiver: Receiver,
-) -> Result<zcash_address::ZcashAddress, <DbT as LowLevelWalletRead>::Error>
-where
-    DbT: LowLevelWalletRead,
-    P: consensus::Parameters,
-{
-    let recipient_address = wallet_db
-        .select_receiving_address(account_id, &receiver)?
-        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-    Ok(recipient_address)
 }
 
 /// Creates subtrees from note commitments in parallel.

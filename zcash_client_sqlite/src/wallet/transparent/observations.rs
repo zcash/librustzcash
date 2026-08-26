@@ -771,13 +771,12 @@ where
             continue;
         }
 
-        let Some((from_account, recipient, value)) =
-            shielded_sent_output_recipient(output, Some(funding_account), |account, receiver| {
-                Ok::<_, SqliteClientError>(
-                    select_receiving_address(conn, params, account, &receiver)?
-                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type())),
-                )
-            })?
+        let Some((from_account, recipient, value)) = shielded_sent_output_recipient(
+            params,
+            output,
+            Some(funding_account),
+            |account, receiver| select_receiving_address(conn, params, account, receiver),
+        )?
         else {
             continue;
         };

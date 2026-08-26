@@ -37,6 +37,11 @@ workspace.
 - `zcash_client_backend::data_api::ll::wallet::SentOutput`
 
 ### Changed
+- `zcash_client_backend::data_api::ll::wallet::{put_blocks, put_blocks_rows}`
+  take the network parameters as a new second argument, and gain a
+  corresponding `P: consensus::Parameters` type parameter after `DbT`. Pass the
+  parameters your store was constructed with; a call that names the type
+  parameters explicitly gains one (`put_blocks::<_, _, SE, TE>`).
 - `zcash_client_backend::data_api::ll::wallet::store_decrypted_tx`, built without
   the `transparent-inputs` feature, now resolves the `recipient_address` of the
   `Recipient::External` it passes to

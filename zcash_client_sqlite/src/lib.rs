@@ -2326,8 +2326,9 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             .transpose()?
             .flatten();
 
-        ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
+        ll::wallet::put_blocks::<_, _, SqliteClientError, commitment_tree::Error>(
             self,
+            &self.params.clone(),
             #[cfg(feature = "transparent-inputs")]
             self.gap_limits,
             from_state,
