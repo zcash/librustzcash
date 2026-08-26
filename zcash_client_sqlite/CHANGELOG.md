@@ -15,6 +15,37 @@ workspace.
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- A `standalone_spendability` migration adds the `addresses.standalone_spendable`
+  column, recording whether the application has declared that it holds the
+  secret key material for a standalone transparent import.
+- `WalletDb` now implements `WalletWrite::set_standalone_transparent_spendability`.
+- `SqliteClientError::NotStandaloneKeyImport`, returned by
+  `set_standalone_transparent_spendability` when the address is a derived
+  address or an address imported without key material.
+- `zewif::ZewifImportReport::redeem_scripts_watch_only`: counts registered
+  P2SH redeem scripts marked watch-only because the document did not deliver
+  the spending key of every member pubkey.
+
+### Changed
+- **Existing standalone transparent imports with key material (imported
+  pubkeys and redeem scripts) are marked watch-only by the
+  `standalone_spendability` migration.** The wallet database cannot know
+  whether the application holds the corresponding secret keys, so until the
+  application calls `WalletWrite::set_standalone_transparent_spendability`
+  for each import it can sign for, the value received at those addresses is
+  reported under `Balance::watch_only_value` instead of `spendable_value`
+  (it remains part of `total`), and their outputs are no longer selected as
+  transaction inputs. Address-only imports remain unspendable, and their
+  value is now also reported as watch-only rather than spendable.
+- `WalletWrite::import_standalone_transparent_pubkey`,
+  `import_standalone_transparent_pubkeys` and
+  `import_standalone_transparent_script` take a `StandaloneSpendability`
+  argument; re-importing an already-imported pubkey or script as `Spendable`
+  promotes it, and never downgrades it.
+- `zewif::import_wallet` marks imported transparent pubkeys spendable (their
+  spending keys are decoded and verified against the pubkeys), and marks a
+  multisig redeem script spendable only when the spending key of every member
+  pubkey was imported; any other redeem script is registered watch-only.
 
 ### Fixed
 - Reading back a stored unmined transaction with a zero expiry height (such as

@@ -2078,13 +2078,17 @@ where
                         utxos_spent.push(outpoint.clone());
                         builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
                     }
+                    // The declared spendability is deliberately not consulted here: it only
+                    // governs input selection and balance reporting. If the proposal names an
+                    // input at a standalone address, the keys supplied explicitly in
+                    // `SpendingKeys::standalone_transparent_keys` are what sign for it.
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::StandalonePubkey(pubkey) => {
+                    TransparentAddressSource::StandalonePubkey { pubkey, .. } => {
                         utxos_spent.push(outpoint.clone());
                         builder.add_transparent_p2pkh_input(*pubkey, outpoint, txout)?;
                     }
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::StandaloneScript(redeem_script) => {
+                    TransparentAddressSource::StandaloneScript { redeem_script, .. } => {
                         let from_chain =
                             zs_script::FromChain::parse(&zs_script::Code(redeem_script.to_bytes()))
                                 .map_err(|_| ::transparent::builder::Error::UnsupportedScript)?;
@@ -2619,9 +2623,11 @@ where
                         .expect("spending key derivation should not fail"),
                 );
             }
+            // Keys explicitly supplied for a standalone address sign for it regardless of the
+            // spendability the application declared at import time.
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandalonePubkey(_)
-            | TransparentAddressSource::StandaloneScript(_) => {
+            TransparentAddressSource::StandalonePubkey { .. }
+            | TransparentAddressSource::StandaloneScript { .. } => {
                 let keys = spending_keys
                     .standalone_transparent_keys
                     .get(&_address)
@@ -3216,8 +3222,8 @@ where
                                 address_index,
                             } => Some((index, *scope, *address_index)),
                             #[cfg(feature = "transparent-key-import")]
-                            TransparentAddressSource::StandalonePubkey(_)
-                            | TransparentAddressSource::StandaloneScript(_)
+                            TransparentAddressSource::StandalonePubkey { .. }
+                            | TransparentAddressSource::StandaloneScript { .. }
                             | TransparentAddressSource::StandaloneAddress => None,
                         }
                     })

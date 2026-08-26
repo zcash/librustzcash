@@ -144,12 +144,40 @@ pub mod zip318;
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing;
 
+/// Whether the application can produce signatures for a standalone (imported) transparent
+/// address.
+///
+/// The wallet stores at most the public key or redeem script for such an address; only the
+/// application knows whether it holds the corresponding secret key(s), so it must declare this
+/// at import time and may revise it later via
+/// [`WalletWrite::set_standalone_transparent_spendability`].
+///
+/// For a multisig redeem script, whether the application considers the address spendable when
+/// it holds only some of the member keys (all `n` versus at least the `required` threshold) is
+/// the application's own policy; the wallet does not inspect the script to decide.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandaloneSpendability {
+    /// The application cannot sign for the address. Its outputs are excluded from spendable
+    /// input selection, and their value is reported under [`Balance::watch_only_value`].
+    WatchOnly,
+    /// The application can sign for the address. Its outputs are offered as spendable inputs
+    /// (subject to the wallet's confirmation policy), and their value is reported under
+    /// [`Balance::spendable_value`] or [`Balance::value_pending_spendability`].
+    Spendable,
+}
+
 /// The origin of a transparent address within a wallet.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransparentKeyOrigin {
     /// The address was imported standalone (no HD derivation scope).
-    Imported,
+    Imported {
+        /// Whether the application has declared that it can sign for the address. An
+        /// address-only import (no pubkey or redeem script) is always
+        /// [`StandaloneSpendability::WatchOnly`].
+        spendability: StandaloneSpendability,
+    },
     /// The address was derived from the account's HD key tree.
     Derived { scope: TransparentKeyScope },
 }
@@ -217,12 +245,29 @@ pub enum MaxSpendMode {
     Everything,
 }
 /// Balance information for a value within a single pool in an account.
+///
+/// The value of a pool is partitioned into buckets. [`spendable_value`], [`locked_value`],
+/// [`change_pending_confirmation`], [`value_pending_spendability`] and [`watch_only_value`]
+/// are disjoint and sum to [`total`]; [`uneconomic_value`] is tracked separately and does not
+/// participate in the total. Of these, only [`spendable_value`] may be spent right now:
+/// [`watch_only_value`] in particular is value received by transparent addresses that the
+/// wallet watches but cannot sign for, and it never becomes spendable without the application
+/// declaring otherwise (see [`StandaloneSpendability`]).
+///
+/// [`spendable_value`]: Balance::spendable_value
+/// [`locked_value`]: Balance::locked_value
+/// [`change_pending_confirmation`]: Balance::change_pending_confirmation
+/// [`value_pending_spendability`]: Balance::value_pending_spendability
+/// [`watch_only_value`]: Balance::watch_only_value
+/// [`uneconomic_value`]: Balance::uneconomic_value
+/// [`total`]: Balance::total
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     spendable_value: Zatoshis,
     locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    watch_only_value: Zatoshis,
     uneconomic_value: Zatoshis,
 }
 
@@ -233,6 +278,7 @@ impl Balance {
         locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        watch_only_value: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
     };
 
@@ -241,6 +287,7 @@ impl Balance {
             + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
+            + self.watch_only_value
             + value)
             .ok_or(BalanceError::Overflow)
     }
@@ -301,6 +348,29 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value in the account received by transparent addresses that the wallet
+    /// watches but cannot sign for: addresses imported without key material via
+    /// `WalletWrite::import_standalone_transparent_address`, and pubkey or redeem script imports
+    /// that the application has declared [`StandaloneSpendability::WatchOnly`].
+    ///
+    /// This value is included in [`total`] but never in [`spendable_value`] or
+    /// [`value_pending_spendability`]; the outputs that comprise it are excluded from spendable
+    /// input selection.
+    ///
+    /// [`total`]: Balance::total
+    /// [`spendable_value`]: Balance::spendable_value
+    /// [`value_pending_spendability`]: Balance::value_pending_spendability
+    pub fn watch_only_value(&self) -> Zatoshis {
+        self.watch_only_value
+    }
+
+    /// Adds the specified value to the watch-only total, checking for overflow.
+    pub fn add_watch_only_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.watch_only_value = (self.watch_only_value + value).unwrap();
+        Ok(())
+    }
+
     /// Returns the value in the account of notes that have value less than or equal to the marginal
     /// fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
@@ -313,12 +383,17 @@ impl Balance {
         Ok(())
     }
 
-    /// Returns the total value of funds represented by this [`Balance`].
+    /// Returns the total value of funds represented by this [`Balance`], including
+    /// [`watch_only_value`] that the wallet cannot spend but excluding [`uneconomic_value`].
+    ///
+    /// [`watch_only_value`]: Balance::watch_only_value
+    /// [`uneconomic_value`]: Balance::uneconomic_value
     pub fn total(&self) -> Zatoshis {
         (self.spendable_value
             + self.locked_value
             + self.change_pending_confirmation
-            + self.value_pending_spendability)
+            + self.value_pending_spendability
+            + self.watch_only_value)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -336,6 +411,8 @@ impl core::ops::Add<Balance> for Balance {
                 .ok_or(BalanceError::Overflow)?,
             value_pending_spendability: (self.value_pending_spendability
                 + rhs.value_pending_spendability)
+                .ok_or(BalanceError::Overflow)?,
+            watch_only_value: (self.watch_only_value + rhs.watch_only_value)
                 .ok_or(BalanceError::Overflow)?,
             uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
                 .ok_or(BalanceError::Overflow)?,
@@ -446,15 +523,18 @@ impl AccountBalance {
     /// [`value_pending_spendability`] field contains transparent funds that are not yet
     /// spendable: funds that do not yet have the number of confirmations required by the
     /// wallet's confirmation policy, and coinbase funds that have not yet reached maturity. The
-    /// [`change_pending_confirmation`] field is currently always zero, because this crate does
-    /// not yet distinguish transparent change from other transparent value awaiting
-    /// confirmation.
+    /// [`watch_only_value`] field contains transparent funds received by addresses that the
+    /// wallet watches but cannot sign for (see [`StandaloneSpendability`]); these are never
+    /// spendable regardless of confirmations. The [`change_pending_confirmation`] field is
+    /// currently always zero, because this crate does not yet distinguish transparent change
+    /// from other transparent value awaiting confirmation.
     ///
     /// [`unshielded_regular_balance`]: AccountBalance::unshielded_regular_balance
     /// [`unshielded_coinbase_balance`]: AccountBalance::unshielded_coinbase_balance
     /// [`spendable_value`]: Balance::spendable_value
     /// [`change_pending_confirmation`]: Balance::change_pending_confirmation
     /// [`value_pending_spendability`]: Balance::value_pending_spendability
+    /// [`watch_only_value`]: Balance::watch_only_value
     pub fn unshielded_balance(&self) -> Balance {
         (self.unshielded_regular_balance + self.unshielded_coinbase_balance)
             .expect("Account balance cannot overflow MAX_MONEY")
@@ -3482,11 +3562,13 @@ impl AccountBirthday {
 /// transparent rules for the purpose of balance, transaction listing, and so forth. However,
 /// transparent keys imported via `WalletWrite::import_standalone_transparent_pubkey` or
 /// `WalletWrite::import_standalone_transparent_script` (available with the
-/// `transparent-key-import` feature) break this abstraction slightly, so wallets using this API
-/// need to be cautious to enforce the invariant that the wallet either maintains access to the
-/// keys required to spend **ALL** outputs received by the account, or that it **DOES NOT** offer
-/// any spending capability for the account, i.e. the account is treated as view-only for all
-/// user-facing operations.
+/// `transparent-key-import` feature) break this abstraction slightly. The wallet cannot verify
+/// whether the application holds the secret keys for such imports, so the application must
+/// declare this per import via [`StandaloneSpendability`]; outputs of imports declared
+/// `WatchOnly` are excluded from spendable input selection and reported under
+/// [`Balance::watch_only_value`]. Wallets using this API need to be cautious to keep that
+/// declaration accurate, i.e. to declare an import `Spendable` only when they maintain access
+/// to the keys required to spend its outputs.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3691,15 +3773,27 @@ pub trait WalletWrite:
     ///
     /// The imported address will contribute to the balance of the account, but the wallet holds
     /// neither the public key (P2PKH) nor the redeem script (P2SH) from which the address was
-    /// derived, so funds received by it cannot be spent — its outputs are excluded from spendable
-    /// input selection, and it must not be included in the addresses passed to
-    /// [`propose_shielding`]. Subsequently importing the corresponding key material with
+    /// derived, so funds received by it cannot be spent: the address is always
+    /// [`StandaloneSpendability::WatchOnly`], its outputs are excluded from the selection
+    /// queries ([`get_spendable_transparent_outputs`],
+    /// [`get_spendable_transparent_outputs_for_addresses`],
+    /// [`select_spendable_transparent_outputs`], and [`get_unspent_transparent_output`]), their
+    /// value is reported under [`Balance::watch_only_value`], and the address must not be
+    /// included in the addresses passed to [`propose_shielding`].
+    /// [`set_standalone_transparent_spendability`] rejects such an address.
+    ///
+    /// Subsequently importing the corresponding key material with
     /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
-    /// upgrades the address in place, after which the spending limitations of those methods
-    /// apply instead.
+    /// upgrades the address in place, after which the spendability declared in that call
+    /// applies instead.
     ///
     /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
     /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
+    /// [`set_standalone_transparent_spendability`]: Self::set_standalone_transparent_spendability
+    /// [`get_spendable_transparent_outputs`]: InputSource::get_spendable_transparent_outputs
+    /// [`get_spendable_transparent_outputs_for_addresses`]: InputSource::get_spendable_transparent_outputs_for_addresses
+    /// [`select_spendable_transparent_outputs`]: InputSource::select_spendable_transparent_outputs
+    /// [`get_unspent_transparent_output`]: InputSource::get_unspent_transparent_output
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_address(
@@ -3716,18 +3810,44 @@ pub trait WalletWrite:
     /// associated transparent p2pkh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). The wallet holds only the public key, so it cannot know whether the
+    /// application can sign for the address; the application declares this via
+    /// `spendability`, and may revise it later with
+    /// [`set_standalone_transparent_spendability`]:
+    ///
+    /// - [`StandaloneSpendability::Spendable`]: the address's outputs are offered by the
+    ///   selection queries ([`get_spendable_transparent_outputs`],
+    ///   [`get_spendable_transparent_outputs_for_addresses`],
+    ///   [`select_spendable_transparent_outputs`], and [`get_unspent_transparent_output`])
+    ///   subject to the wallet's confirmation policy, and their value is reported under
+    ///   [`Balance::spendable_value`] or [`Balance::value_pending_spendability`]. Spending
+    ///   them requires the associated secret key to be provided explicitly in the
+    ///   `standalone_transparent_keys` of the [`SpendingKeys`] passed to
+    ///   [`create_proposed_transactions`]; by extension, calls to [`propose_shielding`] must
+    ///   only include addresses for which the spending application holds or can obtain the
+    ///   secret keys.
+    /// - [`StandaloneSpendability::WatchOnly`]: the address's outputs are excluded from the
+    ///   selection queries, and their value is reported under [`Balance::watch_only_value`].
+    ///
+    /// Importing a pubkey whose address is already recorded as a standalone import of this
+    /// account is idempotent with respect to the key material, and may promote the address
+    /// from `WatchOnly` to `Spendable` if `spendability` is `Spendable`; it never downgrades a
+    /// `Spendable` address. Use [`set_standalone_transparent_spendability`] to downgrade.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    /// [`SpendingKeys`]: crate::data_api::wallet::SpendingKeys
+    /// [`set_standalone_transparent_spendability`]: Self::set_standalone_transparent_spendability
+    /// [`get_spendable_transparent_outputs`]: InputSource::get_spendable_transparent_outputs
+    /// [`get_spendable_transparent_outputs_for_addresses`]: InputSource::get_spendable_transparent_outputs_for_addresses
+    /// [`select_spendable_transparent_outputs`]: InputSource::select_spendable_transparent_outputs
+    /// [`get_unspent_transparent_output`]: InputSource::get_unspent_transparent_output
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
         _account: <Self as WalletRead>::AccountId,
         _pubkey: secp256k1::PublicKey,
+        _spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
         unimplemented!(
             "WalletWrite::import_standalone_transparent_pubkey must be overridden for wallets to use the `transparent-key-import` feature"
@@ -3736,12 +3856,14 @@ pub trait WalletWrite:
 
     /// Imports a batch of standalone transparent pubkeys into the account, adding the associated
     /// transparent p2pkh addresses. See [`import_standalone_transparent_pubkey`] for the semantics
-    /// and spending limitations that apply to each imported pubkey.
+    /// and spending limitations that apply to each imported pubkey; the single `spendability`
+    /// declaration applies to every pubkey in the batch.
     ///
     /// This is equivalent to calling [`import_standalone_transparent_pubkey`] once per pubkey, but
     /// implementations may validate the target account a single time for the whole batch. The
     /// default implementation calls [`import_standalone_transparent_pubkey`] for each pubkey; a
-    /// pubkey whose receiver address is already known to the wallet is skipped.
+    /// pubkey whose receiver address is already known to the wallet is skipped, apart from the
+    /// `WatchOnly` to `Spendable` promotion described there.
     ///
     /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
     #[cfg(feature = "transparent-key-import")]
@@ -3749,9 +3871,10 @@ pub trait WalletWrite:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
         for pubkey in pubkeys {
-            self.import_standalone_transparent_pubkey(account, *pubkey)?;
+            self.import_standalone_transparent_pubkey(account, *pubkey, spendability)?;
         }
         Ok(())
     }
@@ -3760,13 +3883,40 @@ pub trait WalletWrite:
     /// adds the associated transparent p2sh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). The wallet holds only the redeem script, so it cannot know whether the
+    /// application holds enough of the script's member keys to sign for the address; the
+    /// application declares this via `spendability`, and may revise it later with
+    /// [`set_standalone_transparent_spendability`]. Whether a multisig address counts as
+    /// spendable when only some member keys are held (all `n` versus at least the `required`
+    /// threshold) is the application's own policy.
+    ///
+    /// - [`StandaloneSpendability::Spendable`]: the address's outputs are offered by the
+    ///   selection queries ([`get_spendable_transparent_outputs`],
+    ///   [`get_spendable_transparent_outputs_for_addresses`],
+    ///   [`select_spendable_transparent_outputs`], and [`get_unspent_transparent_output`])
+    ///   subject to the wallet's confirmation policy, and their value is reported under
+    ///   [`Balance::spendable_value`] or [`Balance::value_pending_spendability`]. Spending
+    ///   them requires the member secret keys to be provided explicitly in the
+    ///   `standalone_transparent_keys` of the [`SpendingKeys`] passed to
+    ///   [`create_proposed_transactions`]; by extension, calls to [`propose_shielding`] must
+    ///   only include addresses for which the spending application holds or can obtain the
+    ///   secret keys.
+    /// - [`StandaloneSpendability::WatchOnly`]: the address's outputs are excluded from the
+    ///   selection queries, and their value is reported under [`Balance::watch_only_value`].
+    ///
+    /// Importing a script whose address is already recorded as a standalone import of this
+    /// account is idempotent with respect to the key material, and may promote the address
+    /// from `WatchOnly` to `Spendable` if `spendability` is `Spendable`; it never downgrades a
+    /// `Spendable` address. Use [`set_standalone_transparent_spendability`] to downgrade.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    /// [`SpendingKeys`]: crate::data_api::wallet::SpendingKeys
+    /// [`set_standalone_transparent_spendability`]: Self::set_standalone_transparent_spendability
+    /// [`get_spendable_transparent_outputs`]: InputSource::get_spendable_transparent_outputs
+    /// [`get_spendable_transparent_outputs_for_addresses`]: InputSource::get_spendable_transparent_outputs_for_addresses
+    /// [`select_spendable_transparent_outputs`]: InputSource::select_spendable_transparent_outputs
+    /// [`get_unspent_transparent_output`]: InputSource::get_unspent_transparent_output
     ///
     /// # Spending limitations
     ///
@@ -3777,9 +3927,37 @@ pub trait WalletWrite:
         &mut self,
         _account: <Self as WalletRead>::AccountId,
         _script: zcash_script::script::Redeem,
+        _spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
         unimplemented!(
             "WalletWrite::import_standalone_transparent_script must be overridden for wallets to use the `transparent-key-import` feature"
+        )
+    }
+
+    /// Sets the application's declaration of whether it can sign for the given standalone
+    /// transparent address of `account`.
+    ///
+    /// The address must be a standalone import that has key material, i.e. one recorded via
+    /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
+    /// (possibly upgraded from an address-only import). An implementation must return an error
+    /// if the address is unknown to the wallet, belongs to a different account, is derived from
+    /// the account's HD key tree (such addresses are always spendable), or is an address-only
+    /// import (always watch-only until key material is imported).
+    ///
+    /// Unlike the import methods, this may move the address in either direction: it is the only
+    /// way to downgrade a `Spendable` address to `WatchOnly`.
+    ///
+    /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
+    /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
+    #[cfg(feature = "transparent-key-import")]
+    fn set_standalone_transparent_spendability(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _address: &TransparentAddress,
+        _spendability: StandaloneSpendability,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        unimplemented!(
+            "WalletWrite::set_standalone_transparent_spendability must be overridden for wallets to use the `transparent-key-import` feature"
         )
     }
 
@@ -4484,10 +4662,10 @@ pub trait WalletCommitmentTrees {
 
 /// Property tests for the [`Balance`] bucket arithmetic.
 ///
-/// These pin the accounting semantics the locked-value bucket joined: every bucket except
-/// `uneconomic_value` participates in [`Balance::total`] and in the shared overflow guard,
-/// while `uneconomic_value` is guarded only against its own overflow and never contributes
-/// to the total.
+/// These pin the accounting semantics the locked-value and watch-only buckets joined: every
+/// bucket except `uneconomic_value` participates in [`Balance::total`] and in the shared
+/// overflow guard, while `uneconomic_value` is guarded only against its own overflow and never
+/// contributes to the total.
 #[cfg(test)]
 mod balance_tests {
     use proptest::prelude::*;
@@ -4501,19 +4679,27 @@ mod balance_tests {
         Locked = 1,
         PendingChange = 2,
         PendingSpendable = 3,
-        Uneconomic = 4,
+        WatchOnly = 4,
+        Uneconomic = 5,
     }
     use Bucket::*;
 
-    const ALL_BUCKETS: [Bucket; 5] = [
+    const ALL_BUCKETS: [Bucket; 6] = [
         Spendable,
         Locked,
         PendingChange,
         PendingSpendable,
+        WatchOnly,
         Uneconomic,
     ];
     /// The buckets that participate in `Balance::total` and its overflow guard.
-    const TOTAL_BUCKETS: [Bucket; 4] = [Spendable, Locked, PendingChange, PendingSpendable];
+    const TOTAL_BUCKETS: [Bucket; 5] = [
+        Spendable,
+        Locked,
+        PendingChange,
+        PendingSpendable,
+        WatchOnly,
+    ];
 
     fn apply(balance: &mut Balance, bucket: Bucket, value: Zatoshis) -> Result<(), BalanceError> {
         match bucket {
@@ -4521,6 +4707,7 @@ mod balance_tests {
             Locked => balance.add_locked_value(value),
             PendingChange => balance.add_pending_change_value(value),
             PendingSpendable => balance.add_pending_spendable_value(value),
+            WatchOnly => balance.add_watch_only_value(value),
             Uneconomic => balance.add_uneconomic_value(value),
         }
     }
@@ -4531,6 +4718,7 @@ mod balance_tests {
             Locked => balance.locked_value(),
             PendingChange => balance.change_pending_confirmation(),
             PendingSpendable => balance.value_pending_spendability(),
+            WatchOnly => balance.watch_only_value(),
             Uneconomic => balance.uneconomic_value(),
         }
     }
@@ -4541,6 +4729,7 @@ mod balance_tests {
             Just(Locked),
             Just(PendingChange),
             Just(PendingSpendable),
+            Just(WatchOnly),
             Just(Uneconomic),
         ]
     }
@@ -4560,13 +4749,13 @@ mod balance_tests {
     proptest! {
         /// Bucket adds succeed exactly while their overflow guard permits, mutate only the
         /// requested bucket, and leave the balance untouched on failure. `total()` is always
-        /// the sum of the four participating buckets. (In particular this establishes that
+        /// the sum of the five participating buckets. (In particular this establishes that
         /// the `unwrap` inside each guarded add is unreachable.)
         #[test]
         fn add_total_consistency(adds in proptest::collection::vec(arb_add(), 0..12)) {
             let mut balance = Balance::ZERO;
             // The model: per-bucket totals, indexed by bucket discriminant.
-            let mut model = [0u64; 5];
+            let mut model = [0u64; 6];
 
             for (bucket, v) in adds {
                 let value = Zatoshis::from_u64(v).unwrap();

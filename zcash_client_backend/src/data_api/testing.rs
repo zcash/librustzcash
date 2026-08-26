@@ -62,8 +62,6 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
-#[cfg(feature = "transparent-key-import")]
-use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
 #[cfg(feature = "orchard")]
@@ -79,6 +77,8 @@ use {
     pasta_curves::pallas,
     zcash_note_encryption::ShieldedOutput,
 };
+#[cfg(feature = "transparent-key-import")]
+use {super::StandaloneSpendability, zcash_script::script};
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
@@ -3516,6 +3516,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: <Self as WalletRead>::AccountId,
         _address: secp256k1::PublicKey,
+        _spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
         todo!()
     }
@@ -3525,6 +3526,17 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: <Self as WalletRead>::AccountId,
         _script: script::Redeem,
+        _spendability: StandaloneSpendability,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn set_standalone_transparent_spendability(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _address: &TransparentAddress,
+        _spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
         todo!()
     }

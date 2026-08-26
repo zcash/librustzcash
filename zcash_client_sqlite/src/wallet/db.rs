@@ -184,12 +184,20 @@ pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
 /// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
 ///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
 ///   address derived from this script. This is only set for imported addresses (key_scope = -1).
+/// - `standalone_spendable`: `1` if the application has declared that it holds the secret key
+///   material needed to spend outputs received at an imported standalone address, `0` (watch-only)
+///   otherwise. This is only meaningful for, and may only be `1` on, imported rows
+///   (key_scope = -1) that carry key material in one of the two preceding columns. The
+///   `standalone_spendability` migration set this to `0` on all pre-existing rows, because the
+///   wallet database cannot know which secret keys the application holds.
 ///
 /// At most one of `imported_transparent_receiver_pubkey` and
 /// `imported_transparent_receiver_script` may be set. An imported row (key_scope = -1) with
 /// neither set is a standalone transparent address imported without key material: the wallet
-/// watches for outputs received by `cached_transparent_receiver_address`, but cannot spend
-/// them unless the corresponding pubkey or redeem script is subsequently imported.
+/// watches for outputs received by `cached_transparent_receiver_address`, but can never spend
+/// them. Importing the corresponding pubkey or redeem script does not by itself make such
+/// outputs spendable: the wallet only selects them as inputs, and only counts their value as
+/// spendable, once `standalone_spendable` is `1`.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -207,6 +215,7 @@ CREATE TABLE "addresses" (
     transparent_receiver_next_check_time INTEGER,
     imported_transparent_receiver_pubkey BLOB,
     imported_transparent_receiver_script BLOB,
+    standalone_spendable INTEGER NOT NULL DEFAULT 0,
     UNIQUE (account_id, key_scope, diversifier_index_be),
     UNIQUE (imported_transparent_receiver_pubkey),
     UNIQUE (imported_transparent_receiver_script),
@@ -241,6 +250,15 @@ CREATE TABLE "addresses" (
     ),
     CONSTRAINT ck_addr_foreign_or_diversified CHECK (
         (diversifier_index_be IS NULL) == (key_scope = -1)
+    ),
+    -- the spendable marker may only be set on imported rows that carry key material
+    CONSTRAINT ck_addr_standalone_spendable CHECK (
+        standalone_spendable = 0 OR (
+            key_scope = -1 AND (
+                imported_transparent_receiver_pubkey IS NOT NULL
+                OR imported_transparent_receiver_script IS NOT NULL
+            )
+        )
     )
 )"#;
 pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"

@@ -32,7 +32,7 @@ use zip321::{Payment, TransactionRequest};
 use {
     crate::{
         data_api::{
-            AccountBirthday,
+            AccountBirthday, StandaloneSpendability, TransparentKeyOrigin,
             wallet::{self, SpendingKeys},
         },
         wallet::TransparentAddressSource,
@@ -1398,16 +1398,25 @@ where
         .put_received_transparent_utxo(&utxo)
         .unwrap();
 
-    // Verify the balance is reflected via get_transparent_balances.
+    // Verify the balance is reflected via get_transparent_balances, as watch-only value: the
+    // wallet holds no key material with which a spend could be constructed.
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
         .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
         .unwrap();
-    assert_eq!(balances.get(&taddr).map(|(_, b)| b.total()), Some(value),);
+    let (origin, balance) = balances.get(&taddr).expect("address should be present");
+    assert_eq!(
+        origin,
+        &TransparentKeyOrigin::Imported {
+            spendability: StandaloneSpendability::WatchOnly
+        }
+    );
+    assert_eq!(balance.watch_only_value(), value);
+    assert_eq!(balance.spendable_value(), Zatoshis::ZERO);
+    assert_eq!(balance.total(), value);
 
-    // The output must not be offered for spending: the wallet holds no key material with
-    // which a spend could be constructed.
+    // The output must not be offered for spending.
     let utxos = st
         .wallet()
         .get_spendable_transparent_outputs(
@@ -1460,10 +1469,14 @@ where
 
     // Import the key material for each address.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::Spendable)
         .unwrap();
     st.wallet_mut()
-        .import_standalone_transparent_script(account_id, redeem_script)
+        .import_standalone_transparent_script(
+            account_id,
+            redeem_script,
+            StandaloneSpendability::Spendable,
+        )
         .unwrap();
 
     // The addresses were upgraded in place: no new receivers, and each address's source
@@ -1479,7 +1492,7 @@ where
         .expect("address should be present");
     assert!(matches!(
         p2pkh_metadata.source(),
-        TransparentAddressSource::StandalonePubkey(_)
+        TransparentAddressSource::StandalonePubkey { .. }
     ));
 
     let p2sh_metadata = receivers_after
@@ -1487,7 +1500,7 @@ where
         .expect("address should be present");
     assert!(matches!(
         p2sh_metadata.source(),
-        TransparentAddressSource::StandaloneScript(_)
+        TransparentAddressSource::StandaloneScript { .. }
     ));
 }
 
@@ -1508,8 +1521,11 @@ where
     let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
     let pubkey = secret_key.public_key(&secp);
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 }
@@ -1533,8 +1549,11 @@ where
 
     // First import
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1546,8 +1565,11 @@ where
 
     // Second import to same account should also succeed (idempotent)
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1565,7 +1587,7 @@ where
         .expect("address should be present");
     assert!(matches!(
         metadata.source(),
-        TransparentAddressSource::StandalonePubkey(_)
+        TransparentAddressSource::StandalonePubkey { .. }
     ));
 }
 
@@ -1588,8 +1610,11 @@ where
 
     // Import to first account
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account1_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account1_id,
+            pubkey,
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1612,8 +1637,11 @@ where
 
     // Import same pubkey to second account should fail
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account2_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account2_id,
+            pubkey,
+            StandaloneSpendability::Spendable
+        ),
         Err(_)
     );
 }
@@ -1639,7 +1667,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::Spendable)
         .unwrap();
 
     // Derive the P2PKH address.
@@ -1713,7 +1741,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::Spendable)
         .unwrap();
 
     // Derive the P2PKH address.
@@ -1826,8 +1854,11 @@ where
 
     // Import should succeed
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        st.wallet_mut().import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1847,7 +1878,7 @@ where
         .expect("address should be present");
     assert!(matches!(
         metadata.source(),
-        TransparentAddressSource::StandaloneScript(_)
+        TransparentAddressSource::StandaloneScript { .. }
     ));
 }
 
@@ -1867,8 +1898,11 @@ where
 
     // First import
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        st.wallet_mut().import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1880,8 +1914,11 @@ where
 
     // Second import to same account should also succeed (idempotent)
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        st.wallet_mut().import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1901,7 +1938,7 @@ where
         .expect("address should be present");
     assert!(matches!(
         metadata.source(),
-        TransparentAddressSource::StandaloneScript(_)
+        TransparentAddressSource::StandaloneScript { .. }
     ));
 }
 
@@ -1921,8 +1958,11 @@ where
 
     // Import to first account
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_script(account1_id, redeem_script.clone()),
+        st.wallet_mut().import_standalone_transparent_script(
+            account1_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable
+        ),
         Ok(_)
     );
 
@@ -1945,8 +1985,11 @@ where
 
     // Import same redeem script to second account should fail
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_script(account2_id, redeem_script),
+        st.wallet_mut().import_standalone_transparent_script(
+            account2_id,
+            redeem_script,
+            StandaloneSpendability::Spendable
+        ),
         Err(_)
     );
 }
@@ -1970,7 +2013,11 @@ where
 
     // Import the P2SH address.
     st.wallet_mut()
-        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable,
+        )
         .unwrap();
 
     // Derive the expected transparent address from the redeem script.
@@ -2042,7 +2089,11 @@ where
 
     // Import the P2SH address.
     st.wallet_mut()
-        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::Spendable,
+        )
         .unwrap();
 
     // Derive the P2SH address.
@@ -2136,6 +2187,552 @@ where
             .sapling_balance()
             .change_pending_confirmation(),
         (value - fee).unwrap(),
+    );
+}
+
+/// Records a fake unspent output of `value` at `taddr` for `account_id`, mined at `height`,
+/// and returns its outpoint.
+#[cfg(feature = "transparent-key-import")]
+fn put_fake_utxo<DSF, Cache>(
+    st: &mut TestState<Cache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    account_id: <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId,
+    taddr: &TransparentAddress,
+    value: Zatoshis,
+    height: BlockHeight,
+) -> OutPoint
+where
+    DSF: DataStoreFactory,
+{
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        txout,
+        Some(height),
+        Some(account_id),
+        None,
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+    outpoint
+}
+
+/// Scans a block at `height` paying `value` to the account's last generated HD-derived
+/// transparent address and persists it, so that the wallet has scan progress (which
+/// `get_wallet_summary` requires) and a known spendable derived balance.
+#[cfg(feature = "transparent-key-import")]
+fn scan_derived_payment_block<DSF, Cache>(
+    st: &mut TestState<Cache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    account_id: <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId,
+    height: BlockHeight,
+    value: Zatoshis,
+) where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    /// The payment is not time-locked.
+    const NO_LOCK_TIME: u32 = 0;
+
+    let derived_addr = wallet_taddr(st.wallet(), account_id);
+    let network = *st.network();
+    let (scanned, _) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        height,
+        NO_LOCK_TIME,
+        value,
+        &derived_addr,
+    );
+    st.wallet_mut()
+        .put_blocks(
+            &ChainState::empty(height - 1, BlockHash([0; 32])),
+            vec![scanned],
+        )
+        .unwrap();
+}
+
+/// A standalone address under test, holding a single confirmed output of `value` at
+/// `outpoint`, in an account that also holds `derived_value` spendably at its HD-derived
+/// addresses.
+#[cfg(feature = "transparent-key-import")]
+struct StandaloneFixture<AccountId> {
+    account_id: AccountId,
+    taddr: TransparentAddress,
+    outpoint: OutPoint,
+    value: Zatoshis,
+    derived_value: Zatoshis,
+    target_height: TargetHeight,
+}
+
+/// Asserts that the standalone address of `fixture` is reported and offered for selection
+/// according to `spendability`:
+///
+/// - `get_transparent_balances` reports the value under `watch_only_value` (`WatchOnly`) or
+///   `spendable_value` (`Spendable`), with the matching `TransparentKeyOrigin`;
+/// - the unshielded balance of `get_wallet_summary` does the same, on top of the
+///   `derived_value` the account holds spendably at its HD-derived addresses;
+/// - `get_spendable_transparent_outputs` and `select_spendable_transparent_outputs` (restricted
+///   to the standalone address) return the output only when `Spendable`;
+/// - `get_unspent_transparent_output` at a target height returns the output only when
+///   `Spendable`.
+#[cfg(feature = "transparent-key-import")]
+fn check_standalone_spendability<DSF, Cache>(
+    st: &TestState<Cache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    fixture: &StandaloneFixture<<<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId>,
+    spendability: StandaloneSpendability,
+) where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let StandaloneFixture {
+        account_id,
+        taddr,
+        outpoint,
+        value,
+        derived_value,
+        target_height,
+    } = fixture;
+    let (account_id, value, derived_value, target_height) =
+        (*account_id, *value, *derived_value, *target_height);
+    let (expected_spendable, expected_watch_only) = match spendability {
+        StandaloneSpendability::WatchOnly => (Zatoshis::ZERO, value),
+        StandaloneSpendability::Spendable => (value, Zatoshis::ZERO),
+    };
+
+    // Per-address balances carry the declared spendability and bucket the value accordingly.
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (origin, balance) = balances.get(taddr).expect("address should be present");
+    assert_eq!(origin, &TransparentKeyOrigin::Imported { spendability });
+    assert_eq!(balance.spendable_value(), expected_spendable);
+    assert_eq!(balance.watch_only_value(), expected_watch_only);
+    assert_eq!(balance.total(), value);
+
+    // The account-level unshielded balance agrees, over and above the derived balance.
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .unwrap()
+        .unwrap();
+    let unshielded = summary
+        .account_balances()
+        .get(&account_id)
+        .unwrap()
+        .unshielded_balance();
+    assert_eq!(
+        unshielded.spendable_value(),
+        (expected_spendable + derived_value).unwrap()
+    );
+    assert_eq!(unshielded.watch_only_value(), expected_watch_only);
+    assert_eq!(unshielded.total(), (value + derived_value).unwrap());
+
+    // Selection queries offer the output only when declared spendable.
+    let expected_selected: Vec<Zatoshis> = match spendability {
+        StandaloneSpendability::WatchOnly => vec![],
+        StandaloneSpendability::Spendable => vec![value],
+    };
+    let by_address = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            taddr,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap();
+    assert_eq!(
+        by_address.iter().map(|u| u.value()).collect::<Vec<_>>(),
+        expected_selected
+    );
+    let selected = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            Some(std::slice::from_ref(taddr)),
+            TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+            usize::MAX,
+            &StandardFeeRule::Zip317,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap();
+    assert_eq!(
+        selected.iter().map(|u| u.value()).collect::<Vec<_>>(),
+        expected_selected
+    );
+    let by_outpoint = st
+        .wallet()
+        .get_unspent_transparent_output(outpoint, target_height)
+        .unwrap();
+    assert_eq!(
+        by_outpoint.map(|u| u.value()),
+        expected_selected.first().copied()
+    );
+}
+
+/// Tests that a pubkey imported as `WatchOnly` contributes only watch-only balance and is
+/// excluded from input selection, and that
+/// [`WalletWrite::set_standalone_transparent_spendability`] moves it in both directions.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_watch_only<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::WatchOnly)
+        .unwrap();
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+    let derived_value = Zatoshis::const_from_u64(100_000);
+    scan_derived_payment_block::<DSF, _>(&mut st, account_id, height, derived_value);
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = put_fake_utxo::<DSF, _>(&mut st, account_id, &taddr, value, height);
+    let fixture = StandaloneFixture {
+        account_id,
+        taddr,
+        outpoint,
+        value,
+        derived_value,
+        target_height: TargetHeight::from(height + 1),
+    };
+
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::WatchOnly);
+
+    // Declaring the address spendable flips every view.
+    st.wallet_mut()
+        .set_standalone_transparent_spendability(
+            account_id,
+            &fixture.taddr,
+            StandaloneSpendability::Spendable,
+        )
+        .unwrap();
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::Spendable);
+
+    // And back again.
+    st.wallet_mut()
+        .set_standalone_transparent_spendability(
+            account_id,
+            &fixture.taddr,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::WatchOnly);
+}
+
+/// Tests that a multisig redeem script imported as `WatchOnly` contributes only watch-only
+/// balance and is excluded from input selection, and that
+/// [`WalletWrite::set_standalone_transparent_spendability`] moves it in both directions.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_script_watch_only<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let (redeem_script, _) = build_test_redeem_script();
+    let taddr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+
+    st.wallet_mut()
+        .import_standalone_transparent_script(
+            account_id,
+            redeem_script,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+    let derived_value = Zatoshis::const_from_u64(100_000);
+    scan_derived_payment_block::<DSF, _>(&mut st, account_id, height, derived_value);
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = put_fake_utxo::<DSF, _>(&mut st, account_id, &taddr, value, height);
+    let fixture = StandaloneFixture {
+        account_id,
+        taddr,
+        outpoint,
+        value,
+        derived_value,
+        target_height: TargetHeight::from(height + 1),
+    };
+
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::WatchOnly);
+
+    st.wallet_mut()
+        .set_standalone_transparent_spendability(
+            account_id,
+            &fixture.taddr,
+            StandaloneSpendability::Spendable,
+        )
+        .unwrap();
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::Spendable);
+
+    st.wallet_mut()
+        .set_standalone_transparent_spendability(
+            account_id,
+            &fixture.taddr,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+    check_standalone_spendability::<DSF, _>(&st, &fixture, StandaloneSpendability::WatchOnly);
+}
+
+/// Tests that re-importing a standalone pubkey may promote it from `WatchOnly` to
+/// `Spendable`, but never downgrades it.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_reimport_promotes<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    let spendability_of =
+        |st: &TestState<(), <DSF as DataStoreFactory>::DataStore, LocalNetwork>| {
+            st.wallet()
+                .get_transparent_receivers(account_id, false, true)
+                .unwrap()
+                .get(&taddr)
+                .expect("address should be present")
+                .source()
+                .spendability()
+        };
+
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::WatchOnly)
+        .unwrap();
+    assert_eq!(
+        spendability_of(&st),
+        Some(StandaloneSpendability::WatchOnly)
+    );
+
+    // Re-importing as spendable promotes the address.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::Spendable)
+        .unwrap();
+    assert_eq!(
+        spendability_of(&st),
+        Some(StandaloneSpendability::Spendable)
+    );
+
+    // Re-importing as watch-only does not downgrade it.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey, StandaloneSpendability::WatchOnly)
+        .unwrap();
+    assert_eq!(
+        spendability_of(&st),
+        Some(StandaloneSpendability::Spendable)
+    );
+}
+
+/// Tests that [`WalletWrite::set_standalone_transparent_spendability`] rejects addresses
+/// that are not standalone imports with key material: an HD-derived address of the account,
+/// an address-only import, and an address unknown to the wallet.
+#[cfg(feature = "transparent-key-import")]
+pub fn set_standalone_transparent_spendability_rejects_non_standalone<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // An HD-derived address is always spendable; its marker cannot be set.
+    let (derived_addr, _) = account.usk().default_transparent_address();
+    assert_matches!(
+        st.wallet_mut().set_standalone_transparent_spendability(
+            account_id,
+            &derived_addr,
+            StandaloneSpendability::WatchOnly,
+        ),
+        Err(_)
+    );
+
+    // An address-only import is always watch-only; its marker cannot be set.
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let address_only = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, address_only)
+        .unwrap();
+    assert_matches!(
+        st.wallet_mut().set_standalone_transparent_spendability(
+            account_id,
+            &address_only,
+            StandaloneSpendability::Spendable,
+        ),
+        Err(_)
+    );
+
+    // An address the wallet has never seen.
+    let unknown_key = SecretKey::from_slice(&[2u8; 32]).expect("valid secret key");
+    let unknown_addr = TransparentAddress::from_pubkey(&unknown_key.public_key(&secp));
+    assert_matches!(
+        st.wallet_mut().set_standalone_transparent_spendability(
+            account_id,
+            &unknown_addr,
+            StandaloneSpendability::Spendable,
+        ),
+        Err(_)
+    );
+}
+
+/// Tests that the metadata returned by [`WalletRead::get_transparent_receivers`] carries the
+/// declared spendability of pubkey and script imports, and reports address-only imports as
+/// watch-only.
+#[cfg(feature = "transparent-key-import")]
+pub fn get_transparent_receivers_reports_spendability<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let secp = Secp256k1::new();
+
+    let spendable_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let spendable_pubkey = spendable_key.public_key(&secp);
+    let spendable_addr = TransparentAddress::from_pubkey(&spendable_pubkey);
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            spendable_pubkey,
+            StandaloneSpendability::Spendable,
+        )
+        .unwrap();
+
+    let watch_only_key = SecretKey::from_slice(&[2u8; 32]).expect("valid secret key");
+    let watch_only_pubkey = watch_only_key.public_key(&secp);
+    let watch_only_addr = TransparentAddress::from_pubkey(&watch_only_pubkey);
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            watch_only_pubkey,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+
+    let (redeem_script, _) = build_test_redeem_script();
+    let script_addr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+    st.wallet_mut()
+        .import_standalone_transparent_script(
+            account_id,
+            redeem_script.clone(),
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+
+    let address_only_key = SecretKey::from_slice(&[3u8; 32]).expect("valid secret key");
+    let address_only_addr = TransparentAddress::from_pubkey(&address_only_key.public_key(&secp));
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, address_only_addr)
+        .unwrap();
+
+    let receivers = st
+        .wallet()
+        .get_transparent_receivers(account_id, true, true)
+        .unwrap();
+    let source_of = |addr: &TransparentAddress| {
+        receivers
+            .get(addr)
+            .expect("address should be present")
+            .source()
+            .clone()
+    };
+
+    assert_eq!(
+        source_of(&spendable_addr),
+        TransparentAddressSource::StandalonePubkey {
+            pubkey: spendable_pubkey,
+            spendability: StandaloneSpendability::Spendable,
+        }
+    );
+    assert_eq!(
+        source_of(&watch_only_addr),
+        TransparentAddressSource::StandalonePubkey {
+            pubkey: watch_only_pubkey,
+            spendability: StandaloneSpendability::WatchOnly,
+        }
+    );
+    assert_eq!(
+        source_of(&script_addr),
+        TransparentAddressSource::StandaloneScript {
+            redeem_script,
+            spendability: StandaloneSpendability::WatchOnly,
+        }
+    );
+    assert_eq!(
+        source_of(&address_only_addr),
+        TransparentAddressSource::StandaloneAddress
+    );
+    assert_eq!(
+        source_of(&address_only_addr).spendability(),
+        Some(StandaloneSpendability::WatchOnly)
+    );
+
+    // HD-derived receivers report no standalone spendability.
+    let derived = receivers
+        .iter()
+        .filter(|(_, meta)| matches!(meta.source(), TransparentAddressSource::Derived { .. }))
+        .collect::<Vec<_>>();
+    assert!(!derived.is_empty());
+    assert!(
+        derived
+            .iter()
+            .all(|(_, meta)| meta.source().spendability().is_none())
     );
 }
 

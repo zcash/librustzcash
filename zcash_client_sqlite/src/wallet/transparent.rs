@@ -22,8 +22,9 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
-        TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter,
+        StandaloneSpendability, TargetValue, TransactionDataRequest, TransactionStatusFilter,
+        TransparentBalances, TransparentKeyOrigin,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
@@ -57,6 +58,7 @@ use zcash_script::script;
 use zip32::Scope;
 #[cfg(feature = "transparent-key-import")]
 use {
+    super::encoding::decode_standalone_spendability,
     bip32::{PublicKey, PublicKeyBytes},
     zcash_script::script::Code,
 };
@@ -185,7 +187,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             imported_transparent_receiver_pubkey,
             exposed_at_height,
             transparent_receiver_next_check_time,
-            imported_transparent_receiver_script
+            imported_transparent_receiver_script,
+            standalone_spendable
          FROM addresses
          WHERE account_id = :account_id
          AND cached_transparent_receiver_address IS NOT NULL
@@ -269,6 +272,9 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         #[cfg(feature = "transparent-key-import")]
         let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
             row.get("imported_transparent_receiver_script")?;
+        #[cfg(feature = "transparent-key-import")]
+        let spendability =
+            decode_standalone_spendability(row.get::<_, bool>("standalone_spendable")?);
 
         if let Some(taddr) = taddr {
             let p2pkh_metadata = || -> Result<TransparentAddressMetadata, SqliteClientError> {
@@ -293,6 +299,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                             })?;
                             Ok(TransparentAddressMetadata::standalone_p2pkh(
                                 pubkey,
+                                spendability,
                                 exposure,
                                 next_check_time,
                             ))
@@ -333,6 +340,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                         // Standalone P2SH import
                         Ok(TransparentAddressMetadata::standalone_script(
                             imported_transparent_receiver_script,
+                            spendability,
                             exposure,
                             next_check_time,
                         ))
@@ -807,7 +815,8 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                      transparent_child_index = :transparent_child_index,
                      receiver_flags = :receiver_flags,
                      imported_transparent_receiver_pubkey = NULL,
-                     imported_transparent_receiver_script = NULL
+                     imported_transparent_receiver_script = NULL,
+                     standalone_spendable = 0
                  WHERE id = :id",
                 named_params![
                     ":account_id": account_id.0,
@@ -1306,7 +1315,9 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 /// # Parameters
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
-///   returned output. If this is `None`, no spendability checks are performed.
+///   returned output. If this is `None`, no spendability checks are performed; otherwise the
+///   output is only returned if it is unspent, unexpired, and not received at a standalone
+///   import that the application has not declared spendable.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
@@ -1336,11 +1347,16 @@ pub(crate) fn get_wallet_transparent_output(
                  ({}) -- the transaction is unexpired
                  AND u.id NOT IN ({}) -- and the output is unspent
                  AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+                 AND (
+                     addresses.key_scope != {foreign_scope}
+                     OR addresses.standalone_spendable = 1
+                 ) -- and the output is not that of a watch-only standalone import
              )
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        foreign_scope = KeyScope::Foreign.encode(),
     ))?;
 
     let txid_bytes = outpoint.hash();
@@ -1402,12 +1418,11 @@ fn spendable_transparent_outputs_query(
            -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
            -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
          AND ({lock_eligible_sql}) -- the output is eligible under the lock filter
-         AND NOT (
-             addresses.key_scope = {foreign_scope}
-             AND addresses.imported_transparent_receiver_pubkey IS NULL
-             AND addresses.imported_transparent_receiver_script IS NULL
-         ) -- exclude outputs of addresses imported without key material: no
-           -- key material exists with which a spend could be constructed
+         AND (
+             addresses.key_scope != {foreign_scope}
+             OR addresses.standalone_spendable = 1
+         ) -- exclude outputs of standalone imports the application has not declared
+           -- spendable: the wallet cannot construct a spend without the secret key
          ORDER BY {order_by_sql}",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
@@ -1709,6 +1724,18 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     Ok(utxos)
 }
 
+/// Returns whether outputs received at an address with the given key origin are watch-only:
+/// received at a standalone import that the application has not declared spendable.
+fn is_watch_only(key_origin: &TransparentKeyOrigin) -> bool {
+    match key_origin {
+        TransparentKeyOrigin::Derived { .. } => false,
+        TransparentKeyOrigin::Imported { spendability } => match spendability {
+            StandaloneSpendability::WatchOnly => true,
+            StandaloneSpendability::Spendable => false,
+        },
+    }
+}
+
 /// Returns a mapping from each transparent receiver associated with the specified account
 /// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
 /// at a block height less than or equal to `summary_height`.
@@ -1733,7 +1760,8 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(&format!(
-        "SELECT u.address, u.value_zat, u.lock_expiry_height, addresses.key_scope
+        "SELECT u.address, u.value_zat, u.lock_expiry_height, addresses.key_scope,
+                addresses.standalone_spendable
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1760,10 +1788,14 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
         let lock_expiry_height: Option<u32> = row.get("lock_expiry_height")?;
         let key_scope_code: i64 = row.get("key_scope")?;
-        let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
+        let standalone_spendable: bool = row.get("standalone_spendable")?;
+        let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin(standalone_spendable);
 
+        let watch_only = is_watch_only(&key_origin);
         let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
-        if value <= zip317::MARGINAL_FEE {
+        if watch_only {
+            entry.1.add_watch_only_value(value)?;
+        } else if value <= zip317::MARGINAL_FEE {
             entry.1.add_uneconomic_value(value)?;
         } else if is_locked_at(lock_expiry_height, target_height) {
             entry.1.add_locked_value(value)?;
@@ -1782,7 +1814,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     // pending, so we don't check locking here.
     if min_confirmations > 0 {
         let mut stmt_address_balances = conn.prepare(&format!(
-            "SELECT u.address, u.value_zat, addresses.key_scope
+            "SELECT u.address, u.value_zat, addresses.key_scope, addresses.standalone_spendable
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1819,10 +1851,14 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             let taddr = TransparentAddress::decode(params, &taddr_str)?;
             let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
             let key_scope_code: i64 = row.get("key_scope")?;
-            let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
+            let standalone_spendable: bool = row.get("standalone_spendable")?;
+            let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin(standalone_spendable);
 
+            let watch_only = is_watch_only(&key_origin);
             let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
-            if value <= zip317::MARGINAL_FEE {
+            if watch_only {
+                entry.1.add_watch_only_value(value)?;
+            } else if value <= zip317::MARGINAL_FEE {
                 entry.1.add_uneconomic_value(value)?;
             } else {
                 entry.1.add_spendable_value(value)?;
@@ -1852,7 +1888,9 @@ pub(crate) fn add_transparent_account_balances(
         "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
             (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
             (t.mined_height IS NOT NULL
-             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature
+             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature,
+            (addresses.key_scope = {foreign_scope}
+             AND addresses.standalone_spendable = 0) AS is_watch_only
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1860,10 +1898,11 @@ pub(crate) fn add_transparent_account_balances(
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature",
+         GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature, is_watch_only",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        foreign_scope = KeyScope::Foreign.encode(),
     ))?;
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
@@ -1880,13 +1919,19 @@ pub(crate) fn add_transparent_account_balances(
         })?;
         let is_coinbase: bool = row.get("is_coinbase")?;
         let is_mature: bool = row.get("is_mature")?;
+        let is_watch_only: bool = row.get("is_watch_only")?;
 
         let balance = account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO);
         if is_coinbase {
             balance.with_unshielded_coinbase_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
+                if is_watch_only {
+                    // Value received at a standalone import that the application has not
+                    // declared spendable is reported separately, regardless of its other
+                    // properties: the wallet cannot spend it at all.
+                    bal.add_watch_only_value(value)
+                } else if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     // A locked coinbase output (selected by an in-flight shielding
@@ -1903,7 +1948,9 @@ pub(crate) fn add_transparent_account_balances(
             })?;
         } else {
             balance.with_unshielded_regular_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
+                if is_watch_only {
+                    bal.add_watch_only_value(value)
+                } else if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
@@ -1921,7 +1968,9 @@ pub(crate) fn add_transparent_account_balances(
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
             "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
-                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase
+                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
+                (addresses.key_scope = {foreign_scope}
+                 AND addresses.standalone_spendable = 0) AS is_watch_only
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1940,9 +1989,10 @@ pub(crate) fn add_transparent_account_balances(
              )
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-             GROUP BY accounts.uuid, lock_expiry_height, is_coinbase",
+             GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_watch_only",
             spent_utxos_clause(),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+            foreign_scope = KeyScope::Foreign.encode(),
         ))?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
@@ -1958,9 +2008,12 @@ pub(crate) fn add_transparent_account_balances(
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
             })?;
             let is_coinbase: bool = row.get("is_coinbase")?;
+            let is_watch_only: bool = row.get("is_watch_only")?;
 
             let add_pending = |bal: &mut Balance| {
-                if value <= zip317::MARGINAL_FEE {
+                if is_watch_only {
+                    bal.add_watch_only_value(value)
+                } else if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
@@ -2473,7 +2526,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                 imported_transparent_receiver_pubkey,
                 exposed_at_height,
                 transparent_receiver_next_check_time,
-                imported_transparent_receiver_script
+                imported_transparent_receiver_script,
+                standalone_spendable
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
@@ -2534,6 +2588,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                         None => {
                             let _imported_transparent_receiver_script_bytes: Option<Vec<u8>> = row.get("imported_transparent_receiver_script")?;
                             let _pubkey_bytes = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")?;
+                            #[cfg(feature = "transparent-key-import")]
+                            let spendability = decode_standalone_spendability(row.get::<_, bool>("standalone_spendable")?);
 
                             let _standalone_exposure = exposed_at_height.map_or(
                                 Exposure::Unknown,
@@ -2556,6 +2612,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
                                     Ok(TransparentAddressMetadata::standalone_script(
                                         imported_transparent_receiver_script,
+                                        spendability,
                                         _standalone_exposure,
                                         next_check_time,
                                     ))
@@ -2569,6 +2626,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
                                     Ok(TransparentAddressMetadata::standalone_p2pkh(
                                         pubkey,
+                                        spendability,
                                         _standalone_exposure,
                                         next_check_time,
                                     ))
@@ -2926,7 +2984,9 @@ mod tests {
         secp256k1::{PublicKey, Secp256k1, SecretKey},
         std::collections::HashSet,
         transparent::address::TransparentAddress,
-        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
+        zcash_client_backend::data_api::{
+            AccountBirthday, StandaloneSpendability, chain::ChainState,
+        },
         zcash_keys::{address::Address, encoding::AddressCodec},
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
@@ -3869,6 +3929,7 @@ mod tests {
                     &network,
                     account_uuid,
                     pubkey,
+                    StandaloneSpendability::Spendable,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, 0);
@@ -3917,6 +3978,7 @@ mod tests {
                     &network,
                     account_uuid,
                     pubkey,
+                    StandaloneSpendability::Spendable,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, 1);
@@ -3927,6 +3989,7 @@ mod tests {
                     &network,
                     account_uuid,
                     pubkey,
+                    StandaloneSpendability::Spendable,
                 )
                 .unwrap();
                 prop_assert_eq!(reinserted, 0);
@@ -3965,8 +4028,13 @@ mod tests {
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
-        let result =
-            crate::wallet::import_standalone_transparent_pubkey(&tx, &network, unknown, pubkey);
+        let result = crate::wallet::import_standalone_transparent_pubkey(
+            &tx,
+            &network,
+            unknown,
+            pubkey,
+            StandaloneSpendability::Spendable,
+        );
         assert!(matches!(
             result,
             Err(crate::error::SqliteClientError::AccountUnknown)
@@ -4010,6 +4078,7 @@ mod tests {
                     &network,
                     account_uuid,
                     &pubkeys,
+                    StandaloneSpendability::Spendable,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, distinct.len());
@@ -4033,6 +4102,7 @@ mod tests {
                     &network,
                     account_uuid,
                     &pubkeys,
+                    StandaloneSpendability::Spendable,
                 )
                 .unwrap();
                 prop_assert_eq!(again, 0);
@@ -4058,12 +4128,152 @@ mod tests {
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xfe; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
-        let result =
-            crate::wallet::import_standalone_transparent_pubkeys(&tx, &network, unknown, &[pubkey]);
+        let result = crate::wallet::import_standalone_transparent_pubkeys(
+            &tx,
+            &network,
+            unknown,
+            &[pubkey],
+            StandaloneSpendability::Spendable,
+        );
         assert!(matches!(
             result,
             Err(crate::error::SqliteClientError::AccountUnknown)
         ));
+    }
+
+    /// Pins the error variant returned by `set_standalone_transparent_spendability` for each
+    /// failure case, and checks that the success path flips the column in both directions.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn set_standalone_transparent_spendability_errors() {
+        use crate::error::SqliteClientError;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_a = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // A second account, to own an import the first account has no standing over.
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
+                BlockHash([0; 32]),
+            ),
+            None,
+        );
+        let (account_b, _) = st
+            .wallet_mut()
+            .create_account("b", &Secret::new(vec![42u8; 32]), &birthday, None)
+            .unwrap();
+
+        let secp = Secp256k1::new();
+        let pubkey_a =
+            PublicKey::from_secret_key(&secp, &SecretKey::from_slice(&[0x31; 32]).unwrap());
+        let pubkey_b =
+            PublicKey::from_secret_key(&secp, &SecretKey::from_slice(&[0x32; 32]).unwrap());
+        let taddr_a = TransparentAddress::from_pubkey(&pubkey_a);
+        let taddr_b = TransparentAddress::from_pubkey(&pubkey_b);
+        let taddr_address_only = TransparentAddress::PublicKeyHash([0x33; 20]);
+        let taddr_unknown = TransparentAddress::PublicKeyHash([0x44; 20]);
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+
+        // A derived transparent address of account A (created with the account).
+        let account_a_ref = get_account_ref(&tx, account_a).unwrap();
+        let derived_enc: String = tx
+            .query_row(
+                "SELECT cached_transparent_receiver_address FROM addresses
+                 WHERE account_id = :account_id
+                 AND key_scope = :key_scope
+                 AND cached_transparent_receiver_address IS NOT NULL
+                 LIMIT 1",
+                named_params![
+                    ":account_id": account_a_ref.0,
+                    ":key_scope": KeyScope::Zip32(zip32::Scope::External).encode(),
+                ],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let taddr_derived = TransparentAddress::decode(&network, &derived_enc).unwrap();
+
+        crate::wallet::import_standalone_transparent_pubkey(
+            &tx,
+            &network,
+            account_a,
+            pubkey_a,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+        crate::wallet::import_standalone_transparent_pubkey(
+            &tx,
+            &network,
+            account_b,
+            pubkey_b,
+            StandaloneSpendability::WatchOnly,
+        )
+        .unwrap();
+        crate::wallet::import_standalone_transparent_address(
+            &tx,
+            &network,
+            account_a,
+            taddr_address_only,
+        )
+        .unwrap();
+
+        let set = |addr: &TransparentAddress, spendability| {
+            crate::wallet::set_standalone_transparent_spendability(
+                &tx,
+                &network,
+                account_a,
+                addr,
+                spendability,
+            )
+        };
+        let spendable_flag = |addr: &TransparentAddress| -> bool {
+            tx.query_row(
+                "SELECT standalone_spendable FROM addresses
+                 WHERE cached_transparent_receiver_address = :address",
+                named_params![":address": addr.encode(&network)],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        // Unknown address.
+        assert!(matches!(
+            set(&taddr_unknown, StandaloneSpendability::Spendable),
+            Err(SqliteClientError::AddressNotRecognized(a)) if a == taddr_unknown
+        ));
+
+        // Key-material import owned by another account.
+        assert!(matches!(
+            set(&taddr_b, StandaloneSpendability::Spendable),
+            Err(SqliteClientError::StandaloneImportConflict(owner)) if owner == account_b.expose_uuid()
+        ));
+
+        // Derived address of the caller's own account.
+        assert!(matches!(
+            set(&taddr_derived, StandaloneSpendability::Spendable),
+            Err(SqliteClientError::NotStandaloneKeyImport(a)) if a == taddr_derived
+        ));
+
+        // Address-only import of the caller's own account.
+        assert!(matches!(
+            set(&taddr_address_only, StandaloneSpendability::Spendable),
+            Err(SqliteClientError::NotStandaloneKeyImport(a)) if a == taddr_address_only
+        ));
+
+        // The success path flips the column both ways.
+        assert!(!spendable_flag(&taddr_a));
+        set(&taddr_a, StandaloneSpendability::Spendable).unwrap();
+        assert!(spendable_flag(&taddr_a));
+        set(&taddr_a, StandaloneSpendability::WatchOnly).unwrap();
+        assert!(!spendable_flag(&taddr_a));
+        // Nothing else was touched.
+        assert!(!spendable_flag(&taddr_b));
     }
 
     #[test]
@@ -4134,6 +4344,46 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     fn test_import_standalone_transparent_pubkey_balance() {
         zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_balance(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey_watch_only() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_watch_only(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_script_watch_only() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_script_watch_only(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey_reimport_promotes() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_reimport_promotes(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_set_standalone_transparent_spendability_rejects_non_standalone() {
+        zcash_client_backend::data_api::testing::transparent::set_standalone_transparent_spendability_rejects_non_standalone(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_get_transparent_receivers_reports_spendability() {
+        zcash_client_backend::data_api::testing::transparent::get_transparent_receivers_reports_spendability(
             TestDbFactory::default(),
         );
     }

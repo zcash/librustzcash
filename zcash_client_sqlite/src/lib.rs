@@ -114,6 +114,9 @@ use zcash_client_backend::{
     decrypt_transaction,
 };
 
+#[cfg(feature = "transparent-key-import")]
+use zcash_client_backend::data_api::StandaloneSpendability;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
@@ -1775,8 +1778,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkey(account, pubkey))
+        self.transactionally(|wdb| {
+            wdb.import_standalone_transparent_pubkey(account, pubkey, spendability)
+        })
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1784,8 +1790,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
+        self.transactionally(|wdb| {
+            wdb.import_standalone_transparent_pubkeys(account, pubkeys, spendability)
+        })
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1793,8 +1802,23 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.import_standalone_transparent_script(account, script))
+        self.transactionally(|wdb| {
+            wdb.import_standalone_transparent_script(account, script, spendability)
+        })
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn set_standalone_transparent_spendability(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        address: &TransparentAddress,
+        spendability: StandaloneSpendability,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| {
+            wdb.set_standalone_transparent_spendability(account, address, spendability)
+        })
     }
 
     fn get_next_available_address(
@@ -2161,9 +2185,16 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkey(
+            self.conn.0,
+            &self.params,
+            account,
+            pubkey,
+            spendability,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2171,9 +2202,16 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkeys(
+            self.conn.0,
+            &self.params,
+            account,
+            pubkeys,
+            spendability,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2181,8 +2219,31 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
+        spendability: StandaloneSpendability,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
+        wallet::import_standalone_transparent_script(
+            self.conn.0,
+            &self.params,
+            account,
+            script,
+            spendability,
+        )
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn set_standalone_transparent_spendability(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        address: &TransparentAddress,
+        spendability: StandaloneSpendability,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::set_standalone_transparent_spendability(
+            self.conn.0,
+            &self.params,
+            account,
+            address,
+            spendability,
+        )
     }
 
     fn get_next_available_address(

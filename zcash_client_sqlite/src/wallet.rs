@@ -177,6 +177,8 @@ use {
 #[cfg(feature = "transparent-key-import")]
 use {
     ::transparent::address::TransparentAddress,
+    encoding::encode_standalone_spendability,
+    zcash_client_backend::data_api::StandaloneSpendability,
     zcash_script::{descriptor::sh, script::Evaluable},
 };
 
@@ -933,7 +935,8 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
     Ok(rows_affected)
 }
 
-/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
+/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account, with
+/// the given application-declared spendability.
 ///
 /// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
 /// when nothing was inserted because the receiver address was already present in the wallet.
@@ -943,11 +946,19 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
+    spendability: StandaloneSpendability,
 ) -> Result<usize, SqliteClientError> {
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
-    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+    import_standalone_transparent_pubkey_inner(
+        conn,
+        params,
+        account_uuid,
+        account_id,
+        pubkey,
+        spendability,
+    )
 }
 
 /// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
@@ -959,6 +970,7 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     pubkeys: &[secp256k1::PublicKey],
+    spendability: StandaloneSpendability,
 ) -> Result<usize, SqliteClientError> {
     let account_id = get_account_ref(conn, account_uuid)?;
     let mut inserted = 0;
@@ -969,6 +981,7 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
             account_uuid,
             account_id,
             *pubkey,
+            spendability,
         )?;
     }
     Ok(inserted)
@@ -979,6 +992,11 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
 ///
 /// Returns the number of address rows inserted (`1` when a new receiver row was added, `0` when
 /// nothing was inserted because the receiver address was already present).
+///
+/// If the pubkey has already been imported into this account, re-importing it as
+/// [`StandaloneSpendability::Spendable`] promotes the existing row to spendable; a re-import as
+/// [`StandaloneSpendability::WatchOnly`] never downgrades a spendable row (use
+/// [`set_standalone_transparent_spendability`] for that).
 #[cfg(feature = "transparent-key-import")]
 fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -986,23 +1004,25 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     account_id: AccountRef,
     pubkey: secp256k1::PublicKey,
+    spendability: StandaloneSpendability,
 ) -> Result<usize, SqliteClientError> {
-    let existing_import_account = conn
+    let existing_import: Option<(i64, Uuid)> = conn
         .query_row(
-            "SELECT accounts.uuid AS account_uuid
+            "SELECT addresses.id, accounts.uuid AS account_uuid
              FROM addresses
              JOIN accounts ON accounts.id = addresses.account_id
              WHERE imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey",
             named_params![
                 ":imported_transparent_receiver_pubkey": pubkey.serialize()
             ],
-            |row| row.get::<_, Uuid>("account_uuid"),
+            |row| Ok((row.get("id")?, row.get("account_uuid")?)),
         )
         .optional()?;
 
-    if let Some(current) = existing_import_account {
+    if let Some((row_id, current)) = existing_import {
         if current == account_uuid.expose_uuid() {
-            // The key has already been imported; nothing to do.
+            // The key has already been imported; at most promote it to spendable.
+            promote_standalone_spendability(conn, row_id, spendability)?;
             return Ok(0);
         } else {
             return Err(SqliteClientError::StandaloneImportConflict(current));
@@ -1017,10 +1037,12 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     if let Some(row_id) = standalone_address_only_row(conn, account_id, &addr_str)? {
         conn.execute(
             "UPDATE addresses
-             SET imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey
+             SET imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey,
+                 standalone_spendable = :standalone_spendable
              WHERE id = :id",
             named_params![
                 ":imported_transparent_receiver_pubkey": pubkey.serialize(),
+                ":standalone_spendable": encode_standalone_spendability(spendability),
                 ":id": row_id,
             ],
         )?;
@@ -1042,11 +1064,11 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
-          receiver_flags, imported_transparent_receiver_pubkey
+          receiver_flags, imported_transparent_receiver_pubkey, standalone_spendable
         )
         VALUES (
           :account_id, :key_scope, :address, :address,
-          :receiver_flags, :imported_transparent_receiver_pubkey
+          :receiver_flags, :imported_transparent_receiver_pubkey, :standalone_spendable
         )
         "#,
         named_params![
@@ -1054,7 +1076,8 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2PKH.bits(),
-            ":imported_transparent_receiver_pubkey": pubkey.serialize()
+            ":imported_transparent_receiver_pubkey": pubkey.serialize(),
+            ":standalone_spendable": encode_standalone_spendability(spendability),
         ],
     )?;
 
@@ -1063,12 +1086,20 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     Ok(rows_affected)
 }
 
+/// Imports a standalone transparent P2SH receiver by its redeem script into the given account,
+/// with the given application-declared spendability.
+///
+/// If the script has already been imported into this account, re-importing it as
+/// [`StandaloneSpendability::Spendable`] promotes the existing row to spendable; a re-import as
+/// [`StandaloneSpendability::WatchOnly`] never downgrades a spendable row (use
+/// [`set_standalone_transparent_spendability`] for that).
 #[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_uuid: AccountUuid,
     redeem_script: zcash_script::script::Redeem,
+    spendability: StandaloneSpendability,
 ) -> Result<(), SqliteClientError> {
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT below.
@@ -1104,22 +1135,23 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
         )
     })?;
 
-    let existing_import_account = conn
+    let existing_import: Option<(i64, Uuid)> = conn
         .query_row(
-            "SELECT accounts.uuid AS account_uuid
+            "SELECT addresses.id, accounts.uuid AS account_uuid
              FROM addresses
              JOIN accounts ON accounts.id = addresses.account_id
              WHERE imported_transparent_receiver_script = :imported_transparent_receiver_script",
             named_params![
                 ":imported_transparent_receiver_script": &rs_bytes[..]
             ],
-            |row| row.get::<_, Uuid>("account_uuid"),
+            |row| Ok((row.get("id")?, row.get("account_uuid")?)),
         )
         .optional()?;
 
-    if let Some(current) = existing_import_account {
+    if let Some((row_id, current)) = existing_import {
         if current == account_uuid.expose_uuid() {
-            // The key has already been imported; nothing to do.
+            // The script has already been imported; at most promote it to spendable.
+            promote_standalone_spendability(conn, row_id, spendability)?;
             return Ok(());
         } else {
             return Err(SqliteClientError::StandaloneImportConflict(current));
@@ -1134,10 +1166,12 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     if let Some(row_id) = standalone_address_only_row(conn, account_id, &addr_str)? {
         conn.execute(
             "UPDATE addresses
-             SET imported_transparent_receiver_script = :imported_transparent_receiver_script
+             SET imported_transparent_receiver_script = :imported_transparent_receiver_script,
+                 standalone_spendable = :standalone_spendable
              WHERE id = :id",
             named_params![
                 ":imported_transparent_receiver_script": &rs_bytes[..],
+                ":standalone_spendable": encode_standalone_spendability(spendability),
                 ":id": row_id,
             ],
         )?;
@@ -1148,11 +1182,11 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
-          receiver_flags, imported_transparent_receiver_script
+          receiver_flags, imported_transparent_receiver_script, standalone_spendable
         )
         VALUES (
           :account_id, :key_scope, :address, :address,
-          :receiver_flags, :imported_transparent_receiver_script
+          :receiver_flags, :imported_transparent_receiver_script, :standalone_spendable
         )
         "#,
         named_params![
@@ -1160,11 +1194,105 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2SH.bits(),
-            ":imported_transparent_receiver_script": &rs_bytes[..]
+            ":imported_transparent_receiver_script": &rs_bytes[..],
+            ":standalone_spendable": encode_standalone_spendability(spendability),
         ],
     )?;
 
     Ok(())
+}
+
+/// Promotes the standalone import row `row_id` to spendable if `spendability` is
+/// [`StandaloneSpendability::Spendable`]; never downgrades an already-spendable row.
+#[cfg(feature = "transparent-key-import")]
+fn promote_standalone_spendability(
+    conn: &rusqlite::Transaction,
+    row_id: i64,
+    spendability: StandaloneSpendability,
+) -> Result<(), SqliteClientError> {
+    match spendability {
+        StandaloneSpendability::WatchOnly => {}
+        StandaloneSpendability::Spendable => {
+            conn.execute(
+                "UPDATE addresses SET standalone_spendable = 1 WHERE id = :id",
+                named_params![":id": row_id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Sets the application-declared spendability of a standalone transparent import.
+///
+/// The address must be a standalone import (a [`KeyScope::Foreign`] row) of the given account
+/// that carries key material (an imported pubkey or redeem script). Otherwise, the failure is
+/// diagnosed in this order:
+/// 1. an unknown account is reported as [`SqliteClientError::AccountUnknown`];
+/// 2. an address unknown to the wallet is reported as
+///    [`SqliteClientError::AddressNotRecognized`];
+/// 3. an address belonging to a different account (whatever its kind) is reported as
+///    [`SqliteClientError::StandaloneImportConflict`] with that account's identifier;
+/// 4. a derived address of the account, or an address the account imported without key
+///    material, is reported as [`SqliteClientError::NotStandaloneKeyImport`].
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn set_standalone_transparent_spendability<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    address: &TransparentAddress,
+    spendability: StandaloneSpendability,
+) -> Result<(), SqliteClientError> {
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // being conflated with an unknown address.
+    let account_id = get_account_ref(conn, account_uuid)?;
+    let addr_str = Address::Transparent(*address).encode(params);
+
+    let updated = conn.execute(
+        "UPDATE addresses
+         SET standalone_spendable = :standalone_spendable
+         WHERE account_id = :account_id
+         AND cached_transparent_receiver_address = :address
+         AND key_scope = :key_scope
+         AND (
+             imported_transparent_receiver_pubkey IS NOT NULL
+             OR imported_transparent_receiver_script IS NOT NULL
+         )",
+        named_params![
+            ":standalone_spendable": encode_standalone_spendability(spendability),
+            ":account_id": account_id.0,
+            ":address": addr_str,
+            ":key_scope": KeyScope::Foreign.encode(),
+        ],
+    )?;
+
+    if updated == 1 {
+        return Ok(());
+    }
+
+    // Nothing matched; diagnose why. `cached_transparent_receiver_address` is unique, so at most
+    // one row can hold the address.
+    let owner: Option<Uuid> = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE cached_transparent_receiver_address = :address",
+            named_params![":address": addr_str],
+            |row| row.get("account_uuid"),
+        )
+        .optional()?;
+
+    match owner {
+        None => Err(SqliteClientError::AddressNotRecognized(*address)),
+        // The address belongs to another account; report that before its kind, since the caller
+        // has no standing to alter it regardless.
+        Some(owner) if owner != account_uuid.expose_uuid() => {
+            Err(SqliteClientError::StandaloneImportConflict(owner))
+        }
+        // The account's own row did not match the UPDATE, so it is a derived address or an
+        // address-only import.
+        Some(_) => Err(SqliteClientError::NotStandaloneKeyImport(*address)),
+    }
 }
 
 pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(

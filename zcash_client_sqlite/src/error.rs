@@ -246,6 +246,13 @@ pub enum SqliteClientError {
     #[cfg(feature = "transparent-key-import")]
     StandaloneImportConflict(Uuid),
 
+    /// An attempt to set the spendability of a standalone transparent import failed because the
+    /// given address is known to the wallet but is not a standalone import carrying key material:
+    /// it is either a derived address of the account (whose spendability is that of the account)
+    /// or an address imported without key material (which can never be spent from).
+    #[cfg(feature = "transparent-key-import")]
+    NotStandaloneKeyImport(TransparentAddress),
+
     /// An error returned by a [`FeeRule`] during transparent input selection. The underlying
     /// error is boxed so the storage layer does not need to know every fee rule's error type.
     ///
@@ -475,6 +482,13 @@ impl fmt::Display for SqliteClientError {
                 write!(
                     f,
                     "The given standalone transparent address is already managed by account {uuid}"
+                )
+            }
+            #[cfg(feature = "transparent-key-import")]
+            SqliteClientError::NotStandaloneKeyImport(addr) => {
+                write!(
+                    f,
+                    "The transparent address {addr:?} is not a standalone import with key material, so its spendability cannot be set"
                 )
             }
             #[cfg(feature = "transparent-inputs")]

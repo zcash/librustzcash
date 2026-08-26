@@ -26,6 +26,11 @@
 //!    account is registered with that account (its secret half having already been
 //!    delivered to the sink), and P2SH redeem scripts recorded on imported
 //!    accounts' addresses are registered where the wallet can represent them.
+//!    Each registration declares a spendability: a pubkey whose spending key was
+//!    verified is `Spendable`; a multisig redeem script is `Spendable` only if the
+//!    spending key of every member pubkey was verified from the document (zcashd's
+//!    `ismine` rule for P2SH multisig); everything else is `WatchOnly`, and is
+//!    counted in [`ZewifImportReport::redeem_scripts_watch_only`].
 //! 5. Marks the transparent addresses recorded in the document as exposed, so
 //!    that address-based recovery includes them.
 //! 6. Stores the document's transactions: each transaction carrying raw data is
@@ -57,7 +62,7 @@
 //!   crate's decryption support) before import.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
 };
 
@@ -70,8 +75,8 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretVec};
 use zcash_client_backend::{
     data_api::{
-        Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite, Zip32Derivation,
-        chain::ChainState, wallet::decrypt_and_store_transaction,
+        Account as _, AccountBirthday, AccountPurpose, StandaloneSpendability, WalletRead,
+        WalletWrite, Zip32Derivation, chain::ChainState, wallet::decrypt_and_store_transaction,
     },
     wallet::{Exposure, TransparentAddressMetadata},
 };
@@ -529,6 +534,14 @@ pub struct ZewifImportReport {
     pub skipped_transparent_keys: Vec<SkippedTransparentKey>,
     /// The number of P2SH redeem scripts registered with imported accounts.
     pub redeem_scripts_registered: usize,
+    /// The number of registered P2SH redeem scripts that were marked watch-only
+    /// because the document did not deliver the spending keys for every member
+    /// pubkey of the multisig script. These are included in
+    /// `redeem_scripts_registered`; outputs received at them are reported in
+    /// the watch-only balance and are never selected as transaction inputs
+    /// unless the application later reclassifies them via
+    /// `WalletWrite::set_standalone_transparent_spendability`.
+    pub redeem_scripts_watch_only: usize,
     /// The number of P2SH redeem scripts recorded in the document that the
     /// wallet cannot represent (for example, non-multisig scripts).
     pub redeem_scripts_not_representable: usize,
@@ -1075,6 +1088,10 @@ where
     };
     let secp = secp256k1::Secp256k1::new();
 
+    // The serialized pubkeys whose spending keys were delivered and verified, used to decide
+    // whether a multisig redeem script is fully spendable by the wallet.
+    let mut verified_pubkeys: HashSet<Vec<u8>> = HashSet::new();
+
     for entry in store.map_or(&[][..], |s| s.transparent_keys()) {
         if !entry.pubkey().is_compressed() {
             report.skipped_transparent_keys.push(SkippedTransparentKey {
@@ -1097,11 +1114,18 @@ where
         if secret_key.public_key(&secp) != pubkey {
             return Err(ZewifImportError::TransparentKeyMismatch { address });
         }
+        verified_pubkeys.insert(pubkey.serialize().to_vec());
 
         match taddrs.owners.get(&address) {
             Some((account_uuid, _)) => {
-                wdb.import_standalone_transparent_pubkey(*account_uuid, pubkey)
-                    .map_err(ZewifImportError::Wallet)?;
+                // The spending key was delivered and verified against the pubkey, so the
+                // application (via its secret sink) holds what is needed to spend.
+                wdb.import_standalone_transparent_pubkey(
+                    *account_uuid,
+                    pubkey,
+                    StandaloneSpendability::Spendable,
+                )
+                .map_err(ZewifImportError::Wallet)?;
                 report.transparent_keys_registered += 1;
             }
             None => {
@@ -1117,8 +1141,35 @@ where
         let parsed = Redeem::parse(&Code(script_bytes.clone()));
         match parsed {
             Ok(redeem) => {
-                match wdb.import_standalone_transparent_script(*account_uuid, redeem) {
-                    Ok(()) => report.redeem_scripts_registered += 1,
+                // Following zcashd's `ismine` rule for P2SH multisig, the script is spendable
+                // only if the spending key of every member pubkey is held; any other script
+                // kind is not one the wallet can spend from.
+                //
+                // Membership is decided on the exact serialized pubkey: the set holds the
+                // 33-byte compressed encoding of each verified key, and is compared against
+                // whatever encoding the script embeds. A member pubkey in a different encoding
+                // (such as uncompressed) is deliberately treated as not held, so that the
+                // script fails safe to watch-only rather than being declared spendable on a
+                // key the wallet's spend path cannot use. Do not "fix" this by comparing
+                // key hashes.
+                let spendability = match zcash_script::solver::standard(&redeem) {
+                    Some(zcash_script::solver::ScriptKind::MultiSig { pubkeys, .. })
+                        if pubkeys
+                            .iter()
+                            .all(|pk| verified_pubkeys.contains(pk.as_slice())) =>
+                    {
+                        StandaloneSpendability::Spendable
+                    }
+                    _ => StandaloneSpendability::WatchOnly,
+                };
+                match wdb.import_standalone_transparent_script(*account_uuid, redeem, spendability)
+                {
+                    Ok(()) => {
+                        report.redeem_scripts_registered += 1;
+                        if spendability == StandaloneSpendability::WatchOnly {
+                            report.redeem_scripts_watch_only += 1;
+                        }
+                    }
                     // The wallet can only represent a subset of redeem scripts
                     // (e.g. multisig within the P2SH size limit); scripts it
                     // rejects remain recoverable from the document.
@@ -2204,6 +2255,132 @@ mod tests {
         assert_eq!(report.addresses_marked_exposed, 1);
         assert_eq!(report.addresses_not_recognized, 0);
         assert_eq!(report.addresses_never_exposed, 0);
+    }
+
+    /// Imported transparent pubkeys are marked spendable (their spending keys
+    /// were delivered and verified), and a multisig redeem script is marked
+    /// spendable only when every member pubkey's spending key was delivered.
+    #[test]
+    fn redeem_script_spendability_follows_member_keys() {
+        use rusqlite::named_params;
+        use zcash_script::{
+            descriptor::sh,
+            pattern::check_multisig,
+            script::{self, Evaluable as _},
+        };
+
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let held_keys: Vec<secp256k1::SecretKey> = [0x42u8, 0x43]
+            .into_iter()
+            .map(|b| secp256k1::SecretKey::from_slice(&[b; 32]).unwrap())
+            .collect();
+        let held_pubkeys: Vec<secp256k1::PublicKey> =
+            held_keys.iter().map(|sk| sk.public_key(&secp)).collect();
+        // A member key whose spending key is not delivered by the document.
+        let foreign_pubkey = secp256k1::SecretKey::from_slice(&[0x44; 32])
+            .unwrap()
+            .public_key(&secp);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        for (sk, pk) in held_keys.iter().zip(&held_pubkeys) {
+            let mut wif_payload = vec![0xEF];
+            wif_payload.extend_from_slice(&sk.secret_bytes());
+            wif_payload.push(0x01);
+            let wif = bs58::encode(wif_payload).with_check().into_string();
+            store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+                ::zewif::transparent::TransparentPubKey::from_bytes(pk.serialize().to_vec())
+                    .unwrap(),
+                ::zewif::transparent::TransparentSpendingKey::new(wif),
+            ));
+        }
+
+        let multisig = |members: &[&secp256k1::PublicKey]| -> script::Redeem {
+            let member_bytes: Vec<[u8; 33]> = members.iter().map(|pk| pk.serialize()).collect();
+            let member_refs: Vec<&[u8]> = member_bytes.iter().map(|b| &b[..]).collect();
+            script::Component(
+                check_multisig(1, &member_refs, false)
+                    .unwrap()
+                    .into_iter()
+                    .collect(),
+            )
+        };
+        let fully_held = multisig(&[&held_pubkeys[0], &held_pubkeys[1]]);
+        let partially_held = multisig(&[&held_pubkeys[0], &foreign_pubkey]);
+        let p2sh_address = |redeem: &script::Redeem| {
+            TransparentAddress::from_script_pubkey(&sh(redeem))
+                .unwrap()
+                .encode(&TEST_NETWORK)
+        };
+        let fully_held_addr = p2sh_address(&fully_held);
+        let partially_held_addr = p2sh_address(&partially_held);
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::TransparentAddressSet);
+        account.set_name("legacy");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account.set_key_source(::zewif::KeySource::Derived(::zewif::DerivedKeySource::new(
+            ::zewif::SeedFingerprint::new(ts.fingerprint_encoding.clone()),
+            0x7FFF_FFFF,
+            None,
+        )));
+        for pk in &held_pubkeys {
+            let mut taddr = ::zewif::transparent::Address::new(
+                TransparentAddress::from_pubkey(pk).encode(&TEST_NETWORK),
+            );
+            taddr.set_pubkey(
+                ::zewif::transparent::TransparentPubKey::from_bytes(pk.serialize().to_vec())
+                    .unwrap(),
+            );
+            account.add_address(::zewif::Address::new(
+                ::zewif::ProtocolAddress::Transparent(taddr),
+            ));
+        }
+        for (addr, redeem) in [
+            (&fully_held_addr, &fully_held),
+            (&partially_held_addr, &partially_held),
+        ] {
+            let mut taddr = ::zewif::transparent::Address::new(addr.clone());
+            taddr.set_redeem_script(::zewif::Script::from(::zewif::Data::from(
+                redeem.to_bytes(),
+            )));
+            account.add_address(::zewif::Address::new(
+                ::zewif::ProtocolAddress::Transparent(taddr),
+            ));
+        }
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(report.transparent_keys_registered, 2);
+        assert_eq!(report.redeem_scripts_registered, 2);
+        assert_eq!(report.redeem_scripts_watch_only, 1);
+        assert_eq!(report.redeem_scripts_not_representable, 0);
+
+        let spendable = |addr: &str| -> bool {
+            wdb.conn
+                .query_row(
+                    "SELECT standalone_spendable FROM addresses
+                     WHERE cached_transparent_receiver_address = :address",
+                    named_params![":address": addr],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        for pk in &held_pubkeys {
+            assert!(spendable(
+                &TransparentAddress::from_pubkey(pk).encode(&TEST_NETWORK)
+            ));
+        }
+        assert!(spendable(&fully_held_addr));
+        assert!(!spendable(&partially_held_addr));
     }
 
     /// An address recorded with no exposure height (for example a zcashd

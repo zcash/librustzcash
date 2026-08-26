@@ -155,6 +155,7 @@ migration_modules!(
     spend_key_available,
     standalone_address,
     standalone_p2sh,
+    standalone_spendability,
     support_legacy_sqlite,
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
@@ -274,8 +275,8 @@ pub(super) fn all_migrations<
     //                             |  add_transparent_receiver_address_index        \
     //                             |               |                                 \
     //                             |      standalone_address               ironwood_received_notes ----------------
-    //                             |                                        /         |          \                  \
-    //                             |                     ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
+    //                             |               |                        /         |          \                  \
+    //                             |  standalone_spendability  ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
     //                             |                             |          \         |
     //                             |                             |           \ v_address_uses_ironwood
     //                             |                             |            \
@@ -401,6 +402,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
+        Box::new(standalone_spendability::Migration),
     ]
 }
 

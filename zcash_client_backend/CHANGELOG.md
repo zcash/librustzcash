@@ -10,7 +10,43 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api`:
+  - `StandaloneSpendability`, the application's declaration of whether it can
+    sign for a standalone (imported) transparent address. The wallet stores at
+    most the pubkey or redeem script for such an address, so only the
+    application can know whether it holds the secret key(s).
+  - `Balance::watch_only_value` and `Balance::add_watch_only_value`: value
+    received by transparent addresses the wallet watches but cannot sign for
+    (address-only imports, and pubkey/script imports declared `WatchOnly`).
+  - `WalletWrite::set_standalone_transparent_spendability`, which revises the
+    declared spendability of a standalone import that has key material.
+- `zcash_client_backend::wallet::TransparentAddressSource::spendability`.
+
 ### Changed
+- `zcash_client_backend::data_api`:
+  - `WalletWrite::import_standalone_transparent_pubkey`,
+    `WalletWrite::import_standalone_transparent_pubkeys`, and
+    `WalletWrite::import_standalone_transparent_script` now take a
+    `StandaloneSpendability` argument. Outputs of imports declared `WatchOnly`
+    are excluded from the `InputSource` spendable-output queries and reported
+    under `Balance::watch_only_value`; previously every pubkey or script import
+    was offered as spendable. A re-import may promote an address from
+    `WatchOnly` to `Spendable` but never downgrades it.
+  - `TransparentKeyOrigin::Imported` is now a struct variant carrying the
+    declared `spendability`.
+  - `Balance::total` now includes `Balance::watch_only_value`;
+    `Balance::spendable_value` never does. Value received by standalone
+    imports the wallet cannot sign for (including address-only imports) was
+    previously reported under `spendable_value` or
+    `value_pending_spendability`; it now moves to `watch_only_value`.
+- `zcash_client_backend::wallet`:
+  - `TransparentAddressSource::StandalonePubkey` and
+    `TransparentAddressSource::StandaloneScript` are now struct variants
+    (`{ pubkey, spendability }` and `{ redeem_script, spendability }`).
+  - `TransparentAddressMetadata::standalone_p2pkh` and
+    `TransparentAddressMetadata::standalone_script` now take a
+    `StandaloneSpendability` argument.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An

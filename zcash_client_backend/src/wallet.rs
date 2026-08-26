@@ -28,7 +28,10 @@ use crate::{TransferType, fees::sapling as sapling_fees};
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
+use {
+    crate::data_api::StandaloneSpendability, ::transparent::keys::NonHardenedChildIndex,
+    std::time::SystemTime,
+};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1043,11 +1046,15 @@ impl TransparentAddressMetadata {
     #[cfg(feature = "transparent-key-import")]
     pub fn standalone_p2pkh(
         pubkey: secp256k1::PublicKey,
+        spendability: StandaloneSpendability,
         exposure: Exposure,
         next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
-            source: TransparentAddressSource::StandalonePubkey(pubkey),
+            source: TransparentAddressSource::StandalonePubkey {
+                pubkey,
+                spendability,
+            },
             exposure,
             next_check_time,
         }
@@ -1058,11 +1065,15 @@ impl TransparentAddressMetadata {
     #[cfg(feature = "transparent-key-import")]
     pub fn standalone_script(
         redeem_script: script::Redeem,
+        spendability: StandaloneSpendability,
         exposure: Exposure,
         next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
-            source: TransparentAddressSource::StandaloneScript(redeem_script),
+            source: TransparentAddressSource::StandaloneScript {
+                redeem_script,
+                spendability,
+            },
             exposure,
             next_check_time,
         }
@@ -1151,13 +1162,28 @@ pub enum TransparentAddressSource {
     /// unknown or for which the associated spending key was produced from system randomness.
     /// This variant provides the public key directly.
     #[cfg(feature = "transparent-key-import")]
-    StandalonePubkey(secp256k1::PublicKey),
+    StandalonePubkey {
+        /// The public key from which the P2PKH address was derived.
+        pubkey: secp256k1::PublicKey,
+        /// The application's declaration of whether it can sign for the address. This does
+        /// not affect transaction construction: a secret key explicitly supplied for the
+        /// address in `SpendingKeys::standalone_transparent_keys` is used to sign regardless.
+        spendability: StandaloneSpendability,
+    },
 
     /// The address was derived from a P2SH redeem_script for which derivation information is
     /// unknown.
     /// This variant provides the redeem script directly.
     #[cfg(feature = "transparent-key-import")]
-    StandaloneScript(script::Redeem),
+    StandaloneScript {
+        /// The redeem script from which the P2SH address was derived.
+        redeem_script: script::Redeem,
+        /// The application's declaration of whether it holds enough member keys to sign for
+        /// the address. This does not affect transaction construction: secret keys explicitly
+        /// supplied for the address in `SpendingKeys::standalone_transparent_keys` are used to
+        /// sign regardless.
+        spendability: StandaloneSpendability,
+    },
 
     /// The address was imported as a bare transparent address, without any associated key
     /// material. The wallet watches for outputs received by the address, but holds neither
@@ -1175,9 +1201,9 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { scope, .. } => Some(*scope),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandalonePubkey(_) => None,
+            TransparentAddressSource::StandalonePubkey { .. } => None,
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandaloneScript(_) => None,
+            TransparentAddressSource::StandaloneScript { .. } => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneAddress => None,
         }
@@ -1189,9 +1215,9 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { address_index, .. } => Some(*address_index),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandalonePubkey(_) => None,
+            TransparentAddressSource::StandalonePubkey { .. } => None,
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandaloneScript(_) => None,
+            TransparentAddressSource::StandaloneScript { .. } => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneAddress => None,
         }
@@ -1204,11 +1230,30 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { .. } => None,
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandalonePubkey(_) => None,
+            TransparentAddressSource::StandalonePubkey { .. } => None,
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandaloneScript(redeem_script) => Some(redeem_script),
+            TransparentAddressSource::StandaloneScript { redeem_script, .. } => Some(redeem_script),
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneAddress => None,
+        }
+    }
+
+    /// Returns the application's declaration of whether it can sign for the address, if this
+    /// is a standalone (imported) address.
+    ///
+    /// Returns `None` for HD-derived addresses, which are always spendable with the account's
+    /// spending key, and `Some(StandaloneSpendability::WatchOnly)` for an address imported
+    /// without key material.
+    pub fn spendability(&self) -> Option<StandaloneSpendability> {
+        match self {
+            TransparentAddressSource::Derived { .. } => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandalonePubkey { spendability, .. }
+            | TransparentAddressSource::StandaloneScript { spendability, .. } => {
+                Some(*spendability)
+            }
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneAddress => Some(StandaloneSpendability::WatchOnly),
         }
     }
 }

@@ -249,7 +249,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't service transaction data requests in migrations")
         }
         #[cfg(feature = "transparent-key-import")]
-        SqliteClientError::StandaloneImportConflict(_) => {
+        SqliteClientError::StandaloneImportConflict(_)
+        | SqliteClientError::NotStandaloneKeyImport(_) => {
             unreachable!("we do not import standalone transparent addresses in migrations")
         }
         #[cfg(feature = "orchard")]

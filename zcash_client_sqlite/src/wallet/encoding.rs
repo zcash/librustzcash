@@ -19,7 +19,7 @@ use {
     super::transparent::SchedulingError,
     std::time::{Duration, SystemTime},
     transparent::keys::TransparentKeyScope,
-    zcash_client_backend::data_api::TransparentKeyOrigin,
+    zcash_client_backend::data_api::{StandaloneSpendability, TransparentKeyOrigin},
     zcash_keys::keys::AddressGenerationError,
 };
 
@@ -164,8 +164,12 @@ impl KeyScope {
         }
     }
 
+    /// Returns the [`TransparentKeyOrigin`] of an address row with this key scope.
+    ///
+    /// `standalone_spendable` is the row's `standalone_spendable` marker; it is only meaningful
+    /// for (and only ever set on) [`KeyScope::Foreign`] rows, and is ignored otherwise.
     #[cfg(feature = "transparent-inputs")]
-    pub(crate) fn as_key_origin(&self) -> TransparentKeyOrigin {
+    pub(crate) fn as_key_origin(&self, standalone_spendable: bool) -> TransparentKeyOrigin {
         match self {
             KeyScope::Zip32(scope) => TransparentKeyOrigin::Derived {
                 scope: TransparentKeyScope::from(*scope),
@@ -173,8 +177,29 @@ impl KeyScope {
             KeyScope::Ephemeral => TransparentKeyOrigin::Derived {
                 scope: TransparentKeyScope::custom(2).expect("valid scope"),
             },
-            KeyScope::Foreign => TransparentKeyOrigin::Imported,
+            KeyScope::Foreign => TransparentKeyOrigin::Imported {
+                spendability: decode_standalone_spendability(standalone_spendable),
+            },
         }
+    }
+}
+
+/// Encodes a [`StandaloneSpendability`] as the `addresses.standalone_spendable` column value.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn encode_standalone_spendability(spendability: StandaloneSpendability) -> bool {
+    match spendability {
+        StandaloneSpendability::WatchOnly => false,
+        StandaloneSpendability::Spendable => true,
+    }
+}
+
+/// Decodes the `addresses.standalone_spendable` column value as a [`StandaloneSpendability`].
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn decode_standalone_spendability(standalone_spendable: bool) -> StandaloneSpendability {
+    if standalone_spendable {
+        StandaloneSpendability::Spendable
+    } else {
+        StandaloneSpendability::WatchOnly
     }
 }
 
