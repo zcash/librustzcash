@@ -37,6 +37,14 @@ workspace.
   transparent spend detection. Transparent outputs detected by
   `zcash_client_backend::scanning::full::scan_block` were previously discarded
   when the scanned blocks were persisted.
+- The `v_transactions` and `v_transactions_with_pending_migrations` views no
+  longer multiply a sending account's row by the number of distinct groups the
+  transaction's outputs were received into, where a group is an account of the
+  wallet and the outputs no account of the wallet received form one further
+  group. `account_balance_delta`, `total_spent`, `total_received`,
+  `received_note_count`, `spent_note_count`, and the received-note contribution
+  to `memo_count` were each scaled by that count; `sent_note_count` reported
+  the notes of the largest single group instead of all of them.
 
 ## [0.22.0] - 2026-08-18
 
