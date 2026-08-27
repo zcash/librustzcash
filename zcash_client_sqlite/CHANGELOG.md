@@ -30,6 +30,10 @@ workspace.
   query naming it failed with "no such column".
 
 ### Changed
+- `SqliteClientError` has a new variant `DivergedCheckpoints { pool, height }`.
+  When a pool's note commitment tree has checkpoints above and below the
+  truncation height but none at it, truncating or rewinding the wallet now
+  fails with this variant instead of `SqliteClientError::CorruptedData`.
 - `zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`
   takes an additional `rng` first argument that implements `rand_core::{Rng, CryptoRng}`.
 - Migrated to `bip32 0.6`, `group 0.14`, `incrementalmerkletree 0.9`,

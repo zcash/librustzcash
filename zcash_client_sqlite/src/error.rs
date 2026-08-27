@@ -45,6 +45,15 @@ pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
 
+    /// A note commitment tree retains checkpoints both above and below a requested truncation
+    /// height, but has no checkpoint at that height.
+    DivergedCheckpoints {
+        /// The shielded pool whose note commitment tree has diverged checkpoints.
+        pool: ShieldedPool,
+        /// The requested truncation height missing from the tree's checkpoints.
+        height: BlockHeight,
+    },
+
     /// An error occurred decoding a protobuf message.
     Protobuf(prost::DecodeError),
 
@@ -321,6 +330,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::CorruptedData(reason) => {
                 write!(f, "Data DB is corrupted: {reason}")
             }
+            SqliteClientError::DivergedCheckpoints { pool, height } => write!(
+                f,
+                "Data DB is corrupted: the {pool:?} note commitment tree retains checkpoints both above and below height {height}, but none at that height to truncate to"
+            ),
             SqliteClientError::Protobuf(e) => {
                 write!(f, "Failed to parse protobuf-encoded record: {e}")
             }
