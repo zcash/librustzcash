@@ -11,6 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `SqliteClientError::DivergedCheckpoints`, which exposes the divergent shielded pool and the
+  requested truncation height missing from its note commitment tree checkpoints.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
