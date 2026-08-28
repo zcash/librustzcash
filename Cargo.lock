@@ -7169,6 +7169,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "rayon",
+ "redjubjub",
  "rust_decimal",
  "sapling-crypto",
  "secp256k1",
