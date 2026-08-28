@@ -436,24 +436,27 @@ impl AccountPubKey {
     /// Derives the internal ovk and external ovk corresponding to this
     /// transparent fvk. As specified in [ZIP 316][transparent-ovk].
     ///
+    /// A wallet uses these both to encrypt the outgoing ciphertexts of a transaction that spends
+    /// transparent funds, and to recover the outgoing ciphertexts of such a transaction.
+    ///
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
-    pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
+    pub fn ovks_for_shielding(&self) -> ShieldingOvks {
         let i_ovk = PrfExpand::TRANSPARENT_ZIP316_OVK
             .with(&self.0.attrs().chain_code, &self.0.public_key().serialize());
         let ovk_external = ExternalOvk(i_ovk[..32].try_into().unwrap());
         let ovk_internal = InternalOvk(i_ovk[32..].try_into().unwrap());
 
-        (ovk_internal, ovk_external)
+        ShieldingOvks::new(ovk_internal, ovk_external)
     }
 
     /// Derives the internal ovk corresponding to this transparent fvk.
     pub fn internal_ovk(&self) -> InternalOvk {
-        self.ovks_for_shielding().0
+        self.ovks_for_shielding().internal
     }
 
     /// Derives the external ovk corresponding to this transparent fvk.
     pub fn external_ovk(&self) -> ExternalOvk {
-        self.ovks_for_shielding().1
+        self.ovks_for_shielding().external
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -688,6 +691,41 @@ impl ExternalOvk {
     }
 }
 
+/// The pair of outgoing viewing keys derived from a transparent full viewing key, as specified in
+/// [ZIP 316][transparent-ovk].
+///
+/// The two keys are distinct types, but a consumer reaches [`InternalOvk::as_bytes`] or
+/// [`ExternalOvk::as_bytes`] almost immediately, and past that point the scope of a key is carried
+/// only by the position it was read from. [`Self::internal`] and [`Self::external`] name the scope
+/// at that boundary, so that binding a key to the wrong scope is a visible mistake rather than a
+/// transposition.
+///
+/// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
+#[derive(Debug)]
+pub struct ShieldingOvks {
+    internal: InternalOvk,
+    external: ExternalOvk,
+}
+
+impl ShieldingOvks {
+    /// Constructs the pair from its two scopes.
+    pub fn new(internal: InternalOvk, external: ExternalOvk) -> Self {
+        Self { internal, external }
+    }
+
+    /// Returns the outgoing viewing key for the internal scope, which a wallet uses for the
+    /// outputs it sends to itself.
+    pub fn internal(&self) -> &InternalOvk {
+        &self.internal
+    }
+
+    /// Returns the outgoing viewing key for the external scope, which a wallet uses for the
+    /// outputs it sends to other recipients.
+    pub fn external(&self) -> &ExternalOvk {
+        &self.external
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bip32::ChildNumber;
@@ -791,9 +829,9 @@ mod tests {
             key_bytes[32..].copy_from_slice(&tv.pk);
             assert_eq!(account_pubkey.serialize(), key_bytes);
 
-            let (internal_ovk, external_ovk) = account_pubkey.ovks_for_shielding();
-            assert_eq!(internal_ovk.as_bytes(), tv.internal_ovk);
-            assert_eq!(external_ovk.as_bytes(), tv.external_ovk);
+            let shielding_ovks = account_pubkey.ovks_for_shielding();
+            assert_eq!(shielding_ovks.internal().as_bytes(), tv.internal_ovk);
+            assert_eq!(shielding_ovks.external().as_bytes(), tv.external_ovk);
 
             // The test vectors are broken here: they should be deriving an address at the
             // address level, but instead use the account pubkey as an address.
@@ -816,10 +854,10 @@ mod tests {
             key_bytes[32..].copy_from_slice(&tv.pk);
             let account_key = AccountPubKey::deserialize(&key_bytes).unwrap();
 
-            let (internal, external) = account_key.ovks_for_shielding();
+            let shielding_ovks = account_key.ovks_for_shielding();
 
-            assert_eq!(tv.internal_ovk, internal.as_bytes());
-            assert_eq!(tv.external_ovk, external.as_bytes());
+            assert_eq!(tv.internal_ovk, shielding_ovks.internal().as_bytes());
+            assert_eq!(tv.external_ovk, shielding_ovks.external().as_bytes());
         }
     }
 
@@ -901,8 +939,10 @@ mod tests {
         let ephemeral_ivk = account_pubkey.derive_ephemeral_ivk().unwrap();
         assert_eq!(format!("{ephemeral_ivk:?}"), "EphemeralIvk(\"...\")");
 
-        let (internal_ovk, external_ovk) = account_pubkey.ovks_for_shielding();
-        assert_eq!(format!("{internal_ovk:?}"), "InternalOvk(\"...\")");
-        assert_eq!(format!("{external_ovk:?}"), "ExternalOvk(\"...\")");
+        let shielding_ovks = account_pubkey.ovks_for_shielding();
+        assert_eq!(
+            format!("{shielding_ovks:?}"),
+            "ShieldingOvks { internal: InternalOvk(\"...\"), external: ExternalOvk(\"...\") }"
+        );
     }
 }

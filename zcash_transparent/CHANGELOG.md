@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::keys::ShieldingOvks`
+
+### Changed
+- `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns
+  `ShieldingOvks` instead of `(InternalOvk, ExternalOvk)`. Read each key from
+  `ShieldingOvks::internal` or `ShieldingOvks::external` instead of by tuple
+  position.
+
 ## [0.10.0] - 2026-07-23
 
 ### Changed

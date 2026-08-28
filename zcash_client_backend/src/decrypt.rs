@@ -146,9 +146,9 @@ fn candidate_ovks(ufvk: &UnifiedFullViewingKey) -> Vec<OutgoingViewingKey> {
 
     #[cfg(feature = "transparent-inputs")]
     if let Some(pubkey) = ufvk.transparent() {
-        let (internal, external) = pubkey.ovks_for_shielding();
-        ovks.push(external.as_bytes().into());
-        ovks.push(internal.as_bytes().into());
+        let shielding_ovks = pubkey.ovks_for_shielding();
+        ovks.push(shielding_ovks.external().as_bytes().into());
+        ovks.push(shielding_ovks.internal().as_bytes().into());
     }
 
     ovks
@@ -441,15 +441,26 @@ mod tests {
         #[cfg(feature = "transparent-inputs")]
         {
             let tfvk = ufvk.transparent().expect("UFVK has a transparent item");
-            let (internal, external) = tfvk.ovks_for_shielding();
-            // `ovks_for_shielding` returns the pair in (internal, external) order, and both halves
-            // become raw bytes as soon as they are used, so only this destructure records which is
-            // which. Pin each half against the accessor that names it, so that a swap here cannot
-            // pass by relabelling both ends consistently.
-            assert_eq!(external.as_bytes(), tfvk.external_ovk().as_bytes());
-            assert_eq!(internal.as_bytes(), tfvk.internal_ovk().as_bytes());
-            ovks.push(("transparent external", external.as_bytes().into()));
-            ovks.push(("transparent internal", internal.as_bytes().into()));
+            let shielding_ovks = tfvk.ovks_for_shielding();
+            // Both halves of the pair become raw bytes as soon as they are used, so pin each half
+            // against the accessor that names its scope: a key bound to the wrong scope here
+            // cannot pass by relabelling both ends consistently.
+            assert_eq!(
+                shielding_ovks.external().as_bytes(),
+                tfvk.external_ovk().as_bytes()
+            );
+            assert_eq!(
+                shielding_ovks.internal().as_bytes(),
+                tfvk.internal_ovk().as_bytes()
+            );
+            ovks.push((
+                "transparent external",
+                shielding_ovks.external().as_bytes().into(),
+            ));
+            ovks.push((
+                "transparent internal",
+                shielding_ovks.internal().as_bytes().into(),
+            ));
         }
 
         ovks
