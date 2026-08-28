@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- Experimental support for creating and extracting V7 PCZTs under NuTachyon,
+  behind `zcash_unstable="nutachyon"`, using the V6 transaction body.
+
 ## [0.9.3] - 2026-08-07
 
 ### Added

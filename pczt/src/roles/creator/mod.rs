@@ -23,6 +23,8 @@ use {
 #[cfg(feature = "orchard")]
 use crate::orchard::bundle_version_for_revision;
 
+#[cfg(zcash_unstable = "nutachyon")]
+use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 use zcash_protocol::{
     consensus::BranchId,
     constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
@@ -88,7 +90,7 @@ impl Creator {
     /// The transaction version is implied by the consensus branch ID: the v6
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
     /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
-    /// [`Option::Some`]. For v6 transactions, either anchor may be
+    /// [`Option::Some`]. For V6 and later transactions, either anchor may be
     /// [`Option::None`] and restored later.
     ///
     /// # Errors
@@ -121,6 +123,8 @@ impl Creator {
             BranchId::Nu6_3 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
         };
 
         Ok(Self {
@@ -187,7 +191,13 @@ impl Creator {
     /// the consensus branch ID passed to [`Creator::new`] does not carry an Ironwood
     /// bundle.
     pub fn with_ironwood_anchor(mut self, ironwood_anchor: [u8; 32]) -> Result<Self, Error> {
-        if self.tx_version != V6_TX_VERSION {
+        let supports_ironwood = match self.tx_version {
+            V6_TX_VERSION => true,
+            #[cfg(zcash_unstable = "nutachyon")]
+            V7_TX_VERSION => true,
+            _ => false,
+        };
+        if !supports_ironwood {
             return Err(Error::IronwoodNotSupported);
         }
         self.ironwood_anchor = Some(ironwood_anchor);
@@ -295,6 +305,8 @@ impl Creator {
             zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
+            #[cfg(zcash_unstable = "nutachyon")]
+            zcash_primitives::transaction::TxVersion::V7 => Some(V7_TX_VERSION),
         }?;
 
         // Spends and outputs not modifiable.
@@ -341,6 +353,8 @@ impl Creator {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(zcash_unstable = "nutachyon")]
+    use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
     use zcash_protocol::{
         consensus::BranchId,
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
@@ -375,6 +389,22 @@ mod tests {
         .unwrap();
         assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V6_VERSION_GROUP_ID);
+
+        #[cfg(zcash_unstable = "nutachyon")]
+        {
+            let pczt = Creator::new(
+                BranchId::NuTachyon.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            assert_eq!(pczt.global.tx_version, V7_TX_VERSION);
+            assert_eq!(pczt.global.version_group_id, V7_VERSION_GROUP_ID);
+        }
     }
 
     #[test]
