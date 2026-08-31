@@ -9,10 +9,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::transparent::gap_limits::ReconcileOutcome`
+
 ### Changed
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set should disable default features and enable
   only the features they need.
+- `zcash_keys::keys::transparent::gap_limits::AddressStore` has a new required
+  method, `reconcile_stored_addresses`, which has no default implementation.
+- `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses` derives
+  successive windows of addresses until a window reconciles without moving the
+  account's gap, rather than deriving a single window.
 
 ## [0.16.1] - 2026-07-28
 

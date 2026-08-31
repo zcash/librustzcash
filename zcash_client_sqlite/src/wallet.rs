@@ -162,7 +162,10 @@ use {
     ReceiverRequirement::*,
     rusqlite::types::Value,
     std::rc::Rc,
-    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
+    zcash_client_backend::{
+        data_api::DecryptedTransaction,
+        wallet::{WalletTransparentOutput, transparent_address_observations},
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -180,6 +183,7 @@ use {
     zcash_script::{descriptor::sh, script::Evaluable},
 };
 
+pub(crate) mod attribution;
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
@@ -708,6 +712,19 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     }
 
+    // Check every address the wallet now holds against transparent involvement it observed
+    // before this account existed. The gap generation above reconciles the windows it derives,
+    // but the addresses pre-generated below the default address index are outside any such
+    // window, and an account added to a wallet with existing history is exactly the case in
+    // which those addresses may already have been paid.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::reconcile_and_extend_gaps(
+        conn,
+        params,
+        gap_limits,
+        transparent::observations::ReconcileScope::AllAddresses,
+    )?;
+
     Ok(account)
 }
 
@@ -861,6 +878,7 @@ fn standalone_address_only_row(
 pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     address: ::transparent::address::TransparentAddress,
 ) -> Result<usize, SqliteClientError> {
@@ -928,9 +946,28 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
         ],
     )?;
 
+    reconcile_imported_receivers(conn, params, gap_limits, &[address])?;
+
     // The account is known (resolved above) and the receiver is not already recorded (checked
     // above), so exactly one row is inserted.
     Ok(rows_affected)
+}
+
+/// Checks receivers that have just been imported against transparent involvement the wallet
+/// already observed, so that a transaction naming one of them is recognized on import.
+#[cfg(feature = "transparent-key-import")]
+fn reconcile_imported_receivers<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    gap_limits: &GapLimits,
+    addresses: &[::transparent::address::TransparentAddress],
+) -> Result<(), SqliteClientError> {
+    transparent::reconcile_and_extend_gaps(
+        conn,
+        params,
+        gap_limits,
+        transparent::observations::ReconcileScope::Addresses(addresses),
+    )
 }
 
 /// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
@@ -941,13 +978,22 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
 ) -> Result<usize, SqliteClientError> {
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
-    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+    let inserted =
+        import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)?;
+    reconcile_imported_receivers(
+        conn,
+        params,
+        gap_limits,
+        &[TransparentAddress::from_pubkey(&pubkey)],
+    )?;
+    Ok(inserted)
 }
 
 /// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
@@ -957,6 +1003,7 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     pubkeys: &[secp256k1::PublicKey],
 ) -> Result<usize, SqliteClientError> {
@@ -971,6 +1018,15 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
             *pubkey,
         )?;
     }
+
+    // Reconciled once for the whole batch: the check is keyed by address, so a batch costs one
+    // pass over the receivers rather than one pass per receiver.
+    let addresses = pubkeys
+        .iter()
+        .map(TransparentAddress::from_pubkey)
+        .collect::<Vec<_>>();
+    reconcile_imported_receivers(conn, params, gap_limits, &addresses)?;
+
     Ok(inserted)
 }
 
@@ -1067,6 +1123,7 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     redeem_script: zcash_script::script::Redeem,
 ) -> Result<(), SqliteClientError> {
@@ -1141,6 +1198,7 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
                 ":id": row_id,
             ],
         )?;
+        reconcile_imported_receivers(conn, params, gap_limits, &[addr])?;
         return Ok(());
     }
 
@@ -1163,6 +1221,8 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
             ":imported_transparent_receiver_script": &rs_bytes[..]
         ],
     )?;
+
+    reconcile_imported_receivers(conn, params, gap_limits, &[addr])?;
 
     Ok(())
 }
@@ -3693,6 +3753,19 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         sent_tx.target_height().into(),
     )?;
 
+    // The wallet created this transaction, so it involves the wallet and its complete data is in
+    // hand: both involvement directions are recorded, as for any other transaction the wallet
+    // stores. An output paying an address of this wallet that no account has derived yet — the
+    // middle hop of a ZIP 320 pair, or an address beyond another account's gap — is recognized
+    // when that address is derived.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::observations::put_observations(
+        conn,
+        params,
+        tx_ref,
+        &transparent_address_observations(sent_tx.tx()),
+    )?;
+
     let mut detectable_via_scanning = false;
 
     // Mark notes as spent.
@@ -3788,6 +3861,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             ),
                             sent_tx.target_height().into(),
                             true,
+                            transparent::GapAdvance::Immediate,
                         )?;
                     }
                 }
@@ -3884,6 +3958,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     .expect("can extract a recipient address from an ephemeral address script"),
                     sent_tx.target_height().into(),
                     true,
+                    transparent::GapAdvance::Immediate,
                 )?;
             }
             #[cfg(feature = "transparent-inputs")]
@@ -3910,6 +3985,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     .expect("can extract a recipient address from a transparent recipient_address"),
                     sent_tx.target_height().into(),
                     true,
+                    transparent::GapAdvance::Immediate,
                 )?;
             }
         }
@@ -5909,6 +5985,8 @@ pub(crate) fn query_transparent_spend_locator_map(
             index,
             vec![],
             vec![],
+            #[cfg(feature = "transparent-inputs")]
+            vec![],
             vec![],
             vec![],
             #[cfg(feature = "orchard")]
@@ -5969,6 +6047,8 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             txid,
             index,
             vec![],
+            vec![],
+            #[cfg(feature = "transparent-inputs")]
             vec![],
             vec![],
             vec![],

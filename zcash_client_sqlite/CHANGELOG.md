@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- Schema: a migration adds the `transparent_tx_address_observations` table,
+  which records every transparent address named by a wallet-involved
+  transaction, in both involvement directions, and populates it from every
+  transaction for which complete data is already stored.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
@@ -57,6 +61,50 @@ workspace.
   wallet's transparent outputs, for both compact and full blocks. A spend
   observed before the block that created the spent output has been scanned is
   resolved when that output is discovered.
+- A transaction the wallet stores that names a transparent address the wallet
+  did not control at the time is recognized when an address covering it is
+  added afterwards, by account creation or import, by
+  `WalletWrite::import_standalone_transparent_{address, pubkey, pubkeys,
+  script}`, or by gap-limit advancement. Recognition records the received
+  output and any spend of it, marks the address used and advances the gap,
+  watches the output for a spend, requests the transactions that funded the
+  containing transaction, and sets the fee of any transaction whose fee the
+  recovered output completes. A transaction that only spends from the wallet is
+  recognized through the address its `scriptSig` reveals. The migration that
+  adds the index applies this to a wallet's entire stored history.
+- Recognizing involvement mined below an account's birthday lowers that
+  birthday to the height of the earliest such involvement, clears the account's
+  recorded birthday note commitment tree sizes, and queues the widened range
+  (from Sapling activation upward) for scanning at `ScanPriority::Historic`,
+  re-queueing any part of it that had already been scanned or ignored. No
+  `ScanPriority::Ignored` range is left between the new birthday and the
+  previous one: an ignored range that reaches above the previous birthday is
+  queued in full, so `WalletRead::suggest_scan_ranges` offers all of it.
+- When a spend of a wallet transparent output is linked to a transaction the
+  wallet already stores, each transparent output of that transaction now
+  receives a record of the account that funded it and the recipient it paid:
+  `v_tx_outputs` reports a `from_account_uuid` for it, and `v_received_outputs`
+  reports a `sent_note_id`. Such a record was previously written only when the
+  funding account was known at the moment the transaction was stored. Outputs
+  that already carry a recorded recipient are left unchanged.
+- A migration writes the funding-account record for every stored transaction an
+  existing wallet already treats as spending anything it received, in any pool.
+  On a wallet upgraded before that record existed, those transactions' outputs
+  are no longer reported as receipts from an unknown sender.
+- The funding-account record now covers a transaction's shielded outputs as
+  well as its transparent ones, in every pool, recovered by decrypting the
+  stored transaction under the viewing keys the wallet holds. A transaction
+  shielding transparent funds into another account of the same wallet
+  previously reported its shielded output — the principal one — with a NULL
+  `from_account_uuid` and a NULL `sent_note_id`. An output no held key can
+  decrypt still records nothing, as it does when the transaction is first
+  stored. The repair migration applies this to existing wallets.
+- Linking a spend of a wallet shielded note to a transaction the wallet already
+  stores now writes the funding-account record too. Only transparent spends
+  triggered it before. A transaction funded from a shielded note — Sapling,
+  Orchard or Ironwood — whose nullifier was linked after its data was stored
+  therefore reported a NULL `from_account_uuid` for the payment it made to
+  another account of the same wallet, while its change carried one.
 
 ## [0.22.0] - 2026-08-18
 

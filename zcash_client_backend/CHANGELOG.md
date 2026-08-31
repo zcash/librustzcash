@@ -23,8 +23,38 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
   `TxOut::to_txout` (behind `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentAddressObservation` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentInvolvement` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::transparent_address_observations` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTx::transparent_address_observations`
+  (behind `transparent-inputs`)
+- `zcash_client_backend::data_api::ll::wallet::detect_wallet_transparent_outputs`
+- `zcash_client_backend::data_api::ll::wallet::transparent_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::shielded_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::SentOutput`
 
 ### Changed
+- `zcash_client_backend::data_api::ll::wallet::{put_blocks, put_blocks_rows}`
+  take the network parameters as a new second argument, and gain a
+  corresponding `P: consensus::Parameters` type parameter after `DbT`. Pass the
+  parameters your store was constructed with; a call that names the type
+  parameters explicitly gains one (`put_blocks::<_, _, SE, TE>`).
+- `zcash_client_backend::data_api::ll::wallet::store_decrypted_tx`, built without
+  the `transparent-inputs` feature, now resolves the `recipient_address` of the
+  `Recipient::External` it passes to
+  `LowLevelWalletWrite::put_sent_output` for a transparent output through
+  `LowLevelWalletRead::select_receiving_address`, as it already did with that
+  feature enabled; it previously always used the bare transparent address. A
+  store may therefore record a unified address where it previously recorded a
+  transparent one.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`,
+  `put_transparent_address_observations`. Implement it by recording each
+  supplied observation as an idempotent upsert keyed by the transaction, the
+  involvement direction, and the item index.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
@@ -40,7 +70,8 @@ workspace.
   disabled the argument is absent, and the unconstrained error type must be
   named at the call site (`scan_block::<_, _, _, Infallible>(..)`).
 - `zcash_client_backend::wallet::WalletTx::new` takes a `transparent_spends`
-  argument before `transparent_outputs`.
+  argument before `transparent_outputs`, and, behind `transparent-inputs`, a
+  `transparent_address_observations` argument after it.
 - `zcash_client_backend::scanning::Nullifiers` is renamed to `SpendIdentifiers`,
   and additionally tracks the outpoints of the wallet's unspent transparent
   outputs; `SpendIdentifiers::unspent` populates them and

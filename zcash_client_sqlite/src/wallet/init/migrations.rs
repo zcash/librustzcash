@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    repair_funding_attribution,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -160,6 +161,7 @@ migration_modules!(
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
     transparent_spend_locator_map,
+    transparent_tx_address_observations,
     tree_retained_checkpoints,
     tx_observation_height,
     tx_retrieval_queue,
@@ -405,7 +407,24 @@ pub(super) fn all_migrations<
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
         Box::new(fix_v_transactions_multi_account_totals::Migration),
+        Box::new(transparent_tx_address_observations::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(repair_funding_attribution::Migration {
+            params: params.clone(),
+        }),
     ]
+}
+
+/// Constructs the attribution repair migration, for tests that drive it directly.
+#[cfg(test)]
+pub(crate) fn repair_funding_attribution_migration<P>(
+    params: P,
+) -> impl RusqliteMigration<Error = WalletMigrationError>
+where
+    P: consensus::Parameters,
+{
+    repair_funding_attribution::Migration { params }
 }
 
 /// All states of the migration DAG that have been exposed in a public crate release, in
