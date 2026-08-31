@@ -1416,12 +1416,33 @@ pub(super) fn view_migration_transactions() -> String {
 /// time, or raw bytes; `account_balance_delta` is minus the transaction's fee, every real output
 /// being internal to the account). `v_transactions` itself is unchanged; a consumer opts into
 /// the merged feed by reading this view instead.
+///
+/// Every column reference names its source table, CTE, or subquery alias. SQLite resolves a
+/// bare name against the input columns before the output aliases, so a bare name can bind a
+/// joined table's column of the same name instead of the projection it appears to repeat.
 pub(super) const VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS: &str = "
 CREATE VIEW v_transactions_with_pending_migrations AS
-SELECT account_uuid, mined_height, txid, tx_index, expiry_height, raw, account_balance_delta,
-       total_spent, total_received, fee_paid, has_change, sent_note_count, received_note_count,
-       memo_count, block_time, expired_unmined, spent_note_count, is_shielding,
-       pool_crossing_value, trust_status, zip318_kind
+SELECT v_transactions.account_uuid           AS account_uuid,
+       v_transactions.mined_height           AS mined_height,
+       v_transactions.txid                   AS txid,
+       v_transactions.tx_index               AS tx_index,
+       v_transactions.expiry_height          AS expiry_height,
+       v_transactions.raw                    AS raw,
+       v_transactions.account_balance_delta  AS account_balance_delta,
+       v_transactions.total_spent            AS total_spent,
+       v_transactions.total_received         AS total_received,
+       v_transactions.fee_paid               AS fee_paid,
+       v_transactions.has_change             AS has_change,
+       v_transactions.sent_note_count        AS sent_note_count,
+       v_transactions.received_note_count    AS received_note_count,
+       v_transactions.memo_count             AS memo_count,
+       v_transactions.block_time             AS block_time,
+       v_transactions.expired_unmined        AS expired_unmined,
+       v_transactions.spent_note_count       AS spent_note_count,
+       v_transactions.is_shielding           AS is_shielding,
+       v_transactions.pool_crossing_value    AS pool_crossing_value,
+       v_transactions.trust_status           AS trust_status,
+       v_transactions.zip318_kind            AS zip318_kind
 FROM v_transactions
 UNION ALL
 SELECT vmt.account_uuid          AS account_uuid,
@@ -1448,6 +1469,12 @@ SELECT vmt.account_uuid          AS account_uuid,
        vmt.zip318_kind           AS zip318_kind
 FROM v_migration_transactions vmt";
 
+/// The history of transactions that affect the balance of each account in the wallet. The parent
+/// module's documentation describes the columns.
+///
+/// Every column reference names its source table, CTE, or subquery alias. SQLite resolves a
+/// bare name against the input columns before the output aliases, so a bare name can bind a
+/// joined table's column of the same name instead of the projection it appears to repeat.
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS
 WITH
@@ -1456,7 +1483,7 @@ notes AS (
     SELECT ro.account_id              AS account_id,
            ro.transaction_id          AS transaction_id,
            ro.pool                    AS pool,
-           id_within_pool_table,
+           ro.id_within_pool_table    AS id_within_pool_table,
            ro.value                   AS value,
            ro.value                   AS received_value,
            0                          AS spent_value,
@@ -1486,7 +1513,7 @@ notes AS (
     SELECT ro.account_id              AS account_id,
            ros.transaction_id         AS transaction_id,
            ro.pool                    AS pool,
-           id_within_pool_table,
+           ro.id_within_pool_table    AS id_within_pool_table,
            -ro.value                  AS value,
            0                          AS received_value,
            ro.value                   AS spent_value,
@@ -1509,12 +1536,14 @@ notes AS (
 -- received value in but spent nothing from is a pool that value crossed into from
 -- elsewhere, which is what `pool_crossings` below is built on.
 notes_by_pool AS (
-    SELECT account_id, transaction_id, pool,
-           SUM(spent_note_count)                   AS spent_note_count,
-           SUM(received_count + change_note_count) AS received_note_count,
-           SUM(received_value)                     AS received_value
+    SELECT notes.account_id                                     AS account_id,
+           notes.transaction_id                                 AS transaction_id,
+           notes.pool                                           AS pool,
+           SUM(notes.spent_note_count)                          AS spent_note_count,
+           SUM(notes.received_count + notes.change_note_count)  AS received_note_count,
+           SUM(notes.received_value)                            AS received_value
     FROM notes
-    GROUP BY account_id, transaction_id, pool
+    GROUP BY notes.account_id, notes.transaction_id, notes.pool
 ),
 -- Obtain a count of the notes that the wallet created in each transaction,
 -- not counting change notes.
@@ -1532,7 +1561,10 @@ sent_note_counts AS (
     FROM sent_notes
     LEFT JOIN v_received_outputs ro ON sent_notes.id = ro.sent_note_id
     WHERE COALESCE(ro.is_change, 0) = 0
-    GROUP BY account_id, sent_notes.transaction_id
+    -- Group by the SENDING account. A bare `account_id` here binds `ro.account_id`, the
+    -- receiving account, because SQLite resolves a GROUP BY name against the input columns
+    -- before the output aliases.
+    GROUP BY sent_notes.from_account_id, sent_notes.transaction_id
 ),
 -- Identifies the transactions that are wallet-internal transfers moving an account's own
 -- funds between shielded pools, and reports the value that crossed. `crossing_value` is

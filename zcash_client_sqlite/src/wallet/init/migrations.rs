@@ -130,6 +130,7 @@ migration_modules!(
     fix_broken_commitment_trees,
     fix_transparent_received_outputs,
     fix_v_transactions_expired_unmined,
+    fix_v_transactions_multi_account_totals,
     full_account_ids,
     initial_setup,
     ironwood_pool_code_views,
@@ -401,6 +402,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
+        Box::new(fix_v_transactions_multi_account_totals::Migration),
     ]
 }
 

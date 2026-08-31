@@ -6089,27 +6089,33 @@ mod tests {
 
     use rusqlite::{Connection, named_params};
     use sapling::zip32::ExtendedSpendingKey;
-    use secrecy::{ExposeSecret, SecretVec};
+    use secrecy::{ExposeSecret, Secret, SecretVec};
     use uuid::Uuid;
-    use zcash_client_backend::data_api::{
-        Account as _, AccountSource, TransactionDataRequest, TransactionStatus, WalletRead,
-        WalletWrite,
-        chain::{ChainState, CommitmentTreeRoot},
-        error::RewindError,
-        testing::{
-            AddressType, DataStoreFactory, FakeCompactOutput, InitialChainState, TestBuilder,
-            TestState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    use zcash_client_backend::{
+        data_api::{
+            Account as _, AccountBirthday, AccountSource, TransactionDataRequest,
+            TransactionStatus, WalletRead, WalletTest, WalletWrite,
+            chain::{ChainState, CommitmentTreeRoot},
+            error::RewindError,
+            testing::{
+                AddressType, DataStoreFactory, FakeCompactOutput, InitialChainState, TestBuilder,
+                TestState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+                single_output_change_strategy,
+            },
+            wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
         },
-        wallet::ConfirmationsPolicy,
+        fees::StandardFeeRule,
+        wallet::OvkPolicy,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
         TxId,
         consensus::{BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters},
-        value::Zatoshis,
+        value::{ZatBalance, Zatoshis},
         zip318::{Zip318Classification, Zip318TxKind},
     };
+    use zip321::{Payment, TransactionRequest};
 
     use crate::{
         AccountUuid,
@@ -7858,5 +7864,131 @@ mod tests {
             put_zip318_classification(conn, TxRef(ABSENT), classification),
             Err(SqliteClientError::CorruptedData(_))
         );
+    }
+
+    /// A transaction's outputs may be received into several of the wallet's accounts, and into
+    /// none of them. The sending account's row in `v_transactions` must report what that account
+    /// actually spent and received, once, however many recipients the transaction has.
+    ///
+    /// Account 1 spends its single note to pay account 2, account 3, and an address outside the
+    /// wallet. The subquery that counts the notes the wallet created groups them, and grouping
+    /// them by the receiving account rather than the sending one emits one row per distinct
+    /// recipient account (outputs the wallet does not receive forming a group of their own); the
+    /// outer join then multiplies every aggregate of the sending account's row by the number of
+    /// those groups. Three groups make a threefold total, which no rounding or off-by-one can
+    /// account for.
+    #[test]
+    fn v_transactions_totals_do_not_scale_with_the_recipient_account_count() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
+
+        // Three accounts in one wallet, so that payments between them are payments the wallet
+        // sees both halves of.
+        let seed = Secret::new(vec![0u8; 32]);
+        let birthday = AccountBirthday::from_sapling_activation(st.network(), BlockHash([0; 32]));
+        let (account1, usk1) = st
+            .wallet_mut()
+            .create_account("account1", &seed, &birthday, None)
+            .unwrap();
+        let dfvk1 = SaplingPoolTester::sk_to_fvk(SaplingPoolTester::usk_to_sk(&usk1));
+        let (account2, usk2) = st
+            .wallet_mut()
+            .create_account("account2", &seed, &birthday, None)
+            .unwrap();
+        let dfvk2 = SaplingPoolTester::sk_to_fvk(SaplingPoolTester::usk_to_sk(&usk2));
+        let (account3, usk3) = st
+            .wallet_mut()
+            .create_account("account3", &seed, &birthday, None)
+            .unwrap();
+        let dfvk3 = SaplingPoolTester::sk_to_fvk(SaplingPoolTester::usk_to_sk(&usk3));
+
+        // Fund account 1 with exactly one note, so that the spent total the view reports is a
+        // value no arithmetic over several notes could coincidentally produce.
+        let note_value = Zatoshis::const_from_u64(200_000);
+        let (h, _, _) = st.generate_next_block(&dfvk1, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(h, 1);
+        assert_eq!(st.get_total_balance(account1), note_value);
+
+        // One transaction paying three recipients: two of the wallet's own accounts and one
+        // address the wallet does not hold. None of the three outputs is change, so all three
+        // survive into the sent-note subquery, in three distinct groups.
+        let to_account2 = Zatoshis::const_from_u64(20_000);
+        let to_account3 = Zatoshis::const_from_u64(30_000);
+        let to_external = Zatoshis::const_from_u64(40_000);
+        let external = SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&[0xf5; 32]));
+        let request = TransactionRequest::new(vec![
+            Payment::without_memo(
+                SaplingPoolTester::fvk_default_address(&dfvk2).to_zcash_address(st.network()),
+                to_account2,
+            ),
+            Payment::without_memo(
+                SaplingPoolTester::fvk_default_address(&dfvk3).to_zcash_address(st.network()),
+                to_account3,
+            ),
+            Payment::without_memo(external.to_zcash_address(st.network()), to_external),
+        ])
+        .unwrap();
+
+        let change_strategy = single_output_change_strategy(
+            StandardFeeRule::Zip317,
+            None,
+            SaplingPoolTester::SHIELDED_PROTOCOL,
+        );
+        let input_selector = GreedyInputSelector::new();
+        let txid = st
+            .spend(
+                &input_selector,
+                &change_strategy,
+                &usk1,
+                request,
+                OvkPolicy::Sender,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap()[0];
+
+        let (h, _) = st.generate_next_block_including(txid);
+        st.scan_cached_blocks(h, 1);
+
+        let history = st.wallet().get_tx_history().unwrap();
+        let row_for = |account| {
+            history
+                .iter()
+                .find(|tx| tx.txid() == txid && tx.account_id() == &account)
+                .unwrap_or_else(|| panic!("{account:?} has a row for the transaction"))
+        };
+        let sender = row_for(account1);
+
+        // The one funding note, counted once.
+        assert_eq!(sender.total_spent(), note_value);
+        assert_eq!(sender.spent_note_count(), 1);
+
+        // The three outputs the wallet created for a recipient address, counted once each.
+        assert_eq!(sender.sent_note_count(), 3);
+
+        // Everything the transaction did not pay out or spend on the fee returns to account 1
+        // as change, and change is all it receives.
+        let fee = sender
+            .fee_paid()
+            .expect("the wallet created the transaction");
+        let paid_out = (to_account2 + to_account3 + to_external + fee).unwrap();
+        assert!(sender.has_change());
+        assert_eq!(sender.received_note_count(), 0);
+        assert_eq!(
+            sender.total_received(),
+            (note_value - paid_out).unwrap(),
+            "the change returned to the sending account, counted once",
+        );
+        assert_eq!(sender.account_value_delta(), -ZatBalance::from(paid_out));
+
+        // The recipient accounts' own rows are unaffected: each spent nothing and received the
+        // payment made to it.
+        for (account, paid) in [(account2, to_account2), (account3, to_account3)] {
+            let recipient = row_for(account);
+            assert_eq!(recipient.total_spent(), Zatoshis::ZERO);
+            assert_eq!(recipient.total_received(), paid);
+            assert_eq!(recipient.received_note_count(), 1);
+        }
     }
 }
