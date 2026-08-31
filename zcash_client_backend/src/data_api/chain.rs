@@ -162,7 +162,7 @@ use crate::{
     data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
-        Nullifiers, ScanningKeys,
+        ScanBlockError, ScanningKeys, SpendIdentifiers,
         compact::{BatchRunners, scan_block_with_runners},
     },
 };
@@ -657,24 +657,33 @@ where
     };
 
     // Get the nullifiers for the unspent notes we are tracking
-    let mut nullifiers = Nullifiers::unspent(data_db).map_err(Error::Wallet)?;
+    let mut nullifiers = SpendIdentifiers::unspent(data_db).map_err(Error::Wallet)?;
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
+    // Reborrowed immutably so that the scanning closure may resolve transparent addresses while
+    // `data_db` remains available for the write that follows.
+    #[cfg(feature = "transparent-inputs")]
+    let address_lookup: &DbT = data_db;
     block_source.with_blocks::<_, <DbT as WalletRead>::Error>(
         Some(from_height),
         Some(limit),
         |block: CompactBlock| {
             scan_summary.scanned_range.end = block.height() + 1;
-            let scanned_block = scan_block_with_runners::<_, _, _, (), (), ()>(
+            let scanned_block = scan_block_with_runners::<_, _, _, (), (), (), _>(
                 params,
                 block,
                 &scanning_keys,
                 &nullifiers,
                 prior_block_metadata.as_ref(),
                 Some(&mut runners),
+                #[cfg(feature = "transparent-inputs")]
+                |address| address_lookup.find_account_for_transparent_address(address),
             )
-            .map_err(Error::Scan)?;
+            .map_err(|e| match e {
+                ScanBlockError::Scan(e) => Error::Scan(e),
+                ScanBlockError::AddressLookup(e) => Error::Wallet(e),
+            })?;
 
             for wtx in &scanned_block.transactions {
                 scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();

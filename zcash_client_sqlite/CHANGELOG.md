@@ -53,6 +53,9 @@ workspace.
   `received_note_count`, `spent_note_count`, and the received-note contribution
   to `memo_count` were each scaled by that count; `sent_note_count` reported
   the notes of the largest single group instead of all of them.
+- Block scanning records transparent outputs paying the wallet and spends of the
+  wallet's transparent outputs. A spend observed before the block that created
+  the spent output has been scanned is resolved when that output is discovered.
 
 ## [0.22.0] - 2026-08-18
 
