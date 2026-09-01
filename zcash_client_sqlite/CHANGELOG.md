@@ -53,6 +53,8 @@ workspace.
   `received_note_count`, `spent_note_count`, and the received-note contribution
   to `memo_count` were each scaled by that count; `sent_note_count` reported
   the notes of the largest single group instead of all of them.
+- `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
+  no longer fail on wallets containing accounts imported by UIVK.
 
 ## [0.22.0] - 2026-08-18
 

@@ -190,11 +190,11 @@ migration_modules!(
 use std::{rc::Rc, sync::Mutex};
 
 use rand_core::RngCore;
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
-use zcash_address::unified::{Encoding as _, Ufvk};
+use zcash_address::unified::{Encoding as _, Ufvk, Uivk};
 use zcash_protocol::consensus;
 
 use crate::util::Clock;
@@ -663,41 +663,92 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
 ) -> Result<(), WalletMigrationError> {
-    // Ensure that the `ufvk_support` migration has been applied; if it hasn't, we won't be able to
-    // validate that the UFVKs in the wallet correspond to the network type that the wallet is
-    // being migrated for.
-    let has_ufvk = conn
-        .query_row(
-            &format!(
-                "SELECT 1 FROM {} WHERE id = :migration_id",
-                super::MIGRATIONS_TABLE
-            ),
-            named_params![":migration_id": &ufvk_support::MIGRATION_ID.as_bytes()[..]],
-            |row| row.get::<_, bool>(0),
-        )
-        .optional()?
-        == Some(true);
+    // This check runs before any not-yet-applied migrations for the current library version,
+    // so the `accounts` table may be in any of its historical shapes, or absent entirely
+    // (prior to `initial_setup`). Probe its actual columns directly, rather than keying off
+    // the id of the migration that happened to introduce them, so the check states its real
+    // precondition and stays correct across future migration reorganizations. Querying
+    // `pragma_table_info` for a nonexistent table simply returns no rows, so a wallet with no
+    // `accounts` table yet is handled the same way as one that has the table but lacks the
+    // column.
+    let has_column = |name: &str| -> Result<bool, WalletMigrationError> {
+        Ok(conn
+            .prepare("SELECT 1 FROM pragma_table_info('accounts') WHERE name = :name")?
+            .exists(named_params![":name": name])?)
+    };
+    let has_ufvk = has_column("ufvk")?;
+    let has_uivk = has_column("uivk")?;
 
-    if has_ufvk {
-        let mut fvks_stmt = conn.prepare("SELECT ufvk FROM accounts")?;
+    let network_name = |n| match n {
+        consensus::NetworkType::Main => "mainnet",
+        consensus::NetworkType::Test => "testnet",
+        consensus::NetworkType::Regtest => "regtest",
+    };
+    let mismatch_err = |account_id: i64, key_kind: &str, network: consensus::NetworkType| {
+        WalletMigrationError::CorruptedData(format!(
+            "Network type mismatch: account {account_id} {key_kind} is for {} but attempting to initialize for {}.",
+            network_name(network),
+            network_name(params.network_type())
+        ))
+    };
+
+    if has_uivk {
+        // `ufvk` may be NULL for accounts imported by UIVK; `uivk` is otherwise always
+        // present for such accounts. Validate the network of whichever key the account
+        // actually stores a value for, preferring the UFVK when both are available.
+        let mut stmt = conn.prepare("SELECT id, ufvk, uivk FROM accounts")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let account_id: i64 = row.get(0)?;
+            let ufvk_parsed = row
+                .get::<_, Option<String>>(1)?
+                .map(|ufvk_str| {
+                    let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
+                        WalletMigrationError::CorruptedData(format!(
+                            "Unable to parse UFVK for account {account_id}: {e}"
+                        ))
+                    })?;
+                    Ok::<_, WalletMigrationError>((network, "UFVK"))
+                })
+                .transpose()?;
+
+            let uivk_parsed = row
+                .get::<_, Option<String>>(2)?
+                .map(|uivk_str| {
+                    let (network, _) = Uivk::decode(&uivk_str).map_err(|e| {
+                        WalletMigrationError::CorruptedData(format!(
+                            "Unable to parse UIVK for account {account_id}: {e}"
+                        ))
+                    })?;
+                    Ok::<_, WalletMigrationError>((network, "UIVK"))
+                })
+                .transpose()?;
+
+            let (network, key_kind) =
+                ufvk_parsed
+                    .or(uivk_parsed)
+                    .ok_or(WalletMigrationError::CorruptedData(
+                        "account has neither a UFVK nor a UIVK".to_string(),
+                    ))?;
+
+            if network != params.network_type() {
+                return Err(mismatch_err(account_id, key_kind, network));
+            }
+        }
+    } else if has_ufvk {
+        let mut fvks_stmt = conn.prepare("SELECT account, ufvk FROM accounts")?;
         let mut rows = fvks_stmt.query([])?;
         while let Some(row) = rows.next()? {
-            let ufvk_str = row.get::<_, String>(0)?;
+            let account_id: i64 = row.get(0)?;
+            let ufvk_str = row.get::<_, String>(1)?;
             let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
-                WalletMigrationError::CorruptedData(format!("Unable to parse UFVK: {e}"))
+                WalletMigrationError::CorruptedData(format!(
+                    "Unable to parse UFVK for account {account_id}: {e}"
+                ))
             })?;
 
             if network != params.network_type() {
-                let network_name = |n| match n {
-                    consensus::NetworkType::Main => "mainnet",
-                    consensus::NetworkType::Test => "testnet",
-                    consensus::NetworkType::Regtest => "regtest",
-                };
-                return Err(WalletMigrationError::CorruptedData(format!(
-                    "Network type mismatch: account UFVK is for {} but attempting to initialize for {}.",
-                    network_name(network),
-                    network_name(params.network_type())
-                )));
+                return Err(mismatch_err(account_id, "UFVK", network));
             }
         }
     }
@@ -712,16 +763,23 @@ pub(crate) mod tests {
     // Used only by the orchard-gated note-generation strategies below.
     #[cfg(feature = "orchard")]
     use proptest::{prelude::any, prop_compose};
-    use rusqlite::Connection;
+    use rusqlite::{Connection, named_params};
     use secrecy::Secret;
     use tempfile::NamedTempFile;
     use uuid::Uuid;
-    use zcash_protocol::consensus::Network;
+    use zcash_keys::keys::{UnifiedAddressRequest, UnifiedIncomingViewingKey, UnifiedSpendingKey};
+    use zcash_protocol::consensus::{BlockHeight, Network, NetworkUpgrade, Parameters};
+
+    #[cfg(feature = "transparent-inputs")]
+    use {::transparent::keys::NonHardenedChildIndex, zcash_keys::encoding::AddressCodec as _};
 
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::WalletMigrator,
+        wallet::{
+            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
+            init::WalletMigrator,
+        },
     };
     use schemerz::Migration;
 
@@ -918,5 +976,250 @@ pub(crate) mod tests {
             Ok(_)
         );
         // We don't ensure that the migration state changed, because it may not have.
+    }
+
+    /// A UIVK-only account (one imported without a UFVK, e.g. via an incoming viewing key)
+    /// stores `NULL` in the `accounts.ufvk` column. `verify_network_compatibility` must fall
+    /// back to checking the network of the account's `uivk` in that case, rather than choking
+    /// on the `NULL` `ufvk` as it did prior to this fix.
+    ///
+    /// The wallet is migrated only to the most recent published release, then given the rows
+    /// that release stores for a view-only UIVK import. The subsequent `init_or_migrate` call
+    /// therefore still has migrations to apply, which must also tolerate the `NULL` `ufvk`.
+    ///
+    /// Those rows are written as raw SQL rather than by calling `wallet::add_account`.
+    /// Applying the current `add_account` to a historical schema is a combination no wallet
+    /// is ever in: an application migrates to the current schema before it performs any
+    /// wallet operation. It also fails as soon as a runtime path reached from `add_account`
+    /// touches a table that a later migration introduces. All this test needs from
+    /// `add_account` is the data state it leaves behind, so the fixture writes that state
+    /// directly.
+    #[test]
+    fn uivk_only_account_is_network_compatible() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+
+        let seed = [0xab; 32];
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed.to_vec()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, super::V_0_22_0_RC6)
+            .unwrap();
+
+        let uivk =
+            UnifiedSpendingKey::from_seed(&Network::TestNetwork, &seed, zip32::AccountId::ZERO)
+                .unwrap()
+                .to_unified_full_viewing_key()
+                .to_unified_incoming_viewing_key();
+
+        let birthday_height = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+
+        let account_id = insert_uivk_only_account(
+            &db_data.conn,
+            *Uuid::new_v4().as_bytes(),
+            &uivk,
+            &Network::TestNetwork,
+            birthday_height,
+        );
+
+        // The account's default Unified Address is the only `addresses` row that
+        // `add_account` writes for a UIVK-only account: a UIVK carries a single transparent
+        // receiver instead of an extended pubkey, so no transparent gap addresses can be
+        // derived from it. The row is part of the fixture because `standalone_address`, one
+        // of the migrations still pending at V_0_22_0_RC6, rebuilds the `addresses` table
+        // and copies every existing row through tightened CHECK constraints.
+        let (address, d_idx) = uivk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+
+        // Mirrors the transparent bookkeeping in `wallet::upsert_address`, which upholds the
+        // `addresses` table's transparent-index consistency constraint.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_child_index, cached_transparent_receiver_address) = match (
+            NonHardenedChildIndex::try_from(d_idx).ok(),
+            address.transparent(),
+        ) {
+            (Some(idx), Some(receiver)) => (
+                Some(idx.index()),
+                Some(receiver.encode(&Network::TestNetwork)),
+            ),
+            _ => (None, None),
+        };
+        #[cfg(not(feature = "transparent-inputs"))]
+        let (transparent_child_index, cached_transparent_receiver_address): (
+            Option<u32>,
+            Option<String>,
+        ) = (None, None);
+
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO addresses (
+                     account_id, key_scope, diversifier_index_be, address,
+                     transparent_child_index, cached_transparent_receiver_address,
+                     exposed_at_height, receiver_flags
+                 )
+                 VALUES (
+                     :account_id, :key_scope, :diversifier_index_be, :address,
+                     :transparent_child_index, :cached_transparent_receiver_address,
+                     :exposed_at_height, :receiver_flags
+                 )",
+                named_params![
+                    ":account_id": account_id,
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                    ":diversifier_index_be": &encode_diversifier_index_be(d_idx)[..],
+                    ":address": address.encode(&Network::TestNetwork),
+                    ":transparent_child_index": transparent_child_index,
+                    ":cached_transparent_receiver_address": cached_transparent_receiver_address,
+                    ":exposed_at_height": u32::from(birthday_height),
+                    ":receiver_flags": ReceiverFlags::from(&address).bits(),
+                ],
+            )
+            .unwrap();
+
+        // Re-running the migrator is exactly what a wallet upgrade does; it must succeed
+        // rather than failing with an `InvalidColumnType` error on the NULL `ufvk`, and the
+        // migrations still pending since V_0_22_0_RC6 must not choke on it either.
+        assert_matches!(
+            WalletMigrator::new()
+                .with_seed(Secret::new(seed.to_vec()))
+                .ignore_seed_relevance()
+                .init_or_migrate(&mut db_data),
+            Ok(())
+        );
+    }
+
+    /// Pins the `has_ufvk`-but-not-`has_uivk` branch of `verify_network_compatibility`
+    /// against a wallet actually carrying an account row in that era's shape, rather than
+    /// only against empty databases. At `V_0_9_0`, `accounts` predates `full_account_ids`:
+    /// `account` is the primary key and `ufvk` is the sole (non-nullable) viewing key column;
+    /// `uivk` does not exist yet. Migrating such a wallet the rest of the way to the current
+    /// schema exercises `full_account_ids` carrying real account data across the shape
+    /// change, immediately after the pre-existing branch has validated it.
+    #[test]
+    fn ufvk_only_account_predating_uivk_column_migrates() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+
+        let seed = [0xab; 32];
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed.to_vec()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, super::V_0_9_0)
+            .unwrap();
+
+        let ufvk =
+            UnifiedSpendingKey::from_seed(&Network::TestNetwork, &seed, zip32::AccountId::ZERO)
+                .unwrap()
+                .to_unified_full_viewing_key();
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (account, ufvk, birthday_height) VALUES (0, :ufvk, 0)",
+                named_params![":ufvk": ufvk.encode(&Network::TestNetwork)],
+            )
+            .unwrap();
+
+        assert_matches!(
+            WalletMigrator::new()
+                .with_seed(Secret::new(seed.to_vec()))
+                .ignore_seed_relevance()
+                .init_or_migrate(&mut db_data),
+            Ok(())
+        );
+    }
+
+    /// Inserts the `accounts` row that `wallet::add_account` writes for an
+    /// [`AccountPurpose::ViewOnly`](zcash_client_backend::data_api::AccountPurpose) UIVK
+    /// import: `account_kind = 1` (imported), no HD derivation metadata, no spend key, and a
+    /// `NULL` `ufvk`. Returns the new row's `id`.
+    ///
+    /// Writing the row directly gives these tests control over the two things `add_account`
+    /// fixes for them: the network the stored `uivk` is encoded for (`add_account` always
+    /// uses the wallet's own [`consensus::Parameters`]), and the schema version the row is
+    /// written against. The IVK-cache and birthday-tree-size columns are left `NULL`; nothing
+    /// under test reads them, so this is not a faithful general-purpose account fixture.
+    fn insert_uivk_only_account(
+        conn: &Connection,
+        uuid: [u8; 16],
+        uivk: &UnifiedIncomingViewingKey,
+        uivk_network: &Network,
+        birthday_height: BlockHeight,
+    ) -> i64 {
+        conn.query_row(
+            "INSERT INTO accounts (
+                 name, uuid, account_kind, ufvk, uivk, has_spend_key, birthday_height
+             )
+             VALUES (:name, :uuid, :account_kind, NULL, :uivk, 0, :birthday_height)
+             RETURNING id",
+            named_params![
+                ":name": "uivk-only",
+                ":uuid": &uuid[..],
+                ":account_kind": 1,
+                ":uivk": uivk.encode(uivk_network),
+                ":birthday_height": u32::from(birthday_height),
+            ],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// A UIVK-only account whose stored `uivk` was encoded for a different network must still
+    /// be caught by `verify_network_compatibility`, exactly as a `ufvk`-bearing account is.
+    #[test]
+    fn uivk_only_account_network_mismatch_is_rejected() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+
+        let seed = [0xab; 32];
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed.to_vec()))
+            .ignore_seed_relevance()
+            .init_or_migrate(&mut db_data)
+            .unwrap();
+
+        // Encode the account's `uivk` for mainnet while the wallet itself is testnet.
+        let uivk =
+            UnifiedSpendingKey::from_seed(&Network::MainNetwork, &seed, zip32::AccountId::ZERO)
+                .unwrap()
+                .to_unified_full_viewing_key()
+                .to_unified_incoming_viewing_key();
+        insert_uivk_only_account(
+            &db_data.conn,
+            [7; 16],
+            &uivk,
+            &Network::MainNetwork,
+            BlockHeight::from_u32(0),
+        );
+
+        assert_matches!(
+            WalletMigrator::new()
+                .with_seed(Secret::new(seed.to_vec()))
+                .ignore_seed_relevance()
+                .init_or_migrate(&mut db_data),
+            Err(schemerz::MigratorError::Adapter(
+                super::WalletMigrationError::CorruptedData(msg)
+            )) if msg.contains("UIVK")
+        );
     }
 }
