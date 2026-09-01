@@ -25,6 +25,14 @@ workspace.
   complete transaction data reached
   `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
   Transparent spends are still not detected during block scanning.
+- `zcash_client_backend::decrypt::decrypt_transaction` now attempts outgoing
+  ciphertext recovery with every outgoing viewing key an account's UFVK can
+  produce — Orchard, Sapling and transparent-derived, in both the external and
+  internal scopes — instead of only the same-pool external-scope key, and tries
+  each pool's outputs against every account instead of only those whose UFVK
+  holds that pool's key. Cross-pool sends, shielding transactions, and outputs
+  encrypted under an internal-scope OVK now recover their recipient, value and
+  memo as `zcash_client_backend::TransferType::Outgoing`.
 
 ## [0.24.0] - 2026-08-18
 
