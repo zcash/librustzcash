@@ -14,6 +14,12 @@ workspace.
   that require a smaller feature set should disable default features and enable
   only the features they need.
 
+### Fixed
+- `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer
+  panics when the `regex` crate is built without the `unicode-perl` feature,
+  which this crate does not require. This affected consumers whose dependency
+  graphs enabled no `regex` Unicode features.
+
 ## [0.16.1] - 2026-07-28
 
 ### Added
