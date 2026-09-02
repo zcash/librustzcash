@@ -5013,6 +5013,74 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_address_matches_revision_0_stored_address() {
+        // A wallet created before Revision 2 support stores its addresses in the
+        // Revision 0 encoding, and no migration re-encodes them. Address lookup must
+        // still resolve such a row, even though the query encodes the address it is
+        // given as Revision 2.
+        use zcash_address::unified::{Address as UnifiedEncoding, Encoding, Receiver, Uitem};
+        use zcash_protocol::{address::Revision, consensus::Parameters};
+
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+
+        // Rebuild the address in the Revision 0 encoding a pre-migration wallet held.
+        let mut items = vec![];
+        #[cfg(feature = "orchard")]
+        if let Some(orchard) = ua.orchard() {
+            items.push(Uitem::Data(Receiver::Orchard(
+                orchard.to_raw_address_bytes(),
+            )));
+        }
+        if let Some(sapling) = ua.sapling() {
+            items.push(Uitem::Data(Receiver::Sapling(sapling.to_bytes())));
+        }
+        if let Some(taddr) = ua.transparent() {
+            items.push(Uitem::Data(match taddr {
+                ::transparent::address::TransparentAddress::PublicKeyHash(data) => {
+                    Receiver::P2pkh(*data)
+                }
+                ::transparent::address::TransparentAddress::ScriptHash(data) => {
+                    Receiver::P2sh(*data)
+                }
+            }));
+        }
+        let revision_0 = UnifiedEncoding::try_from_items(Revision::R0, items)
+            .expect("the generated address is a valid Revision 0 address")
+            .encode(&state.network().network_type());
+
+        let address = Address::Unified(Box::new(ua));
+        let revision_2 = address.encode_receiver_preserving(state.network());
+        assert_ne!(revision_0, revision_2);
+
+        let updated = state
+            .wallet_mut()
+            .conn_mut()
+            .execute(
+                "UPDATE addresses SET address = :revision_0 WHERE address = :revision_2",
+                named_params![":revision_0": revision_0, ":revision_2": revision_2],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+
+        // Both encodings of the same address must resolve to the same account.
+        assert_eq!(
+            state
+                .wallet()
+                .find_account_for_address(state.network(), &address)
+                .unwrap(),
+            Some(account.id())
+        );
+    }
+
+    #[test]
     fn find_account_for_address_returns_none_for_unknown_address() {
         // Create a test wallet with one account
         let st = create_test_wallet_with_one_account();
