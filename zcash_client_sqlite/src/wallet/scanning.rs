@@ -211,6 +211,31 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
     Ok(())
 }
 
+/// Queues `range` for re-scanning at [`ScanPriority::Historic`], overriding any record that
+/// part of it has already been scanned.
+///
+/// The merge is performed with forced rescans enabled, so a [`ScanPriority::Scanned`] entry
+/// does not dominate the inserted range; entries whose priority exceeds
+/// [`ScanPriority::Historic`] still do, and are preserved. Nothing outside the `scan_queue`
+/// table is touched.
+///
+/// An empty range is a no-op.
+pub(crate) fn queue_rescan(
+    conn: &rusqlite::Transaction<'_>,
+    range: Range<BlockHeight>,
+) -> Result<(), SqliteClientError> {
+    if range.is_empty() {
+        return Ok(());
+    }
+
+    replace_queue_entries::<SqliteClientError>(
+        conn,
+        &range,
+        Some(ScanRange::from_parts(range.clone(), Historic)).into_iter(),
+        true,
+    )
+}
+
 /// Drops the scan work queued below `height`, leaving the queue's coverage contiguous.
 ///
 /// This is the inverse of [`replace_queue_entries`], and cannot be expressed in terms of
@@ -768,7 +793,7 @@ pub(crate) mod tests {
 
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
-        AccountBirthday, Ratio, WalletRead, WalletWrite,
+        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, spanning_tree::testing::scan_range},
         testing::{
@@ -844,7 +869,7 @@ pub(crate) mod tests {
         std::{collections::BTreeSet, convert::Infallible},
         zcash_client_backend::{
             data_api::{
-                Account as _, WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
+                WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
                 wallet::input_selection::GreedyInputSelector,
             },
             fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -1813,6 +1838,122 @@ pub(crate) mod tests {
 
         let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// `queue_rescan` overrides the `Scanned` and `Ignored` bookkeeping entries covering its
+    /// range, and leaves entries of higher priority than `Historic` untouched.
+    #[test]
+    fn queue_rescan_overrides_scanned_and_ignored_ranges() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let ranges = [
+            scan_range(200..250, ChainTip),
+            scan_range(100..200, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        st.wallet_mut()
+            .queue_rescan(BlockHeight::from(50)..BlockHeight::from(220))
+            .unwrap();
+
+        let expected = vec![
+            // `ChainTip` dominates `Historic`, so the requested range is clipped here.
+            scan_range(200..250, ChainTip),
+            // Both the `Scanned` and the `Ignored` portions of the requested range are now
+            // queued for scanning, and coalesce into a single entry.
+            scan_range(50..200, Historic),
+            scan_range(0..50, Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    /// An empty range leaves the scan queue exactly as it was.
+    #[test]
+    fn queue_rescan_with_empty_range_is_a_noop() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let ranges = vec![
+            scan_range(150..200, ChainTip),
+            scan_range(100..150, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        st.wallet_mut()
+            .queue_rescan(BlockHeight::from(120)..BlockHeight::from(120))
+            .unwrap();
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert_eq!(actual, ranges);
+    }
+
+    /// `queue_rescan` re-queues blocks that have already been scanned without removing any of
+    /// the wallet state that scanning them produced.
+    #[test]
+    fn queue_rescan_preserves_scanned_wallet_state() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([3; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(50000);
+
+        let (start_height, _, _) =
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        for _ in 1..10 {
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        }
+        st.scan_cached_blocks(start_height, 10);
+
+        let rescan_range = start_height..(start_height + 10);
+        let balance_before = st.get_total_balance(account_id);
+        let max_scanned_before = st
+            .wallet()
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height());
+        assert_eq!(max_scanned_before, Some(start_height + 9));
+
+        st.wallet_mut().queue_rescan(rescan_range.clone()).unwrap();
+
+        // The scanned blocks are queued for scanning again.
+        let queued = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert!(
+            queued.iter().any(|r| r.priority() == Historic
+                && r.block_range().start <= rescan_range.start
+                && r.block_range().end >= rescan_range.end),
+            "no Historic range covering {rescan_range:?} in {queued:?}"
+        );
+
+        // Nothing that scanning them produced has been removed.
+        assert_eq!(st.get_total_balance(account_id), balance_before);
+        assert_eq!(
+            st.wallet()
+                .block_max_scanned()
+                .unwrap()
+                .map(|m| m.block_height()),
+            max_scanned_before
+        );
     }
 
     /// This sets up the case wherein:
