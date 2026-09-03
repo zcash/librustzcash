@@ -21,11 +21,17 @@
 //!    corresponding spending material was delivered to the sink and as view-only
 //!    accounts otherwise. Account birthdays are constructed from the tree-state
 //!    frontiers carried by the document where present.
-//! 4. Registers standalone transparent keys: each transparent spending key in the
-//!    secret store whose pay-to-public-key-hash address appears under an imported
-//!    account is registered with that account (its secret half having already been
-//!    delivered to the sink), and P2SH redeem scripts recorded on imported
-//!    accounts' addresses are registered where the wallet can represent them.
+//! 4. Registers standalone transparent records: each transparent spending key in
+//!    the secret store whose pay-to-public-key-hash address appears under an
+//!    imported account is registered with that account (its secret half having
+//!    already been delivered to the sink), and P2SH redeem scripts recorded on
+//!    imported accounts' addresses are registered where the wallet can represent
+//!    them. Watch-only records — bare addresses, public keys whose spending keys
+//!    are absent from the secret store, and redeem scripts for which not every
+//!    member public key has a verified spending key — are imported as standalone
+//!    receivers of accounts imported as view-only, and are skipped (and reported)
+//!    for accounts imported with spend authority, so that no account mixes spend
+//!    authority.
 //! 5. Marks the transparent addresses recorded in the document as exposed, so
 //!    that address-based recovery includes them.
 //! 6. Stores the document's transactions: each transaction carrying raw data is
@@ -514,6 +520,35 @@ pub struct SkippedTransparentKey {
     pub reason: TransparentKeySkipReason,
 }
 
+/// The form in which a watch-only transparent record appears in a document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchOnlyForm {
+    /// A bare transparent address, with no key material.
+    Address,
+    /// A public key recorded for an address whose spending key is absent from
+    /// the document's secret store.
+    Pubkey,
+    /// A P2SH redeem script for which the document's secret store does not
+    /// hold a verified spending key for every member public key.
+    RedeemScript,
+}
+
+/// A watch-only transparent record that was not imported because the account
+/// that carries it was imported with spend authority.
+///
+/// An account is a single root of spend authority: either the application can
+/// sign for everything the account can detect, or for nothing (the account is
+/// view-only). Registering a watch-only record with a spending account would
+/// mix spend authority within the account, so such records are excluded from
+/// the import; they remain recoverable from the retained document.
+#[derive(Debug, Clone)]
+pub struct SkippedWatchOnly {
+    /// The transparent address of the watch-only record.
+    pub address: String,
+    /// The form in which the record appears in the document.
+    pub form: WatchOnlyForm,
+}
+
 /// A summary of the effects of a ZeWIF document import.
 #[derive(Debug, Clone, Default)]
 pub struct ZewifImportReport {
@@ -532,6 +567,14 @@ pub struct ZewifImportReport {
     /// The number of P2SH redeem scripts recorded in the document that the
     /// wallet cannot represent (for example, non-multisig scripts).
     pub redeem_scripts_not_representable: usize,
+    /// The number of watch-only transparent records (bare addresses, public
+    /// keys without spending keys, and the addresses of redeem scripts the
+    /// wallet cannot represent) imported as standalone receivers of view-only
+    /// accounts.
+    pub watch_only_receivers_imported: usize,
+    /// Watch-only transparent records that were not imported because the
+    /// account that carries them was imported with spend authority.
+    pub skipped_watch_only: Vec<SkippedWatchOnly>,
     /// The number of transparent addresses marked as exposed.
     pub addresses_marked_exposed: usize,
     /// The number of transparent addresses recorded in the document that the
@@ -966,10 +1009,11 @@ where
             }
         }
 
-        register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
+        let excluded_watch_only =
+            register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
 
         let accounts: std::collections::HashSet<AccountUuid> =
-            taddrs.owners.values().map(|(uuid, _)| *uuid).collect();
+            taddrs.owners.values().map(|rec| rec.account).collect();
         // Record which transparent receivers the wallet already considered
         // exposed before any of the document's data was applied. Account import
         // exposes each account's default address, which sits at whatever child
@@ -1019,6 +1063,7 @@ where
             &taddrs,
             &accounts,
             &pre_existing_exposures,
+            &excluded_watch_only,
             &mut report,
         )?;
 
@@ -1027,16 +1072,38 @@ where
 }
 
 /// The transparent addresses recorded under imported accounts, indexed for
-/// standalone key registration and exposure marking.
+/// standalone record registration and exposure marking.
 #[derive(Default)]
 struct TransparentAddressRecords {
-    /// Maps each transparent address string to the account that recorded it
-    /// and the height at which the document records it as having been exposed,
-    /// if any. A `None` height carries no exposure claim either way; see
-    /// [`mark_addresses_exposed`] for how such an address is classified.
-    owners: HashMap<String, (AccountUuid, Option<BlockHeight>)>,
-    /// The P2SH redeem scripts recorded on imported accounts' addresses.
-    redeem_scripts: Vec<(AccountUuid, Vec<u8>)>,
+    /// Maps each transparent address string to the record of how an imported
+    /// account carries it.
+    owners: HashMap<String, RecordedTransparentAddress>,
+    /// The P2SH redeem scripts recorded on imported accounts' addresses,
+    /// alongside the address string that carries each of them.
+    redeem_scripts: Vec<(AccountUuid, String, Vec<u8>)>,
+    /// Whether each imported account was imported with spend authority.
+    /// Standalone transparent records may be registered only with an account
+    /// whose spend authority matches what the application can sign for.
+    spending_accounts: HashMap<AccountUuid, bool>,
+}
+
+/// How a transparent address is recorded under an imported account.
+struct RecordedTransparentAddress {
+    /// The account that records the address.
+    account: AccountUuid,
+    /// The height at which the document records the address as having been
+    /// exposed, if any. A `None` height carries no exposure claim either way;
+    /// see [`mark_addresses_exposed`] for how such an address is classified.
+    exposed_at: Option<BlockHeight>,
+    /// The public key the document records for a watch-only address imported
+    /// without its private key, where present.
+    pubkey: Option<Vec<u8>>,
+    /// Whether the address carries a P2SH redeem script (collected in
+    /// [`TransparentAddressRecords::redeem_scripts`]).
+    has_redeem_script: bool,
+    /// Whether the document records the address's key as obtained by HD
+    /// derivation, in which case the account's own keys cover it.
+    derived: bool,
 }
 
 /// Decodes a WIF-encoded transparent spending key, accepting both the
@@ -1054,16 +1121,29 @@ fn decode_wif(expected_prefix: u8, wif: &str) -> Option<secp256k1::SecretKey> {
     }
 }
 
-/// Registers the secret store's standalone transparent spending keys with the
-/// accounts that record their addresses, and the recorded P2SH redeem scripts
-/// with the accounts that carry them.
+/// Registers the document's standalone transparent records with the accounts
+/// that carry them, honoring each account's spend authority.
+///
+/// Each transparent spending key in the secret store is verified against its
+/// recorded public key and registered with the account that records its
+/// pay-to-public-key-hash address; its secret half has already been delivered
+/// to the sink. Watch-only records — bare addresses, public keys whose
+/// spending keys are absent from the secret store, and P2SH redeem scripts for
+/// which not every member public key has a verified spending key — are
+/// imported as standalone receivers only of accounts imported as view-only.
+/// Registering them with an account imported with spend authority would mix
+/// spend authority within that account, so for such accounts they are skipped
+/// and reported instead, and remain recoverable from the retained document.
+///
+/// Returns the addresses of the records skipped this way, so that exposure
+/// marking does not separately report them.
 fn register_transparent_keys<DbT, P, S>(
     wdb: &mut DbT,
     params: &P,
     store: Option<&::zewif::SecretStore>,
     taddrs: &TransparentAddressRecords,
     report: &mut ZewifImportReport,
-) -> Result<(), ZewifImportError<S>>
+) -> Result<std::collections::HashSet<String>, ZewifImportError<S>>
 where
     DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     P: consensus::Parameters,
@@ -1074,6 +1154,13 @@ where
         NetworkType::Test | NetworkType::Regtest => 0xEF,
     };
     let secp = secp256k1::Secp256k1::new();
+
+    // The compressed public keys whose spending keys the secret store was
+    // verified to hold, and the p2pkh addresses those keys derive. These
+    // determine what the application can sign for, and hence which standalone
+    // records an account with spend authority may register.
+    let mut verified_pubkeys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+    let mut owned_addresses: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for entry in store.map_or(&[][..], |s| s.transparent_keys()) {
         if !entry.pubkey().is_compressed() {
@@ -1098,11 +1185,14 @@ where
             return Err(ZewifImportError::TransparentKeyMismatch { address });
         }
 
+        verified_pubkeys.insert(pubkey.serialize().to_vec());
+
         match taddrs.owners.get(&address) {
-            Some((account_uuid, _)) => {
-                wdb.import_standalone_transparent_pubkey(*account_uuid, pubkey)
+            Some(rec) => {
+                wdb.import_standalone_transparent_pubkey(rec.account, pubkey)
                     .map_err(ZewifImportError::Wallet)?;
                 report.transparent_keys_registered += 1;
+                owned_addresses.insert(address);
             }
             None => {
                 report.skipped_transparent_keys.push(SkippedTransparentKey {
@@ -1113,28 +1203,141 @@ where
         }
     }
 
-    for (account_uuid, script_bytes) in &taddrs.redeem_scripts {
-        let parsed = Redeem::parse(&Code(script_bytes.clone()));
-        match parsed {
-            Ok(redeem) => {
+    let mut excluded: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (account_uuid, address, script_bytes) in &taddrs.redeem_scripts {
+        let spending = taddrs
+            .spending_accounts
+            .get(account_uuid)
+            .copied()
+            .unwrap_or(false);
+        let parsed = Redeem::parse(&Code(script_bytes.clone())).ok();
+
+        // An account with spend authority may register only a script the
+        // application can sign for: a multisig for which every member public
+        // key has a verified spending key in the secret store. Anything else
+        // recorded on such an account is watch-only material, and is excluded
+        // to keep the account's spend authority pure.
+        if spending {
+            let fully_owned = parsed.as_ref().is_some_and(|redeem| {
+                match zcash_script::solver::standard(redeem) {
+                    Some(zcash_script::solver::ScriptKind::MultiSig { pubkeys, .. }) => pubkeys
+                        .iter()
+                        .all(|pk| verified_pubkeys.contains(pk.as_slice())),
+                    _ => false,
+                }
+            });
+            if !fully_owned {
+                report.skipped_watch_only.push(SkippedWatchOnly {
+                    address: address.clone(),
+                    form: WatchOnlyForm::RedeemScript,
+                });
+                excluded.insert(address.clone());
+                continue;
+            }
+        }
+
+        let registered = match parsed {
+            Some(redeem) => {
                 match wdb.import_standalone_transparent_script(*account_uuid, redeem) {
-                    Ok(()) => report.redeem_scripts_registered += 1,
+                    Ok(()) => {
+                        report.redeem_scripts_registered += 1;
+                        true
+                    }
                     // The wallet can only represent a subset of redeem scripts
                     // (e.g. multisig within the P2SH size limit); scripts it
                     // rejects remain recoverable from the document.
                     Err(SqliteClientError::BadAccountData(_)) => {
                         report.redeem_scripts_not_representable += 1;
+                        false
                     }
                     Err(e) => return Err(ZewifImportError::Wallet(e)),
                 }
             }
-            Err(_) => {
+            None => {
                 report.redeem_scripts_not_representable += 1;
+                false
             }
+        };
+        // A view-only account carries no signing claim, so even where the
+        // script itself cannot be represented, its address can still be
+        // watched via an address-only import.
+        if !registered
+            && !spending
+            && let Ok(taddr) = TransparentAddress::decode(params, address)
+        {
+            wdb.import_standalone_transparent_address(*account_uuid, taddr)
+                .map_err(ZewifImportError::Wallet)?;
+            report.watch_only_receivers_imported += 1;
         }
     }
 
-    Ok(())
+    // The recorded addresses not covered above, and not receivers the wallet
+    // already recognizes, are watch-only records: addresses the document
+    // watched without holding any corresponding spending key. Import them as
+    // standalone receivers of view-only accounts, and exclude them from
+    // accounts with spend authority.
+    let accounts: std::collections::HashSet<AccountUuid> =
+        taddrs.owners.values().map(|rec| rec.account).collect();
+    let mut known: std::collections::HashSet<TransparentAddress> = std::collections::HashSet::new();
+    for account_uuid in &accounts {
+        known.extend(
+            wdb.get_transparent_receivers(*account_uuid, true, true)
+                .map_err(ZewifImportError::Wallet)?
+                .into_keys(),
+        );
+    }
+
+    for (address_str, rec) in &taddrs.owners {
+        if rec.has_redeem_script || rec.derived || owned_addresses.contains(address_str) {
+            // Redeem scripts were handled above; derived addresses are covered
+            // by the account's own keys; owned addresses were registered from
+            // the secret store.
+            continue;
+        }
+        let Ok(taddr) = TransparentAddress::decode(params, address_str) else {
+            // Exposure marking counts the addresses the wallet cannot
+            // recognize.
+            continue;
+        };
+        if known.contains(&taddr) {
+            // Already a receiver of an imported account; nothing standalone to
+            // import.
+            continue;
+        }
+        if taddrs
+            .spending_accounts
+            .get(&rec.account)
+            .copied()
+            .unwrap_or(false)
+        {
+            report.skipped_watch_only.push(SkippedWatchOnly {
+                address: address_str.clone(),
+                form: if rec.pubkey.is_some() {
+                    WatchOnlyForm::Pubkey
+                } else {
+                    WatchOnlyForm::Address
+                },
+            });
+            excluded.insert(address_str.clone());
+            continue;
+        }
+        // A recorded public key is used only when it derives the recorded
+        // address; the address is otherwise imported alone, since it is the
+        // address that the document watched.
+        let pubkey = rec.pubkey.as_deref().and_then(|bytes| {
+            let pk = secp256k1::PublicKey::from_slice(bytes).ok()?;
+            (TransparentAddress::from_pubkey(&pk) == taddr).then_some(pk)
+        });
+        match pubkey {
+            Some(pk) => wdb.import_standalone_transparent_pubkey(rec.account, pk),
+            None => wdb.import_standalone_transparent_address(rec.account, taddr),
+        }
+        .map_err(ZewifImportError::Wallet)?;
+        report.watch_only_receivers_imported += 1;
+    }
+
+    Ok(excluded)
 }
 
 /// Returns the transparent receivers of the given accounts that the wallet
@@ -1197,6 +1400,7 @@ fn mark_addresses_exposed<DbT, P, S>(
     taddrs: &TransparentAddressRecords,
     accounts: &std::collections::HashSet<AccountUuid>,
     pre_existing_exposures: &std::collections::HashSet<TransparentAddress>,
+    excluded: &std::collections::HashSet<String>,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
@@ -1266,7 +1470,13 @@ where
     // The exposures the document itself records.
     let mut exposures: Vec<(TransparentAddress, BlockHeight)> = vec![];
     let mut unheighted: Vec<TransparentAddress> = vec![];
-    for (address_str, (_, exposure_height)) in &taddrs.owners {
+    for (address_str, rec) in &taddrs.owners {
+        if excluded.contains(address_str) {
+            // The record was skipped by `register_transparent_keys` to keep
+            // its account's spend authority pure, and has already been
+            // reported.
+            continue;
+        }
         let Some((taddr, (account_uuid, meta))) = TransparentAddress::decode(params, address_str)
             .ok()
             .and_then(|taddr| known.get(&taddr).map(|owner| (taddr, owner)))
@@ -1274,10 +1484,10 @@ where
             report.addresses_not_recognized += 1;
             continue;
         };
-        match exposure_height {
+        match rec.exposed_at {
             Some(height) => {
-                exposures.push((taddr, *height));
-                note_exposure(&mut exposed_indices, *account_uuid, meta, *height);
+                exposures.push((taddr, height));
+                note_exposure(&mut exposed_indices, *account_uuid, meta, height);
             }
             None => unheighted.push(taddr),
         }
@@ -1552,7 +1762,16 @@ where
         }
     };
 
-    // Record the account's transparent addresses for standalone key
+    // Record whether the account was imported with spend authority; standalone
+    // transparent records may be registered only where the application's
+    // ability to sign for them matches it.
+    let is_spending = wdb
+        .get_account(account_uuid)
+        .map_err(ZewifImportError::Wallet)?
+        .is_some_and(|account| matches!(account.purpose(), AccountPurpose::Spending { .. }));
+    taddrs.spending_accounts.insert(account_uuid, is_spending);
+
+    // Record the account's transparent addresses for standalone record
     // registration and exposure marking.
     for address in account.addresses() {
         if let ::zewif::ProtocolAddress::Transparent(taddr) = address.address() {
@@ -1565,13 +1784,25 @@ where
             let exposure_height = address
                 .exposed_at_height()
                 .map(|h| BlockHeight::from(u32::from(h)));
-            taddrs
-                .owners
-                .insert(taddr.address().to_owned(), (account_uuid, exposure_height));
+            taddrs.owners.insert(
+                taddr.address().to_owned(),
+                RecordedTransparentAddress {
+                    account: account_uuid,
+                    exposed_at: exposure_height,
+                    pubkey: taddr.pubkey().map(|p| p.as_slice().to_vec()),
+                    has_redeem_script: taddr.redeem_script().is_some(),
+                    derived: matches!(
+                        taddr.spend_authority(),
+                        Some(::zewif::transparent::TransparentSpendAuthority::Derived(_))
+                    ),
+                },
+            );
             if let Some(script) = taddr.redeem_script() {
-                taddrs
-                    .redeem_scripts
-                    .push((account_uuid, script.as_ref().to_vec()));
+                taddrs.redeem_scripts.push((
+                    account_uuid,
+                    taddr.address().to_owned(),
+                    script.as_ref().to_vec(),
+                ));
             }
         }
     }
@@ -2348,6 +2579,311 @@ mod tests {
             );
         }
         assert!(!matches!(exposure_at(4), Exposure::Exposed { .. }));
+    }
+
+    /// A compressed-key WIF encoding under the testnet/regtest prefix.
+    fn test_wif(secret_key: &secp256k1::SecretKey) -> String {
+        let mut wif_payload = vec![0xEF];
+        wif_payload.extend_from_slice(&secret_key.secret_bytes());
+        wif_payload.push(0x01);
+        bs58::encode(wif_payload).with_check().into_string()
+    }
+
+    /// A UFVK account with no corresponding spending material in the document,
+    /// which is therefore imported as view-only.
+    fn view_only_account(ts: &TestSeed) -> ::zewif::Account {
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("viewing");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account
+    }
+
+    /// Builds an m-of-n multisig redeem script over the given public keys,
+    /// returning the script bytes and its P2SH address string.
+    fn multisig_script(required: u8, pubkeys: &[secp256k1::PublicKey]) -> (Vec<u8>, String) {
+        use zcash_script::{
+            descriptor::sh,
+            pattern::check_multisig,
+            script::{Component, Evaluable as _, Redeem},
+        };
+        let serialized: Vec<[u8; 33]> = pubkeys.iter().map(|pk| pk.serialize()).collect();
+        let refs: Vec<&[u8]> = serialized.iter().map(|pk| &pk[..]).collect();
+        let redeem: Redeem = Component(
+            check_multisig(required, &refs, false)
+                .unwrap()
+                .into_iter()
+                .collect(),
+        );
+        let script_pubkey = sh(&redeem);
+        let addr = TransparentAddress::from_script_pubkey(&script_pubkey)
+            .unwrap()
+            .encode(&TEST_NETWORK);
+        (redeem.to_bytes(), addr)
+    }
+
+    /// A zewif transparent address record carrying the given redeem script.
+    fn taddr_with_redeem_script(address: &str, script_bytes: &[u8]) -> ::zewif::Address {
+        let mut taddr = ::zewif::transparent::Address::new(address.to_owned());
+        taddr.set_redeem_script(::zewif::Script::from(::zewif::Data::from(
+            script_bytes.to_vec(),
+        )));
+        ::zewif::Address::new(::zewif::ProtocolAddress::Transparent(taddr))
+    }
+
+    /// Watch-only transparent records — a bare address and a public key
+    /// without a spending key — carried by an account imported as view-only
+    /// are imported as standalone receivers of that account.
+    #[test]
+    fn watch_only_records_on_view_only_account_are_imported() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        // A public key recorded without its spending key, as zcashd's
+        // `importpubkey` produces.
+        let watched_key = secp256k1::SecretKey::from_slice(&[0x43; 32]).unwrap();
+        let watched_pubkey = watched_key.public_key(&secp);
+        let pubkey_addr = TransparentAddress::from_pubkey(&watched_pubkey).encode(&TEST_NETWORK);
+        // A bare address watched with no key material at all, as zcashd's
+        // `importaddress` produces.
+        let bare_taddr = TransparentAddress::PublicKeyHash([0x77; 20]);
+        let bare_addr = bare_taddr.encode(&TEST_NETWORK);
+
+        let mut account = view_only_account(&ts);
+        let mut with_pubkey = ::zewif::transparent::Address::new(pubkey_addr.clone());
+        with_pubkey.set_pubkey(
+            ::zewif::transparent::TransparentPubKey::from_bytes(
+                watched_pubkey.serialize().to_vec(),
+            )
+            .unwrap(),
+        );
+        let mut exposed = ::zewif::Address::new(::zewif::ProtocolAddress::Transparent(with_pubkey));
+        exposed.set_exposed_at_height(::zewif::BlockHeight::from(2_600_050));
+        account.add_address(exposed);
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(::zewif::transparent::Address::new(
+                bare_addr.clone(),
+            )),
+        ));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.watch_only_receivers_imported, 2);
+        assert!(report.skipped_watch_only.is_empty());
+        assert_eq!(report.addresses_not_recognized, 0);
+
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        assert!(
+            receivers
+                .contains_key(&TransparentAddress::decode(&TEST_NETWORK, &pubkey_addr).unwrap())
+        );
+        assert!(receivers.contains_key(&bare_taddr));
+    }
+
+    /// Watch-only transparent records carried by an account imported with
+    /// spend authority are not imported — registering them would mix spend
+    /// authority within the account — and are reported instead.
+    #[test]
+    fn watch_only_records_on_spending_account_are_skipped() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+
+        let bare_taddr = TransparentAddress::PublicKeyHash([0x77; 20]);
+        let bare_addr = bare_taddr.encode(&TEST_NETWORK);
+        let mut account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+        let mut watched = ::zewif::Address::new(::zewif::ProtocolAddress::Transparent(
+            ::zewif::transparent::Address::new(bare_addr.clone()),
+        ));
+        watched.set_exposed_at_height(::zewif::BlockHeight::from(2_600_050));
+        account.add_address(watched);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.watch_only_receivers_imported, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(report.skipped_watch_only[0].address, bare_addr);
+        assert_eq!(report.skipped_watch_only[0].form, WatchOnlyForm::Address);
+        // The skipped record is reported once; exposure marking does not
+        // additionally count it as unrecognized.
+        assert_eq!(report.addresses_not_recognized, 0);
+
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        assert!(!receivers.contains_key(&bare_taddr));
+    }
+
+    /// A multisig redeem script recorded on a spending account is registered
+    /// when the document's secret store holds a verified spending key for
+    /// every member public key.
+    #[test]
+    fn multisig_with_all_member_keys_registers_into_spending_account() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let member_keys: Vec<secp256k1::SecretKey> = [[0x44; 32], [0x45; 32]]
+            .iter()
+            .map(|bytes| secp256k1::SecretKey::from_slice(bytes).unwrap())
+            .collect();
+        let member_pubkeys: Vec<secp256k1::PublicKey> =
+            member_keys.iter().map(|sk| sk.public_key(&secp)).collect();
+        let (script_bytes, p2sh_addr) = multisig_script(2, &member_pubkeys);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        let mut account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+        for (sk, pk) in member_keys.iter().zip(&member_pubkeys) {
+            store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+                ::zewif::transparent::TransparentPubKey::from_bytes(pk.serialize().to_vec())
+                    .unwrap(),
+                ::zewif::transparent::TransparentSpendingKey::new(test_wif(sk)),
+            ));
+            account.add_address(::zewif::Address::new(
+                ::zewif::ProtocolAddress::Transparent(::zewif::transparent::Address::new(
+                    TransparentAddress::from_pubkey(pk).encode(&TEST_NETWORK),
+                )),
+            ));
+        }
+        account.add_address(taddr_with_redeem_script(&p2sh_addr, &script_bytes));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.transparent_keys_registered, 2);
+        assert_eq!(report.redeem_scripts_registered, 1);
+        assert!(report.skipped_watch_only.is_empty());
+
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        assert!(
+            receivers.contains_key(&TransparentAddress::decode(&TEST_NETWORK, &p2sh_addr).unwrap())
+        );
+    }
+
+    /// A multisig redeem script recorded on a spending account is watch-only
+    /// material when any member public key lacks a verified spending key in
+    /// the document's secret store; it is skipped and reported rather than
+    /// registered, so that the account's spend authority stays pure.
+    #[test]
+    fn multisig_with_missing_member_keys_is_skipped_for_spending_account() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let held_key = secp256k1::SecretKey::from_slice(&[0x44; 32]).unwrap();
+        let held_pubkey = held_key.public_key(&secp);
+        let missing_pubkey = secp256k1::SecretKey::from_slice(&[0x45; 32])
+            .unwrap()
+            .public_key(&secp);
+        let (script_bytes, p2sh_addr) = multisig_script(2, &[held_pubkey, missing_pubkey]);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+            ::zewif::transparent::TransparentPubKey::from_bytes(held_pubkey.serialize().to_vec())
+                .unwrap(),
+            ::zewif::transparent::TransparentSpendingKey::new(test_wif(&held_key)),
+        ));
+
+        let mut account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(::zewif::transparent::Address::new(
+                TransparentAddress::from_pubkey(&held_pubkey).encode(&TEST_NETWORK),
+            )),
+        ));
+        account.add_address(taddr_with_redeem_script(&p2sh_addr, &script_bytes));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        // The held member key is still registered under its own address...
+        assert_eq!(report.transparent_keys_registered, 1);
+        // ...but the partially-owned script is not.
+        assert_eq!(report.redeem_scripts_registered, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(report.skipped_watch_only[0].address, p2sh_addr);
+        assert_eq!(
+            report.skipped_watch_only[0].form,
+            WatchOnlyForm::RedeemScript
+        );
+
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        assert!(
+            !receivers
+                .contains_key(&TransparentAddress::decode(&TEST_NETWORK, &p2sh_addr).unwrap())
+        );
+    }
+
+    /// A multisig redeem script recorded on an account imported as view-only
+    /// is registered without any member spending keys: a view-only account
+    /// carries no signing claim for the material it watches.
+    #[test]
+    fn multisig_on_view_only_account_is_registered_without_member_keys() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let member_pubkeys: Vec<secp256k1::PublicKey> = [[0x44; 32], [0x45; 32]]
+            .iter()
+            .map(|bytes| {
+                secp256k1::SecretKey::from_slice(bytes)
+                    .unwrap()
+                    .public_key(&secp)
+            })
+            .collect();
+        let (script_bytes, p2sh_addr) = multisig_script(2, &member_pubkeys);
+
+        let mut account = view_only_account(&ts);
+        account.add_address(taddr_with_redeem_script(&p2sh_addr, &script_bytes));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.redeem_scripts_registered, 1);
+        assert!(report.skipped_watch_only.is_empty());
+
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        assert!(
+            receivers.contains_key(&TransparentAddress::decode(&TEST_NETWORK, &p2sh_addr).unwrap())
+        );
     }
 
     #[test]
