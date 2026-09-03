@@ -1762,9 +1762,11 @@ where
 
     let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
     let network = *st.network();
+    let clock = st.clock().clone();
     let txids = wallet::shield_transparent_funds(
         st.wallet_mut(),
         &network,
+        &clock,
         &prover,
         &prover,
         &input_selector,
@@ -2092,9 +2094,11 @@ where
 
     let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
     let network = *st.network();
+    let clock = st.clock().clone();
     let txids = wallet::shield_transparent_funds(
         st.wallet_mut(),
         &network,
+        &clock,
         &prover,
         &prover,
         &input_selector,
@@ -2839,7 +2843,7 @@ where
         .1;
     let payment_amount = Zatoshis::const_from_u64(50_000);
     let request = TransactionRequest::new(vec![Payment::without_memo(
-        Address::Sapling(recipient).to_zcash_address(&network),
+        Address::Sapling(Box::new(recipient)).to_zcash_address(&network),
         payment_amount,
     )])
     .unwrap();

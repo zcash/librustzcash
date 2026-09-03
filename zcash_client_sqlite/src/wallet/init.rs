@@ -1462,12 +1462,12 @@ mod tests {
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
             let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
-            let address_str = Address::Unified(
+            let address_str = Address::from(
                 ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
-            .encode(&wdb.params);
+            .encode_receiver_preserving(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1606,7 +1606,10 @@ mod tests {
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
-                assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
+                assert_eq!(
+                    tv.unified_addr,
+                    ua.encode_receiver_preserving(&Network::MainNetwork)
+                );
 
                 db_data
                     .get_next_available_address(account_id, ua_request)

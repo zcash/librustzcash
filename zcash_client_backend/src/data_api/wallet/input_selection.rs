@@ -1009,7 +1009,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
+                        GreedyInputSelectorError::UnsupportedAddress(addr),
                     ));
                 }
             }
@@ -1729,7 +1729,7 @@ where
         && let Address::Unified(addr) = &recipient_address
     {
         return Err(InputSelectorError::Selection(
-            GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+            GreedyInputSelectorError::UnsupportedAddress(addr.clone()),
         ));
     }
 
@@ -2406,7 +2406,7 @@ where
         }
         Address::Unified(ua) if ua.has_sapling() => Ok(PoolType::SAPLING),
         Address::Unified(ua) => Err(InputSelectorError::Selection(
-            GreedyInputSelectorError::UnsupportedAddress(Box::new(ua)),
+            GreedyInputSelectorError::UnsupportedAddress(ua),
         )),
         Address::Transparent(_) | Address::Tex(_) => Err(InputSelectorError::Proposal(
             ProposalError::ShieldingRequiresShieldedRecipient,

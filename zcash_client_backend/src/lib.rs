@@ -66,6 +66,7 @@ pub mod proposal;
 pub mod proto;
 pub mod scan;
 pub mod scanning;
+pub mod util;
 pub mod wallet;
 
 #[cfg(any(feature = "sync", feature = "sync-decryptor"))]

@@ -121,12 +121,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         let dfvk = ufvk.sapling().ok_or_else(||
                             WalletMigrationError::CorruptedData("Derivation should have produced a UFVK containing a Sapling component.".to_owned()))?;
                         let (idx, expected_address) = dfvk.default_address();
-                        if decoded_address != expected_address {
+                        if *decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(format!(
                                     "Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                                     address,
-                                    Address::Sapling(expected_address).encode(&self.params),
+                                    Address::from(expected_address).encode(&self.params),
                                     idx
                                 ))
                             } else {
@@ -140,12 +140,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     }
                     Address::Unified(decoded_address) => {
                         let (expected_address, idx) = ufvk.default_address(ua_request)?;
-                        if decoded_address != expected_address {
+                        if *decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(format!(
                                     "Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
                                     address,
-                                    Address::Unified(expected_address).encode(&self.params),
+                                    Address::from(expected_address).encode(&self.params),
                                     idx
                                 ))
                             } else {
@@ -159,7 +159,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 seed_is_relevant = true;
 
                 let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk.default_address(ua_request)?.0.encode(&self.params);
+                let address_str: String = ufvk
+                    .default_address(ua_request)?
+                    .0
+                    .encode_receiver_preserving(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily

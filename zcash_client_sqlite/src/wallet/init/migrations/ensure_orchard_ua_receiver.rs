@@ -73,7 +73,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let mut di_be = *diversifier_index.as_bytes();
             di_be.reverse();
             update_address.execute(named_params![
-                ":address": default_addr.encode(&self.params),
+                ":address": default_addr.encode_receiver_preserving(&self.params),
                 ":account_id": account_id,
                 ":j": &di_be[..],
             ])?;
@@ -165,7 +165,7 @@ mod tests {
                 named_params![
                     ":account_id": account_id,
                     ":j": &di_be[..],
-                    ":address": addr.encode(&db_data.params)
+                    ":address": addr.encode_receiver_preserving(&db_data.params)
                 ],
             )
             .unwrap();

@@ -6,6 +6,7 @@ use std::{
     fmt,
     hash::Hash,
     num::NonZeroU32,
+    time::Duration,
 };
 
 #[cfg(feature = "pczt")]
@@ -120,6 +121,7 @@ use crate::{
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
+    util::testing::FixedClock,
     wallet::{
         LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput,
     },
@@ -540,6 +542,10 @@ pub trait Reset: WalletTest + Sized {
 }
 
 /// The state for a `zcash_client_backend` test.
+/// The fixed instant (2025-02-25T00:00:00Z) at which a [`TestState`]'s clock starts,
+/// as an offset from the Unix epoch.
+const TEST_CLOCK_EPOCH_OFFSET: Duration = Duration::from_secs(1740441600);
+
 pub struct TestState<Cache, DataStore: WalletTest, Network> {
     cache: Cache,
     cached_blocks: BTreeMap<BlockHeight, CachedBlock>,
@@ -548,9 +554,15 @@ pub struct TestState<Cache, DataStore: WalletTest, Network> {
     network: Network,
     test_account: Option<(SecretVec<u8>, TestAccount<DataStore::Account>)>,
     rng: ChaChaRng,
+    clock: FixedClock,
 }
 
 impl<Cache, DataStore: WalletTest, Network> TestState<Cache, DataStore, Network> {
+    /// Exposes the fixed clock that this test state passes to wallet operations.
+    pub fn clock(&self) -> &FixedClock {
+        &self.clock
+    }
+
     /// Exposes an immutable reference to the test's `DataStore`.
     pub fn wallet(&self) -> &DataStore {
         &self.wallet_data
@@ -1193,9 +1205,11 @@ where
             None,
         )?;
 
+        let clock = self.clock.clone();
         create_proposed_transactions(
             self.wallet_mut(),
             &network,
+            &clock,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1444,9 +1458,11 @@ where
         FeeRuleT: FeeRule,
     {
         let network = self.network().clone();
+        let clock = self.clock.clone();
         create_proposed_transactions(
             self.wallet_mut(),
             &network,
+            &clock,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1477,9 +1493,11 @@ where
     {
         let network = self.network().clone();
 
+        let clock = self.clock.clone();
         create_pczt_from_proposal(
             self.wallet_mut(),
             &network,
+            &clock,
             spend_from_account,
             ovk_policy,
             proposal,
@@ -1503,8 +1521,10 @@ where
         let prover = real_test_prover();
         let (spend_vk, output_vk) = prover.verifying_keys();
 
+        let clock = self.clock.clone();
         extract_and_store_transaction_from_pczt(
             self.wallet_mut(),
+            &clock,
             pczt,
             Some((&spend_vk, &output_vk)),
             None,
@@ -1532,9 +1552,11 @@ where
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let network = self.network().clone();
+        let clock = self.clock.clone();
         shield_transparent_funds(
             self.wallet_mut(),
             &network,
+            &clock,
             &MockSpendProver,
             &MockOutputProver,
             input_selector,
@@ -2144,6 +2166,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             network: self.network,
             test_account,
             rng: self.rng,
+            clock: FixedClock::new(std::time::UNIX_EPOCH + TEST_CLOCK_EPOCH_OFFSET),
         }
     }
 }
@@ -2909,7 +2932,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
             compact_sapling_output(
                 params,
                 height,
-                recipient,
+                *recipient,
                 value,
                 Some(::sapling::keys::OutgoingViewingKey(ovk_bytes)),
                 &mut rng,

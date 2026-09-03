@@ -9,10 +9,65 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
+- `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_time`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_time`
+- `zcash_keys::address::UnifiedAddress::expiry_height`
+- `zcash_keys::address::UnifiedAddress::expiry_time`
+- `zcash_keys::address::UnifiedAddress::to_transparent_including_zcash_address`
+- `zcash_keys::address::UnifiedAddress::encode_transparent_including`
+- `zcash_keys::address::UnifiedAddress::to_receiver_preserving_zcash_address`
+- `zcash_keys::address::UnifiedAddress::encode_receiver_preserving`
+- `zcash_keys::address::Address::to_receiver_preserving_zcash_address`
+- `zcash_keys::address::Address::encode_receiver_preserving`
+- `zcash_keys::keys::P2shPolicy`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
+- `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`
+- `zcash_keys::keys::UnifiedAddressRequest::TRANSPARENT_ONLY`
+- ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
+  `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
+  - Address expiry height and expiry time metadata fields.
+  - Expiry metadata is propagated from UFVK → UIVK → UA per spec.
+  - Automatic R2 revision selection when metadata items are present.
+
 ### Changed
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set should disable default features and enable
   only the features they need.
+- `zcash_keys::address::UnifiedAddress::from_receivers` now accepts optional
+  expiry height and expiry time parameters.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::new` (behind
+  `test-dependencies`) now accepts unknown data, expiry height, expiry time,
+  and unknown metadata parameters.
+- `zcash_keys::address::UnifiedAddress::from_receivers` no longer requires a
+  shielded receiver; at least one receiver (transparent or shielded) suffices.
+- `zcash_keys::address::UnifiedAddress::to_zcash_address` produces `zu`
+  (shielded-only) addresses for R2, stripping any transparent receiver; an
+  address with no shielded receiver falls back to its `tu`
+  (transparent-including) encoding.
+- The `Sapling` and `Unified` variants of `zcash_keys::address::Address` now
+  wrap their payloads in `Box` to reduce the enum's stack footprint.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::to_receiver_requirements`
+  returns `ReceiverRequirements::TRANSPARENT_ONLY` for a key having a transparent
+  item, no shielded item, and no data item that the build cannot interpret,
+  instead of `Err(ReceiverRequirementError::NoShieldedReceiver)`. Address
+  generation from such a key, including via
+  `UnifiedAddressRequest::AllAvailableKeys`, now produces a transparent-only
+  ZIP 316 Revision 2 (`tu`) Unified Address. A key having a data item that the
+  build cannot interpret, such as an item of a pool whose feature is disabled,
+  still returns `Err(ReceiverRequirementError::NoShieldedReceiver)`.
+- `zcash_keys::keys::ReceiverRequirements::intersect` permits a result having no
+  shielded receiver when an operand already had none.
+- `zcash_keys::keys::transparent::gap_limits::generate_address_list` propagates
+  `Err(AddressGenerationError::NoSatisfiableReceiver)` for an external-scope
+  address, instead of returning a bare transparent address for that error.
+- `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
+  renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer
