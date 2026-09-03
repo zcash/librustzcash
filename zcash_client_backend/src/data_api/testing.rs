@@ -33,7 +33,11 @@ use {
         },
     },
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
+    ::transparent::{
+        address::{Script, TransparentAddress},
+        bundle::OutPoint,
+        keys::TransparentKeyScope,
+    },
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -733,6 +737,72 @@ where
         );
 
         (height, res, nfs)
+    }
+
+    /// Adds a block at the next height containing a single transparent-only transaction that
+    /// spends `vin` and creates an output of each `(address, value)` in `vout`, and inserts it
+    /// into the cache.
+    ///
+    /// The transaction is placed at index 1 within the block, behind a placeholder occupying the
+    /// coinbase position, so that the outputs it creates are not subject to the coinbase maturity
+    /// rule. Returns the height of the block and the id of the transparent transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn generate_next_block_transparent(
+        &mut self,
+        vin: &[OutPoint],
+        vout: &[(TransparentAddress, Zatoshis)],
+    ) -> (BlockHeight, Cache::InsertResult, TxId) {
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self
+            .latest_cached_block()
+            .unwrap_or(&pre_activation_block)
+            .clone();
+        let height = prior_cached_block.height() + 1;
+
+        let mut coinbase = fake_compact_tx(&mut self.rng);
+        coinbase.index = 0;
+
+        let mut ctx = fake_compact_tx(&mut self.rng);
+        ctx.index = 1;
+        ctx.vin = vin
+            .iter()
+            .map(|outpoint| compact_formats::CompactTxIn {
+                prevout_txid: outpoint.hash().to_vec(),
+                prevout_index: outpoint.n(),
+            })
+            .collect();
+        ctx.vout = vout
+            .iter()
+            .map(|(addr, value)| compact_formats::TxOut {
+                value: value.into_u64(),
+                script_pub_key: Script::from(addr.script()).0.0,
+            })
+            .collect();
+        let txid = TxId::from_bytes(ctx.txid[..].try_into().expect("txid is 32 bytes"));
+
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                self.rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash
+            .extend_from_slice(&prior_cached_block.chain_state.block_hash().0);
+        cb.vtx.push(coinbase);
+        cb.vtx.push(ctx);
+        cb.chain_metadata = Some(compact_formats::ChainMetadata {
+            sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
+            orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
+            ironwood_commitment_tree_size: prior_cached_block.ironwood_end_size,
+        });
+
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(height);
+
+        (height, res, txid)
     }
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
@@ -3387,6 +3457,21 @@ impl WalletRead for MockWalletDb {
         _query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
         Ok(Vec::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        Ok(HashMap::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_transparent_address(
+        &self,
+        _address: &TransparentAddress,
+    ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error> {
+        Ok(None)
     }
 
     #[cfg(feature = "transparent-inputs")]
