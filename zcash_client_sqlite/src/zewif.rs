@@ -1262,12 +1262,13 @@ where
         // A view-only account carries no signing claim, so even where the
         // script itself cannot be represented, its address can still be
         // watched via an address-only import.
-        if !registered && !spending {
-            if let Ok(taddr) = TransparentAddress::decode(params, address) {
-                wdb.import_standalone_transparent_address(*account_uuid, taddr)
-                    .map_err(ZewifImportError::Wallet)?;
-                report.watch_only_receivers_imported += 1;
-            }
+        if !registered
+            && !spending
+            && let Ok(taddr) = TransparentAddress::decode(params, address)
+        {
+            wdb.import_standalone_transparent_address(*account_uuid, taddr)
+                .map_err(ZewifImportError::Wallet)?;
+            report.watch_only_receivers_imported += 1;
         }
     }
 
