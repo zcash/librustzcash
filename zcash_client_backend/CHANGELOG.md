@@ -48,6 +48,15 @@ workspace.
     discarded.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
+- The standalone transparent import methods
+  (`zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_{address,
+  pubkey, pubkeys, script}`) are now documented as carrying an account
+  spend-authority contract: an account is a single root of spend authority, so
+  importing standalone material into an account asserts that the application's
+  ability to sign for that material matches the account's declared purpose.
+  Watch-only material — a pubkey whose secret key the application does not
+  hold, a multisig redeem script with missing member keys, or a bare address —
+  must be imported into a view-only account, never into a spending account.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
