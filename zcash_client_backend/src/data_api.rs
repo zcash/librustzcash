@@ -55,6 +55,15 @@
 //! (both the external and internal parts of that key, as defined by
 //! [ZIP 316](https://zips.z.cash/zip-0316)) will be interpreted as belonging to that account.
 //!
+//! An account is thus a single root of spend authority: whether the application maintains
+//! spending capability for the account is declared exactly once, when the account is created or
+//! imported (via [`AccountPurpose`]), and applies uniformly to everything the account can detect.
+//! The application must maintain the ability to spend either _all_ of an account's receivers or
+//! _none_ of them; APIs that attach additional receivers to an existing account (such as the
+//! standalone transparent imports available with the `transparent-key-import` feature) must not
+//! be used to mix watch-only material into a spending account. See the [`WalletWrite`] trait
+//! documentation for details.
+//!
 //! [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 //! [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
 //! [`zcash_client_sqlite`]: https://docs.rs/zcash_client_sqlite
@@ -670,9 +679,11 @@ impl AccountSource {
 /// detected, and so balance-related APIs and APIs that rely upon spentness checks MUST be
 /// implemented to return errors if invoked for an IVK-only account.
 ///
-/// For spending accounts in implementations that support the `transparent-key-import` feature,
-/// care must be taken to ensure that spending keys corresponding to every imported transparent
-/// address in an account are maintained by the application.
+/// In implementations that support the `transparent-key-import` feature, importing standalone
+/// transparent material into a spending account carries the assertion that the application
+/// maintains the spending key material required to sign for the imported receiver; watch-only
+/// transparent material may only be imported into view-only accounts. See the [`WalletWrite`]
+/// trait documentation for details.
 pub trait Account {
     type AccountId: Copy;
 
@@ -3478,15 +3489,29 @@ impl AccountBirthday {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
-/// An account is treated as having a single root of spending authority that spans the shielded and
-/// transparent rules for the purpose of balance, transaction listing, and so forth. However,
-/// transparent keys imported via `WalletWrite::import_standalone_transparent_pubkey` or
-/// `WalletWrite::import_standalone_transparent_script` (available with the
-/// `transparent-key-import` feature) break this abstraction slightly, so wallets using this API
-/// need to be cautious to enforce the invariant that the wallet either maintains access to the
-/// keys required to spend **ALL** outputs received by the account, or that it **DOES NOT** offer
-/// any spending capability for the account, i.e. the account is treated as view-only for all
-/// user-facing operations.
+/// An account is treated as having a single root of spending authority that spans the shielded
+/// and transparent rules for the purpose of balance, transaction listing, and so forth. Whether
+/// the application maintains that spending authority is declared exactly once, when the account
+/// is created or imported (via [`AccountPurpose`]), and the wallet must either maintain access to
+/// the keys required to spend **ALL** outputs detectable by the account, or **NOT** offer any
+/// spending capability for the account at all (i.e. the account is view-only).
+///
+/// The standalone transparent import methods
+/// (`WalletWrite::import_standalone_transparent_address`,
+/// `WalletWrite::import_standalone_transparent_pubkey`,
+/// `WalletWrite::import_standalone_transparent_pubkeys`, and
+/// `WalletWrite::import_standalone_transparent_script`, available with the
+/// `transparent-key-import` feature) attach receivers to an account that the account's own keys
+/// do not cover, and so carry a contract: importing standalone material into an account asserts
+/// that the application's ability to sign for that material matches the account's declared
+/// purpose. Into a spending account, import only material for which the application holds (or
+/// can obtain) the keys required to sign — for a P2SH multisig script, all of its member keys.
+/// Watch-only material — a pubkey whose secret key the application does not hold, a multisig
+/// script with missing member keys, or a bare address — must instead be imported into a
+/// view-only account. The wallet backend cannot verify what the application is able to sign for,
+/// so this contract is not enforced; violating it produces an account that mixes spend
+/// authority, for which the wallet may propose transactions that the application is unable to
+/// sign.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3698,6 +3723,15 @@ pub trait WalletWrite:
     /// upgrades the address in place, after which the spending limitations of those methods
     /// apply instead.
     ///
+    /// # Account spend authority
+    ///
+    /// A bare address carries no key material, so the application cannot sign for the outputs it
+    /// receives: an address-only import is watch-only material, which belongs in a view-only
+    /// account under the single-root-of-spend-authority contract described in the [`WalletWrite`]
+    /// trait documentation. (The exclusion of its outputs from input selection is independent of
+    /// that contract: it holds for any account, because the wallet lacks the pubkey or redeem
+    /// script required to construct a spending input at all.)
+    ///
     /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
     /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
@@ -3716,10 +3750,14 @@ pub trait WalletWrite:
     /// associated transparent p2pkh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts), but spending funds held by this address requires the associated spending key to
+    /// be provided explicitly when calling [`create_proposed_transactions`]; the wallet does not
+    /// store it. Importing a pubkey into a spending account therefore asserts that the
+    /// application holds (or can obtain) that spending key: a watch-only pubkey — one whose
+    /// secret key the application does not hold — must be imported into a view-only account
+    /// instead, per the single-root-of-spend-authority contract described in the [`WalletWrite`]
+    /// trait documentation. By extension, calls to [`propose_shielding`] must only include
+    /// addresses for which the spending application holds or can obtain the spending keys.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
@@ -3760,9 +3798,14 @@ pub trait WalletWrite:
     /// adds the associated transparent p2sh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
+    /// accounts), but spending funds held by this address requires the associated spending keys
+    /// to be provided explicitly when calling [`create_proposed_transactions`]; the wallet does
+    /// not store them. Importing a redeem script into a spending account therefore asserts that
+    /// the application holds (or can obtain) the spending keys for all of the script's member
+    /// public keys: a script with missing member keys is watch-only material, and must be
+    /// imported into a view-only account instead, per the single-root-of-spend-authority
+    /// contract described in the [`WalletWrite`] trait documentation. By extension, calls to
+    /// [`propose_shielding`] must only include addresses for which the spending application
     /// holds or can obtain the spending keys.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions

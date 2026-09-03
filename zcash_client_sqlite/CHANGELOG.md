@@ -15,6 +15,26 @@ workspace.
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- `zewif::ZewifImportReport::watch_only_receivers_imported` and
+  `zewif::ZewifImportReport::skipped_watch_only` (with the supporting types
+  `zewif::SkippedWatchOnly` and `zewif::WatchOnlyForm`), reporting how the
+  watch-only transparent records in a document were handled.
+
+### Changed
+- `zewif::import_wallet` now keeps each imported account's spend authority
+  pure:
+  - Watch-only transparent records — bare addresses, public keys whose
+    spending keys are absent from the document's secret store, and the
+    addresses of redeem scripts the wallet cannot represent — are imported as
+    standalone receivers of accounts imported as view-only. They were
+    previously dropped.
+  - A P2SH redeem script recorded on an account imported with spend authority
+    is registered only when every member public key of the script has a
+    verified spending key in the document's secret store. Watch-only records
+    (including such partially-owned scripts) carried by a spending account are
+    skipped and reported instead of being registered, since registering them
+    would mix spend authority within the account; they remain recoverable from
+    the retained document.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
