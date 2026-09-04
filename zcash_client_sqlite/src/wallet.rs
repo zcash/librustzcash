@@ -4308,15 +4308,15 @@ fn witness_destroying_truncation_error(
 }
 
 /// Reports a [`TreeTruncation::DivergedCheckpoints`] classification for the given pool as
-/// [`SqliteClientError::CorruptedData`].
+/// [`SqliteClientError::DivergedCheckpoints`].
 fn diverged_checkpoints_error(
     pool: ShieldedPool,
     truncation_height: BlockHeight,
 ) -> SqliteClientError {
-    SqliteClientError::CorruptedData(format!(
-        "the {pool:?} note commitment tree retains checkpoints both above and below \
-         height {truncation_height}, but none at that height to truncate to"
-    ))
+    SqliteClientError::DivergedCheckpoints {
+        pool,
+        height: truncation_height,
+    }
 }
 
 /// Truncates the wallet to `truncation_height`, bringing each pool's note commitment tree
@@ -4331,7 +4331,7 @@ fn diverged_checkpoints_error(
 /// inexecutable without indicating any inconsistency in the wallet's state; this is
 /// reported as [`SqliteClientError::RequestedRewindInvalid`]. A pool classified as
 /// [`TreeTruncation::DivergedCheckpoints`] is reported as
-/// [`SqliteClientError::CorruptedData`].
+/// [`SqliteClientError::DivergedCheckpoints`].
 pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -4779,12 +4779,12 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 /// empty *and* every account in the wallet has a birthday greater than
 /// `chain_state.block_height() + 1`. Returns `Err(RewindError::DataSource(_))` with a
 /// `CorruptedData` payload if `reset_account_birthdays` contains any account UUID that is not
-/// present in the wallet, or if a pool's note commitment tree retains checkpoints that
-/// straddle the truncation height without one at it (see [`plan_tree_truncation`]); and with
-/// a `RequestedRewindInvalid` payload if discarding a pool tree's scanned state would destroy
-/// witness data for notes below the rewind target that the requeued rescan would not
-/// re-create — a valid wallet state from which the requested rewind simply cannot be
-/// executed.
+/// present in the wallet; with a `DivergedCheckpoints` payload if a pool's note commitment
+/// tree retains checkpoints that straddle the truncation height without one at it (see
+/// [`plan_tree_truncation`]); and with a `RequestedRewindInvalid` payload if discarding a pool
+/// tree's scanned state would destroy witness data for notes below the rewind target that the
+/// requeued rescan would not re-create — a valid wallet state from which the requested rewind
+/// simply cannot be executed.
 pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -6125,8 +6125,9 @@ mod tests {
 
     use super::{
         KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday, chain_tip_height,
-        flag_previously_received_change, get_transaction, min_shared_checkpoint_height, parse_tx,
-        put_zip318_classification, queue_tx_retrieval, select_truncation_height,
+        diverged_checkpoints_error, flag_previously_received_change, get_transaction,
+        min_shared_checkpoint_height, parse_tx, put_zip318_classification, queue_tx_retrieval,
+        select_truncation_height,
     };
 
     use incrementalmerkletree::frontier::Frontier;
@@ -7275,10 +7276,21 @@ mod tests {
         );
     }
 
-    /// An Ironwood tree with checkpoints both above and below the truncation height but none
-    /// at it must still be treated as corruption: the tree cannot be truncated to the height
-    /// consistently, and its state genuinely diverges from the pools that determined that
-    /// height.
+    #[test]
+    fn diverged_checkpoints_error_preserves_pool_and_height() {
+        let height = BlockHeight::from_u32(42);
+
+        let result = diverged_checkpoints_error(ShieldedPool::Sapling, height);
+
+        assert_matches!(
+            result,
+            SqliteClientError::DivergedCheckpoints {
+                pool: ShieldedPool::Sapling,
+                height: actual_height,
+            } if actual_height == height
+        );
+    }
+
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_straddling_ironwood_checkpoints_errors() {
@@ -7303,7 +7315,12 @@ mod tests {
 
         assert_matches!(
             result,
-            Err(RewindError::DataSource(SqliteClientError::CorruptedData(_)))
+            Err(RewindError::DataSource(
+                SqliteClientError::DivergedCheckpoints {
+                    pool: ShieldedPool::Ironwood,
+                    height,
+                }
+            )) if height == target_height
         );
     }
 
