@@ -47,6 +47,12 @@ workspace.
   `UnifiedFullViewingKey` that carries one now records that it does not describe the
   account completely, so `to_receiver_requirements` no longer reports such a key as
   describing a shielded-only or transparent-only account.
+- Unified Addresses derived from a `UnifiedFullViewingKey` or
+  `UnifiedIncomingViewingKey` that carries a P2SH viewing key item now contain the
+  corresponding P2SH receiver, and `has_transparent` returns `true` for such a key.
+  A P2SH viewing key item is represented by `zcash_transparent::zip48::P2shFullViewingKey`
+  or `P2shIncomingViewingKey`, which accept only the standard ZIP 48 descriptor template;
+  a key carrying any other template fails to decode.
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set should disable default features and enable
   only the features they need.

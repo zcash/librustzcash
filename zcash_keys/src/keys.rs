@@ -1993,9 +1993,7 @@ impl UnifiedIncomingViewingKey {
                 let j = to_transparent_child_index(_j);
                 let derived = match tivk {
                     TransparentIvk::P2pkh(k) => j.and_then(|j| k.derive_address(j).ok()),
-                    // Deriving a receiver from a P2SH viewing key item requires evaluating
-                    // its wallet policy, which this implementation does not do.
-                    TransparentIvk::P2sh(_) => None,
+                    TransparentIvk::P2sh(p) => j.map(|j| p.derive_address(j).0),
                 };
 
                 transparent = match (request.p2pkh, derived) {
@@ -2514,27 +2512,23 @@ mod tests {
                 tv.account
             );
 
-            // The Unified Address derived from the decoded UIVK must match the vector.
-            // Deriving the transparent receiver of a P2SH viewing key item requires
-            // evaluating its BIP 388 wallet policy, which this crate does not yet do, so
-            // the addresses of such keys cannot yet be checked against the vectors.
-            // TODO: assert these vectors too, once P2SH receiver derivation is supported.
-            if tv.p2sh_ivk_bytes.is_none() {
-                let ua = decoded
-                    .address(
-                        DiversifierIndex::from(tv.diversifier_index),
-                        UnifiedAddressRequest::AllAvailableKeys,
-                    )
-                    .unwrap_or_else(|e| {
-                        panic!("UA derivation failed for account {}: {e:?}", tv.account)
-                    });
-                assert_eq!(
-                    ua.encode_receiver_preserving(&MAIN_NETWORK),
-                    tv.derived_ua,
-                    "derived UA mismatch for account {}",
-                    tv.account
-                );
-            }
+            // The Unified Address derived from the decoded UIVK must match the vector,
+            // including the P2SH receiver obtained by evaluating a P2SH viewing key
+            // item's wallet policy.
+            let ua = decoded
+                .address(
+                    DiversifierIndex::from(tv.diversifier_index),
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap_or_else(|e| {
+                    panic!("UA derivation failed for account {}: {e:?}", tv.account)
+                });
+            assert_eq!(
+                ua.encode_receiver_preserving(&MAIN_NETWORK),
+                tv.derived_ua,
+                "derived UA mismatch for account {}",
+                tv.account
+            );
 
             // Verify key data matches the test vector bytes.
             if let Some(ref expected) = tv.t_p2pkh_ivk_bytes {
