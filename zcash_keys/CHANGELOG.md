@@ -29,6 +29,7 @@ workspace.
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
 - `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`
 - `zcash_keys::keys::UnifiedAddressRequest::TRANSPARENT_ONLY`
+- `zcash_keys::keys::AddressGenerationError::UnsupportedP2shPolicy`
 - ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
   `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
   - Address expiry height and expiry time metadata fields.
@@ -36,6 +37,12 @@ workspace.
   - Automatic R2 revision selection when metadata items are present.
 
 ### Changed
+- Unified Addresses derived from a `UnifiedFullViewingKey` or
+  `UnifiedIncomingViewingKey` that carries a P2SH viewing key item now contain the
+  corresponding P2SH receiver, and `has_transparent` returns `true` for such a key.
+  Only the `sh(sortedmulti(..))` descriptor template is evaluated; address generation
+  for any other template fails with
+  `AddressGenerationError::UnsupportedP2shPolicy`.
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set should disable default features and enable
   only the features they need.

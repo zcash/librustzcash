@@ -25,10 +25,7 @@ use ReceiverRequirement::*;
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::consensus::NetworkConstants;
 
-#[cfg(all(
-    feature = "transparent-inputs",
-    any(test, feature = "test-dependencies")
-))]
+#[cfg(feature = "transparent-inputs")]
 use ::transparent::address::TransparentAddress;
 
 #[cfg(feature = "unstable")]
@@ -550,6 +547,9 @@ pub enum AddressGenerationError {
     /// Omitting both shielded receiver types is permitted only for a key that has no shielded
     /// item; see [`ReceiverRequirements::TRANSPARENT_ONLY`].
     NoSatisfiableReceiver,
+    /// A P2SH viewing key item carries a descriptor template that this implementation
+    /// cannot evaluate, so no P2SH receiver can be derived from it.
+    UnsupportedP2shPolicy,
 }
 
 impl fmt::Display for AddressGenerationError {
@@ -593,6 +593,12 @@ impl fmt::Display for AddressGenerationError {
                 write!(
                     f,
                     "The Unified Viewing Key does not contain a key for typecode {t:?}."
+                )
+            }
+            AddressGenerationError::UnsupportedP2shPolicy => {
+                write!(
+                    f,
+                    "The P2SH viewing key item uses a descriptor template that is not supported."
                 )
             }
             AddressGenerationError::NoSatisfiableReceiver => {
@@ -942,6 +948,111 @@ impl core::fmt::Debug for P2shPolicy {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("P2shPolicy").field(&"...").finish()
     }
+}
+
+/// Derives the P2SH receiver at `child_index` from the UIVK form of a P2SH viewing key
+/// item, as specified in [ZIP 316] Revision 2: each key in the key information vector is
+/// advanced to its non-hardened child at that index, the descriptor template is
+/// instantiated with the derived keys, and the receiver is the HASH160 of the resulting
+/// output script.
+///
+/// Only the `sh(sortedmulti(..))` descriptor template is supported; any other template
+/// yields [`AddressGenerationError::UnsupportedP2shPolicy`].
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[cfg(feature = "transparent-inputs")]
+fn derive_p2sh_receiver(
+    policy: &P2shPolicy,
+    child_index: NonHardenedChildIndex,
+) -> Result<TransparentAddress, AddressGenerationError> {
+    /// The length of one key information entry: a 32-byte BIP 32 chain code followed by
+    /// a 33-byte SEC1 compressed public key.
+    const KEY_INFO_LEN: usize = 65;
+    /// Script encoding of the small integers `OP_1` ..= `OP_16`, which is `0x50 + n`.
+    const OP_SMALL_INT_BASE: u8 = 0x50;
+    /// The largest integer `OP_1` ..= `OP_16` can encode, bounding both the multisig
+    /// threshold and the number of keys a `sortedmulti` descriptor may carry.
+    const MAX_SMALL_INT: usize = 16;
+    /// `OP_CHECKMULTISIG`.
+    const OP_CHECKMULTISIG: u8 = 0xae;
+
+    let bytes = policy.as_bytes();
+
+    // The container framing was validated when the item was parsed, so framing reads
+    // cannot fail here.
+    let mut cursor = corez::io::Cursor::new(bytes);
+    let template_len = usize::try_from(
+        zcash_encoding::CompactSize::read(&mut cursor)
+            .expect("P2SH policy framing was validated at parse time"),
+    )
+    .expect("validated template length fits in usize");
+    let template_start = usize::try_from(cursor.position()).expect("cursor fits in usize");
+    let template = core::str::from_utf8(&bytes[template_start..template_start + template_len])
+        .expect("template was validated as US-ASCII at parse time");
+    cursor.set_position((template_start + template_len) as u64);
+    let n_keys = usize::try_from(
+        zcash_encoding::CompactSize::read(&mut cursor)
+            .expect("P2SH policy framing was validated at parse time"),
+    )
+    .expect("validated key count fits in usize");
+    let keys_start = usize::try_from(cursor.position()).expect("cursor fits in usize");
+
+    // `sh(sortedmulti(<threshold>,@<i>/*,..))` is the only template this implementation
+    // evaluates. The placeholder/key correspondence was checked at parse time.
+    let placeholders = template
+        .strip_prefix("sh(sortedmulti(")
+        .and_then(|inner| inner.strip_suffix("))"))
+        .ok_or(AddressGenerationError::UnsupportedP2shPolicy)?;
+    let (threshold, placeholders) = placeholders
+        .split_once(',')
+        .ok_or(AddressGenerationError::UnsupportedP2shPolicy)?;
+    let threshold = threshold
+        .parse::<usize>()
+        .ok()
+        .filter(|t| (1..=MAX_SMALL_INT).contains(t) && *t <= n_keys)
+        .ok_or(AddressGenerationError::UnsupportedP2shPolicy)?;
+    if n_keys > MAX_SMALL_INT {
+        return Err(AddressGenerationError::UnsupportedP2shPolicy);
+    }
+
+    // Instantiate the template: each `@N` placeholder takes the non-hardened child of key
+    // information entry `N` at the diversifier index.
+    let mut pubkeys = Vec::with_capacity(n_keys);
+    for placeholder in placeholders.split(',') {
+        let key_index = placeholder
+            .strip_prefix('@')
+            .and_then(|rest| rest.strip_suffix("/*"))
+            .and_then(|index| index.parse::<usize>().ok())
+            .filter(|index| *index < n_keys)
+            .ok_or(AddressGenerationError::UnsupportedP2shPolicy)?;
+        let entry: &[u8; KEY_INFO_LEN] = bytes
+            [keys_start + key_index * KEY_INFO_LEN..keys_start + (key_index + 1) * KEY_INFO_LEN]
+            .try_into()
+            .expect("P2SH policy framing was validated at parse time");
+        let pubkey = ::transparent::keys::ExternalIvk::deserialize(entry)
+            .and_then(|ivk| ivk.derive_pubkey(child_index))
+            .map_err(AddressGenerationError::Bip32DerivationError)?;
+        pubkeys.push(pubkey.serialize());
+    }
+    if pubkeys.len() != n_keys {
+        return Err(AddressGenerationError::UnsupportedP2shPolicy);
+    }
+    // `sortedmulti` orders the keys of the instantiated script, not those of the template.
+    pubkeys.sort_unstable();
+
+    let mut script = alloc::vec![OP_SMALL_INT_BASE + threshold as u8];
+    for pubkey in &pubkeys {
+        // A 33-byte compressed public key is pushed by its own length, which is below the
+        // first `OP_PUSHDATA` opcode.
+        script.push(pubkey.len() as u8);
+        script.extend_from_slice(pubkey);
+    }
+    script.push(OP_SMALL_INT_BASE + n_keys as u8);
+    script.push(OP_CHECKMULTISIG);
+
+    Ok(TransparentAddress::ScriptHash(
+        ::transparent::util::hash160::hash(&script),
+    ))
 }
 
 /// Derives the UIVK form of a P2SH viewing key item from its UFVK form, rewriting the
@@ -1852,7 +1963,7 @@ impl UnifiedIncomingViewingKey {
         #[cfg(not(feature = "transparent-inputs"))]
         return false;
         #[cfg(feature = "transparent-inputs")]
-        return self.transparent.is_some();
+        return self.transparent.is_some() || self.p2sh.is_some();
     }
 
     /// Returns the Transparent external IVK, if present.
@@ -2049,6 +2160,16 @@ impl UnifiedIncomingViewingKey {
 
                 transparent = match (request.p2pkh, j.and_then(|j| tivk.derive_address(j).ok())) {
                     (Require | Allow, Some(addr)) => Ok(Some(addr)),
+                    (Require, None) => {
+                        Err(AddressGenerationError::InvalidTransparentChildIndex(_j))
+                    }
+                    _ => Ok(None),
+                }?;
+            } else if let Some(policy) = self.p2sh.as_ref() {
+                // A P2SH viewing key item yields the transparent receiver instead; ZIP 316
+                // permits at most one transparent item, so the two are exclusive.
+                transparent = match (request.p2pkh, to_transparent_child_index(_j)) {
+                    (Require | Allow, Some(j)) => derive_p2sh_receiver(policy, j).map(Some),
                     (Require, None) => {
                         Err(AddressGenerationError::InvalidTransparentChildIndex(_j))
                     }
@@ -2563,27 +2684,23 @@ mod tests {
                 tv.account
             );
 
-            // The Unified Address derived from the decoded UIVK must match the vector.
-            // Deriving the transparent receiver of a P2SH viewing key item requires
-            // evaluating its BIP 388 wallet policy, which this crate does not yet do, so
-            // the addresses of such keys cannot yet be checked against the vectors.
-            // TODO: assert these vectors too, once P2SH receiver derivation is supported.
-            if tv.p2sh_ivk_bytes.is_none() {
-                let ua = decoded
-                    .address(
-                        DiversifierIndex::from(tv.diversifier_index),
-                        UnifiedAddressRequest::AllAvailableKeys,
-                    )
-                    .unwrap_or_else(|e| {
-                        panic!("UA derivation failed for account {}: {e:?}", tv.account)
-                    });
-                assert_eq!(
-                    ua.encode_receiver_preserving(&MAIN_NETWORK),
-                    tv.derived_ua,
-                    "derived UA mismatch for account {}",
-                    tv.account
-                );
-            }
+            // The Unified Address derived from the decoded UIVK must match the vector,
+            // including the P2SH receiver obtained by evaluating a P2SH viewing key
+            // item's wallet policy.
+            let ua = decoded
+                .address(
+                    DiversifierIndex::from(tv.diversifier_index),
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap_or_else(|e| {
+                    panic!("UA derivation failed for account {}: {e:?}", tv.account)
+                });
+            assert_eq!(
+                ua.encode_receiver_preserving(&MAIN_NETWORK),
+                tv.derived_ua,
+                "derived UA mismatch for account {}",
+                tv.account
+            );
 
             // Verify key data matches the test vector bytes.
             if let Some(ref expected) = tv.t_p2pkh_ivk_bytes {
