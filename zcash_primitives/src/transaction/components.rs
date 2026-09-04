@@ -2,6 +2,8 @@
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;
+#[cfg(zcash_unstable = "nutachyon")]
+pub mod tachyon;
 
 pub use self::sprout::JsDescription;
 

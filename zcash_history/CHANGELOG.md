@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- Experimental `zcash_history::{NodeDataV4, V4}` support behind
+  `zcash_unstable="nutachyon"`. V4 history nodes commit to the start and end
+  Tachyon anchors and the number of transactions containing Tachyon bundles.
+
 ## [0.6.0] - 2026-07-24
 
 ### Added
