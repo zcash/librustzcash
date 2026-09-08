@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    repair_funding_attribution,
     restore_ua_transparent_receivers,
     sapling_memo_consistency,
     sent_notes_to_internal,
@@ -319,7 +320,7 @@ pub(super) fn all_migrations<
     //                                                                   fix_v_transactions_multi_account_totals
     //
     // `transparent_tx_address_observations` depends on every leaf of the graph above, and so it
-    // follows all of them.
+    // follows all of them. `repair_funding_attribution` depends on it in turn.
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -451,7 +452,21 @@ pub(super) fn all_migrations<
         Box::new(transparent_tx_address_observations::Migration {
             _params: params.clone(),
         }),
+        Box::new(repair_funding_attribution::Migration {
+            params: params.clone(),
+        }),
     ]
+}
+
+/// Constructs the attribution repair migration, for tests that drive it directly.
+#[cfg(test)]
+pub(crate) fn repair_funding_attribution_migration<P>(
+    params: P,
+) -> impl RusqliteMigration<Error = WalletMigrationError>
+where
+    P: consensus::Parameters,
+{
+    repair_funding_attribution::Migration { params }
 }
 
 /// All states of the migration DAG that have been exposed in a public crate release, in
@@ -896,7 +911,10 @@ pub(crate) mod tests {
             .collect()
         };
 
-        for id in [super::transparent_tx_address_observations::MIGRATION_ID] {
+        for id in [
+            super::transparent_tx_address_observations::MIGRATION_ID,
+            super::repair_funding_attribution::MIGRATION_ID,
+        ] {
             let applied_before = transitive_dependencies(id);
             let unordered: Vec<Uuid> = dependencies
                 .keys()
