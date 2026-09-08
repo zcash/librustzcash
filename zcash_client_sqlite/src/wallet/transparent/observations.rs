@@ -11,10 +11,9 @@
 //! See the `transparent_tx_address_observations` table documentation for how this index divides
 //! labour with the two outpoint-keyed spend maps.
 //!
-//! The module also carries what recognition of a spend implies for the spending transaction.
 //! Linking a spend of a wallet output to a stored transaction is the moment the wallet learns
-//! which account funded that transaction, and [`attribute_funded_outputs`] then records for its
-//! outputs what storing it with that knowledge would have recorded.
+//! which account funded that transaction. What that implies for the transaction's own outputs is
+//! [`crate::wallet::attribution`]'s to record; this module calls in when it makes such a link.
 
 use rusqlite::{OptionalExtension, named_params};
 
@@ -32,7 +31,7 @@ use zcash_keys::{
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     TxId,
-    consensus::{self, BlockHeight, BranchId},
+    consensus::{self, BlockHeight},
     value::Zatoshis,
 };
 
@@ -43,7 +42,10 @@ use super::{
 use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
-    wallet::{KeyScope, attribution::attribute_funded_outputs, queue_tx_retrieval, update_tx_fee},
+    wallet::{
+        KeyScope, attribution::attribute_funded_outputs, parse_stored, queue_tx_retrieval,
+        update_tx_fee,
+    },
 };
 
 /// The direction in which a transaction's transparent data names an address, as encoded in the
@@ -133,25 +135,6 @@ pub(crate) fn put_observations<P: consensus::Parameters>(
     }
 
     Ok(())
-}
-
-/// Parses stored transaction bytes, or returns `None` if they do not parse.
-///
-/// The consensus branch ID a transaction is parsed under does not affect the parse: versions
-/// before v5 do not encode it, and v5 onward carry their own. Every use in this module reads only
-/// the transparent bundle, so a placeholder suffices and no height needs to be resolved for an
-/// unmined transaction with no expiry height.
-///
-/// Bytes that do not parse are data the wallet cannot act on. This module must never fail on
-/// them: its reconciliation runs inside the index migration, which cannot be reverted, so an
-/// error there would leave the wallet unable to open. The backfill that populates the index
-/// already skips such rows, and every path that reads them back agrees with it.
-///
-/// A failure here is permanent for that row: `queue_tx_retrieval` records enhancement intent
-/// only for a transaction whose data the wallet lacks, and a row with unusable bytes still has
-/// `raw` set, so no re-fetch is ever recorded for it.
-pub(crate) fn parse_stored(raw: &[u8]) -> Option<Transaction> {
-    Transaction::read(raw, BranchId::Sprout).ok()
 }
 
 /// Returns the stored transaction with the given txid, or `None` if the wallet does not hold it

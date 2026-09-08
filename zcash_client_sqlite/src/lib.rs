@@ -2914,6 +2914,18 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 }
 
+/// Re-derivation of a transaction's funding attribution, for the write paths that link a spend of
+/// a wallet output without recording the spending transaction's own recipients.
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL, R>
+    WalletDb<C, P, CL, R>
+{
+    /// Records for the given transaction's outputs what storing it with its funding account known
+    /// would have recorded. See [`wallet::attribution::attribute_funded_outputs`].
+    fn attribute_funded_outputs(&self, tx_ref: TxRef) -> Result<(), SqliteClientError> {
+        wallet::attribution::attribute_funded_outputs(self.conn.borrow(), &self.params, tx_ref)
+    }
+}
+
 impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
     LowLevelWalletWrite for WalletDb<C, P, CL, R>
 {
@@ -3012,6 +3024,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             spent_in,
         )?;
 
+        if let Some(spent_in) = spent_in {
+            self.attribute_funded_outputs(spent_in)?;
+        }
+
         Ok(())
     }
 
@@ -3020,7 +3036,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::sapling::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::sapling::mark_sapling_note_spent(self.conn.borrow(), tx_ref, nf)
+        let spent = wallet::sapling::mark_sapling_note_spent(self.conn.borrow(), tx_ref, nf)?;
+        if spent {
+            self.attribute_funded_outputs(tx_ref)?;
+        }
+        Ok(spent)
     }
 
     fn track_block_sapling_nullifiers(
@@ -3049,6 +3069,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             spent_in,
         )?;
 
+        if let Some(spent_in) = spent_in {
+            self.attribute_funded_outputs(spent_in)?;
+        }
+
         Ok(())
     }
 
@@ -3070,6 +3094,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             spent_in,
         )?;
 
+        if let Some(spent_in) = spent_in {
+            self.attribute_funded_outputs(spent_in)?;
+        }
+
         Ok(())
     }
 
@@ -3079,7 +3107,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::orchard::mark_orchard_note_spent(self.conn.borrow(), tx_ref, nf)
+        let spent = wallet::orchard::mark_orchard_note_spent(self.conn.borrow(), tx_ref, nf)?;
+        if spent {
+            self.attribute_funded_outputs(tx_ref)?;
+        }
+        Ok(spent)
     }
 
     #[cfg(feature = "orchard")]
@@ -3088,7 +3120,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)
+        let spent = wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)?;
+        if spent {
+            self.attribute_funded_outputs(tx_ref)?;
+        }
+        Ok(spent)
     }
 
     #[cfg(feature = "orchard")]
