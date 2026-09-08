@@ -39,6 +39,8 @@ workspace.
   (behind `transparent-inputs`)
 - `zcash_client_backend::data_api::ll::wallet::detect_wallet_transparent_outputs`
 - `zcash_client_backend::data_api::ll::wallet::transparent_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::shielded_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::SentOutput`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
