@@ -12,9 +12,17 @@
 
 use rusqlite::{OptionalExtension, named_params};
 
-use zcash_client_backend::data_api::ll::wallet::{
-    detect_wallet_transparent_outputs, transparent_sent_output_recipient,
+use zcash_client_backend::{
+    data_api::ll::{
+        ReceivedShieldedOutput,
+        wallet::{
+            detect_wallet_transparent_outputs, shielded_sent_output_recipient,
+            transparent_sent_output_recipient,
+        },
+    },
+    decrypt_transaction,
 };
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     PoolType,
     consensus::{self, BlockHeight},
@@ -24,8 +32,9 @@ use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
     wallet::{
+        chain_tip_height,
         encoding::pool_code,
-        put_sent_output, select_receiving_address,
+        get_unified_full_viewing_keys, put_sent_output, select_receiving_address,
         transparent::observations::parse_stored,
         transparent::{find_account_uuid_for_transparent_address, list_funding_accounts},
     },
@@ -58,13 +67,12 @@ use crate::{
 /// same account; scanning one whose data the wallet already holds can only follow the recognition
 /// of the spent output, which is a call site of this function.
 ///
-/// The shielded half of the same defect is left unrepaired here. A shielded output the wallet
-/// received from elsewhere is recorded as sent only when the funding account is known at store
-/// time, so a transaction that shields a transparent output the wallet did not yet recognize
-/// keeps a shielded output with no recorded sender, and neither this function nor the repair
-/// migration touches it. Reconstructing it needs the transaction decrypted under the wallet's
-/// viewing keys rather than read from its transparent bundle; the wallet holds both the stored
-/// bytes and the keys, so it is reachable offline, and simply not done here.
+/// Shielded outputs are replayed as well, by decrypting the stored bytes under every viewing key
+/// the wallet holds; see [`attribute_shielded_outputs`]. What decryption cannot open is the
+/// residual: an output paying an account whose keys the wallet does not have, and one whose
+/// outgoing viewing key it does not hold, name a recipient the wallet has no way to learn. That
+/// is precisely what storing the transaction would have left unrecorded, so the replay reaches
+/// the state store-time processing reaches, not a lesser one.
 pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
@@ -116,7 +124,7 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
     )?;
 
     for output in &outputs {
-        if has_recorded_recipient(conn, tx_ref, output.index())? {
+        if has_recorded_recipient(conn, tx_ref, PoolType::TRANSPARENT, output.index())? {
             continue;
         }
 
@@ -140,14 +148,140 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
         )?;
     }
 
+    attribute_shielded_outputs(conn, params, tx_ref, &tx, tx_mined_height, funding_account)?;
+
     Ok(())
 }
 
-/// Returns whether the wallet has recorded a recipient for the given transparent output of the
-/// given transaction.
-pub(crate) fn has_recorded_recipient(
+/// Returns whether the transaction produces any shielded output, in any pool the wallet stores.
+fn has_shielded_outputs(tx: &Transaction) -> bool {
+    let sapling = tx
+        .sapling_bundle()
+        .is_some_and(|bundle| !bundle.shielded_outputs().is_empty());
+
+    #[cfg(feature = "orchard")]
+    let shielded = sapling
+        || tx
+            .orchard_bundle()
+            .is_some_and(|bundle| !bundle.actions().is_empty())
+        || tx
+            .ironwood_bundle()
+            .is_some_and(|bundle| !bundle.actions().is_empty());
+
+    #[cfg(not(feature = "orchard"))]
+    let shielded = sapling;
+
+    shielded
+}
+
+/// Records the sent outputs of the shielded bundles of a stored transaction that the wallet now
+/// knows `funding_account` funded.
+///
+/// What a transaction's shielded bundles paid is recoverable only by trial decryption, so this
+/// re-runs it over the stored bytes under every viewing key the wallet holds — the same function
+/// the store-time path decrypts with — and records for each output what that path would have
+/// recorded with the funding account in hand.
+fn attribute_shielded_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+    tx: &Transaction,
+    mined_height: Option<BlockHeight>,
+    funding_account: AccountUuid,
+) -> Result<(), SqliteClientError> {
+    // Trial decryption costs a key lookup and a pass over every output under every key, so a
+    // transaction with no shielded output — the common shape for one recognized through a
+    // transparent spend — is settled without paying either.
+    if !has_shielded_outputs(tx) {
+        return Ok(());
+    }
+
+    let ufvks = get_unified_full_viewing_keys(conn, params)?;
+    if ufvks.is_empty() {
+        return Ok(());
+    }
+
+    let d_tx = decrypt_transaction(params, mined_height, chain_tip_height(conn)?, tx, &ufvks);
+
+    put_missing_sent_outputs(
+        conn,
+        params,
+        tx_ref,
+        d_tx.sapling_outputs(),
+        funding_account,
+    )?;
+
+    #[cfg(feature = "orchard")]
+    {
+        put_missing_sent_outputs(
+            conn,
+            params,
+            tx_ref,
+            d_tx.orchard_outputs(),
+            funding_account,
+        )?;
+        put_missing_sent_outputs(
+            conn,
+            params,
+            tx_ref,
+            d_tx.ironwood_outputs(),
+            funding_account,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Records the send that each of the given decrypted outputs represents, skipping any output for
+/// which the wallet has already recorded a recipient.
+fn put_missing_sent_outputs<P, Output>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+    outputs: &[Output],
+    funding_account: AccountUuid,
+) -> Result<(), SqliteClientError>
+where
+    P: consensus::Parameters,
+    Output: ReceivedShieldedOutput<AccountId = AccountUuid>,
+{
+    for output in outputs {
+        let pool = PoolType::Shielded(output.to_wallet_note().pool());
+        if has_recorded_recipient(conn, tx_ref, pool, output.index())? {
+            continue;
+        }
+
+        let Some((from_account, recipient, value)) = shielded_sent_output_recipient(
+            params,
+            output,
+            Some(funding_account),
+            |account, receiver| select_receiving_address(conn, params, account, receiver),
+        )?
+        else {
+            continue;
+        };
+
+        put_sent_output(
+            conn,
+            params,
+            from_account,
+            tx_ref,
+            output.index(),
+            &recipient,
+            value,
+            output.memo(),
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Returns whether the wallet has recorded a recipient for the given output of the given
+/// transaction, in the given pool.
+fn has_recorded_recipient(
     conn: &rusqlite::Connection,
     tx_ref: TxRef,
+    pool: PoolType,
     output_index: usize,
 ) -> Result<bool, SqliteClientError> {
     Ok(conn.query_row(
@@ -159,9 +293,9 @@ pub(crate) fn has_recorded_recipient(
         )",
         named_params! {
             ":transaction_id": tx_ref.0,
-            ":output_pool": pool_code(PoolType::TRANSPARENT),
+            ":output_pool": pool_code(pool),
             ":output_index": i64::try_from(output_index)
-                .expect("a transparent output index fits in an i64"),
+                .expect("an output index fits in an i64"),
         },
         |row| row.get(0),
     )?)
