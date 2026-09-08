@@ -127,6 +127,7 @@ use crate::{
 
 pub mod pool;
 pub mod sapling;
+pub mod shard_stub;
 
 #[cfg(feature = "orchard")]
 pub mod orchard;
@@ -979,6 +980,36 @@ where
     pub fn truncate_to_height_retaining_cache(&mut self, height: BlockHeight) {
         self.wallet_mut().truncate_to_height(height).unwrap();
         self.latest_block_height = Some(height);
+    }
+
+    /// Truncates the block cache to the specified height without touching the wallet, so
+    /// that subsequent `generate_next_block_*` calls extend a divergent chain from that
+    /// height. This is useful for simulating a reorg after rewinding the wallet via
+    /// [`WalletWrite::rewind_to_chain_state`], which performs its own (deeper) truncation
+    /// of wallet data.
+    pub fn truncate_cache_to_height(&mut self, height: BlockHeight) {
+        self.cache.truncate_to_height(height);
+        self.cached_blocks.split_off(&(height + 1));
+        self.latest_block_height = Some(height);
+    }
+
+    /// Records the given [`CachedBlock`] at `height` without populating the
+    /// block cache itself.
+    ///
+    /// Used by [`shard_stub::fake_advance_to`] to register a synthetic chain
+    /// state: the wallet's note commitment tree has been advanced via fake
+    /// subtree roots, but no real block exists at this height. Subsequent
+    /// `generate_next_block_*` calls will use this entry as their prior chain
+    /// state, so the next real block lands at `height + 1`.
+    pub fn insert_synthetic_cached_block(
+        &mut self,
+        height: BlockHeight,
+        cached_block: CachedBlock,
+    ) {
+        self.cached_blocks.insert(height, cached_block);
+        if self.latest_block_height.is_none_or(|h| height > h) {
+            self.latest_block_height = Some(height);
+        }
     }
 }
 
