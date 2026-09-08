@@ -183,7 +183,6 @@ use {
     zcash_script::{descriptor::sh, script::Evaluable},
 };
 
-#[cfg(feature = "transparent-inputs")]
 pub(crate) mod attribution;
 pub mod commitment_tree;
 pub(crate) mod common;
@@ -3192,6 +3191,24 @@ pub(crate) fn get_received_memo(
         .transpose()?;
 
     Ok(memo)
+}
+
+/// Parses stored transaction bytes, or returns `None` if they do not parse.
+///
+/// The consensus branch ID a transaction is parsed under does not affect the parse: versions
+/// before v5 do not encode it, and v5 onward carry their own, so a placeholder suffices and no
+/// height needs to be resolved for an unmined transaction with no expiry height.
+///
+/// Bytes that do not parse are data the wallet cannot act on. No caller may fail on them: the
+/// paths that read them run inside migrations, which cannot be reverted, so an error there would
+/// leave the wallet unable to open. Every path that reads stored bytes back agrees on skipping
+/// them.
+///
+/// A failure here is permanent for that row: `queue_tx_retrieval` records enhancement intent
+/// only for a transaction whose data the wallet lacks, and a row with unusable bytes still has
+/// `raw` set, so no re-fetch is ever recorded for it.
+pub(crate) fn parse_stored(raw: &[u8]) -> Option<Transaction> {
+    Transaction::read(raw, BranchId::Sprout).ok()
 }
 
 fn parse_tx<P: consensus::Parameters>(
