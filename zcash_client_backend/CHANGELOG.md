@@ -48,6 +48,11 @@ workspace.
   expiration rules for every payment recipient: a payment to an address that is
   known to have expired, or whose expiry height the transaction's expiry height
   would exceed, fails with `Error::RecipientAddressExpiry`.
+- `zcash_client_backend::data_api::ll::wallet::{put_blocks, put_blocks_rows}`
+  take the network parameters as a new second argument, and gain a
+  corresponding `P: consensus::Parameters` type parameter after `DbT`. Pass the
+  parameters your store was constructed with; a call that names the type
+  parameters explicitly gains one (`put_blocks::<_, _, SE, TE>`).
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
   method behind `transparent-inputs`,
   `put_transparent_address_observations`. Implement it by recording each
