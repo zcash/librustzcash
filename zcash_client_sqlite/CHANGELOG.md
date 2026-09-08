@@ -98,6 +98,10 @@ workspace.
   reports a `sent_note_id`. Such a record was previously written only when the
   funding account was known at the moment the transaction was stored. Outputs
   that already carry a recorded recipient are left unchanged.
+- A migration writes the funding-account record for every stored transaction an
+  existing wallet already treats as spending anything it received, in any pool.
+  On a wallet upgraded before that record existed, those transactions' outputs
+  are no longer reported as receipts from an unknown sender.
 - The funding-account record now covers a transaction's shielded outputs as
   well as its transparent ones, in every pool, recovered by decrypting the
   stored transaction under the viewing keys the wallet holds. A transaction

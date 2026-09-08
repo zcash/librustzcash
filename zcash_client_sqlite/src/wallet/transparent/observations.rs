@@ -641,7 +641,7 @@ fn recompute_dependent_fees(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use ::transparent::{
         address::{Script, TransparentAddress},
         bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
@@ -968,7 +968,7 @@ mod tests {
 
     /// The transparent address derived for the given account UFVK at the given external child
     /// index.
-    fn external_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
+    pub(crate) fn external_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
         ufvk.transparent()
             .expect("the test account has a transparent key")
             .derive_external_ivk()
@@ -1012,7 +1012,7 @@ mod tests {
 
     /// Reads the transparent rows of `v_tx_outputs` for the given transaction, as
     /// `(output_index, from_account_uuid, to_account_uuid)`.
-    fn tx_output_accounts(
+    pub(crate) fn tx_output_accounts(
         conn: &rusqlite::Connection,
         txid: TxId,
     ) -> Vec<(u32, Option<uuid::Uuid>, Option<uuid::Uuid>)> {
@@ -1034,7 +1034,7 @@ mod tests {
 
     /// The transparent outputs an external-receipt consumer selects: those the wallet received
     /// for which it holds no record of a sender, and which are not flagged as change.
-    fn unattributed_receipts(conn: &rusqlite::Connection) -> Vec<(Vec<u8>, u32)> {
+    pub(crate) fn unattributed_receipts(conn: &rusqlite::Connection) -> Vec<(Vec<u8>, u32)> {
         let mut stmt = conn
             .prepare(
                 "SELECT t.txid, ro.output_index
@@ -2365,7 +2365,7 @@ mod tests {
     /// outpoint and nothing records which account paid for its outputs.
     ///
     /// Returns the spending transaction and the guest account's key.
-    fn store_spend_before_its_prevout<C>(
+    pub(crate) fn store_spend_before_its_prevout<C>(
         st: &mut TestState<C, TestDb, LocalNetwork>,
         host_address: TransparentAddress,
         stranger: TransparentAddress,
