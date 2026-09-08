@@ -7,38 +7,116 @@
 //! transaction. Its outputs are then reported forever as receipts from an unknown sender, and a
 //! transfer between two accounts of one wallet reads as a payment from a stranger.
 //!
-//! This module replays the attribution step over the stored transaction data, and is called from
-//! the paths that link a spend without recording the transaction's recipients themselves.
+//! This module replays the attribution step over the stored transaction data, in every pool, and
+//! is called from the paths that link a spend without recording the transaction's recipients
+//! themselves. It sits outside `transparent-inputs` because the defect does: a wallet with no
+//! transparent support at all still spends shielded notes, and still links those spends late.
 
 use rusqlite::{OptionalExtension, named_params};
 
 use zcash_client_backend::{
-    data_api::ll::{
-        ReceivedShieldedOutput,
-        wallet::{
-            detect_wallet_transparent_outputs, shielded_sent_output_recipient,
-            transparent_sent_output_recipient,
-        },
-    },
+    data_api::ll::{ReceivedShieldedOutput, wallet::shielded_sent_output_recipient},
     decrypt_transaction,
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    PoolType,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
+    value::Zatoshis,
 };
 
 use crate::{
     AccountUuid, TxRef,
     error::SqliteClientError,
     wallet::{
-        chain_tip_height,
-        encoding::pool_code,
-        get_unified_full_viewing_keys, put_sent_output, select_receiving_address,
-        transparent::observations::parse_stored,
-        transparent::{find_account_uuid_for_transparent_address, list_funding_accounts},
+        chain_tip_height, encoding::pool_code, get_unified_full_viewing_keys, parse_stored,
+        put_sent_output, select_receiving_address,
     },
 };
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::wallet::transparent::find_account_uuid_for_transparent_address,
+    zcash_client_backend::data_api::ll::wallet::{
+        detect_wallet_transparent_outputs, transparent_sent_output_recipient,
+    },
+};
+
+/// Returns the wallet accounts that contributed inputs to the transaction with the
+/// given internal id, paired with the total value each account contributed. Results
+/// are ordered by total contributed value descending; ties are broken in favor of
+/// the account whose oldest contributed input has the lowest mined height (with
+/// unmined inputs sorting last), then by `accounts.id`.
+///
+/// The inner `UNION ALL` must carry one branch per pool in which the wallet can record a
+/// received output: transparent, Sapling, Orchard, and Ironwood. A missing branch does not
+/// produce an error, it silently under-counts the accounts that funded the transaction, so
+/// a pool added to the schema without a branch here changes which account this reports.
+///
+/// The pools are enumerated here rather than read from the cross-pool `v_received_outputs`
+/// view because that view has to be materialized in full to be joined by output id, which
+/// scans every received-note table. This query is run once per candidate output, so it is
+/// written to be satisfied from the spend tables' `transaction_id` indexes instead.
+pub(crate) fn list_funding_accounts(
+    conn: &rusqlite::Connection,
+    creating_tx_id: i64,
+) -> Result<Vec<(AccountUuid, Zatoshis)>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT a.uuid, contribs.total_value
+         FROM accounts a
+         JOIN (
+             SELECT account_id,
+                    SUM(value) AS total_value,
+                    MIN(IFNULL(mined_height, 0x7FFFFFFF)) AS oldest_mined
+             FROM (
+                 SELECT tro.account_id, tro.value_zat AS value, t.mined_height AS mined_height
+                 FROM transparent_received_outputs tro
+                 JOIN transparent_received_output_spends tros
+                   ON tros.transparent_received_output_id = tro.id
+                 JOIN transactions t ON t.id_tx = tro.transaction_id
+                 WHERE tros.transaction_id = :creating_tx_id
+                 UNION ALL
+                 SELECT srn.account_id, srn.value, t.mined_height
+                 FROM sapling_received_notes srn
+                 JOIN sapling_received_note_spends srns
+                   ON srns.sapling_received_note_id = srn.id
+                 JOIN transactions t ON t.id_tx = srn.transaction_id
+                 WHERE srns.transaction_id = :creating_tx_id
+                 UNION ALL
+                 SELECT orn.account_id, orn.value, t.mined_height
+                 FROM orchard_received_notes orn
+                 JOIN orchard_received_note_spends orns
+                   ON orns.orchard_received_note_id = orn.id
+                 JOIN transactions t ON t.id_tx = orn.transaction_id
+                 WHERE orns.transaction_id = :creating_tx_id
+                 UNION ALL
+                 SELECT irn.account_id, irn.value, t.mined_height
+                 FROM ironwood_received_notes irn
+                 JOIN ironwood_received_note_spends irns
+                   ON irns.ironwood_received_note_id = irn.id
+                 JOIN transactions t ON t.id_tx = irn.transaction_id
+                 WHERE irns.transaction_id = :creating_tx_id
+             )
+             GROUP BY account_id
+         ) contribs ON contribs.account_id = a.id
+         ORDER BY contribs.total_value DESC, contribs.oldest_mined ASC, a.id ASC",
+    )?;
+
+    stmt.query_and_then(
+        named_params![":creating_tx_id": creating_tx_id],
+        |row| -> Result<(AccountUuid, Zatoshis), SqliteClientError> {
+            let account = AccountUuid(row.get(0)?);
+            let raw_value: i64 = row.get(1)?;
+            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
+                SqliteClientError::CorruptedData(format!(
+                    "Invalid funding contribution value: {raw_value}"
+                ))
+            })?;
+            Ok((account, value))
+        },
+    )?
+    .collect()
+}
 
 /// Records the sent outputs of a stored transaction that the wallet now knows one of its accounts
 /// funded.
@@ -59,13 +137,16 @@ use crate::{
 /// A transaction whose stored bytes are absent or do not parse contributes nothing; see
 /// [`parse_stored`].
 ///
-/// Block scanning also links spends, and calls nothing here, because a link it makes can never
-/// reveal a funding account that storing the transaction would have missed: the query that makes
-/// the link and the query that resolves a funding account match a prevout against
-/// `transparent_received_outputs` under one and the same condition. Scanning a transaction the
-/// wallet has no data for records an intent to retrieve it, and storing what arrives resolves the
-/// same account; scanning one whose data the wallet already holds can only follow the recognition
-/// of the spent output, which is a call site of this function.
+/// A transparent spend that block scanning links needs nothing from here: the query that makes
+/// that link and the query that resolves a funding account match a prevout against
+/// `transparent_received_outputs` under one and the same condition, so such a link can never
+/// reveal an account that storing the transaction would have missed. A shielded spend is not so
+/// placed. Its evidence is a nullifier, which scanning records in the nullifier map before the
+/// note that reveals it is necessarily known, and that map is pruned behind the fully scanned
+/// height; a note discovered after its entry is gone leaves the spend to be linked by a later
+/// rescan, against a transaction whose data the wallet holds by then. So scanning calls in for
+/// shielded spends, and the store-time path calls in with it, where the work is redundant but
+/// bounded to one decryption by the guard in [`attribute_shielded_outputs`].
 ///
 /// Shielded outputs are replayed as well, by decrypting the stored bytes under every viewing key
 /// the wallet holds; see [`attribute_shielded_outputs`]. What decryption cannot open is the
@@ -110,10 +191,32 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
         return Ok(());
     };
 
+    #[cfg(feature = "transparent-inputs")]
+    attribute_transparent_outputs(conn, params, tx_ref, &tx, tx_mined_height, funding_account)?;
+
+    attribute_shielded_outputs(conn, params, tx_ref, &tx, tx_mined_height, funding_account)?;
+
+    Ok(())
+}
+
+/// Records the sent outputs of the transparent bundle of a stored transaction that the wallet now
+/// knows `funding_account` funded.
+///
+/// What a transparent output paid is written in the transaction itself, so this reads it directly
+/// rather than decrypting anything.
+#[cfg(feature = "transparent-inputs")]
+fn attribute_transparent_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    tx_ref: TxRef,
+    tx: &Transaction,
+    mined_height: Option<BlockHeight>,
+    funding_account: AccountUuid,
+) -> Result<(), SqliteClientError> {
     let outputs = detect_wallet_transparent_outputs::<_, AccountUuid, SqliteClientError>(
         params,
-        &tx,
-        tx_mined_height,
+        tx,
+        mined_height,
         Some(funding_account),
         |address| {
             Ok(
@@ -148,30 +251,72 @@ pub(crate) fn attribute_funded_outputs<P: consensus::Parameters>(
         )?;
     }
 
-    attribute_shielded_outputs(conn, params, tx_ref, &tx, tx_mined_height, funding_account)?;
-
     Ok(())
 }
 
-/// Returns whether the transaction produces any shielded output, in any pool the wallet stores.
-fn has_shielded_outputs(tx: &Transaction) -> bool {
-    let sapling = tx
-        .sapling_bundle()
-        .is_some_and(|bundle| !bundle.shielded_outputs().is_empty());
+/// Returns how many outputs the transaction produces in each shielded pool this build stores.
+fn shielded_output_counts(tx: &Transaction) -> Vec<(PoolType, usize)> {
+    #[allow(unused_mut)]
+    let mut counts = vec![(
+        PoolType::Shielded(ShieldedPool::Sapling),
+        tx.sapling_bundle()
+            .map_or(0, |bundle| bundle.shielded_outputs().len()),
+    )];
 
     #[cfg(feature = "orchard")]
-    let shielded = sapling
-        || tx
-            .orchard_bundle()
-            .is_some_and(|bundle| !bundle.actions().is_empty())
-        || tx
-            .ironwood_bundle()
-            .is_some_and(|bundle| !bundle.actions().is_empty());
+    {
+        counts.push((
+            PoolType::Shielded(ShieldedPool::Orchard),
+            tx.orchard_bundle()
+                .map_or(0, |bundle| bundle.actions().len()),
+        ));
+        counts.push((
+            PoolType::Shielded(ShieldedPool::Ironwood),
+            tx.ironwood_bundle()
+                .map_or(0, |bundle| bundle.actions().len()),
+        ));
+    }
 
-    #[cfg(not(feature = "orchard"))]
-    let shielded = sapling;
+    counts
+}
 
-    shielded
+/// Returns whether any shielded output of the transaction has no recorded recipient.
+///
+/// The comparison is made pool by pool. A recipient row is unique per transaction, pool and
+/// output index, and every index a writer uses is below that pool's output count, so a pool
+/// holding as many rows as it has outputs holds one for each.
+///
+/// Only the pools this build stores are counted, on either side. A build without `orchard`
+/// neither counts an Orchard action nor writes a recipient for one, and the rows an
+/// Orchard-capable build left behind say nothing about whether this build's own pools are
+/// complete: totalling across pools would let those rows stand in for a missing Sapling
+/// recipient, and skip the very repair this exists for.
+fn has_unrecorded_shielded_recipient(
+    conn: &rusqlite::Connection,
+    tx_ref: TxRef,
+    tx: &Transaction,
+) -> Result<bool, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT COUNT(*) FROM sent_notes
+         WHERE transaction_id = :transaction_id
+         AND output_pool = :output_pool",
+    )?;
+
+    for (pool, output_count) in shielded_output_counts(tx) {
+        let recorded: usize = stmt.query_row(
+            named_params! {
+                ":transaction_id": tx_ref.0,
+                ":output_pool": pool_code(pool),
+            },
+            |row| row.get(0),
+        )?;
+
+        if recorded < output_count {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// Records the sent outputs of the shielded bundles of a stored transaction that the wallet now
@@ -189,10 +334,12 @@ fn attribute_shielded_outputs<P: consensus::Parameters>(
     mined_height: Option<BlockHeight>,
     funding_account: AccountUuid,
 ) -> Result<(), SqliteClientError> {
-    // Trial decryption costs a key lookup and a pass over every output under every key, so a
-    // transaction with no shielded output — the common shape for one recognized through a
-    // transparent spend — is settled without paying either.
-    if !has_shielded_outputs(tx) {
+    // Trial decryption costs a key lookup and a pass over every output under every key. A count
+    // per pool settles the cases that need neither: a transaction with no shielded output — the
+    // common shape for one recognized through a transparent spend — and one whose shielded
+    // outputs already carry a recipient apiece. This is what keeps the replay to a single
+    // decryption when a caller links several spends of one transaction in turn.
+    if !has_unrecorded_shielded_recipient(conn, tx_ref, tx)? {
         return Ok(());
     }
 
@@ -299,4 +446,483 @@ fn has_recorded_recipient(
         },
         |row| row.get(0),
     )?)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use rand_core::OsRng;
+    use rusqlite::named_params;
+    use zcash_client_backend::data_api::{
+        Account as _, AccountPurpose, TargetValue, WalletCommitmentTrees, WalletWrite,
+        testing::{AddressType, TestBuilder, TestState},
+        wallet::{
+            ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
+            input_selection::LockFilter,
+        },
+    };
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_primitives::{
+        block::BlockHash,
+        transaction::{
+            Transaction,
+            builder::{BuildConfig, Builder, BundlePadding},
+            fees::zip317,
+        },
+    };
+    use zcash_protocol::{
+        PoolType, ShieldedPool, TxId, consensus::BlockHeight, local_consensus::LocalNetwork,
+        memo::MemoBytes, value::Zatoshis,
+    };
+    use zip32::AccountId;
+
+    use crate::{
+        AccountUuid,
+        error::SqliteClientError,
+        testing::{
+            BlockCache,
+            db::{TestDb, TestDbFactory},
+        },
+        wallet::encoding::pool_code,
+    };
+
+    /// The `(from_account_uuid, to_account_uuid)` pairs `v_tx_outputs` reports for the given
+    /// transaction in the given pool, in a fixed order.
+    ///
+    /// Neither the index nor the order of a shielded output is fixed by the transaction's shape,
+    /// because the bundle is padded with dummy outputs and shuffled, so the index is dropped and
+    /// the pairs are sorted.
+    pub(crate) fn pool_output_parties(
+        conn: &rusqlite::Connection,
+        txid: TxId,
+        pool: PoolType,
+    ) -> Vec<(Option<uuid::Uuid>, Option<uuid::Uuid>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT from_account_uuid, to_account_uuid
+                 FROM v_tx_outputs
+                 WHERE txid = :txid AND output_pool = :pool
+                 ORDER BY output_index",
+            )
+            .unwrap();
+        let mut parties = stmt
+            .query_map(
+                named_params! { ":txid": txid.as_ref(), ":pool": pool_code(pool) },
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        parties.sort();
+        parties
+    }
+
+    /// The given pairs in the order [`pool_output_parties`] reports them.
+    fn sorted(
+        mut parties: Vec<(Option<uuid::Uuid>, Option<uuid::Uuid>)>,
+    ) -> Vec<(Option<uuid::Uuid>, Option<uuid::Uuid>)> {
+        parties.sort();
+        parties
+    }
+
+    /// The shielded outputs an external-receipt consumer selects: those the wallet received for
+    /// which it holds no record of a sender, and which are not flagged as change.
+    pub(crate) fn unattributed_shielded_receipts(
+        conn: &rusqlite::Connection,
+    ) -> Vec<(Vec<u8>, u32)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, ro.output_index
+                 FROM v_received_outputs ro
+                 JOIN transactions t ON t.id_tx = ro.transaction_id
+                 WHERE ro.pool != 0 AND ro.sent_note_id IS NULL AND ro.is_change = 0
+                 ORDER BY t.txid, ro.output_index",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    /// Builds a transaction spending the guest account's only Sapling note, paying `recipient`
+    /// and returning the remainder, less the fee, to the guest account's own change address.
+    ///
+    /// The note and its witness are read from the wallet, so the nullifier the transaction
+    /// reveals is the one the wallet computes for that note.
+    fn sapling_transfer_tx(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        guest: AccountUuid,
+        guest_usk: &UnifiedSpendingKey,
+        recipient: ::sapling::PaymentAddress,
+        recipient_value: u64,
+        anchor_height: BlockHeight,
+    ) -> Transaction {
+        let network = *st.network();
+        let target_height = TargetHeight::from(anchor_height + 1);
+
+        let received = crate::wallet::sapling::select_spendable_sapling_notes(
+            &st.wallet().db().conn,
+            &network,
+            guest,
+            TargetValue::AtLeast(Zatoshis::const_from_u64(1)),
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &[],
+            LockFilter::Unfiltered,
+        )
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the guest account's note is spendable");
+
+        let note = received.note().clone();
+        let note_value = note.value().inner();
+        let position = received.note_commitment_tree_position();
+
+        let (anchor, merkle_path) = st
+            .wallet_mut()
+            .with_sapling_tree_mut::<_, _, SqliteClientError>(|tree| {
+                let anchor = ::sapling::Anchor::from(
+                    tree.root_at_checkpoint_id(&anchor_height)?
+                        .expect("a checkpoint exists at the note's receipt height"),
+                );
+                let merkle_path = tree
+                    .witness_at_checkpoint_id_caching(position, &anchor_height)?
+                    .expect("the received note can be witnessed at its receipt height");
+                Ok((anchor, merkle_path))
+            })
+            .unwrap();
+
+        let extsk = guest_usk.sapling().clone();
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let change_address = dfvk.change_address().1;
+
+        // The fee is fixed by the shape rather than the values, so the same shape is assembled
+        // twice: once to measure it, and once with the change that balances it.
+        let assemble = |change_value: u64| {
+            let mut builder = Builder::new(
+                network,
+                BlockHeight::from(target_height),
+                BuildConfig::Standard {
+                    sapling_anchor: Some(anchor),
+                    orchard_anchor: Some(orchard::Anchor::empty_tree()),
+                    ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            );
+            builder
+                .add_sapling_spend::<zip317::FeeError>(
+                    dfvk.fvk().clone(),
+                    note.clone(),
+                    merkle_path.clone(),
+                )
+                .unwrap();
+            builder
+                .add_sapling_output::<zip317::FeeError>(
+                    Some(dfvk.fvk().ovk),
+                    recipient,
+                    Zatoshis::from_u64(recipient_value).unwrap(),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_sapling_output::<zip317::FeeError>(
+                    Some(dfvk.fvk().ovk),
+                    change_address,
+                    Zatoshis::from_u64(change_value).unwrap(),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+        };
+
+        let fee = u64::from(
+            assemble(1)
+                .get_fee(&zip317::FeeRule::standard())
+                .expect("the fee of a balanced shape is computable"),
+        );
+
+        assemble(note_value - recipient_value - fee)
+            .mock_build(
+                &::transparent::builder::TransparentSigningSet::new(),
+                &[extsk],
+                &[],
+                OsRng,
+            )
+            .unwrap()
+            .transaction()
+            .clone()
+    }
+
+    /// The state the maintainer's wallet was found in: a transfer funded by a Sapling note, whose
+    /// spend of that note was linked after its data was stored, so its payment to another account
+    /// carries no record of a sender while its change carries one.
+    ///
+    /// The wallet's own writers no longer produce that state, so it is reconstructed: the transfer
+    /// is stored with its funding known, and the spend link and the cross-account recipient are
+    /// then removed. What remains is what a wallet upgraded before the shielded hooks existed
+    /// holds.
+    ///
+    /// Returns the transfer, the height its funding note was received at, and the guest account
+    /// that funded it.
+    fn store_transfer_with_its_spend_unlinked(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        host: AccountUuid,
+        recipient: ::sapling::PaymentAddress,
+    ) -> (Transaction, BlockHeight, uuid::Uuid) {
+        let network = *st.network();
+        let birthday = st.test_account().unwrap().birthday().clone();
+
+        let guest_usk =
+            UnifiedSpendingKey::from_seed(&network, &[0xC7; 32], AccountId::ZERO).unwrap();
+        let guest_ufvk = guest_usk.to_unified_full_viewing_key();
+        let guest_dfvk = guest_ufvk
+            .sapling()
+            .expect("the guest account has a Sapling key")
+            .clone();
+        let guest = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "guest",
+                &guest_ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap()
+            .id();
+
+        let (note_height, _, _) = st.generate_next_block(
+            &guest_dfvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(500_000),
+        );
+        st.scan_cached_blocks(note_height, 1);
+
+        let transfer = sapling_transfer_tx(st, guest, &guest_usk, recipient, 100_000, note_height);
+        decrypt_and_store_transaction(&network, st.wallet_mut(), &transfer, None).unwrap();
+
+        // Unlink the spend, and drop the record of who sent the cross-account payment. The change
+        // output keeps its record, because the arm that writes it never consulted the funding
+        // account in the first place.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "DELETE FROM sapling_received_note_spends
+                 WHERE transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+                named_params! { ":txid": transfer.txid().as_ref() },
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM sent_notes
+                 WHERE transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                 AND to_account_id = (SELECT id FROM accounts WHERE uuid = :host)",
+                named_params! {
+                    ":txid": transfer.txid().as_ref(),
+                    ":host": host.expose_uuid(),
+                },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+
+        (transfer, note_height, guest.expose_uuid())
+    }
+
+    /// A transaction funded by a Sapling note, paying another account of the same wallet. Until
+    /// the wallet links the spend of that note, nothing records who sent the payment, and the
+    /// receiving account reads it as a receipt from a stranger — while the change returned to the
+    /// funding account is attributed, because that arm never consulted the funding account.
+    #[test]
+    fn sapling_funded_transfer_is_attributed_when_its_spend_is_linked() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_id = host.account().id();
+        let host_uuid = host_id.expose_uuid();
+        let host_sapling = host
+            .usk()
+            .to_unified_full_viewing_key()
+            .sapling()
+            .expect("the test account has a Sapling key")
+            .default_address()
+            .1;
+
+        let (transfer, _, guest_uuid) =
+            store_transfer_with_its_spend_unlinked(&mut st, host_id, host_sapling);
+        let txid = transfer.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        // The diagnosed shape: the cross-account payment is a receipt from nobody, the change is
+        // attributed.
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (None, Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(seen, _)| seen == txid.as_ref()),
+        );
+
+        // Scanning the transfer reveals its nullifier against the note the wallet holds, which
+        // links the spend and establishes which account funded it.
+        let (h, _) = st.generate_next_block_from_tx(1, &transfer);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (Some(guest_uuid), Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(seen, _)| seen != txid.as_ref()),
+            "no output of the transfer is reported as a receipt from nobody",
+        );
+    }
+    /// The other site that links a shielded spend: a nullifier observed while scanning, held in
+    /// the nullifier map because the note it reveals was not yet the wallet's, and resolved when
+    /// that note arrives. The spend is recorded against the *spending* transaction, which is not
+    /// the transaction the note was received in, so this pins which of the two the replay is
+    /// asked to attribute.
+    #[test]
+    fn a_note_recovered_after_its_spend_attributes_the_spending_transaction() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_id = host.account().id();
+        let host_uuid = host_id.expose_uuid();
+        let host_sapling = host
+            .usk()
+            .to_unified_full_viewing_key()
+            .sapling()
+            .expect("the test account has a Sapling key")
+            .default_address()
+            .1;
+
+        let (transfer, note_height, guest_uuid) =
+            store_transfer_with_its_spend_unlinked(&mut st, host_id, host_sapling);
+        let txid = transfer.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        // Take the funding note away, so that scanning the transfer cannot match its nullifier
+        // and has to park it in the nullifier map.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute("DELETE FROM sapling_received_notes", [])
+                .unwrap();
+            conn.commit().unwrap();
+        }
+
+        let (spend_height, _) = st.generate_next_block_from_tx(1, &transfer);
+        st.scan_cached_blocks(spend_height, 1);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (None, Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+            "the spend is unmatched, so nothing yet says who funded the transfer",
+        );
+
+        // Recovering the note resolves the parked nullifier, and the transaction the spend
+        // belongs to is the transfer, not the block the note came in.
+        st.scan_cached_blocks(note_height, 1);
+
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (Some(guest_uuid), Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(seen, _)| seen != txid.as_ref()),
+        );
+    }
+
+    /// Recipient rows belonging to one pool must not stand in for a missing recipient in another.
+    ///
+    /// This is the shape a wallet takes across configurations: an Orchard-capable build records
+    /// recipients for a transaction's Orchard actions, and a build without `orchard` reopens the
+    /// wallet, sees those rows, and cannot see the actions they belong to. Totalling recipient
+    /// rows against a total output count lets them cover an unattributed Sapling output and skip
+    /// the replay for good. The fixture reproduces that arithmetic within one build by recording
+    /// Orchard recipients for a transaction that has no Orchard actions, which is what the
+    /// feature-off build's count amounts to.
+    #[test]
+    fn recipients_recorded_for_one_pool_do_not_mask_another() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let host = st.test_account().unwrap();
+        let host_id = host.account().id();
+        let host_uuid = host_id.expose_uuid();
+        let host_sapling = host
+            .usk()
+            .to_unified_full_viewing_key()
+            .sapling()
+            .expect("the test account has a Sapling key")
+            .default_address()
+            .1;
+
+        let (transfer, _, guest_uuid) =
+            store_transfer_with_its_spend_unlinked(&mut st, host_id, host_sapling);
+        let txid = transfer.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        // Recipients in a pool the transaction has no outputs in, in numbers that cover every
+        // Sapling output it does have.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "INSERT INTO sent_notes
+                    (transaction_id, output_pool, output_index, from_account_id, value)
+                 SELECT (SELECT id_tx FROM transactions WHERE txid = :txid),
+                        :orchard,
+                        idx.i,
+                        (SELECT id FROM accounts WHERE uuid = :guest),
+                        1
+                 FROM (SELECT 0 AS i UNION SELECT 1 UNION SELECT 2
+                       UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) idx",
+                named_params! {
+                    ":txid": txid.as_ref(),
+                    ":orchard": pool_code(PoolType::Shielded(ShieldedPool::Orchard)),
+                    ":guest": guest_uuid,
+                },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+
+        // Linking the spend must still run the replay over the Sapling pool.
+        let (h, _) = st.generate_next_block_from_tx(1, &transfer);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (Some(guest_uuid), Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+        );
+    }
 }
