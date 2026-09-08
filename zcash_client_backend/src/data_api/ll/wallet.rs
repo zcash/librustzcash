@@ -311,8 +311,9 @@ pub struct PutBlocksRows {
 ///
 /// This governs the shielded nullifier maps and the transparent spend map alike; the
 /// argument above is indifferent to which kind of output identifier is being tracked.
-pub fn put_blocks_rows<DbT, SE, TE>(
+pub fn put_blocks_rows<DbT, P, SE, TE>(
     wallet_db: &mut DbT,
+    params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
@@ -320,6 +321,7 @@ pub fn put_blocks_rows<DbT, SE, TE>(
 where
     DbT: PutBlocksRowsDbT<SE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
+    P: consensus::Parameters,
 {
     if blocks.is_empty() {
         return Ok(PutBlocksRows::default());
@@ -433,9 +435,6 @@ where
                 tx.ironwood_spends().iter().map(|spend| spend.nf()),
             )
             .map_err(PutBlocksError::Storage)?;
-
-            // TODO: Pass in the actual network parameters even though we don't need them.
-            let params: Option<&consensus::Network> = None;
 
             put_shielded_outputs(
                 wallet_db,
@@ -666,8 +665,9 @@ where
 ///   boundary block containing no shielded outputs in any pool would otherwise leave a permanent
 ///   hole in the retained grid, and the anchor there could never be proved against. `None`
 ///   disables anchor retention.
-pub fn put_blocks<DbT, SE, TE>(
+pub fn put_blocks<DbT, P, SE, TE>(
     wallet_db: &mut DbT,
+    params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
@@ -676,9 +676,11 @@ pub fn put_blocks<DbT, SE, TE>(
 where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
+    P: consensus::Parameters,
 {
     let rows = put_blocks_rows(
         wallet_db,
+        params,
         #[cfg(feature = "transparent-inputs")]
         gap_limits,
         from_state,
@@ -1066,7 +1068,7 @@ where
 
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.sapling_outputs(),
@@ -1083,7 +1085,7 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.orchard_outputs(),
@@ -1102,7 +1104,7 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        Some(params),
+        params,
         tx_ref,
         funding_account,
         d_tx.ironwood_outputs(),
@@ -1327,7 +1329,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn put_shielded_outputs<DbT, P, Output>(
     wallet_db: &mut DbT,
-    params: Option<&P>,
+    params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     funding_account: Option<DbT::AccountId>,
     outputs: &[Output],
@@ -1359,7 +1361,7 @@ where
                 let recipient = Recipient::External {
                     recipient_address: external_address(
                         wallet_db,
-                        params.expect("present when outgoing is possible (store_decrypted_tx)"),
+                        params,
                         output.account_id(),
                         note.receiver(),
                     )?,
@@ -1397,9 +1399,7 @@ where
                         receiving_account: output.account_id(),
                         external_address: Some(external_address(
                             wallet_db,
-                            params.expect(
-                                "present when funding_account is known (store_decrypted_tx)",
-                            ),
+                            params,
                             output.account_id(),
                             note.receiver(),
                         )?),
