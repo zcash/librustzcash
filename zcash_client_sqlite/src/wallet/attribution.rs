@@ -448,6 +448,43 @@ fn has_recorded_recipient(
     )?)
 }
 
+/// Repairs the funding attribution of every stored transaction the wallet records as spending one
+/// of its own notes or outputs, in any pool.
+///
+/// A wallet whose spends were linked before the attribution replay existed holds the linkage
+/// without the attribution, and nothing revisits a stored transaction on its own. This restores
+/// the invariant over the wallet's whole history; it writes nothing for a transaction that is
+/// already attributed. Selecting a transaction that needs nothing costs only the two counts it
+/// settles for, so the selection is pool-complete rather than tailored to which transactions
+/// might need repair.
+pub(crate) fn repair_funding_attribution<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+) -> Result<(), SqliteClientError> {
+    let spending_txs = {
+        let mut stmt = conn.prepare(
+            "SELECT t.id_tx
+             FROM transactions t
+             WHERE t.raw IS NOT NULL
+             AND t.id_tx IN (
+                 SELECT transaction_id FROM transparent_received_output_spends
+                 UNION SELECT transaction_id FROM sapling_received_note_spends
+                 UNION SELECT transaction_id FROM orchard_received_note_spends
+                 UNION SELECT transaction_id FROM ironwood_received_note_spends
+             )",
+        )?;
+
+        stmt.query_map([], |row| row.get::<_, i64>(0).map(TxRef))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    for tx_ref in spending_txs {
+        attribute_funded_outputs(conn, params, tx_ref)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use rand_core::OsRng;
@@ -484,6 +521,9 @@ pub(crate) mod tests {
         },
         wallet::encoding::pool_code,
     };
+    use schemerz_rusqlite::RusqliteMigration as _;
+
+    use super::repair_funding_attribution;
 
     /// The `(from_account_uuid, to_account_uuid)` pairs `v_tx_outputs` reports for the given
     /// transaction in the given pool, in a fixed order.
@@ -791,6 +831,144 @@ pub(crate) mod tests {
             "no output of the transfer is reported as a receipt from nobody",
         );
     }
+
+    /// The replay is idempotent: linking the same spend again, and reconciling afterwards,
+    /// records nothing further.
+    #[test]
+    fn shielded_spend_attribution_is_idempotent() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let host_id = host.account().id();
+        let host_sapling = host
+            .usk()
+            .to_unified_full_viewing_key()
+            .sapling()
+            .expect("the test account has a Sapling key")
+            .default_address()
+            .1;
+
+        let (transfer, _, _) =
+            store_transfer_with_its_spend_unlinked(&mut st, host_id, host_sapling);
+        let txid = transfer.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        let (h, _) = st.generate_next_block_from_tx(1, &transfer);
+        st.scan_cached_blocks(h, 1);
+        let attributed = pool_output_parties(&st.wallet().db().conn, txid, sapling);
+        assert!(attributed.iter().all(|(from, _)| from.is_some()));
+
+        let repair = |st: &TestState<BlockCache, TestDb, LocalNetwork>| {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            repair_funding_attribution(&conn, &network).unwrap();
+            conn.commit().unwrap();
+        };
+
+        repair(&st);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            attributed,
+        );
+
+        repair(&st);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            attributed,
+        );
+    }
+
+    /// The repair heals a wallet in the state the maintainer's was found in: the transfer's data
+    /// stored, its Sapling spend linked, and the payment to another account carrying no sender.
+    ///
+    /// The transaction has no transparent spend, so only the pool-complete selection reaches it.
+    #[test]
+    fn repair_heals_a_shielded_funded_transfer() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let host = st.test_account().unwrap();
+        let host_id = host.account().id();
+        let host_uuid = host_id.expose_uuid();
+        let host_sapling = host
+            .usk()
+            .to_unified_full_viewing_key()
+            .sapling()
+            .expect("the test account has a Sapling key")
+            .default_address()
+            .1;
+
+        let (transfer, _, guest_uuid) =
+            store_transfer_with_its_spend_unlinked(&mut st, host_id, host_sapling);
+        let txid = transfer.txid();
+        let sapling = PoolType::Shielded(ShieldedPool::Sapling);
+
+        // Restore the spend linkage without the attribution, which is what a wallet upgraded
+        // before the shielded hooks existed holds.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute(
+                "INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+                 SELECT n.id, (SELECT id_tx FROM transactions WHERE txid = :txid)
+                 FROM sapling_received_notes n
+                 WHERE n.nf IS NOT NULL",
+                named_params! { ":txid": txid.as_ref() },
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            sorted(vec![
+                (None, Some(host_uuid)),
+                (Some(guest_uuid), Some(guest_uuid)),
+            ]),
+            "the fixture starts with the cross-account payment unattributed",
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .any(|(seen, _)| seen == txid.as_ref()),
+        );
+
+        // The repair migration's selection reaches the transaction through its shielded spend.
+        let migration =
+            crate::wallet::init::migrations::repair_funding_attribution_migration(network);
+        let repair = |st: &TestState<BlockCache, TestDb, LocalNetwork>| {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            migration.up(&conn).unwrap();
+            conn.commit().unwrap();
+        };
+
+        repair(&st);
+        let repaired = sorted(vec![
+            (Some(guest_uuid), Some(host_uuid)),
+            (Some(guest_uuid), Some(guest_uuid)),
+        ]);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            repaired,
+        );
+        assert!(
+            unattributed_shielded_receipts(&st.wallet().db().conn)
+                .iter()
+                .all(|(seen, _)| seen != txid.as_ref()),
+        );
+
+        // Running it again records nothing further.
+        repair(&st);
+        assert_eq!(
+            pool_output_parties(&st.wallet().db().conn, txid, sapling),
+            repaired,
+        );
+    }
+
     /// The other site that links a shielded spend: a nullifier observed while scanning, held in
     /// the nullifier map because the note it reveals was not yet the wallet's, and resolved when
     /// that note arrives. The spend is recorded against the *spending* transaction, which is not
