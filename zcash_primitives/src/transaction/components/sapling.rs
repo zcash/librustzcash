@@ -515,17 +515,11 @@ pub(crate) fn read_v7_bundle(
     let mut effects_reader = effects;
 
     // Effecting data: nSpends || SaplingSpendEffecting* || nOutputs ||
-    // SaplingOutput* || anchorSapling (only if nSpends > 0).
+    // SaplingOutput*. The anchor is authorizing data, not effecting data.
     let spend_descs = Vector::read(&mut effects_reader, read_spend_v5)?;
     let output_descs = Vector::read(&mut effects_reader, read_output_v5)?;
     let n_spends = spend_descs.len();
     let n_outputs = output_descs.len();
-
-    let anchor = if n_spends > 0 {
-        Some(read_base(&mut effects_reader, "anchor")?)
-    } else {
-        None
-    };
 
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
@@ -553,10 +547,16 @@ pub(crate) fn read_v7_bundle(
     })?;
     let mut auth_reader = auth_bytes;
 
-    // Authorizing data: vSpendProofsSapling (192 bytes per spend) ||
+    // Authorizing data: anchorSapling (32 bytes, only if nSpends > 0) ||
+    // vSpendProofsSapling (192 bytes per spend) ||
     // vSpendAuthSigsSapling (SaplingSignature per spend) ||
     // vOutputProofsSapling (192 bytes per output) ||
     // bindingSigSapling (SaplingSignature).
+    let anchor = if n_spends > 0 {
+        Some(read_base(&mut auth_reader, "anchor")?)
+    } else {
+        None
+    };
     let v_spend_proofs = Array::read(&mut auth_reader, n_spends, |r| read_zkproof(r))?;
     let mut v_spend_auth_sigs: Vec<redjubjub::Signature<SpendAuth>> = Vec::with_capacity(n_spends);
     for _ in 0..n_spends {
@@ -604,8 +604,10 @@ pub(crate) fn read_v7_bundle(
 /// [ZIP 248 §Sapling Effecting Data](https://zips.z.cash/zip-0248#sapling-effecting-data)
 ///
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
-///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
-///         anchorSapling (32 bytes, present if nSpends > 0).
+///         nOutputs, SaplingOutput[nOutputs] (756 bytes each).
+///
+/// The anchor is not part of the effecting data; it is written by
+/// [`write_v7_auth`].
 #[cfg(zcash_v7)]
 pub(crate) fn write_v7_effects<W: Write>(
     mut writer: W,
@@ -624,11 +626,6 @@ pub(crate) fn write_v7_effects<W: Write>(
         write_output_v5_without_proof(w, e)
     })?;
 
-    // anchorSapling (only if nSpends > 0)
-    if !bundle.shielded_spends().is_empty() {
-        writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
-    }
-
     Ok(())
 }
 
@@ -638,7 +635,8 @@ pub(crate) fn write_v7_effects<W: Write>(
 /// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
 /// (version 0: `[0x01, 0x00]`).
 ///
-/// Layout: vSpendProofsSapling (192*nSpends),
+/// Layout: anchorSapling (32 bytes, present if nSpends > 0),
+///         vSpendProofsSapling (192*nSpends),
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),
 ///         bindingSigSapling (SaplingSignature with sighashInfo).
@@ -647,6 +645,12 @@ pub(crate) fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
+    // anchorSapling (only if nSpends > 0): all spends in a bundle share one
+    // anchor, so it is written once here.
+    if let Some(spend) = bundle.shielded_spends().first() {
+        writer.write_all(spend.anchor().to_repr().as_ref())?;
+    }
+
     // Spend proofs
     Array::write(
         &mut writer,

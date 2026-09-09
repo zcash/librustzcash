@@ -101,8 +101,9 @@ pub fn read_v7_bundle(
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     let mut effects_reader = effects;
 
-    // Effecting data: nActions || OrchardActionEffecting* ||
-    //                 (flags || anchor)?  (present iff nActions > 0)
+    // Effecting data: nActions || OrchardActionEffecting* || flags?
+    //                 (flags present iff nActions > 0; the anchor is
+    //                 authorizing data, not effecting data)
     //
     // # Correctness
     // The closure is not redundant: `read_action_without_auth` has an HRTB
@@ -127,7 +128,6 @@ pub fn read_v7_bundle(
     }
 
     let flags = read_flags(&mut effects_reader)?;
-    let anchor = read_anchor(&mut effects_reader)?;
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -143,9 +143,10 @@ pub fn read_v7_bundle(
     })?;
     let mut auth_reader = auth_bytes;
 
-    // Authorizing data: sizeProofsOrchard || proofsOrchard ||
+    // Authorizing data: anchorOrchard || sizeProofsOrchard || proofsOrchard ||
     //                   vSpendAuthSigsOrchard (OrchardSignature per action) ||
     //                   bindingSigOrchard (OrchardSignature).
+    let anchor = read_anchor(&mut auth_reader)?;
     let proof_bytes = Vector::read(&mut auth_reader, |r| r.read_u8())?;
     let actions = NonEmpty::from_vec(
         actions_without_auth
@@ -193,9 +194,10 @@ pub fn write_v7_effects<W: Write>(
     Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
         write_action_without_auth(w, a)
     })?;
-    // flagsOrchard + anchorOrchard (only if nActions > 0, which is always true here)
+    // flagsOrchard (only if nActions > 0, which is always true here). The
+    // anchor is not part of the effecting data; it is written by
+    // [`write_v7_auth`].
     writer.write_all(&[bundle.flags().to_byte()])?;
-    writer.write_all(&bundle.anchor().to_bytes())?;
     Ok(())
 }
 
@@ -209,6 +211,8 @@ pub fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
+    // anchorOrchard
+    writer.write_all(&bundle.anchor().to_bytes())?;
     // sizeProofsOrchard + proofsOrchard
     Vector::write(
         &mut writer,
