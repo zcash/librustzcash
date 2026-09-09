@@ -60,6 +60,27 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     if tx.version().has_zip233() {
         prop_assert_eq!(tx.zip233_amount(), txo.zip233_amount());
     }
+    // The identifier and the authorizing data commitment cover the bundle
+    // fields that the assertions above do not reach, including which side of
+    // the effecting/authorizing split each field was encoded on.
+    //
+    // A Sapling bundle encodes one anchor for all of its spends, so a
+    // generated bundle whose spends disagree about the anchor cannot survive
+    // a roundtrip; the digests are only meaningful for the rest.
+    let sapling_anchors_agree = tx.sapling_bundle().is_none_or(|bundle| {
+        let mut anchors = bundle
+            .shielded_spends()
+            .iter()
+            .map(|spend| spend.anchor().to_bytes());
+        anchors
+            .next()
+            .is_none_or(|first| anchors.all(|a| a == first))
+    });
+    if sapling_anchors_agree {
+        prop_assert_eq!(tx.txid(), txo.txid());
+        let (auth, auth_o) = (tx.auth_commitment(), txo.auth_commitment());
+        prop_assert_eq!(auth.as_bytes(), auth_o.as_bytes());
+    }
     Ok(())
 }
 
