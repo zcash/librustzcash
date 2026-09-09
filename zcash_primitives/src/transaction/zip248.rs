@@ -200,17 +200,19 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized. The `effect_digest` is
-/// computed using the opaque effects personalization defined in ZIP 248,
-/// allowing any wallet to derive the txid. The `auth_digest` cannot be
-/// computed without understanding the bundle type, so it is left as `None`
-/// when parsed from the wire.
+/// the transaction can still be serialized. ZIP 248 defines no digest for a
+/// bundle a client does not understand — it expects the client to be given
+/// one — so `effect_digest` is filled in with the implementation-defined
+/// flat hash described on [`opaque_effects_personalization`]. The
+/// `auth_digest` cannot be computed without understanding the bundle type,
+/// so it is left as `None` when parsed from the wire.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
     /// Raw effecting-data bytes from the wire.
     pub effect_data: Vec<u8>,
     /// Digest of the effecting data for the txid computation, using the
-    /// opaque effects personalization from ZIP 248 §T.3.
+    /// implementation-defined personalization from
+    /// [`opaque_effects_personalization`].
     pub effect_digest: blake2b_simd::Hash,
     /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
@@ -1045,12 +1047,23 @@ pub fn write_bundle_data_framing<W: Write>(
 
 /// Returns the 16-byte BLAKE2b personalization for the opaque effects digest
 /// of a bundle with the given type and variant.
-/// [ZIP 248 §T.3](https://zips.z.cash/zip-0248#t-3-effects-bundles-digest)
 ///
 /// Layout: `"ZTxIdT" (6) | bundleType (4-byte LE) | 0x56 (1) | bundleVariant (1) | "Hash" (4)`
 ///
-/// This is used for bundle types not understood by the wallet, allowing the
-/// txid to be computed by flat-hashing the raw `vBundleData` bytes.
+/// # Implementation-defined
+///
+/// This scheme is **not** specified by ZIP 248. The ZIP defines a
+/// `bundle_effects_digest` only per bundle type, and expects a wallet that
+/// does not understand a bundle to be *given* that 32-byte digest (see
+/// [ZIP 248 §Implications for Wallets](https://zips.z.cash/zip-0248#implications-for-wallets)).
+///
+/// Flat-hashing the raw `vBundleData` bytes keeps txid computation infallible
+/// for transactions carrying bundle types this implementation does not know,
+/// but the resulting digest is *not* the digest that a validator which
+/// understands the bundle would compute, and so the txid derived from it will
+/// not match consensus. Treat a txid computed over an unknown bundle as
+/// provisional until this implementation understands that bundle type, or is
+/// extended to accept supplied per-bundle digests.
 pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> [u8; 16] {
     let mut p = [0u8; 16];
     p[..6].copy_from_slice(b"ZTxIdT");

@@ -1442,10 +1442,12 @@ impl Transaction {
         }
 
         // Store any remaining (unrecognized) bundles as opaque
-        // `UnknownBundle` entries. The effects digest is computed as a flat
-        // BLAKE2b-256 of the raw vBundleData bytes with a (bundleType,
-        // bundleVariant)-derived personalization per ZIP 248 §T.3, allowing
-        // wallets to compute the txid without understanding the bundle.
+        // `UnknownBundle` entries. ZIP 248 expects a client that does not
+        // understand a bundle to be given its `bundle_effects_digest`; with
+        // no such digest to hand, we fall back to a flat BLAKE2b-256 of the
+        // raw vBundleData bytes under an implementation-defined
+        // personalization, so that txid computation stays infallible. See
+        // `zip248::opaque_effects_personalization` for what that costs.
         // Auth data is stored for re-serialization but no auth digest is
         // computed — the correct algorithm is defined by the bundle's ZIP.
         for (bundle_type, (variant, effect)) in effect_data_by_type {
