@@ -425,6 +425,37 @@ fn zip_0233() {
     assert_ne!(tx.txid(), tx3.txid());
 }
 
+/// [ZIP 248 §v0 Signature Digest](https://zips.z.cash/zip-0248#v0-signature-digest):
+/// "For transactions that have no transparent inputs, the v0 signature digest
+/// is identical to the transaction identifier digest."
+#[test]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
+    use super::zip248;
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut vp = zip248::ValuePoolDeltas::empty();
+    vp.set_fee(Zatoshis::from_u64(10_000).unwrap());
+    vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(10_000).unwrap());
+    // `TestUnauthorized` supplies the transparent signing context that the
+    // signature hash requires; this transaction has no transparent bundle.
+    let tx = TransactionData::<TestUnauthorized>::from_parts_v7(
+        super::TxVersion::V7,
+        BranchId::Nu7,
+        0,
+        BlockHeight::from_u32(100),
+        vp,
+        zip248::BundleMap::new(),
+    );
+
+    let txid_parts = tx.digest_v7();
+    let sighash = v7_signature_hash(&tx, &SignableInput::Shielded, &txid_parts);
+    assert_eq!(
+        sighash.as_bytes(),
+        super::txid::to_txid(tx.version(), tx.consensus_branch_id(), &txid_parts).as_ref(),
+    );
+}
+
 #[cfg(test)]
 mod zip248_tests {
     use super::super::zip248;
@@ -787,7 +818,7 @@ mod zip248_tests {
         /// Builds a minimal v7 transaction header (20 bytes).
         fn v7_header(branch_id: BranchId) -> Vec<u8> {
             let mut buf = Vec::new();
-            // header: version 6 with overwintered bit
+            // header: version 7 with overwintered bit
             buf.extend_from_slice(&(V7_TX_VERSION | (1 << 31)).to_le_bytes());
             buf.extend_from_slice(&V7_VERSION_GROUP_ID.to_le_bytes());
             buf.extend_from_slice(&u32::from(branch_id).to_le_bytes());
@@ -801,6 +832,18 @@ mod zip248_tests {
             CompactSize::write(&mut *buf, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
             CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
+        }
+
+        /// The effecting data of a coinbase bundle at height 100 that issues
+        /// nothing: `blockHeight || blockSubsidy || lockboxValue ||
+        /// coinbaseDataLen`.
+        fn coinbase_effects() -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&100u32.to_le_bytes());
+            buf.extend_from_slice(&0u64.to_le_bytes());
+            buf.extend_from_slice(&0u64.to_le_bytes());
+            CompactSize::write(&mut buf, 0).unwrap();
+            buf
         }
 
         /// Writes a VP delta entry directly to bytes.
@@ -837,11 +880,31 @@ mod zip248_tests {
         }
 
         #[test]
-        fn rejects_reserved_bundle_type() {
+        fn rejects_coinbase_in_auth_bundles() {
             let mut buf = v7_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
+            // A coinbase effect bundle, and an auth bundle for it: the
+            // registry marks the coinbase mAuthBundles column as prohibited.
             CompactSize::write(&mut *buf, 1).unwrap();
-            write_vp_entry(&mut buf, 1, 0, 1000);
+            zip248::write_bundle_data_framing(&mut buf, 1, 0, &coinbase_effects()).unwrap();
+            CompactSize::write(&mut *buf, 1).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 1, 0, &[0xAA]).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_oversized_coinbase_data() {
+            let mut effects = coinbase_effects();
+            // Replace the empty `coinbaseData` with one byte over the limit.
+            effects.pop();
+            CompactSize::write(&mut effects, zip248::MAX_COINBASE_DATA_LEN + 1).unwrap();
+            effects.extend_from_slice(&[0u8; zip248::MAX_COINBASE_DATA_LEN + 1]);
+
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 1).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 1, 0, &effects).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
@@ -863,7 +926,8 @@ mod zip248_tests {
             let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 4, 0, &[0xAA]).unwrap();
+            // bundleType 5 is the fee bundle, which is value-only.
+            zip248::write_bundle_data_framing(&mut buf, 5, 0, &[0xAA]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
@@ -913,6 +977,128 @@ mod zip248_tests {
             zip248::write_bundle_data_framing(&mut buf, 0, 0, &[0xBB]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap(); // no auth
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+    }
+
+    // -- Whole-transaction roundtrips for the v7 bundle types ------------------
+
+    #[cfg(zcash_v7)]
+    mod bundle_roundtrips {
+        use proptest::prelude::*;
+
+        use super::super::super::{
+            Authorized, Transaction, TransactionData, TxVersion,
+            components::orchard::testing::arb_bundle_for_version, zip248,
+        };
+        use alloc::vec::Vec;
+        use zcash_protocol::{
+            consensus::{BlockHeight, BranchId},
+            value::Zatoshis,
+        };
+
+        fn roundtrip(tx: &Transaction) -> Transaction {
+            let mut buf = Vec::new();
+            tx.write(&mut buf)
+                .expect("v7 transactions are serializable");
+            Transaction::read(&buf[..], BranchId::Nu7).expect("the encoding just written parses")
+        }
+
+        #[test]
+        fn coinbase_bundle_roundtrips_through_a_transaction() {
+            let coinbase = zip248::CoinbaseBundle::from_parts(
+                1_500_000,
+                Zatoshis::from_u64(156_250_000).unwrap(),
+                Zatoshis::from_u64(18_750_000).unwrap(),
+                b"a miner was here".to_vec(),
+            )
+            .expect("valid coinbase bundle");
+
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.set_coinbase(coinbase.value_pool_delta());
+            // Something has to consume what the coinbase bundle contributes;
+            // an Orchard delta stands in for the outputs that would.
+            vp.set_orchard(-coinbase.value_pool_delta());
+
+            let mut bundles = zip248::BundleMap::new();
+            bundles.insert_coinbase(coinbase.clone());
+
+            let tx = TransactionData::<Authorized>::from_parts_v7(
+                TxVersion::V7,
+                BranchId::Nu7,
+                0,
+                BlockHeight::from_u32(1_500_100),
+                vp,
+                bundles,
+            )
+            .freeze()
+            .expect("v7 transaction data can be frozen");
+
+            let parsed = roundtrip(&tx);
+            assert_eq!(parsed.coinbase_bundle(), Some(&coinbase));
+            assert_eq!(parsed.txid(), tx.txid());
+            assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+        }
+
+        proptest! {
+            // Generating Orchard bundles is expensive, and this property does
+            // not depend on the bundle's shape, so a handful of cases is
+            // plenty.
+            #![proptest_config(ProptestConfig::with_cases(4))]
+
+            /// An Orchard protocol bundle carried as the Ironwood bundle
+            /// survives a serialization roundtrip, and is digested
+            /// differently from the same bundle carried as the Orchard
+            /// bundle: the two act on different pools.
+            #[test]
+            fn ironwood_bundle_roundtrips_and_digests_differently(
+                bundle in arb_bundle_for_version(TxVersion::V7).prop_filter(
+                    "an Ironwood bundle is only interesting when present",
+                    |b| b.is_some(),
+                ),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+                let value_balance = *bundle.value_balance();
+
+                let build = |as_ironwood: bool| {
+                    let mut vp = zip248::ValuePoolDeltas::empty();
+                    let mut bundles = zip248::BundleMap::<Authorized>::new();
+                    if as_ironwood {
+                        vp.set_ironwood(value_balance);
+                        bundles.insert_ironwood(bundle.clone());
+                    } else {
+                        vp.set_orchard(value_balance);
+                        bundles.insert_orchard(bundle.clone());
+                    }
+                    // Balance the transaction so that it satisfies the
+                    // value pool delta rule.
+                    vp.set_transparent(-value_balance);
+
+                    TransactionData::<Authorized>::from_parts_v7(
+                        TxVersion::V7,
+                        BranchId::Nu7,
+                        0,
+                        BlockHeight::from_u32(100),
+                        vp,
+                        bundles,
+                    )
+                    .freeze()
+                    .expect("v7 transaction data can be frozen")
+                };
+
+                let as_ironwood = build(true);
+                let parsed = roundtrip(&as_ironwood);
+                prop_assert_eq!(parsed.txid(), as_ironwood.txid());
+                prop_assert!(parsed.ironwood_bundle().is_some());
+                prop_assert!(parsed.orchard_bundle().is_none());
+                let (parsed_auth, ironwood_auth) =
+                    (parsed.auth_commitment(), as_ironwood.auth_commitment());
+                prop_assert_eq!(parsed_auth.as_bytes(), ironwood_auth.as_bytes());
+
+                let as_orchard = build(false);
+                prop_assert_ne!(as_ironwood.txid(), as_orchard.txid());
+                let orchard_auth = as_orchard.auth_commitment();
+                prop_assert_ne!(ironwood_auth.as_bytes(), orchard_auth.as_bytes());
+            }
         }
     }
 
