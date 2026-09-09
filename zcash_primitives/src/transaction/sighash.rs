@@ -14,6 +14,9 @@ use ::sapling::bundle::GrothProofBytes;
 use ::transparent::sighash::TransparentAuthorizingContext;
 use zcash_protocol::value::Zatoshis;
 
+#[cfg(zcash_unstable = "nu8")]
+use super::sighash_v7::v7_signature_hash;
+
 pub enum SignableInput<'a> {
     Shielded,
     Transparent(transparent::sighash::SignableInput<'a, Zatoshis>),
@@ -66,8 +69,10 @@ where
                 TxDigests::Zip143(zip143_digests(&tx))
             }
             TxVersion::V5 | TxVersion::V6 => TxDigests::Zip244(tx.digest(TxIdDigester)),
-            #[cfg(zcash_unstable = "nutachyon")]
-            TxVersion::V7 => TxDigests::Zip244(tx.digest(TxIdDigester)),
+            // v7 (ZIP 248) digests have their own tree shape, which `TxIdDigester`
+            // does not build.
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => TxDigests::Zip244(tx.digest_v7()),
         };
         Self::from_tx_digests(tx, tx_digests)
     }
@@ -97,9 +102,9 @@ where
                 let tx_digests = TxDigests::Zip244(tx.digest(TxIdDigester));
                 Ok(Self::from_tx_digests(tx, tx_digests))
             }
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             TxVersion::V7 => {
-                let tx_digests = TxDigests::Zip244(tx.digest(TxIdDigester));
+                let tx_digests = TxDigests::Zip244(tx.digest_v7());
                 Ok(Self::from_tx_digests(tx, tx_digests))
             }
         }
@@ -151,6 +156,11 @@ where
         let inputs_digests = self.transparent_inputs_digests.as_ref();
         SignatureHash(match &self.tx_digests {
             TxDigests::Zip143(digests) => v4_signature_hash(&self.tx, signable_input, digests),
+            // v7 signs under ZIP 248, not the v6 sighash.
+            #[cfg(zcash_unstable = "nu8")]
+            TxDigests::Zip244(txid_parts) if matches!(self.tx.version, TxVersion::V7) => {
+                v7_signature_hash(&self.tx, signable_input, txid_parts, inputs_digests)
+            }
             TxDigests::Zip244(txid_parts) if self.tx.version.has_ironwood() => {
                 v6_signature_hash(&self.tx, signable_input, txid_parts, inputs_digests)
             }
