@@ -547,6 +547,15 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     /// Returns the ZIP 248 value pool deltas.
+    /// Returns the Ironwood bundle, if any.
+    ///
+    /// The Ironwood bundle acts on the *Ironwood pool* using the Orchard
+    /// protocol, so it has the same type as the Orchard bundle.
+    /// [ZIP 248 §Orchard Protocol Bundles](https://zips.z.cash/zip-0248#orchard-protocol-bundles)
+    pub fn ironwood_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        self.bundles.ironwood()
+    }
+
     pub fn value_pool_deltas(&self) -> &zip248::ValuePoolDeltas {
         &self.value_pool_deltas
     }
@@ -655,8 +664,8 @@ impl<A: Authorization> TransactionData<A> {
     #[cfg(zcash_v7)]
     pub fn digest_v7(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
-            TxIdDigester, hash_v7_coinbase_effects, hash_v7_header, hash_v7_orchard_effects,
-            hash_v7_sapling_effects, hash_v7_value_pool_deltas,
+            TxIdDigester, hash_v7_coinbase_effects, hash_v7_header, hash_v7_ironwood_effects,
+            hash_v7_orchard_effects, hash_v7_sapling_effects, hash_v7_value_pool_deltas,
         };
 
         let digester = TxIdDigester;
@@ -692,12 +701,15 @@ impl<A: Authorization> TransactionData<A> {
             sapling_digest: self.bundles.sapling().map(hash_v7_sapling_effects),
             // Leaf 5: orchard effects only (actions, flags).
             orchard_digest: self.bundles.orchard().map(hash_v7_orchard_effects),
+            // Leaf 6: the same, for the Orchard protocol bundle acting on the
+            // *Ironwood pool*.
+            ironwood_digest: self.bundles.ironwood().map(hash_v7_ironwood_effects),
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
                 &digester,
                 self.bundles.tze(),
             ),
-            // Leaf 6: the serialized VP deltas map.
+            // Leaf 7: the serialized VP deltas map.
             value_pool_deltas_digest: Some(hash_v7_value_pool_deltas(&self.value_pool_deltas)),
             // Unknown-bundle digests are folded in alongside the known leaves.
             unknown_effect_digests,
@@ -733,7 +745,7 @@ impl<A: Authorization> TransactionData<A> {
         f_sapling: impl FnOnce(
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
-        f_orchard: impl FnOnce(
+        f_orchard: impl FnMut(
             Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
@@ -771,7 +783,7 @@ impl<A: Authorization> TransactionData<A> {
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         )
             -> Result<Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>, E>,
-        f_orchard: impl FnOnce(
+        f_orchard: impl FnMut(
             Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
         )
             -> Result<Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>, E>,
@@ -824,6 +836,8 @@ impl<A: Authorization> TransactionData<A> {
                         )
                     })
                 },
+                // Applied to the Orchard bundle and then to the Ironwood
+                // bundle: both are Orchard protocol bundles.
                 |ob| {
                     ob.map(|b| {
                         b.map_authorization(
@@ -1412,6 +1426,21 @@ impl Transaction {
             }
         }
 
+        // [ZIP 248 §Orchard Protocol Bundles]: the Ironwood bundle shares the
+        // Orchard bundle's encoding; only the pool it acts on, and so its
+        // digest personalizations, differ.
+        let (ironwood_effect, ironwood_auth) = take_known(zip248::BundleType::Ironwood.to_u64());
+        if let Some(effect) = ironwood_effect {
+            let value_balance = vp.ironwood_value().unwrap_or(ZatBalance::zero());
+            if let Some(b) = orchard_serialization::read_v7_bundle(
+                &effect,
+                ironwood_auth.as_deref(),
+                value_balance,
+            )? {
+                bundles.insert_ironwood(b);
+            }
+        }
+
         // Store any remaining (unrecognized) bundles as opaque
         // `UnknownBundle` entries. The effects digest is computed as a flat
         // BLAKE2b-256 of the raw vBundleData bytes with a (bundleType,
@@ -1678,6 +1707,15 @@ impl Transaction {
                 buf,
             ));
         }
+        if let Some(ib) = self.bundles.ironwood() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v7_effects(&mut buf, ib)?;
+            effect_bundles.push((
+                zip248::BundleId::IRONWOOD.wire_key().0,
+                zip248::BundleId::IRONWOOD.wire_key().1,
+                buf,
+            ));
+        }
         // Append unknown bundles (already stored as opaque bytes) and then
         // sort everything by bundleType to achieve canonical wire order.
         for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
@@ -1721,6 +1759,15 @@ impl Transaction {
             auth_bundles.push((
                 zip248::BundleId::ORCHARD.wire_key().0,
                 zip248::BundleId::ORCHARD.wire_key().1,
+                buf,
+            ));
+        }
+        if let Some(ib) = self.bundles.ironwood() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v7_auth(&mut buf, ib)?;
+            auth_bundles.push((
+                zip248::BundleId::IRONWOOD.wire_key().0,
+                zip248::BundleId::IRONWOOD.wire_key().1,
                 buf,
             ));
         }
@@ -1807,8 +1854,8 @@ impl Transaction {
     #[cfg(zcash_v7)]
     fn auth_commitment_v7(&self) -> Blake2bHash {
         use txid::{
-            hash_v7_auth_bundles, hash_v7_orchard_auth, hash_v7_sapling_auth,
-            hash_v7_transparent_auth, v7_bundle_digest_entries,
+            hash_v7_auth_bundles, hash_v7_ironwood_auth, hash_v7_orchard_auth,
+            hash_v7_sapling_auth, hash_v7_transparent_auth, v7_bundle_digest_entries,
         };
 
         // Per-protocol auth digests. Each covers the bundle's witness data
@@ -1831,6 +1878,12 @@ impl Transaction {
             .orchard()
             .map(Some)
             .map(hash_v7_orchard_auth);
+        let ironwood_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .ironwood()
+            .map(Some)
+            .map(hash_v7_ironwood_auth);
 
         // Unknown bundles may carry pre-computed auth digests set by the
         // caller via BundleMap::get_unknown_mut.
@@ -1849,6 +1902,7 @@ impl Transaction {
             None,
             sapling_auth_digest.as_ref(),
             orchard_auth_digest.as_ref(),
+            ironwood_auth_digest.as_ref(),
             &unknown_auth_digests,
         ));
 
@@ -1892,6 +1946,9 @@ pub struct TxDigests<A> {
     /// only for coinbase transactions.
     #[cfg(zcash_v7)]
     pub coinbase_digest: Option<A>,
+    /// v7 (ZIP 248): digest of the Ironwood bundle's effecting data.
+    #[cfg(zcash_v7)]
+    pub ironwood_digest: Option<A>,
     /// v7 (ZIP 248): digest of the value pool deltas map.
     #[cfg(zcash_v7)]
     pub value_pool_deltas_digest: Option<A>,
@@ -2155,8 +2212,11 @@ impl<A: Authorization> TransactionData<A> {
             // Orchard protocol bundle of a coinbase transaction. (Coinbase
             // outputs are unspendable until maturity, and enabling spends
             // would allow circumventing the maturity rule.)
-            if let Some(orchard_bundle) = self.bundles.orchard() {
-                if orchard_bundle.flags().spends_enabled() {
+            for orchard_protocol_bundle in [self.bundles.orchard(), self.bundles.ironwood()]
+                .into_iter()
+                .flatten()
+            {
+                if orchard_protocol_bundle.flags().spends_enabled() {
                     return Err(V7ConsensusError::CoinbaseEnableSpendsOrchardSet);
                 }
             }

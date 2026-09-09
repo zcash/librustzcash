@@ -83,6 +83,10 @@ const ZCASH_V7_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardH_v7";
 #[cfg(zcash_v7)]
 const ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaH_v7";
 #[cfg(zcash_v7)]
+const ZCASH_V7_IRONWOOD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdIronwd_Hash";
+#[cfg(zcash_v7)]
+const ZCASH_V7_IRONWOOD_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthIrnwdHash";
+#[cfg(zcash_v7)]
 pub(crate) const ZCASH_V7_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBnd_Hash";
 #[cfg(zcash_v7)]
 pub(crate) const ZCASH_V7_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBnd__Hash";
@@ -474,21 +478,71 @@ pub(crate) fn hash_v7_sapling_effects<A: sapling::bundle::Authorization>(
 pub(crate) fn hash_v7_orchard_effects(
     bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
 ) -> Blake2bHash {
-    let mut h = hasher(ZCASH_V7_ORCHARD_HASH_PERSONALIZATION);
+    hash_v7_orchard_protocol_effects(bundle, &ORCHARD_POOL_PERSONALIZATIONS)
+}
+
+/// Implements [ZIP 248 §T.3.4](https://zips.z.cash/zip-0248#t-3-4-ironwood-effects-digest).
+///
+/// The Ironwood bundle uses the same effecting data encoding as the Orchard
+/// bundle, so its digest is computed exactly as `orchard_effects_digest` is,
+/// with each personalization string replaced by its Ironwood counterpart.
+/// The strings differ so that the digest of a bundle acting on one pool
+/// cannot be reused as the digest of a bundle acting on the other.
+#[cfg(zcash_v7)]
+pub(crate) fn hash_v7_ironwood_effects(
+    bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
+) -> Blake2bHash {
+    hash_v7_orchard_protocol_effects(bundle, &IRONWOOD_POOL_PERSONALIZATIONS)
+}
+
+/// The BLAKE2b personalizations of one Orchard protocol pool's digests.
+///
+/// The *Orchard pool* and the *Ironwood pool* are acted on by bundle types
+/// that share an encoding, and so share a digest shape; only these strings
+/// distinguish them.
+#[cfg(zcash_v7)]
+struct OrchardPoolPersonalizations {
+    effects: &'static [u8; 16],
+    actions_compact: &'static [u8; 16],
+    actions_memos: &'static [u8; 16],
+    actions_noncompact: &'static [u8; 16],
+    auth: &'static [u8; 16],
+}
+
+#[cfg(zcash_v7)]
+const ORCHARD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPersonalizations {
+    effects: ZCASH_V7_ORCHARD_HASH_PERSONALIZATION,
+    actions_compact: b"ZTxIdOrcActCHash",
+    actions_memos: b"ZTxIdOrcActMHash",
+    actions_noncompact: b"ZTxIdOrcActNHash",
+    auth: ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION,
+};
+
+#[cfg(zcash_v7)]
+const IRONWOOD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPersonalizations {
+    effects: ZCASH_V7_IRONWOOD_HASH_PERSONALIZATION,
+    actions_compact: b"ZTxIdIrnActCHash",
+    actions_memos: b"ZTxIdIrnActMHash",
+    actions_noncompact: b"ZTxIdIrnActNHash",
+    auth: ZCASH_V7_IRONWOOD_AUTH_HASH_PERSONALIZATION,
+};
+
+#[cfg(zcash_v7)]
+fn hash_v7_orchard_protocol_effects(
+    bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
+    personalizations: &OrchardPoolPersonalizations,
+) -> Blake2bHash {
+    let mut h = hasher(personalizations.effects);
 
     // Per ZIP 248 §T.3.3: the three sub-hashes partition each action's fields
     // into compact (lightweight-client-relevant), memo, and non-compact groups,
     // exactly as ZIP 244 does. The orchard crate's `hash_bundle_txid_data` is
     // the ZIP 244 form and includes valueBalanceOrchard, so we cannot delegate
     // to it and must re-implement the sub-hashes here.
-    const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActCHash";
-    const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActMHash";
-    const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActNHash";
-
     if !bundle.actions().is_empty() {
-        let mut compact_h = hasher(ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION);
-        let mut memos_h = hasher(ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION);
-        let mut noncompact_h = hasher(ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION);
+        let mut compact_h = hasher(personalizations.actions_compact);
+        let mut memos_h = hasher(personalizations.actions_memos);
+        let mut noncompact_h = hasher(personalizations.actions_noncompact);
 
         for action in bundle.actions().iter() {
             // Compact fields: these are the minimum needed by light clients
@@ -639,7 +693,27 @@ pub(crate) fn hash_v7_sapling_auth(
 pub(crate) fn hash_v7_orchard_auth(
     orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
-    let mut h = hasher(ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION);
+    hash_v7_orchard_protocol_auth(orchard_bundle, &ORCHARD_POOL_PERSONALIZATIONS)
+}
+
+/// Implements [ZIP 248 §A.1.4](https://zips.z.cash/zip-0248#a-1-4-ironwood-auth-digest).
+///
+/// Computed over the Ironwood bundle's authorizing data exactly as
+/// `orchard_auth_digest` is, including its commitment to the anchor, with the
+/// `ZTxAuthIrnwdHash` personalization in place of `ZTxAuthOrchaH_v7`.
+#[cfg(zcash_v7)]
+pub(crate) fn hash_v7_ironwood_auth(
+    ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    hash_v7_orchard_protocol_auth(ironwood_bundle, &IRONWOOD_POOL_PERSONALIZATIONS)
+}
+
+#[cfg(zcash_v7)]
+fn hash_v7_orchard_protocol_auth(
+    orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+    personalizations: &OrchardPoolPersonalizations,
+) -> Blake2bHash {
+    let mut h = hasher(personalizations.auth);
     if let Some(bundle) = orchard_bundle {
         // [ZIP 248 §A.1.3a]: anchorOrchard.
         h.write_all(&bundle.anchor().to_bytes())
@@ -802,6 +876,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             #[cfg(zcash_v7)]
             coinbase_digest: None,
             #[cfg(zcash_v7)]
+            ironwood_digest: None,
+            #[cfg(zcash_v7)]
             value_pool_deltas_digest: None,
             #[cfg(zcash_v7)]
             unknown_effect_digests: alloc::vec::Vec::new(),
@@ -912,6 +988,7 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
         digests.coinbase_digest.as_ref(),
         digests.sapling_digest.as_ref(),
         digests.orchard_digest.as_ref(),
+        digests.ironwood_digest.as_ref(),
         &digests.unknown_effect_digests,
     ));
 
@@ -929,7 +1006,8 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
 /// bundleVariant)` order.
 ///
 /// The merge works in two phases:
-/// 1. Push known bundle digests (transparent, coinbase, sapling, orchard) if present.
+/// 1. Push known bundle digests (transparent, coinbase, sapling, orchard,
+///    ironwood) if present.
 ///    These have well-known `BundleId` constants whose wire keys are defined
 ///    by the spec to be in increasing order already.
 /// 2. Append all unknown-bundle digests. These come from the wire and their
@@ -947,6 +1025,7 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
     coinbase_digest: Option<&'a Blake2bHash>,
     sapling_digest: Option<&'a Blake2bHash>,
     orchard_digest: Option<&'a Blake2bHash>,
+    ironwood_digest: Option<&'a Blake2bHash>,
     unknown: &'a [((u64, u64), Blake2bHash)],
 ) -> alloc::vec::Vec<((u64, u64), &'a Blake2bHash)> {
     use super::zip248::BundleId;
@@ -963,6 +1042,9 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
     }
     if let Some(d) = orchard_digest {
         entries.push((BundleId::ORCHARD.wire_key(), d));
+    }
+    if let Some(d) = ironwood_digest {
+        entries.push((BundleId::IRONWOOD.wire_key(), d));
     }
     // Unknown bundles: these were round-tripped from the wire and may include
     // bundle types introduced by future network upgrades that this code does

@@ -386,6 +386,7 @@ pub enum TypedBundle<A: Authorization> {
     Sprout(sprout::Bundle),
     Sapling(sapling::Bundle<A::SaplingAuth, ZatBalance>),
     Orchard(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
+    Ironwood(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
     #[cfg(zcash_unstable = "zfuture")]
     Tze(tze::Bundle<A::TzeAuth>),
 }
@@ -473,6 +474,23 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
+    /// Returns the Ironwood bundle, if present.
+    ///
+    /// The Ironwood bundle acts on the *Ironwood pool* using the Orchard
+    /// protocol, so it is represented by the same type as the Orchard bundle.
+    ///
+    /// ZIP 248 leaves the `enableCrossAddress` flag unrestricted in an
+    /// Ironwood bundle, but `orchard::bundle::Flags` has no representation
+    /// for that bit yet, so an Ironwood bundle that sets it cannot currently
+    /// be parsed. This will be lifted when the `orchard` crate implements
+    /// ZIP 2006.
+    pub fn ironwood(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        self.known.get(&BundleId::IRONWOOD).and_then(|b| match b {
+            TypedBundle::Ironwood(bundle) => Some(bundle.as_ref()),
+            _ => None,
+        })
+    }
+
     /// Returns the tze bundle, if present.
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
@@ -520,6 +538,12 @@ impl<A: Authorization> BundleMap<A> {
             .insert(BundleId::ORCHARD, TypedBundle::Orchard(Box::new(bundle)));
     }
 
+    /// Inserts the Ironwood bundle.
+    pub fn insert_ironwood(&mut self, bundle: orchard::Bundle<A::OrchardAuth, ZatBalance>) {
+        self.known
+            .insert(BundleId::IRONWOOD, TypedBundle::Ironwood(Box::new(bundle)));
+    }
+
     /// Inserts the tze bundle.
     #[cfg(zcash_unstable = "zfuture")]
     pub fn insert_tze(&mut self, bundle: tze::Bundle<A::TzeAuth>) {
@@ -542,7 +566,9 @@ impl<A: Authorization> BundleMap<A> {
 
     // -- Authorization mapping --
 
-    /// Transforms bundle authorization types using the given per-protocol closures.
+    /// Transforms bundle authorization types using the given per-protocol
+    /// closures. `f_orchard` is applied to both Orchard protocol bundles: the
+    /// Orchard bundle and the Ironwood bundle.
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl FnOnce(
@@ -551,7 +577,7 @@ impl<A: Authorization> BundleMap<A> {
         f_sapling: impl FnOnce(
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
-        f_orchard: impl FnOnce(
+        mut f_orchard: impl FnMut(
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
@@ -582,7 +608,7 @@ impl<A: Authorization> BundleMap<A> {
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         )
             -> Result<Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>, E>,
-        f_orchard: impl FnOnce(
+        mut f_orchard: impl FnMut(
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         )
             -> Result<Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>, E>,
@@ -598,6 +624,7 @@ impl<A: Authorization> BundleMap<A> {
         let mut sprout_bundle = None;
         let mut sapling_bundle = None;
         let mut orchard_bundle = None;
+        let mut ironwood_bundle = None;
         #[cfg(zcash_unstable = "zfuture")]
         let mut tze_bundle = None;
         let mut result = BundleMap::new();
@@ -609,6 +636,7 @@ impl<A: Authorization> BundleMap<A> {
                 TypedBundle::Sprout(b) => sprout_bundle = Some(b),
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
                 TypedBundle::Orchard(b) => orchard_bundle = Some(*b),
+                TypedBundle::Ironwood(b) => ironwood_bundle = Some(*b),
                 #[cfg(zcash_unstable = "zfuture")]
                 TypedBundle::Tze(b) => tze_bundle = Some(b),
             }
@@ -632,6 +660,11 @@ impl<A: Authorization> BundleMap<A> {
         }
         if let Some(b) = f_orchard(orchard_bundle)? {
             result.insert_orchard(b);
+        }
+        // The Ironwood bundle is an Orchard protocol bundle acting on the
+        // *Ironwood pool*, so the same authorization mapping applies to it.
+        if let Some(b) = f_orchard(ironwood_bundle)? {
+            result.insert_ironwood(b);
         }
         #[cfg(zcash_unstable = "zfuture")]
         if let Some(b) = f_tze(tze_bundle)? {
@@ -779,6 +812,16 @@ impl ValuePoolDeltas {
     /// Sets the Orchard bundle's ZEC value pool delta.
     pub fn set_orchard(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Orchard, BundleVariant::Default, value);
+    }
+
+    /// Returns the Ironwood bundle's ZEC value pool delta.
+    pub fn ironwood_value(&self) -> Option<ZatBalance> {
+        self.get_zec(BundleType::Ironwood)
+    }
+
+    /// Sets the Ironwood bundle's ZEC value pool delta.
+    pub fn set_ironwood(&mut self, value: ZatBalance) {
+        self.set_zec(BundleType::Ironwood, BundleVariant::Default, value);
     }
 
     /// Returns the transaction fee as a non-negative amount.

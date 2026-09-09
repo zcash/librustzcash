@@ -56,6 +56,7 @@ pub fn v7_signature_hash<
         txid_parts.coinbase_digest.as_ref(),
         txid_parts.sapling_digest.as_ref(),
         txid_parts.orchard_digest.as_ref(),
+        txid_parts.ironwood_digest.as_ref(),
         &txid_parts.unknown_effect_digests,
     ));
 
