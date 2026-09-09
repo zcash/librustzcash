@@ -73,6 +73,8 @@ const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 #[cfg(zcash_v7)]
 pub(crate) const ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
 #[cfg(zcash_v7)]
+const ZCASH_V7_COINBASE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdCoinbasHash";
+#[cfg(zcash_v7)]
 const ZCASH_V7_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingH_v7";
 #[cfg(zcash_v7)]
 const ZCASH_V7_SAPLING_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliH_v7";
@@ -383,6 +385,32 @@ pub(crate) fn hash_v7_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
     h.finalize()
 }
 
+/// Implements [ZIP 248 §T.3.1](https://zips.z.cash/zip-0248#t-3-1-coinbase-effects-digest).
+///
+/// Hashes the coinbase bundle's effecting data: the block height, the block
+/// subsidy, the part of that subsidy deposited into the lockbox, and the
+/// miner-chosen `coinbaseData`.
+///
+/// Unlike the other per-bundle digests there is no empty-bundle sentinel: a
+/// transaction that has no coinbase bundle contributes no entry for it to
+/// `effects_bundles_digest` at all.
+#[cfg(zcash_v7)]
+pub(crate) fn hash_v7_coinbase_effects(bundle: &super::zip248::CoinbaseBundle) -> Blake2bHash {
+    use zcash_encoding::CompactSize;
+
+    let mut h = hasher(ZCASH_V7_COINBASE_HASH_PERSONALIZATION);
+    h.write_u32_le(bundle.block_height()).unwrap();
+    h.write_all(&u64::from(bundle.block_subsidy()).to_le_bytes())
+        .unwrap();
+    h.write_all(&u64::from(bundle.lockbox_value()).to_le_bytes())
+        .unwrap();
+    // `coinbaseData` is hashed in its field encoding, i.e. with its leading
+    // `compactSize` length.
+    CompactSize::write(&mut h, bundle.coinbase_data().len()).unwrap();
+    h.write_all(bundle.coinbase_data()).unwrap();
+    h.finalize()
+}
+
 /// Implements [ZIP 248 §T.3.2](https://zips.z.cash/zip-0248#t-3-2-sapling-effects-digest).
 ///
 /// Produces `spends_digest || outputs_digest`.
@@ -614,7 +642,8 @@ pub(crate) fn hash_v7_orchard_auth(
     let mut h = hasher(ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION);
     if let Some(bundle) = orchard_bundle {
         // [ZIP 248 §A.1.3a]: anchorOrchard.
-        h.write_all(&bundle.anchor().to_bytes()).expect("infallible");
+        h.write_all(&bundle.anchor().to_bytes())
+            .expect("infallible");
         // [ZIP 248 §A.1.3b]: the single aggregated proof for all actions.
         h.write_all(bundle.authorization().proof().as_ref())
             .expect("infallible");
@@ -771,6 +800,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             // path; the legacy `TransactionDigest::combine` path used for
             // pre-v7 transactions leaves them empty.
             #[cfg(zcash_v7)]
+            coinbase_digest: None,
+            #[cfg(zcash_v7)]
             value_pool_deltas_digest: None,
             #[cfg(zcash_v7)]
             unknown_effect_digests: alloc::vec::Vec::new(),
@@ -878,6 +909,7 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
             .transparent_digests
             .is_some()
             .then_some(&transparent_digest),
+        digests.coinbase_digest.as_ref(),
         digests.sapling_digest.as_ref(),
         digests.orchard_digest.as_ref(),
         &digests.unknown_effect_digests,
@@ -892,12 +924,12 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
 }
 
 /// Builds `((bundleType, bundleVariant), &Blake2bHash)` entries for a v7
-/// per-bundle digest, merging known transparent/sapling/orchard digests
+/// per-bundle digest, merging the known bundle digests
 /// with unknown-bundle digests in strictly increasing `(bundleType,
 /// bundleVariant)` order.
 ///
 /// The merge works in two phases:
-/// 1. Push known bundle digests (transparent, sapling, orchard) if present.
+/// 1. Push known bundle digests (transparent, coinbase, sapling, orchard) if present.
 ///    These have well-known `BundleId` constants whose wire keys are defined
 ///    by the spec to be in increasing order already.
 /// 2. Append all unknown-bundle digests. These come from the wire and their
@@ -912,6 +944,7 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
 #[cfg(zcash_v7)]
 pub(crate) fn v7_bundle_digest_entries<'a>(
     transparent_digest: Option<&'a Blake2bHash>,
+    coinbase_digest: Option<&'a Blake2bHash>,
     sapling_digest: Option<&'a Blake2bHash>,
     orchard_digest: Option<&'a Blake2bHash>,
     unknown: &'a [((u64, u64), Blake2bHash)],
@@ -921,6 +954,9 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
     // Known bundles, pushed in the natural order of their wire keys.
     if let Some(d) = transparent_digest {
         entries.push((BundleId::TRANSPARENT.wire_key(), d));
+    }
+    if let Some(d) = coinbase_digest {
+        entries.push((BundleId::COINBASE.wire_key(), d));
     }
     if let Some(d) = sapling_digest {
         entries.push((BundleId::SAPLING.wire_key(), d));

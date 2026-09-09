@@ -53,6 +53,7 @@ pub fn v7_signature_hash<
         tx.transparent_bundle()
             .is_some()
             .then_some(&transparent_sig),
+        txid_parts.coinbase_digest.as_ref(),
         txid_parts.sapling_digest.as_ref(),
         txid_parts.orchard_digest.as_ref(),
         &txid_parts.unknown_effect_digests,

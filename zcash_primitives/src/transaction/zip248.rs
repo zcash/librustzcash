@@ -220,6 +220,159 @@ pub struct UnknownBundle {
 }
 
 // ---------------------------------------------------------------------------
+// CoinbaseBundle
+// ---------------------------------------------------------------------------
+
+/// The maximum length of the coinbase bundle's `coinbaseData` field.
+///
+/// A coinbase `scriptSig` was limited to 100 bytes, of which the leading push
+/// of the block height took 5; of the 95 bytes that remained, the
+/// `compactSize` length prefix of `coinbaseData` now takes one.
+pub const MAX_COINBASE_DATA_LEN: usize = 94;
+
+/// The largest block height that may appear in a coinbase bundle,
+/// matching the range that ZIP 203 allows for `nExpiryHeight`.
+const MAX_COINBASE_BLOCK_HEIGHT: u32 = 499_999_999;
+
+/// The effecting data of the ZIP 248 coinbase bundle (`bundleType = 1`).
+/// [ZIP 248 §Coinbase Bundle](https://zips.z.cash/zip-0248#coinbase-bundle)
+///
+/// A transaction is a coinbase transaction if and only if it has a coinbase
+/// bundle. The bundle replaces the otherwise-unspendable transparent input
+/// that identified a coinbase transaction in previous transaction versions,
+/// and carries the block height that that input was required to encode.
+///
+/// `block_subsidy` is the whole of the new issuance for the block, and
+/// `lockbox_value` is the part of it that the funding streams deposit into
+/// the deferred pool. Only the difference is paid out by the transaction, so
+/// that difference — not the subsidy — is the bundle's value pool delta.
+///
+/// The coinbase bundle has no authorizing data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoinbaseBundle {
+    block_height: u32,
+    block_subsidy: Zatoshis,
+    lockbox_value: Zatoshis,
+    coinbase_data: Vec<u8>,
+}
+
+impl CoinbaseBundle {
+    /// Constructs a coinbase bundle, returning `None` if any of the field
+    /// constraints in ZIP 248 §"Coinbase Effecting Data" is violated.
+    pub fn from_parts(
+        block_height: u32,
+        block_subsidy: Zatoshis,
+        lockbox_value: Zatoshis,
+        coinbase_data: Vec<u8>,
+    ) -> Option<Self> {
+        if block_height == 0
+            || block_height > MAX_COINBASE_BLOCK_HEIGHT
+            || lockbox_value > block_subsidy
+            || coinbase_data.len() > MAX_COINBASE_DATA_LEN
+        {
+            return None;
+        }
+        Some(Self {
+            block_height,
+            block_subsidy,
+            lockbox_value,
+            coinbase_data,
+        })
+    }
+
+    /// Returns the height of the block in which the transaction is mined.
+    pub fn block_height(&self) -> u32 {
+        self.block_height
+    }
+
+    /// Returns the block subsidy for that block.
+    pub fn block_subsidy(&self) -> Zatoshis {
+        self.block_subsidy
+    }
+
+    /// Returns the part of the block subsidy deposited into the lockbox.
+    pub fn lockbox_value(&self) -> Zatoshis {
+        self.lockbox_value
+    }
+
+    /// Returns the miner-chosen data. Consensus assigns no meaning to it.
+    pub fn coinbase_data(&self) -> &[u8] {
+        &self.coinbase_data
+    }
+
+    /// Returns the value that this bundle contributes to the transparent
+    /// transaction value pool: the block subsidy less the lockbox deposit.
+    ///
+    /// This is the value that
+    /// $\mathsf{mValuePoolDeltas}[(\mathsf{CoinbaseBundleId}, \mathsf{Zec})]$
+    /// is required to equal.
+    pub fn value_pool_delta(&self) -> ZatBalance {
+        // `from_parts` and `read` both reject a lockbox value larger than the
+        // subsidy, so the difference of two in-range amounts is in range.
+        let subsidy = i64::try_from(u64::from(self.block_subsidy)).expect("MAX_MONEY fits in i64");
+        let lockbox = i64::try_from(u64::from(self.lockbox_value)).expect("MAX_MONEY fits in i64");
+        ZatBalance::from_i64(subsidy - lockbox).expect("lockboxValue <= blockSubsidy <= MAX_MONEY")
+    }
+
+    /// Deserializes the coinbase bundle's effecting data.
+    /// [ZIP 248 §Coinbase Effecting Data](https://zips.z.cash/zip-0248#coinbase-effecting-data)
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut u32_buf = [0u8; 4];
+        reader.read_exact(&mut u32_buf)?;
+        let block_height = u32::from_le_bytes(u32_buf);
+
+        let mut u64_buf = [0u8; 8];
+        reader.read_exact(&mut u64_buf)?;
+        let block_subsidy = Zatoshis::from_u64(u64::from_le_bytes(u64_buf)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase blockSubsidy out of valid monetary range",
+            )
+        })?;
+
+        reader.read_exact(&mut u64_buf)?;
+        let lockbox_value = Zatoshis::from_u64(u64::from_le_bytes(u64_buf)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase lockboxValue out of valid monetary range",
+            )
+        })?;
+
+        let data_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+        // Bound the allocation before reading: `coinbaseDataLen` comes from
+        // the wire and is capped by ZIP 248 at `MAX_COINBASE_DATA_LEN`.
+        if data_len > MAX_COINBASE_DATA_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase coinbaseDataLen exceeds the ZIP 248 limit of 94 bytes",
+            ));
+        }
+        let mut coinbase_data = vec![0u8; data_len];
+        reader.read_exact(&mut coinbase_data)?;
+
+        Self::from_parts(block_height, block_subsidy, lockbox_value, coinbase_data).ok_or_else(
+            || {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "coinbase bundle violates a ZIP 248 field constraint \
+                     (blockHeight range, or lockboxValue > blockSubsidy)",
+                )
+            },
+        )
+    }
+
+    /// Serializes the coinbase bundle's effecting data.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.block_height.to_le_bytes())?;
+        writer.write_all(&u64::from(self.block_subsidy).to_le_bytes())?;
+        writer.write_all(&u64::from(self.lockbox_value).to_le_bytes())?;
+        CompactSize::write(&mut writer, self.coinbase_data.len())?;
+        writer.write_all(&self.coinbase_data)?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TypedBundle
 // ---------------------------------------------------------------------------
 
@@ -229,6 +382,7 @@ pub struct UnknownBundle {
 #[derive(Debug)]
 pub enum TypedBundle<A: Authorization> {
     Transparent(transparent::Bundle<A::TransparentAuth>),
+    Coinbase(CoinbaseBundle),
     Sprout(sprout::Bundle),
     Sapling(sapling::Bundle<A::SaplingAuth, ZatBalance>),
     Orchard(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
@@ -286,6 +440,15 @@ impl<A: Authorization> BundleMap<A> {
             })
     }
 
+    /// Returns the coinbase bundle, if present. A transaction is a coinbase
+    /// transaction if and only if this returns `Some`.
+    pub fn coinbase(&self) -> Option<&CoinbaseBundle> {
+        self.known.get(&BundleId::COINBASE).and_then(|b| match b {
+            TypedBundle::Coinbase(bundle) => Some(bundle),
+            _ => None,
+        })
+    }
+
     /// Returns the sprout bundle, if present.
     pub fn sprout(&self) -> Option<&sprout::Bundle> {
         self.known.get(&BundleId::SPROUT).and_then(|b| match b {
@@ -331,6 +494,12 @@ impl<A: Authorization> BundleMap<A> {
     pub fn insert_transparent(&mut self, bundle: transparent::Bundle<A::TransparentAuth>) {
         self.known
             .insert(BundleId::TRANSPARENT, TypedBundle::Transparent(bundle));
+    }
+
+    /// Inserts the coinbase bundle.
+    pub fn insert_coinbase(&mut self, bundle: CoinbaseBundle) {
+        self.known
+            .insert(BundleId::COINBASE, TypedBundle::Coinbase(bundle));
     }
 
     /// Insert a Sprout bundle. Uses the in-memory-only [`BundleType::Sprout`].
@@ -425,6 +594,7 @@ impl<A: Authorization> BundleMap<A> {
         >,
     ) -> Result<BundleMap<B>, E> {
         let mut transparent_bundle = None;
+        let mut coinbase_bundle = None;
         let mut sprout_bundle = None;
         let mut sapling_bundle = None;
         let mut orchard_bundle = None;
@@ -435,6 +605,7 @@ impl<A: Authorization> BundleMap<A> {
         for (_id, bundle) in self.known {
             match bundle {
                 TypedBundle::Transparent(b) => transparent_bundle = Some(b),
+                TypedBundle::Coinbase(b) => coinbase_bundle = Some(b),
                 TypedBundle::Sprout(b) => sprout_bundle = Some(b),
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
                 TypedBundle::Orchard(b) => orchard_bundle = Some(*b),
@@ -446,6 +617,11 @@ impl<A: Authorization> BundleMap<A> {
 
         if let Some(b) = f_transparent(transparent_bundle)? {
             result.insert_transparent(b);
+        }
+        // The coinbase bundle has no authorizing data, so it passes through
+        // unchanged.
+        if let Some(b) = coinbase_bundle {
+            result.insert_coinbase(b);
         }
         // Sprout bundles pass through unchanged (no authorization to map).
         if let Some(b) = sprout_bundle {
@@ -572,6 +748,17 @@ impl ValuePoolDeltas {
     /// Sets the transparent bundle's ZEC value pool delta.
     pub fn set_transparent(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Transparent, BundleVariant::Default, value);
+    }
+
+    /// Returns the coinbase bundle's ZEC value pool delta: the block subsidy
+    /// less the part of it deposited into the lockbox.
+    pub fn coinbase_value(&self) -> Option<ZatBalance> {
+        self.get_zec(BundleType::Coinbase)
+    }
+
+    /// Sets the coinbase bundle's ZEC value pool delta.
+    pub fn set_coinbase(&mut self, value: ZatBalance) {
+        self.set_zec(BundleType::Coinbase, BundleVariant::Default, value);
     }
 
     /// Returns the Sapling bundle's ZEC value pool delta.

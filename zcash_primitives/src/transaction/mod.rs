@@ -527,6 +527,13 @@ impl<A: Authorization> TransactionData<A> {
         self.bundles.transparent()
     }
 
+    /// Returns the coinbase bundle, if any. A v7 transaction is a coinbase
+    /// transaction if and only if it has one.
+    /// [ZIP 248 §Coinbase Bundle](https://zips.z.cash/zip-0248#coinbase-bundle)
+    pub fn coinbase_bundle(&self) -> Option<&zip248::CoinbaseBundle> {
+        self.bundles.coinbase()
+    }
+
     pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
         self.bundles.sprout()
     }
@@ -648,8 +655,8 @@ impl<A: Authorization> TransactionData<A> {
     #[cfg(zcash_v7)]
     pub fn digest_v7(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
-            TxIdDigester, hash_v7_header, hash_v7_orchard_effects, hash_v7_sapling_effects,
-            hash_v7_value_pool_deltas,
+            TxIdDigester, hash_v7_coinbase_effects, hash_v7_header, hash_v7_orchard_effects,
+            hash_v7_sapling_effects, hash_v7_value_pool_deltas,
         };
 
         let digester = TxIdDigester;
@@ -678,16 +685,19 @@ impl<A: Authorization> TransactionData<A> {
                 &digester,
                 self.bundles.transparent(),
             ),
-            // Leaf 3: sapling effects only (spends, outputs, value balance).
+            // Leaf 3: the coinbase bundle's effecting data, for coinbase
+            // transactions only.
+            coinbase_digest: self.bundles.coinbase().map(hash_v7_coinbase_effects),
+            // Leaf 4: sapling effects only (spends, outputs).
             sapling_digest: self.bundles.sapling().map(hash_v7_sapling_effects),
-            // Leaf 4: orchard effects only (actions, flags, value balance, anchor).
+            // Leaf 5: orchard effects only (actions, flags).
             orchard_digest: self.bundles.orchard().map(hash_v7_orchard_effects),
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
                 &digester,
                 self.bundles.tze(),
             ),
-            // Leaf 5: the serialized VP deltas map.
+            // Leaf 6: the serialized VP deltas map.
             value_pool_deltas_digest: Some(hash_v7_value_pool_deltas(&self.value_pool_deltas)),
             // Unknown-bundle digests are folded in alongside the known leaves.
             unknown_effect_digests,
@@ -1362,6 +1372,22 @@ impl Transaction {
             }
         }
 
+        // [ZIP 248 §Coinbase Bundle]: the presence of this bundle is what makes
+        // a transaction a coinbase transaction. It has no authorizing data;
+        // an mAuthBundles entry for it was rejected above.
+        let (coinbase_effect, _) = take_known(zip248::BundleType::Coinbase.to_u64());
+        if let Some(effect) = coinbase_effect {
+            let mut effect_reader = &effect[..];
+            let bundle = zip248::CoinbaseBundle::read(&mut effect_reader)?;
+            if !effect_reader.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "trailing bytes in v7 coinbase effecting data",
+                ));
+            }
+            bundles.insert_coinbase(bundle);
+        }
+
         let (sapling_effect, sapling_auth) = take_known(zip248::BundleType::Sapling.to_u64());
         if let Some(effect) = sapling_effect {
             let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
@@ -1625,6 +1651,15 @@ impl Transaction {
                 buf,
             ));
         }
+        if let Some(cb) = self.bundles.coinbase() {
+            let mut buf = Vec::new();
+            cb.write(&mut buf)?;
+            effect_bundles.push((
+                zip248::BundleId::COINBASE.wire_key().0,
+                zip248::BundleId::COINBASE.wire_key().1,
+                buf,
+            ));
+        }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
             sapling_serialization::write_v7_effects(&mut buf, sb)?;
@@ -1810,6 +1845,8 @@ impl Transaction {
         // then hash them all into auth_bundles_digest.
         let auth_bundles_digest = hash_v7_auth_bundles(v7_bundle_digest_entries(
             transparent_auth_digest.as_ref(),
+            // The coinbase bundle has no authorizing data.
+            None,
             sapling_auth_digest.as_ref(),
             orchard_auth_digest.as_ref(),
             &unknown_auth_digests,
@@ -1851,6 +1888,10 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
+    /// v7 (ZIP 248): digest of the coinbase bundle's effecting data. Present
+    /// only for coinbase transactions.
+    #[cfg(zcash_v7)]
+    pub coinbase_digest: Option<A>,
     /// v7 (ZIP 248): digest of the value pool deltas map.
     #[cfg(zcash_v7)]
     pub value_pool_deltas_digest: Option<A>,
@@ -1934,9 +1975,27 @@ pub enum V7ConsensusError {
     /// and a non-ZEC `assetClass`. (Bundle-local rule: fee amounts are
     /// denominated in ZEC and no other asset.)
     FeeAssetClassNotZec { asset_class: u8 },
-    /// A coinbase transaction has the `enableSpendsOrchard` bit of
-    /// `flagsOrchard` set. (Bundle-local rule.)
+    /// `mValuePoolDeltas` contains an entry with
+    /// `bundleType = CoinbaseBundleId` and a non-ZEC `assetClass`.
+    /// (Bundle-local rule: the block subsidy is denominated in ZEC and no
+    /// other asset.)
+    CoinbaseAssetClassNotZec { asset_class: u8 },
+    /// A coinbase transaction has the `enableSpends` bit of `flagsOrchard`
+    /// set in an Orchard protocol bundle. (Bundle-local rule.)
     CoinbaseEnableSpendsOrchardSet,
+    /// A coinbase transaction spends a transparent output. (Bundle-local
+    /// rule: the transparent bundle of a coinbase transaction must have
+    /// `tx_in_count = 0`.)
+    CoinbaseTransparentInputs { tx_in_count: usize },
+    /// A coinbase transaction has Sapling spends. (Bundle-local rule:
+    /// `nSpendsSapling` must be 0 for coinbase transactions.)
+    CoinbaseSaplingSpends { spend_count: usize },
+    /// The coinbase bundle's value pool delta does not equal
+    /// `blockSubsidy - lockboxValue`. (Cross-bundle rule.)
+    CoinbaseValueDeltaMismatch {
+        expected: ZatBalance,
+        actual: ZatBalance,
+    },
     /// A coinbase transaction has a negative fee delta in
     /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. The coinbase fee delta
     /// represents fees collected from other transactions in the block and
@@ -1947,11 +2006,11 @@ pub enum V7ConsensusError {
     /// negative deltas (value removed from the transparent transaction
     /// value pool), so the fee delta must be nonpositive.
     NonCoinbaseFeeDeltaPositive { value: ZatBalance },
-    /// For a non-coinbase transaction, the per-asset sum of all entries in
-    /// `mValuePoolDeltas` must be zero. This variant is returned when the
-    /// sum for some asset is nonzero, indicating that value would be
-    /// created or destroyed by the transaction.
-    NonCoinbaseValueImbalance {
+    /// The per-asset sum of all entries in `mValuePoolDeltas` must be zero
+    /// for every transaction, coinbase included. This variant is returned
+    /// when the sum for some asset is nonzero, indicating that value would
+    /// be created or destroyed by the transaction.
+    ValueImbalance {
         bundle_type_for_asset: u64,
         asset_class: u8,
         sum: ZatBalance,
@@ -1971,9 +2030,30 @@ impl core::fmt::Display for V7ConsensusError {
                 "fee bundle value pool delta has non-ZEC assetClass {:#x}",
                 asset_class
             ),
+            V7ConsensusError::CoinbaseAssetClassNotZec { asset_class } => write!(
+                f,
+                "coinbase bundle value pool delta has non-ZEC assetClass {:#x}",
+                asset_class
+            ),
             V7ConsensusError::CoinbaseEnableSpendsOrchardSet => write!(
                 f,
-                "coinbase transaction has enableSpendsOrchard set in Orchard flags"
+                "coinbase transaction has enableSpends set in an Orchard protocol bundle"
+            ),
+            V7ConsensusError::CoinbaseTransparentInputs { tx_in_count } => write!(
+                f,
+                "coinbase transaction spends {} transparent output(s)",
+                tx_in_count
+            ),
+            V7ConsensusError::CoinbaseSaplingSpends { spend_count } => write!(
+                f,
+                "coinbase transaction has {} Sapling spend(s)",
+                spend_count
+            ),
+            V7ConsensusError::CoinbaseValueDeltaMismatch { expected, actual } => write!(
+                f,
+                "coinbase bundle value pool delta is {}, but blockSubsidy - lockboxValue is {}",
+                i64::from(*actual),
+                i64::from(*expected)
             ),
             V7ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
                 f,
@@ -1985,13 +2065,13 @@ impl core::fmt::Display for V7ConsensusError {
                 "non-coinbase fee bundle value pool delta is positive ({}); fees are encoded as negative deltas",
                 i64::from(*value)
             ),
-            V7ConsensusError::NonCoinbaseValueImbalance {
+            V7ConsensusError::ValueImbalance {
                 bundle_type_for_asset,
                 asset_class,
                 sum,
             } => write!(
                 f,
-                "non-coinbase value pool deltas do not sum to zero for assetClass={:#x} (any-bundleType={}): sum={}",
+                "value pool deltas do not sum to zero for assetClass={:#x} (any-bundleType={}): sum={}",
                 asset_class,
                 bundle_type_for_asset,
                 i64::from(*sum)
@@ -2014,34 +2094,67 @@ impl<A: Authorization> TransactionData<A> {
     /// Returns `Ok(())` if all transaction-local rules are satisfied,
     /// otherwise returns the first violation found.
     ///
-    /// `is_coinbase` selects the rules that apply only to coinbase
-    /// transactions (`enableSpendsOrchard = 0`, fee delta nonnegative)
-    /// versus non-coinbase ones (fee delta nonpositive, per-asset sum
-    /// equals zero).
+    /// Whether the transaction is a coinbase transaction is determined by the
+    /// presence of its coinbase bundle, as ZIP 248 defines it.
     ///
-    /// Rules that require block context -- the per-block sum of fee bundle
-    /// values being zero, and the coinbase ZEC sum equal to
-    /// `-BlockSubsidy(height)` -- are *not* checked here and must be
-    /// enforced by the consumer when validating the containing block.
-    pub fn check_v7_consensus_rules(&self, is_coinbase: bool) -> Result<(), V7ConsensusError> {
-        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
-        // Bundle-local rule: fee entries are ZEC-only. A fee denominated in
-        // a non-ZEC asset has no defined meaning and must be rejected.
+    /// Rules that require block context are *not* checked here and must be
+    /// enforced by the consumer when validating the containing block: the
+    /// per-block sum of fee bundle values being zero, exactly one coinbase
+    /// transaction being first in the block, and the coinbase bundle's
+    /// `blockHeight`, `blockSubsidy` and `lockboxValue` matching the block
+    /// and the issuance schedule.
+    pub fn check_v7_consensus_rules(&self) -> Result<(), V7ConsensusError> {
+        let coinbase_bundle = self.bundles.coinbase();
+        let is_coinbase = coinbase_bundle.is_some();
+
+        // [ZIP 248 §Bundle-local rules]: fee and coinbase entries are
+        // ZEC-only. A block subsidy or fee denominated in a non-ZEC asset has
+        // no defined meaning and must be rejected.
         for (key, _) in self.value_pool_deltas.iter() {
-            if key.bundle_type == zip248::BundleType::Fee
-                && key.asset_class != zip248::ASSET_CLASS_ZEC
-            {
-                return Err(V7ConsensusError::FeeAssetClassNotZec {
-                    asset_class: key.asset_class,
-                });
+            if key.asset_class != zip248::ASSET_CLASS_ZEC {
+                match key.bundle_type {
+                    zip248::BundleType::Fee => {
+                        return Err(V7ConsensusError::FeeAssetClassNotZec {
+                            asset_class: key.asset_class,
+                        });
+                    }
+                    zip248::BundleType::Coinbase => {
+                        return Err(V7ConsensusError::CoinbaseAssetClassNotZec {
+                            asset_class: key.asset_class,
+                        });
+                    }
+                    _ => (),
+                }
             }
         }
 
-        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
-        // Bundle-local: coinbase must not enable Orchard spends (coinbase
-        // outputs are unspendable until maturity, and enabling spends would
-        // allow circumventing the maturity rule).
         if is_coinbase {
+            // [ZIP 248 §Bundle-local rules]: a coinbase transaction must not
+            // spend any transparent output. The coinbase bundle replaces the
+            // unspendable input that carried the block height in earlier
+            // transaction versions.
+            if let Some(transparent_bundle) = self.bundles.transparent() {
+                if !transparent_bundle.vin.is_empty() {
+                    return Err(V7ConsensusError::CoinbaseTransparentInputs {
+                        tx_in_count: transparent_bundle.vin.len(),
+                    });
+                }
+            }
+
+            // [ZIP 248 §Bundle-local rules]: a coinbase transaction must not
+            // spend shielded notes either.
+            if let Some(sapling_bundle) = self.bundles.sapling() {
+                if !sapling_bundle.shielded_spends().is_empty() {
+                    return Err(V7ConsensusError::CoinbaseSaplingSpends {
+                        spend_count: sapling_bundle.shielded_spends().len(),
+                    });
+                }
+            }
+
+            // [ZIP 248 §Bundle-local rules]: `enableSpends` must be 0 in every
+            // Orchard protocol bundle of a coinbase transaction. (Coinbase
+            // outputs are unspendable until maturity, and enabling spends
+            // would allow circumventing the maturity rule.)
             if let Some(orchard_bundle) = self.bundles.orchard() {
                 if orchard_bundle.flags().spends_enabled() {
                     return Err(V7ConsensusError::CoinbaseEnableSpendsOrchardSet);
@@ -2049,10 +2162,16 @@ impl<A: Authorization> TransactionData<A> {
             }
         }
 
-        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
-        // Cross-bundle rule: fee delta sign. Coinbase collects fees (delta
-        // >= 0), non-coinbase pays fees (delta <= 0). A positive non-coinbase
-        // fee would create value from nothing.
+        // The remaining bundle-local rule, that `enableCrossAddress` is 0 in
+        // an Orchard bundle (it is unrestricted in an Ironwood bundle), is
+        // enforced by the `orchard` crate: `Flags::from_byte` rejects any
+        // byte with a bit other than `enableSpends` or `enableOutputs` set,
+        // so a bundle carrying that bit cannot be parsed at all here.
+
+        // [ZIP 248 §Cross-bundle and chain-context rules]: fee delta sign.
+        // Coinbase collects fees (delta >= 0), non-coinbase pays fees
+        // (delta <= 0). A positive non-coinbase fee would create value from
+        // nothing.
         let fee_delta = self
             .value_pool_deltas
             .iter()
@@ -2070,30 +2189,46 @@ impl<A: Authorization> TransactionData<A> {
             return Err(V7ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
         }
 
-        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
-        // Cross-bundle rule: non-coinbase per-asset conservation. The sum of
-        // all VP deltas for each (assetClass, assetUuid) must be zero, i.e.
-        // no value is created or destroyed. For coinbase the analogous rule
-        // ("ZEC sum == -BlockSubsidy(height)") requires block context.
-        if !is_coinbase {
-            // Group ALL entries (known + unknown) by (assetClass, assetUuid)
-            // and verify the sum is zero for each asset.
-            let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, ZatBalance)> = BTreeMap::new();
-            for entry in self.value_pool_deltas.to_wire_entries() {
-                let asset_key = (entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
-                let acc = by_asset
-                    .entry(asset_key)
-                    .or_insert((entry.bundle_type, ZatBalance::zero()));
-                acc.1 = (acc.1 + entry.value).ok_or(V7ConsensusError::ValueDeltaSumOverflow)?;
+        // [ZIP 248 §Cross-bundle and chain-context rules]: the coinbase
+        // bundle's value pool delta is the part of the block subsidy that is
+        // not deposited into the lockbox. Both components are in its
+        // effecting data, so the relation is checkable without block context.
+        if let Some(coinbase_bundle) = coinbase_bundle {
+            let expected = coinbase_bundle.value_pool_delta();
+            let actual = self
+                .value_pool_deltas
+                .coinbase_value()
+                .unwrap_or(ZatBalance::zero());
+            if actual != expected {
+                return Err(V7ConsensusError::CoinbaseValueDeltaMismatch { expected, actual });
             }
-            for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
-                if sum != ZatBalance::zero() {
-                    return Err(V7ConsensusError::NonCoinbaseValueImbalance {
-                        bundle_type_for_asset: any_bundle_type,
-                        asset_class,
-                        sum,
-                    });
-                }
+        }
+
+        // [ZIP 248 §Cross-bundle and chain-context rules]: per-asset
+        // conservation. The sum of all VP deltas for each
+        // (assetClass, assetUuid) must be zero, i.e. no value is created or
+        // destroyed. This holds for coinbase transactions too: the part of
+        // the block subsidy that the transaction pays out enters the
+        // transparent transaction value pool as the coinbase bundle's delta,
+        // and the fees collected enter it as the fee bundle's delta.
+        //
+        // Group ALL entries (known + unknown) by (assetClass, assetUuid) and
+        // verify the sum is zero for each asset.
+        let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, ZatBalance)> = BTreeMap::new();
+        for entry in self.value_pool_deltas.to_wire_entries() {
+            let asset_key = (entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
+            let acc = by_asset
+                .entry(asset_key)
+                .or_insert((entry.bundle_type, ZatBalance::zero()));
+            acc.1 = (acc.1 + entry.value).ok_or(V7ConsensusError::ValueDeltaSumOverflow)?;
+        }
+        for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
+            if sum != ZatBalance::zero() {
+                return Err(V7ConsensusError::ValueImbalance {
+                    bundle_type_for_asset: any_bundle_type,
+                    asset_class,
+                    sum,
+                });
             }
         }
 

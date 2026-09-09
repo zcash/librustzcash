@@ -604,24 +604,135 @@ mod zip248_tests {
             );
             let tx = make_v7(vp);
             assert_eq!(
-                tx.check_v7_consensus_rules(false),
+                tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::FeeAssetClassNotZec {
                     asset_class: zip248::ASSET_CLASS_OTHER
                 }),
             );
         }
 
+        /// Builds a coinbase bundle paying out `subsidy` zatoshis with
+        /// `lockbox` of it deposited into the lockbox.
+        fn coinbase_bundle(subsidy: u64, lockbox: u64) -> zip248::CoinbaseBundle {
+            zip248::CoinbaseBundle::from_parts(
+                100,
+                Zatoshis::from_u64(subsidy).unwrap(),
+                Zatoshis::from_u64(lockbox).unwrap(),
+                vec![],
+            )
+            .expect("valid coinbase bundle")
+        }
+
+        fn make_v7_coinbase(
+            vp: zip248::ValuePoolDeltas,
+            coinbase: zip248::CoinbaseBundle,
+        ) -> TransactionData<Authorized> {
+            let mut bundles = zip248::BundleMap::new();
+            bundles.insert_coinbase(coinbase);
+            TransactionData::from_parts_v7(
+                TxVersion::V7,
+                BranchId::Nu7,
+                0,
+                BlockHeight::from_u32(100),
+                vp,
+                bundles,
+            )
+        }
+
         #[test]
         fn coinbase_fee_delta_must_be_nonnegative() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // stored as -1000
-            let tx = make_v7(vp);
+            let tx = make_v7_coinbase(vp, coinbase_bundle(0, 0));
             assert_eq!(
-                tx.check_v7_consensus_rules(true),
+                tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::CoinbaseFeeDeltaNegative {
                     value: ZatBalance::from_i64(-1000).unwrap(),
                 }),
             );
+        }
+
+        #[test]
+        fn coinbase_vp_delta_must_equal_subsidy_less_lockbox() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // The bundle issues 3 and locks 1, so the delta must be 2.
+            vp.set_coinbase(ZatBalance::from_i64(3).unwrap());
+            vp.set_transparent(ZatBalance::from_i64(-3).unwrap());
+            let tx = make_v7_coinbase(vp, coinbase_bundle(3, 1));
+            assert_eq!(
+                tx.check_v7_consensus_rules(),
+                Err(V7ConsensusError::CoinbaseValueDeltaMismatch {
+                    expected: ZatBalance::from_i64(2).unwrap(),
+                    actual: ZatBalance::from_i64(3).unwrap(),
+                }),
+            );
+        }
+
+        #[test]
+        fn balanced_coinbase_passes() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // Issue 3, lock 1: the bundle contributes 2 to the transparent
+            // transaction value pool, and the transparent outputs consume it.
+            vp.set_coinbase(ZatBalance::from_i64(2).unwrap());
+            vp.set_transparent(ZatBalance::from_i64(-2).unwrap());
+            let tx = make_v7_coinbase(vp, coinbase_bundle(3, 1));
+            assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+        }
+
+        #[test]
+        fn coinbase_bundle_rejects_lockbox_above_subsidy() {
+            assert!(
+                zip248::CoinbaseBundle::from_parts(
+                    100,
+                    Zatoshis::from_u64(2).unwrap(),
+                    Zatoshis::from_u64(3).unwrap(),
+                    vec![],
+                )
+                .is_none()
+            );
+        }
+
+        #[test]
+        fn coinbase_bundle_rejects_oversized_coinbase_data() {
+            assert!(
+                zip248::CoinbaseBundle::from_parts(
+                    100,
+                    Zatoshis::ZERO,
+                    Zatoshis::ZERO,
+                    vec![0u8; zip248::MAX_COINBASE_DATA_LEN + 1],
+                )
+                .is_none()
+            );
+        }
+
+        #[test]
+        fn coinbase_bundle_rejects_out_of_range_block_height() {
+            for height in [0, 500_000_000] {
+                assert!(
+                    zip248::CoinbaseBundle::from_parts(
+                        height,
+                        Zatoshis::ZERO,
+                        Zatoshis::ZERO,
+                        vec![],
+                    )
+                    .is_none()
+                );
+            }
+        }
+
+        #[test]
+        fn coinbase_bundle_roundtrips() {
+            let bundle = zip248::CoinbaseBundle::from_parts(
+                123_456,
+                Zatoshis::from_u64(312_500_000).unwrap(),
+                Zatoshis::from_u64(31_250_000).unwrap(),
+                b"miner data".to_vec(),
+            )
+            .expect("valid coinbase bundle");
+
+            let mut buf = alloc::vec::Vec::new();
+            bundle.write(&mut buf).unwrap();
+            assert_eq!(zip248::CoinbaseBundle::read(&buf[..]).unwrap(), bundle);
         }
 
         #[test]
@@ -636,7 +747,7 @@ mod zip248_tests {
             );
             let tx = make_v7(vp);
             assert_eq!(
-                tx.check_v7_consensus_rules(false),
+                tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::NonCoinbaseFeeDeltaPositive {
                     value: ZatBalance::from_i64(1000).unwrap(),
                 }),
@@ -644,16 +755,13 @@ mod zip248_tests {
         }
 
         #[test]
-        fn non_coinbase_vp_deltas_must_balance() {
+        fn vp_deltas_must_balance() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Sapling adds 100k to the pool but nothing subtracts it.
             vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap());
             let tx = make_v7(vp);
-            let err = tx.check_v7_consensus_rules(false).unwrap_err();
-            assert!(matches!(
-                err,
-                V7ConsensusError::NonCoinbaseValueImbalance { .. }
-            ));
+            let err = tx.check_v7_consensus_rules().unwrap_err();
+            assert!(matches!(err, V7ConsensusError::ValueImbalance { .. }));
         }
 
         #[test]
@@ -662,7 +770,7 @@ mod zip248_tests {
             vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // -1000
             vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(1000).unwrap()); // +1000
             let tx = make_v7(vp);
-            assert_eq!(tx.check_v7_consensus_rules(false), Ok(()));
+            assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
         }
     }
 
@@ -819,7 +927,7 @@ mod zip248_tests {
         #[test]
         fn to_wire_entries_canonical_order_with_unknown() {
             let mut vp = zip248::ValuePoolDeltas::empty();
-            // Known: Orchard (3), Fee (4)
+            // Known: Orchard (3), Fee (5)
             vp.set_orchard(ZatBalance::from_i64(50_000).unwrap());
             vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
             // Unknown: bundleType 8 (sorts after all known types)
@@ -827,8 +935,8 @@ mod zip248_tests {
 
             let entries = vp.to_wire_entries();
             let types: Vec<u64> = entries.iter().map(|e| e.bundle_type).collect();
-            // Orchard=3, Fee=4, Unknown=8 — strictly increasing.
-            assert_eq!(types, vec![3, 4, 8]);
+            // Orchard=3, Fee=5, Unknown=8 — strictly increasing.
+            assert_eq!(types, vec![3, 5, 8]);
         }
     }
 
