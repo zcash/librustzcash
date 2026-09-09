@@ -9,8 +9,8 @@ use ::sapling::bundle::GrothProofBytes;
 #[cfg(zcash_unstable = "zfuture")]
 use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
-#[cfg(zcash_v6)]
-use super::sighash_v6::v6_signature_hash;
+#[cfg(zcash_v7)]
+use super::sighash_v7::v7_signature_hash;
 
 pub enum SignableInput<'a> {
     Shielded,
@@ -62,9 +62,9 @@ pub fn signature_hash<
 
         TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
 
-        #[cfg(zcash_v6)]
-        TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
+        #[cfg(zcash_v7)]
+        TxVersion::V7 => v7_signature_hash(tx, signable_input, txid_parts),
         #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::ZFuture => v7_signature_hash(tx, signable_input, txid_parts),
     })
 }

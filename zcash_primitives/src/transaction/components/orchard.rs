@@ -18,8 +18,8 @@ use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_protocol::value::ZatBalance;
 
 use crate::transaction::Transaction;
-#[cfg(zcash_v6)]
-use crate::transaction::zip248::consume_v6_sighash_v0_info;
+#[cfg(zcash_v7)]
+use crate::transaction::zip248::consume_v7_sighash_v0_info;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -86,15 +86,15 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
-/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors.
+/// Reads an [`orchard::Bundle`] from v7 effecting + authorizing byte vectors.
 /// [ZIP 248 §Orchard Bundle](https://zips.z.cash/zip-0248#orchard-bundle)
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
 /// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(zcash_v6)]
-pub fn read_v6_bundle(
+#[cfg(zcash_v7)]
+pub fn read_v7_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
     value_balance: ZatBalance,
@@ -114,13 +114,13 @@ pub fn read_v6_bundle(
         if !effects_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in v6 Orchard effecting data",
+                "trailing bytes in v7 Orchard effecting data",
             ));
         }
         if auth.is_some_and(|a| !a.is_empty()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "v6 Orchard auth bundle present for an empty effecting bundle",
+                "v7 Orchard auth bundle present for an empty effecting bundle",
             ));
         }
         return Ok(None);
@@ -131,14 +131,14 @@ pub fn read_v6_bundle(
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in v6 Orchard effecting data",
+            "trailing bytes in v7 Orchard effecting data",
         ));
     }
 
     let auth_bytes = auth.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "v6 Orchard effecting bundle present without matching auth bundle",
+            "v7 Orchard effecting bundle present without matching auth bundle",
         )
     })?;
     let mut auth_reader = auth_bytes;
@@ -151,20 +151,20 @@ pub fn read_v6_bundle(
         actions_without_auth
             .into_iter()
             .map(|action| {
-                consume_v6_sighash_v0_info(&mut auth_reader, "Orchard spend auth sig")?;
+                consume_v7_sighash_v0_info(&mut auth_reader, "Orchard spend auth sig")?;
                 action.try_map(|_| read_signature::<_, SpendAuth>(&mut auth_reader))
             })
             .collect::<Result<Vec<_>, _>>()?,
     )
     .expect("nonempty by construction");
 
-    consume_v6_sighash_v0_info(&mut auth_reader, "Orchard binding sig")?;
+    consume_v7_sighash_v0_info(&mut auth_reader, "Orchard binding sig")?;
     let binding_signature = read_signature::<_, redpallas::Binding>(&mut auth_reader)?;
 
     if !auth_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in v6 Orchard authorizing data",
+            "trailing bytes in v7 Orchard authorizing data",
         ));
     }
 
@@ -182,10 +182,10 @@ pub fn read_v6_bundle(
     )))
 }
 
-/// Writes the effecting data for an Orchard bundle in v6 format.
+/// Writes the effecting data for an Orchard bundle in v7 format.
 /// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
-#[cfg(zcash_v6)]
-pub fn write_v6_effects<W: Write>(
+#[cfg(zcash_v7)]
+pub fn write_v7_effects<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
@@ -199,13 +199,13 @@ pub fn write_v6_effects<W: Write>(
     Ok(())
 }
 
-/// Writes the authorizing data for an Orchard bundle in v6 format.
+/// Writes the authorizing data for an Orchard bundle in v7 format.
 /// [ZIP 248 §Orchard Authorizing Data](https://zips.z.cash/zip-0248#orchard-authorizing-data)
 ///
 /// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
 /// (version 0: `[0x01, 0x00]`).
-#[cfg(zcash_v6)]
-pub fn write_v6_auth<W: Write>(
+#[cfg(zcash_v7)]
+pub fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {

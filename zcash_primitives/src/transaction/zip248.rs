@@ -27,10 +27,10 @@ use super::components::tze;
 use super::Authorization;
 
 // ---------------------------------------------------------------------------
-// Bundle type and variant enums (ZIP 248 registry for v6 transactions)
+// Bundle type and variant enums (ZIP 248 registry for v7 transactions)
 // ---------------------------------------------------------------------------
 
-/// Bundle type identifiers from the V6 Transaction Bundle Type Registry
+/// Bundle type identifiers from the V7 Transaction Bundle Type Registry
 /// defined in ZIP 248.
 ///
 /// Each variant corresponds to a protocol or value pool. New bundle types
@@ -104,7 +104,7 @@ impl BundleType {
     }
 }
 
-/// Bundle variant identifiers from the V6 Transaction Bundle Type Registry
+/// Bundle variant identifiers from the V7 Transaction Bundle Type Registry
 /// defined in ZIP 248.
 ///
 /// Within a given bundle type, variants allow protocol evolution while
@@ -625,7 +625,7 @@ impl ValuePoolDeltas {
         self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, bal);
     }
 
-    /// Insert a known-type entry. Used during v6 deserialization.
+    /// Insert a known-type entry. Used during v7 deserialization.
     pub fn insert_known(
         &mut self,
         key: ValuePoolDeltaKey,
@@ -635,7 +635,7 @@ impl ValuePoolDeltas {
         self.known.insert(key, (variant, value));
     }
 
-    /// Insert an unknown-type entry. Used during v6 deserialization.
+    /// Insert an unknown-type entry. Used during v7 deserialization.
     pub fn insert_unknown(
         &mut self,
         bundle_type: u64,
@@ -697,7 +697,7 @@ impl ValuePoolDeltas {
 }
 
 // ---------------------------------------------------------------------------
-// v6 wire format helpers
+// v7 wire format helpers
 // ---------------------------------------------------------------------------
 
 /// A single value pool delta entry as it appears on the wire.
@@ -833,8 +833,8 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
 ///
 /// Sighash version 0 encodes as `[0x01, 0x00]` on the wire: compactSize(1) for the
 /// info length, then `0x00` for the version byte. This is the only defined version.
-#[cfg(zcash_v6)]
-pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
+#[cfg(zcash_v7)]
+pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
     reader: &mut R,
     _context: &'static str,
 ) -> io::Result<()> {
@@ -871,15 +871,15 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
 }
 
 // ---------------------------------------------------------------------------
-// Transparent v6 effect/auth helpers
+// Transparent v7 effect/auth helpers
 // ---------------------------------------------------------------------------
 
-/// Writes transparent effecting data in v6 format.
+/// Writes transparent effecting data in v7 format.
 /// [ZIP 248 §Transparent Effecting Data](https://zips.z.cash/zip-0248#transparent-effecting-data)
 ///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
-pub fn write_v6_transparent_effects<W: Write>(
+pub fn write_v7_transparent_effects<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
@@ -897,11 +897,11 @@ pub fn write_v6_transparent_effects<W: Write>(
     Ok(())
 }
 
-/// Writes transparent authorizing data in v6 format.
+/// Writes transparent authorizing data in v7 format.
 /// [ZIP 248 §Transparent Authorizing Data](https://zips.z.cash/zip-0248#transparent-authorizing-data)
 ///
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
-pub fn write_v6_transparent_auth<W: Write>(
+pub fn write_v7_transparent_auth<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {

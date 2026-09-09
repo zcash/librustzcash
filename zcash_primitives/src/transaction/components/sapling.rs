@@ -22,8 +22,8 @@ use zcash_protocol::{
 
 use super::GROTH_PROOF_SIZE;
 use crate::transaction::Transaction;
-#[cfg(zcash_v6)]
-use crate::transaction::zip248::consume_v6_sighash_v0_info;
+#[cfg(zcash_v7)]
+use crate::transaction::zip248::consume_v7_sighash_v0_info;
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
@@ -499,15 +499,15 @@ pub(crate) fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-/// Reads a [`Bundle`] from v6 effecting + authorizing byte vectors.
+/// Reads a [`Bundle`] from v7 effecting + authorizing byte vectors.
 /// [ZIP 248 §Sapling Bundle](https://zips.z.cash/zip-0248#sapling-bundle)
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
 /// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(zcash_v6)]
-pub(crate) fn read_v6_bundle(
+#[cfg(zcash_v7)]
+pub(crate) fn read_v7_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
     value_balance: ZatBalance,
@@ -530,7 +530,7 @@ pub(crate) fn read_v6_bundle(
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in v6 Sapling effecting data",
+            "trailing bytes in v7 Sapling effecting data",
         ));
     }
 
@@ -539,7 +539,7 @@ pub(crate) fn read_v6_bundle(
         if auth.is_some_and(|a| !a.is_empty()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "v6 Sapling auth bundle present for an empty effecting bundle",
+                "v7 Sapling auth bundle present for an empty effecting bundle",
             ));
         }
         return Ok(None);
@@ -548,7 +548,7 @@ pub(crate) fn read_v6_bundle(
     let auth_bytes = auth.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "v6 Sapling effecting bundle present without matching auth bundle",
+            "v7 Sapling effecting bundle present without matching auth bundle",
         )
     })?;
     let mut auth_reader = auth_bytes;
@@ -560,12 +560,12 @@ pub(crate) fn read_v6_bundle(
     let v_spend_proofs = Array::read(&mut auth_reader, n_spends, |r| read_zkproof(r))?;
     let mut v_spend_auth_sigs: Vec<redjubjub::Signature<SpendAuth>> = Vec::with_capacity(n_spends);
     for _ in 0..n_spends {
-        consume_v6_sighash_v0_info(&mut auth_reader, "Sapling spend auth sig")?;
+        consume_v7_sighash_v0_info(&mut auth_reader, "Sapling spend auth sig")?;
         v_spend_auth_sigs.push(read_spend_auth_sig(&mut auth_reader)?);
     }
     let v_output_proofs = Array::read(&mut auth_reader, n_outputs, |r| read_zkproof(r))?;
 
-    consume_v6_sighash_v0_info(&mut auth_reader, "Sapling binding sig")?;
+    consume_v7_sighash_v0_info(&mut auth_reader, "Sapling binding sig")?;
     let mut binding_sig_bytes = [0u8; 64];
     auth_reader.read_exact(&mut binding_sig_bytes)?;
     let binding_sig = redjubjub::Signature::from(binding_sig_bytes);
@@ -573,7 +573,7 @@ pub(crate) fn read_v6_bundle(
     if !auth_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in v6 Sapling authorizing data",
+            "trailing bytes in v7 Sapling authorizing data",
         ));
     }
 
@@ -600,14 +600,14 @@ pub(crate) fn read_v6_bundle(
     ))
 }
 
-/// Writes the effecting data for a Sapling bundle in v6 format.
+/// Writes the effecting data for a Sapling bundle in v7 format.
 /// [ZIP 248 §Sapling Effecting Data](https://zips.z.cash/zip-0248#sapling-effecting-data)
 ///
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
 ///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
 ///         anchorSapling (32 bytes, present if nSpends > 0).
-#[cfg(zcash_v6)]
-pub(crate) fn write_v6_effects<W: Write>(
+#[cfg(zcash_v7)]
+pub(crate) fn write_v7_effects<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
@@ -632,7 +632,7 @@ pub(crate) fn write_v6_effects<W: Write>(
     Ok(())
 }
 
-/// Writes the authorizing data for a Sapling bundle in v6 format.
+/// Writes the authorizing data for a Sapling bundle in v7 format.
 /// [ZIP 248 §Sapling Authorizing Data](https://zips.z.cash/zip-0248#sapling-authorizing-data)
 ///
 /// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
@@ -642,8 +642,8 @@ pub(crate) fn write_v6_effects<W: Write>(
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),
 ///         bindingSigSapling (SaplingSignature with sighashInfo).
-#[cfg(zcash_v6)]
-pub(crate) fn write_v6_auth<W: Write>(
+#[cfg(zcash_v7)]
+pub(crate) fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {

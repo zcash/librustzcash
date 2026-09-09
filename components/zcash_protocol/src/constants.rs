@@ -37,11 +37,22 @@ pub const V5_TX_VERSION: u32 = 5;
 pub const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub const V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+
+/// Transaction version 7, the extensible transaction format specified in
+/// [ZIP 248](https://zips.z.cash/zip-0248).
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub const V7_TX_VERSION: u32 = 7;
+/// The version group ID for Zcash v7 transactions.
+///
+/// ZIP 248 has not yet assigned a version group ID; this placeholder will be
+/// replaced once it does.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub const V7_VERSION_GROUP_ID: u32 = 0xFFFFFFFE;
 
 /// This version is used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.

@@ -5,8 +5,8 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(zcash_v6)]
-pub mod sighash_v6;
+#[cfg(zcash_v7)]
+pub mod sighash_v7;
 
 pub mod txid;
 pub mod zip248;
@@ -15,9 +15,9 @@ pub mod zip248;
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
-#[cfg(zcash_v6)]
+#[cfg(zcash_v7)]
 use alloc::collections::BTreeMap;
-#[cfg(zcash_v6)]
+#[cfg(zcash_v7)]
 use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
@@ -49,8 +49,8 @@ use zcash_protocol::constants::{
     V5_VERSION_GROUP_ID,
 };
 
-#[cfg(zcash_v6)]
-use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+#[cfg(zcash_v7)]
+use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
 #[cfg(zcash_unstable = "zfuture")]
 use {
@@ -85,9 +85,10 @@ pub enum TxVersion {
     /// It is specified in [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding)
     /// and [ZIP 225](https://zips.z.cash/zip-0225).
     V5,
-    /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
-    #[cfg(zcash_v6)]
-    V6,
+    /// Transaction version 7, the extensible transaction format specified in
+    /// [ZIP 248](https://zips.z.cash/zip-0248).
+    #[cfg(zcash_v7)]
+    V7,
     /// This version is used exclusively for in-development transaction
     /// serialization, and will never be active under the consensus rules.
     /// When new consensus transaction versions are added, all call sites
@@ -108,8 +109,8 @@ impl TxVersion {
                 (V3_TX_VERSION, V3_VERSION_GROUP_ID) => Ok(TxVersion::V3),
                 (V4_TX_VERSION, V4_VERSION_GROUP_ID) => Ok(TxVersion::V4),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
-                #[cfg(zcash_v6)]
-                (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
+                #[cfg(zcash_v7)]
+                (V7_TX_VERSION, V7_VERSION_GROUP_ID) => Ok(TxVersion::V7),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -140,8 +141,8 @@ impl TxVersion {
                 TxVersion::V3 => V3_TX_VERSION,
                 TxVersion::V4 => V4_TX_VERSION,
                 TxVersion::V5 => V5_TX_VERSION,
-                #[cfg(zcash_v6)]
-                TxVersion::V6 => V6_TX_VERSION,
+                #[cfg(zcash_v7)]
+                TxVersion::V7 => V7_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -153,8 +154,8 @@ impl TxVersion {
             TxVersion::V3 => V3_VERSION_GROUP_ID,
             TxVersion::V4 => V4_VERSION_GROUP_ID,
             TxVersion::V5 => V5_VERSION_GROUP_ID,
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => V6_VERSION_GROUP_ID,
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => V7_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -174,8 +175,8 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::V3 | TxVersion::V4 => true,
             TxVersion::V5 => false,
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => false,
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => false,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
         }
@@ -191,8 +192,8 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::V3 => false,
             TxVersion::V4 => true,
             TxVersion::V5 => true,
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => true,
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -203,19 +204,19 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
             TxVersion::V5 => true,
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => true,
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
 
-    #[cfg(all(zcash_v6, feature = "zip-233"))]
+    #[cfg(all(zcash_v7, feature = "zip-233"))]
     pub fn has_zip233(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => true,
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -238,7 +239,7 @@ impl TxVersion {
             BranchId::Nu6 => TxVersion::V5,
             BranchId::Nu6_1 => TxVersion::V5,
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => TxVersion::V6,
+            BranchId::Nu7 => TxVersion::V7,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -269,13 +270,13 @@ impl TxVersion {
                 #[cfg(zcash_unstable = "zfuture")]
                 ZFuture => true,
             },
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => match consensus_branch_id {
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 => false,
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
-                // A v6 transaction is also valid under any speculative future
+                // A v7 transaction is also valid under any speculative future
                 // upgrade that builds on top of NU7.
                 #[cfg(zcash_unstable = "zfuture")]
                 ZFuture => true,
@@ -438,7 +439,7 @@ impl<A: Authorization> TransactionData<A> {
             sapling_bundle,
             orchard_bundle,
         );
-        Self::from_parts_v6(
+        Self::from_parts_v7(
             version,
             consensus_branch_id,
             lock_time,
@@ -474,7 +475,7 @@ impl<A: Authorization> TransactionData<A> {
         if let Some(b) = tze_bundle {
             bundles.insert_tze(b);
         }
-        Self::from_parts_v6(
+        Self::from_parts_v7(
             version,
             consensus_branch_id,
             lock_time,
@@ -486,7 +487,7 @@ impl<A: Authorization> TransactionData<A> {
 
     /// Constructs a `TransactionData` directly from a [`BundleMap`](zip248::BundleMap)
     /// and [`ValuePoolDeltas`](zip248::ValuePoolDeltas).
-    pub fn from_parts_v6(
+    pub fn from_parts_v7(
         version: TxVersion,
         consensus_branch_id: BranchId,
         lock_time: u32,
@@ -549,14 +550,14 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     /// Returns the ZIP 233 NSM amount, defaulting to zero if absent.
-    #[cfg(all(zcash_v6, feature = "zip-233"))]
+    #[cfg(all(zcash_v7, feature = "zip-233"))]
     pub fn zip233_amount(&self) -> Zatoshis {
         self.value_pool_deltas
             .zip233_amount()
             .unwrap_or(Zatoshis::ZERO)
     }
 
-    /// Returns the fee amount, if explicitly set (v6+).
+    /// Returns the fee amount, if explicitly set (v7+).
     pub fn fee_amount(&self) -> Option<Zatoshis> {
         self.value_pool_deltas.fee()
     }
@@ -593,7 +594,7 @@ impl<A: Authorization> TransactionData<A> {
                     self.bundles
                         .orchard()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(all(zcash_v6, feature = "zip-233"))]
+                    #[cfg(all(zcash_v7, feature = "zip-233"))]
                     -ZatBalance::from(self.zip233_amount()),
                 ];
 
@@ -615,7 +616,7 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
-                #[cfg(all(zcash_v6, feature = "zip-233"))]
+                #[cfg(all(zcash_v7, feature = "zip-233"))]
                 &self.zip233_amount(),
             ),
             digester.digest_transparent(self.bundles.transparent()),
@@ -626,7 +627,7 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
-    /// Produces v6 transaction digests per
+    /// Produces v7 transaction digests per
     /// [ZIP 248 §TxId Digest](https://zips.z.cash/zip-0248#txid-digest).
     ///
     /// The txid is a Merkle tree over five leaf categories:
@@ -644,11 +645,11 @@ impl<A: Authorization> TransactionData<A> {
     /// Unknown-bundle digests are supplied as-is; they were stored at parse
     /// time (or injected by the caller) and are folded into the tree alongside
     /// known-protocol digests.
-    #[cfg(zcash_v6)]
-    pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
+    #[cfg(zcash_v7)]
+    pub fn digest_v7(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
-            TxIdDigester, hash_v6_header, hash_v6_orchard_effects, hash_v6_sapling_effects,
-            hash_v6_value_pool_deltas,
+            TxIdDigester, hash_v7_header, hash_v7_orchard_effects, hash_v7_sapling_effects,
+            hash_v7_value_pool_deltas,
         };
 
         let digester = TxIdDigester;
@@ -665,7 +666,7 @@ impl<A: Authorization> TransactionData<A> {
 
         TxDigests {
             // Leaf 1: header fields (no auth data involved).
-            header_digest: hash_v6_header(
+            header_digest: hash_v7_header(
                 self.version,
                 self.consensus_branch_id,
                 self.lock_time,
@@ -678,16 +679,16 @@ impl<A: Authorization> TransactionData<A> {
                 self.bundles.transparent(),
             ),
             // Leaf 3: sapling effects only (spends, outputs, value balance).
-            sapling_digest: self.bundles.sapling().map(hash_v6_sapling_effects),
+            sapling_digest: self.bundles.sapling().map(hash_v7_sapling_effects),
             // Leaf 4: orchard effects only (actions, flags, value balance, anchor).
-            orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
+            orchard_digest: self.bundles.orchard().map(hash_v7_orchard_effects),
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
                 &digester,
                 self.bundles.tze(),
             ),
             // Leaf 5: the serialized VP deltas map.
-            value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+            value_pool_deltas_digest: Some(hash_v7_value_pool_deltas(&self.value_pool_deltas)),
             // Unknown-bundle digests are folded in alongside the known leaves.
             unknown_effect_digests,
             unknown_auth_digests,
@@ -843,8 +844,8 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(zcash_v6)]
-struct V6HeaderFragment {
+#[cfg(zcash_v7)]
+struct V7HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
@@ -855,10 +856,10 @@ impl Transaction {
         match data.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => Ok(Self::from_data_v6(data)),
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => Ok(Self::from_data_v7(data)),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => Ok(Self::from_data_v6(data)),
+            TxVersion::ZFuture => Ok(Self::from_data_v7(data)),
         }
     }
 
@@ -883,9 +884,9 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    #[cfg(zcash_v6)]
-    fn from_data_v6(data: TransactionData<Authorized>) -> Self {
-        let txid = to_txid(data.version, data.consensus_branch_id, &data.digest_v6());
+    #[cfg(zcash_v7)]
+    fn from_data_v7(data: TransactionData<Authorized>) -> Self {
+        let txid = to_txid(data.version, data.consensus_branch_id, &data.digest_v7());
 
         Transaction { txid, data }
     }
@@ -907,10 +908,10 @@ impl Transaction {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => Self::read_v7(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
+            TxVersion::ZFuture => Self::read_v7(reader.into_base_reader(), version),
         }
     }
 
@@ -992,12 +993,12 @@ impl Transaction {
         })
     }
 
-    /// Reads a v6 transparent bundle from its `mEffectBundles[0]` and
+    /// Reads a v7 transparent bundle from its `mEffectBundles[0]` and
     /// `mAuthBundles[0]` byte payloads.
     ///
     /// [ZIP 248 §Transparent Bundle](https://zips.z.cash/zip-0248#transparent-bundle)
     ///
-    /// The v6 format splits transparent data into two halves:
+    /// The v7 format splits transparent data into two halves:
     ///   - **Effect data** (commits to the txid): prevouts, sequences, and
     ///     outputs -- everything that determines *what* the transaction does.
     ///   - **Auth data** (excluded from txid): per-input `scriptSig` and
@@ -1008,10 +1009,10 @@ impl Transaction {
     ///
     /// The effect-auth split mirrors the v5 digest structure but at the
     /// serialization level: v5 interleaves effect and auth per-input, while
-    /// v6 groups all effects together and all auth together as separate TLV
+    /// v7 groups all effects together and all auth together as separate TLV
     /// payloads keyed by `(bundleType=0, bundleVariant=1)`.
-    #[cfg(zcash_v6)]
-    fn read_v6_transparent_bundle(
+    #[cfg(zcash_v7)]
+    fn read_v7_transparent_bundle(
         effects: &[u8],
         auth: Option<&[u8]>,
     ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
@@ -1031,7 +1032,7 @@ impl Transaction {
         if !effects_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in v6 transparent effecting data",
+                "trailing bytes in v7 transparent effecting data",
             ));
         }
 
@@ -1039,7 +1040,7 @@ impl Transaction {
             if auth.is_some_and(|a| !a.is_empty()) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "v6 transparent auth bundle present for an empty effecting bundle",
+                    "v7 transparent auth bundle present for an empty effecting bundle",
                 ));
             }
             return Ok(None);
@@ -1053,7 +1054,7 @@ impl Transaction {
             auth.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "v6 transparent effecting bundle has inputs but no auth bundle",
+                    "v7 transparent effecting bundle has inputs but no auth bundle",
                 )
             })?
         };
@@ -1066,14 +1067,14 @@ impl Transaction {
             // TransparentSighashInfo: compactSize-prefixed bytes; sighash
             // version 0 has empty associatedData, so the wire form is
             // [0x01, 0x00].
-            zip248::consume_v6_sighash_v0_info(&mut auth_reader, "transparent input")?;
+            zip248::consume_v7_sighash_v0_info(&mut auth_reader, "transparent input")?;
             let script_sig = Script::read(&mut auth_reader)?;
             vin.push(TxIn::from_parts(prevout, script_sig, sequence));
         }
         if !auth_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in v6 transparent authorizing data",
+                "trailing bytes in v7 transparent authorizing data",
             ));
         }
 
@@ -1130,7 +1131,7 @@ impl Transaction {
         Ok(Self::from_data_v5(data))
     }
 
-    /// Deserializes a v6 transaction from the wire format defined in
+    /// Deserializes a v7 transaction from the wire format defined in
     /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format).
     ///
     /// The wire layout has four sections:
@@ -1143,14 +1144,14 @@ impl Transaction {
     ///   4. **Auth bundles** (`mAuthBundles`) -- per-protocol witness/auth
     ///      data, ordered by `bundleType`. These are excluded from the txid
     ///      but commit to the auth digest.
-    #[cfg(zcash_v6)]
-    fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
+    #[cfg(zcash_v7)]
+    fn read_v7<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         // --- Section 1: Header (5 x u32) ---
-        let V6HeaderFragment {
+        let V7HeaderFragment {
             consensus_branch_id,
             lock_time,
             expiry_height,
-        } = Self::read_v6_header_fragment(&mut reader)?;
+        } = Self::read_v7_header_fragment(&mut reader)?;
 
         // --- Section 2: Value pool deltas map (`mValuePoolDeltas`) ---
         // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
@@ -1179,7 +1180,7 @@ impl Transaction {
                 if &raw_key <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 mValuePoolDeltas is not in strictly increasing \
+                        "v7 mValuePoolDeltas is not in strictly increasing \
                          (bundleType, assetClass, assetUuid) order",
                     ));
                 }
@@ -1192,7 +1193,7 @@ impl Transaction {
                 Some(&existing) if existing != entry.bundle_variant => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 mValuePoolDeltas has multiple bundleVariants for the same bundleType",
+                        "v7 mValuePoolDeltas has multiple bundleVariants for the same bundleType",
                     ));
                 }
                 _ => {
@@ -1236,7 +1237,7 @@ impl Transaction {
                 if bt <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 mEffectBundles is not in strictly increasing bundleType order",
+                        "v7 mEffectBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
@@ -1247,7 +1248,7 @@ impl Transaction {
         // --- Section 4: Auth bundles map (`mAuthBundles`) ---
         // Same TLV framing and strictly-increasing bundleType ordering as
         // mEffectBundles. Auth data is excluded from the txid but included
-        // in the authorizing data commitment (auth_commitment_v6).
+        // in the authorizing data commitment (auth_commitment_v7).
         let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut auth_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
         let mut last_auth_type: Option<u64> = None;
@@ -1257,7 +1258,7 @@ impl Transaction {
                 if bt <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 mAuthBundles is not in strictly increasing bundleType order",
+                        "v7 mAuthBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
@@ -1275,14 +1276,14 @@ impl Transaction {
                 Some(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 transaction has mAuthBundles entry with a bundleVariant \
+                        "v7 transaction has mAuthBundles entry with a bundleVariant \
                          that does not match the corresponding mEffectBundles entry",
                     ));
                 }
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 transaction has mAuthBundles entry with no matching \
+                        "v7 transaction has mAuthBundles entry with no matching \
                          mEffectBundles entry",
                     ));
                 }
@@ -1301,14 +1302,14 @@ impl Transaction {
                 if effect_variant != vp_variant {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "v6 transaction has an mValuePoolDeltas bundleVariant that \
+                        "v7 transaction has an mValuePoolDeltas bundleVariant that \
                          does not match the corresponding mEffectBundles entry",
                     ));
                 }
             }
         }
 
-        // [ZIP 248 §v6 Transaction Bundle Type Registry](https://zips.z.cash/zip-0248#v6-transaction-bundle-type-registry)
+        // [ZIP 248 §v7 Transaction Bundle Type Registry](https://zips.z.cash/zip-0248#v7-transaction-bundle-type-registry)
         // bundleType 1 is Reserved and MUST NOT appear in any map.
         // bundleTypes 4 (fee) and 5 (ZIP 233 NSM) carry only VP delta
         // entries -- the registry marks their effect and auth columns as
@@ -1322,7 +1323,7 @@ impl Transaction {
             {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "v6 transaction has a value-only bundle type (fee or ZIP 233 NSM) \
+                    "v7 transaction has a value-only bundle type (fee or ZIP 233 NSM) \
                      in mEffectBundles or mAuthBundles",
                 ));
             }
@@ -1333,7 +1334,7 @@ impl Transaction {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "v6 transaction references the reserved bundleType 1",
+                "v7 transaction references the reserved bundleType 1",
             ));
         }
 
@@ -1357,7 +1358,7 @@ impl Transaction {
         let (transparent_effect, transparent_auth) =
             take_known(zip248::BundleType::Transparent.to_u64());
         if let Some(effect) = transparent_effect {
-            if let Some(b) = Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
+            if let Some(b) = Self::read_v7_transparent_bundle(&effect, transparent_auth.as_deref())?
             {
                 bundles.insert_transparent(b);
             }
@@ -1366,7 +1367,7 @@ impl Transaction {
         let (sapling_effect, sapling_auth) = take_known(zip248::BundleType::Sapling.to_u64());
         if let Some(effect) = sapling_effect {
             let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
-            if let Some(b) = sapling_serialization::read_v6_bundle(
+            if let Some(b) = sapling_serialization::read_v7_bundle(
                 &effect,
                 sapling_auth.as_deref(),
                 value_balance,
@@ -1378,7 +1379,7 @@ impl Transaction {
         let (orchard_effect, orchard_auth) = take_known(zip248::BundleType::Orchard.to_u64());
         if let Some(effect) = orchard_effect {
             let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
-            if let Some(b) = orchard_serialization::read_v6_bundle(
+            if let Some(b) = orchard_serialization::read_v7_bundle(
                 &effect,
                 orchard_auth.as_deref(),
                 value_balance,
@@ -1422,10 +1423,10 @@ impl Transaction {
             bundles,
         };
 
-        Ok(Self::from_data_v6(data))
+        Ok(Self::from_data_v7(data))
     }
 
-    /// Utility function for reading header data common to v5 and v6 transactions.
+    /// Utility function for reading header data common to v5 and v7 transactions.
     fn read_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
             BranchId::try_from(value).map_err(|_e| {
@@ -1446,16 +1447,16 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    /// Reads the v6 (ZIP 248) common transaction header fields after the
+    /// Reads the v7 (ZIP 248) common transaction header fields after the
     /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
-    /// v6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
+    /// v7 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
     /// `mValuePoolDeltas`.
-    #[cfg(zcash_v6)]
-    fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
+    #[cfg(zcash_v7)]
+    fn read_v7_header_fragment<R: Read>(mut reader: R) -> io::Result<V7HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        Ok(V6HeaderFragment {
+        Ok(V7HeaderFragment {
             consensus_branch_id,
             lock_time,
             expiry_height,
@@ -1469,10 +1470,10 @@ impl Transaction {
         sapling_serialization::read_v5_bundle(reader)
     }
 
-    // `read_tze` is currently unused: v6 transactions reject TZE bundles in
-    // `read_v6` (since ZIP 248 has not yet assigned a bundleType for them),
-    // and pre-v6 transactions never carry TZE. The function is retained for
-    // symmetry with `write_tze` and so that a future read_v6 revision that
+    // `read_tze` is currently unused: v7 transactions reject TZE bundles in
+    // `read_v7` (since ZIP 248 has not yet assigned a bundleType for them),
+    // and pre-v7 transactions never carry TZE. The function is retained for
+    // symmetry with `write_tze` and so that a future read_v7 revision that
     // accepts a TZE bundleType can easily call it.
     #[cfg(zcash_unstable = "zfuture")]
     #[allow(dead_code)]
@@ -1494,10 +1495,10 @@ impl Transaction {
         match self.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
             TxVersion::V5 => self.write_v5(writer),
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => self.write_v6(writer),
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => self.write_v7(writer),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => self.write_v6(writer),
+            TxVersion::ZFuture => self.write_v7(writer),
         }
     }
 
@@ -1569,7 +1570,7 @@ impl Transaction {
         Ok(())
     }
 
-    /// Serializes this transaction in v6 (ZIP 248) wire format.
+    /// Serializes this transaction in v7 (ZIP 248) wire format.
     ///
     /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
     ///
@@ -1584,25 +1585,25 @@ impl Transaction {
     /// `to_wire_entries()` is used for VP deltas because it merges known
     /// (typed) and unknown (opaque) entries into a single sorted sequence,
     /// preserving the canonical wire order required by the spec.
-    #[cfg(zcash_v6)]
-    pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    #[cfg(zcash_v7)]
+    pub fn write_v7<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to the v6 transaction format.",
+                "Sprout components cannot be present when serializing to the v7 transaction format.",
             ));
         }
         #[cfg(zcash_unstable = "zfuture")]
         if self.bundles.tze().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "TZE components cannot be present when serializing to the v6 transaction format \
+                "TZE components cannot be present when serializing to the v7 transaction format \
                  until a bundleType is registered for them in ZIP 248.",
             ));
         }
 
         // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
-        self.write_v6_header(&mut writer)?;
+        self.write_v7_header(&mut writer)?;
 
         // 2. Value pool deltas map -- to_wire_entries() merges known + unknown
         // entries in canonical (bundleType, assetClass, assetUuid) order.
@@ -1619,7 +1620,7 @@ impl Transaction {
 
         if let Some(tb) = self.bundles.transparent() {
             let mut buf = Vec::new();
-            zip248::write_v6_transparent_effects(&mut buf, tb)?;
+            zip248::write_v7_transparent_effects(&mut buf, tb)?;
             effect_bundles.push((
                 zip248::BundleId::TRANSPARENT.wire_key().0,
                 zip248::BundleId::TRANSPARENT.wire_key().1,
@@ -1628,7 +1629,7 @@ impl Transaction {
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
-            sapling_serialization::write_v6_effects(&mut buf, sb)?;
+            sapling_serialization::write_v7_effects(&mut buf, sb)?;
             effect_bundles.push((
                 zip248::BundleId::SAPLING.wire_key().0,
                 zip248::BundleId::SAPLING.wire_key().1,
@@ -1637,7 +1638,7 @@ impl Transaction {
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
-            orchard_serialization::write_v6_effects(&mut buf, ob)?;
+            orchard_serialization::write_v7_effects(&mut buf, ob)?;
             effect_bundles.push((
                 zip248::BundleId::ORCHARD.wire_key().0,
                 zip248::BundleId::ORCHARD.wire_key().1,
@@ -1664,7 +1665,7 @@ impl Transaction {
         if let Some(tb) = self.bundles.transparent() {
             if !tb.vin.is_empty() {
                 let mut buf = Vec::new();
-                zip248::write_v6_transparent_auth(&mut buf, tb)?;
+                zip248::write_v7_transparent_auth(&mut buf, tb)?;
                 auth_bundles.push((
                     zip248::BundleId::TRANSPARENT.wire_key().0,
                     zip248::BundleId::TRANSPARENT.wire_key().1,
@@ -1674,7 +1675,7 @@ impl Transaction {
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
-            sapling_serialization::write_v6_auth(&mut buf, sb)?;
+            sapling_serialization::write_v7_auth(&mut buf, sb)?;
             auth_bundles.push((
                 zip248::BundleId::SAPLING.wire_key().0,
                 zip248::BundleId::SAPLING.wire_key().1,
@@ -1683,7 +1684,7 @@ impl Transaction {
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
-            orchard_serialization::write_v6_auth(&mut buf, ob)?;
+            orchard_serialization::write_v7_auth(&mut buf, ob)?;
             auth_bundles.push((
                 zip248::BundleId::ORCHARD.wire_key().0,
                 zip248::BundleId::ORCHARD.wire_key().1,
@@ -1713,12 +1714,12 @@ impl Transaction {
         Ok(())
     }
 
-    /// Writes the v6 (ZIP 248) common transaction header: header, nVersionGroupId,
+    /// Writes the v7 (ZIP 248) common transaction header: header, nVersionGroupId,
     /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
     /// amount is not included here; it lives in `mValuePoolDeltas` under
     /// `bundleType = 5`.
-    #[cfg(zcash_v6)]
-    pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    #[cfg(zcash_v7)]
+    pub fn write_v7_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
         writer.write_u32_le(self.lock_time)?;
@@ -1754,13 +1755,13 @@ impl Transaction {
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
         match self.data.version {
-            #[cfg(zcash_v6)]
-            TxVersion::V6 => self.auth_commitment_v6(),
+            #[cfg(zcash_v7)]
+            TxVersion::V7 => self.auth_commitment_v7(),
             _ => self.data.digest(BlockTxCommitmentDigester),
         }
     }
 
-    /// Computes the v6 authorizing data commitment per
+    /// Computes the v7 authorizing data commitment per
     /// [ZIP 248 §Authorizing Data Commitment](https://zips.z.cash/zip-0248#authorizing-data-commitment).
     ///
     /// The auth commitment is structurally parallel to the txid digest but
@@ -1770,11 +1771,11 @@ impl Transaction {
     ///
     /// Structure: `BLAKE2b-256(auth_bundles_digest)` with a personalization
     /// tag that embeds the consensus branch ID.
-    #[cfg(zcash_v6)]
-    fn auth_commitment_v6(&self) -> Blake2bHash {
+    #[cfg(zcash_v7)]
+    fn auth_commitment_v7(&self) -> Blake2bHash {
         use txid::{
-            hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
-            hash_v6_transparent_auth, v6_bundle_digest_entries,
+            hash_v7_auth_bundles, hash_v7_orchard_auth, hash_v7_sapling_auth,
+            hash_v7_transparent_auth, v7_bundle_digest_entries,
         };
 
         // Per-protocol auth digests. Each covers the bundle's witness data
@@ -1784,19 +1785,19 @@ impl Transaction {
             .bundles
             .transparent()
             .map(Some)
-            .map(hash_v6_transparent_auth);
+            .map(hash_v7_transparent_auth);
         let sapling_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .sapling()
             .map(Some)
-            .map(hash_v6_sapling_auth);
+            .map(hash_v7_sapling_auth);
         let orchard_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .orchard()
             .map(Some)
-            .map(hash_v6_orchard_auth);
+            .map(hash_v7_orchard_auth);
 
         // Unknown bundles may carry pre-computed auth digests set by the
         // caller via BundleMap::get_unknown_mut.
@@ -1809,7 +1810,7 @@ impl Transaction {
 
         // Merge known + unknown auth digests into a single sorted sequence,
         // then hash them all into auth_bundles_digest.
-        let auth_bundles_digest = hash_v6_auth_bundles(v6_bundle_digest_entries(
+        let auth_bundles_digest = hash_v7_auth_bundles(v7_bundle_digest_entries(
             transparent_auth_digest.as_ref(),
             sapling_auth_digest.as_ref(),
             orchard_auth_digest.as_ref(),
@@ -1852,18 +1853,18 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
-    /// v6 (ZIP 248): digest of the value pool deltas map.
-    #[cfg(zcash_v6)]
+    /// v7 (ZIP 248): digest of the value pool deltas map.
+    #[cfg(zcash_v7)]
     pub value_pool_deltas_digest: Option<A>,
-    /// v6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
+    /// v7 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_v7)]
     pub unknown_effect_digests: Vec<((u64, u64), A)>,
-    /// v6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
+    /// v7 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_v7)]
     pub unknown_auth_digests: Vec<((u64, u64), A)>,
 }
 
@@ -1884,7 +1885,7 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(zcash_v6, feature = "zip-233"))] zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_v7, feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest;
 
     fn digest_transparent(
@@ -1919,7 +1920,7 @@ pub enum DigestError {
     NotSigned,
 }
 
-/// Errors that can be returned by [`TransactionData::check_v6_consensus_rules`].
+/// Errors that can be returned by [`TransactionData::check_v7_consensus_rules`].
 ///
 /// Each variant corresponds to a transaction-local consensus rule from the
 /// "Consensus Rules" section of [ZIP 248]. Rules that require block context
@@ -1928,9 +1929,9 @@ pub enum DigestError {
 /// be enforced by the consumer when validating a block.
 ///
 /// [ZIP 248]: https://zips.z.cash/zip-0248
-#[cfg(zcash_v6)]
+#[cfg(zcash_v7)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum V6ConsensusError {
+pub enum V7ConsensusError {
     /// `mValuePoolDeltas` contains an entry with `bundleType = FeeBundleId`
     /// and a non-ZEC `assetClass`. (Bundle-local rule: fee amounts are
     /// denominated in ZEC and no other asset.)
@@ -1957,36 +1958,36 @@ pub enum V6ConsensusError {
         asset_class: u8,
         sum: ZatBalance,
     },
-    /// A v6 transaction's per-asset value pool delta sum overflowed while
+    /// A v7 transaction's per-asset value pool delta sum overflowed while
     /// being computed. This is itself a consensus failure because a
     /// well-formed sum must fit after the deltas are constrained to balance.
     ValueDeltaSumOverflow,
 }
 
-#[cfg(zcash_v6)]
-impl core::fmt::Display for V6ConsensusError {
+#[cfg(zcash_v7)]
+impl core::fmt::Display for V7ConsensusError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            V6ConsensusError::FeeAssetClassNotZec { asset_class } => write!(
+            V7ConsensusError::FeeAssetClassNotZec { asset_class } => write!(
                 f,
                 "fee bundle value pool delta has non-ZEC assetClass {:#x}",
                 asset_class
             ),
-            V6ConsensusError::CoinbaseEnableSpendsOrchardSet => write!(
+            V7ConsensusError::CoinbaseEnableSpendsOrchardSet => write!(
                 f,
                 "coinbase transaction has enableSpendsOrchard set in Orchard flags"
             ),
-            V6ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
+            V7ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
                 f,
                 "coinbase fee bundle value pool delta is negative ({})",
                 i64::from(*value)
             ),
-            V6ConsensusError::NonCoinbaseFeeDeltaPositive { value } => write!(
+            V7ConsensusError::NonCoinbaseFeeDeltaPositive { value } => write!(
                 f,
                 "non-coinbase fee bundle value pool delta is positive ({}); fees are encoded as negative deltas",
                 i64::from(*value)
             ),
-            V6ConsensusError::NonCoinbaseValueImbalance {
+            V7ConsensusError::NonCoinbaseValueImbalance {
                 bundle_type_for_asset,
                 asset_class,
                 sum,
@@ -1997,17 +1998,17 @@ impl core::fmt::Display for V6ConsensusError {
                 bundle_type_for_asset,
                 i64::from(*sum)
             ),
-            V6ConsensusError::ValueDeltaSumOverflow => {
+            V7ConsensusError::ValueDeltaSumOverflow => {
                 write!(f, "value pool delta sum overflowed i64")
             }
         }
     }
 }
 
-#[cfg(all(zcash_v6, feature = "std"))]
-impl std::error::Error for V6ConsensusError {}
+#[cfg(all(zcash_v7, feature = "std"))]
+impl std::error::Error for V7ConsensusError {}
 
-#[cfg(zcash_v6)]
+#[cfg(zcash_v7)]
 impl<A: Authorization> TransactionData<A> {
     /// Checks the transaction-local consensus rules from
     /// [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules).
@@ -2024,7 +2025,7 @@ impl<A: Authorization> TransactionData<A> {
     /// values being zero, and the coinbase ZEC sum equal to
     /// `-BlockSubsidy(height)` -- are *not* checked here and must be
     /// enforced by the consumer when validating the containing block.
-    pub fn check_v6_consensus_rules(&self, is_coinbase: bool) -> Result<(), V6ConsensusError> {
+    pub fn check_v7_consensus_rules(&self, is_coinbase: bool) -> Result<(), V7ConsensusError> {
         // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
         // Bundle-local rule: fee entries are ZEC-only. A fee denominated in
         // a non-ZEC asset has no defined meaning and must be rejected.
@@ -2032,7 +2033,7 @@ impl<A: Authorization> TransactionData<A> {
             if key.bundle_type == zip248::BundleType::Fee
                 && key.asset_class != zip248::ASSET_CLASS_ZEC
             {
-                return Err(V6ConsensusError::FeeAssetClassNotZec {
+                return Err(V7ConsensusError::FeeAssetClassNotZec {
                     asset_class: key.asset_class,
                 });
             }
@@ -2045,7 +2046,7 @@ impl<A: Authorization> TransactionData<A> {
         if is_coinbase {
             if let Some(orchard_bundle) = self.bundles.orchard() {
                 if orchard_bundle.flags().spends_enabled() {
-                    return Err(V6ConsensusError::CoinbaseEnableSpendsOrchardSet);
+                    return Err(V7ConsensusError::CoinbaseEnableSpendsOrchardSet);
                 }
             }
         }
@@ -2065,10 +2066,10 @@ impl<A: Authorization> TransactionData<A> {
             .unwrap_or(ZatBalance::zero());
         if is_coinbase {
             if i64::from(fee_delta) < 0 {
-                return Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: fee_delta });
+                return Err(V7ConsensusError::CoinbaseFeeDeltaNegative { value: fee_delta });
             }
         } else if i64::from(fee_delta) > 0 {
-            return Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
+            return Err(V7ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
         }
 
         // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
@@ -2085,11 +2086,11 @@ impl<A: Authorization> TransactionData<A> {
                 let acc = by_asset
                     .entry(asset_key)
                     .or_insert((entry.bundle_type, ZatBalance::zero()));
-                acc.1 = (acc.1 + entry.value).ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
+                acc.1 = (acc.1 + entry.value).ok_or(V7ConsensusError::ValueDeltaSumOverflow)?;
             }
             for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
                 if sum != ZatBalance::zero() {
-                    return Err(V6ConsensusError::NonCoinbaseValueImbalance {
+                    return Err(V7ConsensusError::NonCoinbaseValueImbalance {
                         bundle_type_for_asset: any_bundle_type,
                         asset_class,
                         sum,
@@ -2117,7 +2118,7 @@ pub mod testing {
         },
     };
 
-    #[cfg(all(zcash_v6, feature = "zip-233"))]
+    #[cfg(all(zcash_v7, feature = "zip-233"))]
     use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -2138,13 +2139,13 @@ pub mod testing {
             BranchId::Nu6 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6_1 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => Just(TxVersion::V6).boxed(),
+            BranchId::Nu7 => Just(TxVersion::V7).boxed(),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }
     }
 
-    #[cfg(not(zcash_v6))]
+    #[cfg(not(zcash_v7))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),

@@ -21,7 +21,7 @@ use {
 use super::components::tze;
 
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
-use super::sighash_v6::v6_signature_hash;
+use super::sighash_v7::v7_signature_hash;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
@@ -390,8 +390,8 @@ fn zip_0233() {
         let mut vp = zip248::ValuePoolDeltas::empty();
         vp.set_fee(Zatoshis::from_u64(fee).unwrap());
         vp.set_zip233(Zatoshis::from_u64(nsm).unwrap());
-        TransactionData::<super::Authorized>::from_parts_v6(
-            super::TxVersion::V6,
+        TransactionData::<super::Authorized>::from_parts_v7(
+            super::TxVersion::V7,
             BranchId::Nu7,
             0,
             BlockHeight::from_u32(100),
@@ -524,7 +524,7 @@ mod zip248_tests {
         );
     }
 
-    /// Verifies that a v6 transaction with an unknown bundle type can be
+    /// Verifies that a v7 transaction with an unknown bundle type can be
     /// parsed and re-serialized (ZIP 248 forward compatibility).
     #[cfg(zcash_unstable = "nu7")]
     #[test]
@@ -538,8 +538,8 @@ mod zip248_tests {
         let mut bundles: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
         bundles.insert_unknown(42, 0, test_unknown_bundle(&[0xDE, 0xAD, 0xBE, 0xEF]));
 
-        let txdata = TransactionData::<Authorized>::from_parts_v6(
-            TxVersion::V6,
+        let txdata = TransactionData::<Authorized>::from_parts_v7(
+            TxVersion::V7,
             BranchId::Nu7,
             0,
             BlockHeight::from_u32(100),
@@ -573,14 +573,14 @@ mod zip248_tests {
     #[cfg(zcash_unstable = "nu7")]
     mod consensus_rules {
         use super::super::super::{
-            Authorized, TransactionData, TxVersion, V6ConsensusError, ZatBalance, zip248,
+            Authorized, TransactionData, TxVersion, V7ConsensusError, ZatBalance, zip248,
         };
         use zcash_protocol::consensus::{BlockHeight, BranchId};
         use zcash_protocol::value::Zatoshis;
 
-        fn make_v6(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
-            TransactionData::from_parts_v6(
-                TxVersion::V6,
+        fn make_v7(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
+            TransactionData::from_parts_v7(
+                TxVersion::V7,
                 BranchId::Nu7,
                 0,
                 BlockHeight::from_u32(100),
@@ -602,10 +602,10 @@ mod zip248_tests {
                 zip248::BundleVariant::Default,
                 ZatBalance::from_i64(-1000).unwrap(),
             );
-            let tx = make_v6(vp);
+            let tx = make_v7(vp);
             assert_eq!(
-                tx.check_v6_consensus_rules(false),
-                Err(V6ConsensusError::FeeAssetClassNotZec {
+                tx.check_v7_consensus_rules(false),
+                Err(V7ConsensusError::FeeAssetClassNotZec {
                     asset_class: zip248::ASSET_CLASS_OTHER
                 }),
             );
@@ -615,10 +615,10 @@ mod zip248_tests {
         fn coinbase_fee_delta_must_be_nonnegative() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // stored as -1000
-            let tx = make_v6(vp);
+            let tx = make_v7(vp);
             assert_eq!(
-                tx.check_v6_consensus_rules(true),
-                Err(V6ConsensusError::CoinbaseFeeDeltaNegative {
+                tx.check_v7_consensus_rules(true),
+                Err(V7ConsensusError::CoinbaseFeeDeltaNegative {
                     value: ZatBalance::from_i64(-1000).unwrap(),
                 }),
             );
@@ -634,10 +634,10 @@ mod zip248_tests {
                 zip248::BundleVariant::Default,
                 ZatBalance::from_i64(1000).unwrap(),
             );
-            let tx = make_v6(vp);
+            let tx = make_v7(vp);
             assert_eq!(
-                tx.check_v6_consensus_rules(false),
-                Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive {
+                tx.check_v7_consensus_rules(false),
+                Err(V7ConsensusError::NonCoinbaseFeeDeltaPositive {
                     value: ZatBalance::from_i64(1000).unwrap(),
                 }),
             );
@@ -648,11 +648,11 @@ mod zip248_tests {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Sapling adds 100k to the pool but nothing subtracts it.
             vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap());
-            let tx = make_v6(vp);
-            let err = tx.check_v6_consensus_rules(false).unwrap_err();
+            let tx = make_v7(vp);
+            let err = tx.check_v7_consensus_rules(false).unwrap_err();
             assert!(matches!(
                 err,
-                V6ConsensusError::NonCoinbaseValueImbalance { .. }
+                V7ConsensusError::NonCoinbaseValueImbalance { .. }
             ));
         }
 
@@ -661,8 +661,8 @@ mod zip248_tests {
             let mut vp = zip248::ValuePoolDeltas::empty();
             vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // -1000
             vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(1000).unwrap()); // +1000
-            let tx = make_v6(vp);
-            assert_eq!(tx.check_v6_consensus_rules(false), Ok(()));
+            let tx = make_v7(vp);
+            assert_eq!(tx.check_v7_consensus_rules(false), Ok(()));
         }
     }
 
@@ -674,14 +674,14 @@ mod zip248_tests {
         use alloc::vec::Vec;
         use zcash_encoding::CompactSize;
         use zcash_protocol::consensus::BranchId;
-        use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+        use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
-        /// Builds a minimal v6 transaction header (20 bytes).
-        fn v6_header(branch_id: BranchId) -> Vec<u8> {
+        /// Builds a minimal v7 transaction header (20 bytes).
+        fn v7_header(branch_id: BranchId) -> Vec<u8> {
             let mut buf = Vec::new();
             // header: version 6 with overwintered bit
-            buf.extend_from_slice(&(V6_TX_VERSION | (1 << 31)).to_le_bytes());
-            buf.extend_from_slice(&V6_VERSION_GROUP_ID.to_le_bytes());
+            buf.extend_from_slice(&(V7_TX_VERSION | (1 << 31)).to_le_bytes());
+            buf.extend_from_slice(&V7_VERSION_GROUP_ID.to_le_bytes());
             buf.extend_from_slice(&u32::from(branch_id).to_le_bytes());
             buf.extend_from_slice(&0u32.to_le_bytes()); // lock_time
             buf.extend_from_slice(&100u32.to_le_bytes()); // expiry_height
@@ -705,7 +705,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_out_of_order_vp_deltas() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             // 2 VP delta entries: Orchard (3) then Sapling (2) — wrong order.
             CompactSize::write(&mut *buf, 2).unwrap();
             write_vp_entry(&mut buf, 3, 0, 100_000); // Orchard first (wrong)
@@ -718,7 +718,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_duplicate_vp_deltas() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 2).unwrap();
             write_vp_entry(&mut buf, 2, 0, 50_000);
             write_vp_entry(&mut buf, 2, 0, 50_000);
@@ -730,7 +730,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_reserved_bundle_type() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 1).unwrap();
             write_vp_entry(&mut buf, 1, 0, 1000);
             CompactSize::write(&mut *buf, 0).unwrap();
@@ -741,7 +741,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_zero_vp_delta_value() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 0);
             CompactSize::write(&mut *buf, 0).unwrap();
@@ -752,7 +752,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_fee_in_effect_bundles() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 4, 0, &[0xAA]).unwrap();
@@ -763,7 +763,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_mismatched_variant_across_maps() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 100_000);
             // Effect bundle says bundleType 2 variant 1 — mismatch.
@@ -776,7 +776,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_auth_without_effect() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
@@ -786,8 +786,8 @@ mod zip248_tests {
         }
 
         #[test]
-        fn accepts_empty_v6_transaction() {
-            let mut buf = v6_header(BranchId::Nu7);
+        fn accepts_empty_v7_transaction() {
+            let mut buf = v7_header(BranchId::Nu7);
             append_empty_body(&mut buf);
             let tx = Transaction::read(&buf[..], BranchId::Nu7).unwrap();
             assert!(tx.transparent_bundle().is_none());
@@ -797,7 +797,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_out_of_order_effect_bundles() {
-            let mut buf = v6_header(BranchId::Nu7);
+            let mut buf = v7_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
             // Effect bundles: Orchard (3) before Transparent (0) — wrong order.
             CompactSize::write(&mut *buf, 2).unwrap();
@@ -810,7 +810,7 @@ mod zip248_tests {
 
     // -- Wire order and roundtrip tests ----------------------------------------
 
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_v7)]
     mod wire_order {
         use super::super::super::zip248;
         use alloc::vec::Vec;
@@ -834,7 +834,7 @@ mod zip248_tests {
 
     // -- Sighash version info error tests --------------------------------------
 
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_v7)]
     mod sighash_info {
         use super::super::super::zip248;
 
@@ -843,7 +843,7 @@ mod zip248_tests {
             // sighashInfo with version byte 0x01 instead of 0x00.
             let data: &[u8] = &[0x01, 0x01]; // compactSize(1), version=1
             let mut cursor = data;
-            let result = zip248::consume_v6_sighash_v0_info(&mut cursor, "test");
+            let result = zip248::consume_v7_sighash_v0_info(&mut cursor, "test");
             assert!(result.is_err());
         }
 
@@ -852,7 +852,7 @@ mod zip248_tests {
             // sighashInfo with length 2 instead of 1.
             let data: &[u8] = &[0x02, 0x00, 0x00]; // compactSize(2), two bytes
             let mut cursor = data;
-            let result = zip248::consume_v6_sighash_v0_info(&mut cursor, "test");
+            let result = zip248::consume_v7_sighash_v0_info(&mut cursor, "test");
             assert!(result.is_err());
         }
     }
