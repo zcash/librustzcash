@@ -213,6 +213,10 @@ Mainnet activation will be set in the 0.10.0 final release.
 ## [0.8.0] - 2026-04-23
 
 ### Added
+- `zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID}`, for the
+  ZIP 248 transaction format (unstable; requires `zcash_unstable = "nu7"` or
+  `"zfuture"`). The version group ID is a placeholder until ZIP 248 assigns
+  one.
 - `zcash_protocol::consensus::TxIndex`
 - `zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS`
 - `zcash_protocol::consensus::BranchId::{has_sprout, has_sapling, has_orchard}`

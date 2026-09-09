@@ -330,6 +330,14 @@ features supported by `zcash_primitives 0.31.0`.
 ## [0.27.0] - 2026-04-23
 
 ### Added
+- `zcash_primitives::transaction::zip248`, the ZIP 248 extensible transaction
+  format, deployed as transaction version 7 (unstable; requires
+  `zcash_unstable = "nu7"` or `"zfuture"`). It provides `BundleType`,
+  `BundleVariant`, `BundleId`, `BundleMap`, `TypedBundle`, `CoinbaseBundle`,
+  `UnknownBundle` and `ValuePoolDeltas`, and `TransactionData` gains
+  `from_parts_v7`, `digest_v7`, `coinbase_bundle`, `ironwood_bundle`,
+  `value_pool_deltas`, `bundles` and `check_v7_consensus_rules`.
+- `zcash_primitives::transaction::TxVersion::V7`
 - `zcash_primitives::block`:
   - `Block`
   - `impl Debug for {BlockHeader, BlockHeaderData}`

@@ -11,26 +11,25 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent};
 use orchard::bundle::{self as orchard};
 use sapling::bundle::{self as sapling};
-use zcash_encoding::CompactSize;
+use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
+use zcash_protocol::constants::MAX_BLOCK_BYTES;
 use zcash_protocol::value::{ZatBalance, Zatoshis};
 
 use super::components::sprout;
 
-#[cfg(zcash_unstable = "zfuture")]
-use super::components::tze;
-
 use super::Authorization;
 
 // ---------------------------------------------------------------------------
-// Bundle type and variant enums (ZIP 248 registry for v6 transactions)
+// Bundle type and variant enums (ZIP 248 registry for v7 transactions)
 // ---------------------------------------------------------------------------
 
-/// Bundle type identifiers from the V6 Transaction Bundle Type Registry
+/// Bundle type identifiers from the V7 Transaction Bundle Type Registry
 /// defined in ZIP 248.
 ///
 /// Each variant corresponds to a protocol or value pool. New bundle types
@@ -42,43 +41,38 @@ pub enum BundleType {
     ///
     /// In-memory only — no wire encoding, not in the ZIP 248 registry.
     Sprout,
-    /// Transparent Zcash Extensions (speculative, `zcash_unstable = "zfuture"` only).
-    ///
-    /// In-memory only — not yet assigned a bundle type in ZIP 248.
-    Tze,
     /// Transparent inputs and outputs (bundleType 0).
     Transparent,
-    /// Reserved (bundleType 1). MUST NOT appear in any map.
-    Reserved,
+    /// Coinbase issuance and metadata (bundleType 1). No authorizing data.
+    Coinbase,
     /// Sapling spends and outputs (bundleType 2).
     Sapling,
-    /// Orchard actions (bundleType 3).
+    /// Orchard actions acting on the *Orchard pool* (bundleType 3).
     Orchard,
-    /// Transaction fee, value-only (bundleType 4, ZIP 2002).
+    /// Orchard actions acting on the *Ironwood pool* (bundleType 4).
+    ///
+    /// Uses the same encoding as [`BundleType::Orchard`]; the two differ in
+    /// the pool they act on, and so in their digest personalizations.
+    Ironwood,
+    /// Transaction fee, value-only (bundleType 5, ZIP 2002).
     Fee,
-    /// ZIP 233 NSM field, value-only (bundleType 5).
+    /// ZIP 233 NSM field, value-only (bundleType 6, ZIP 233).
     Zip233Nsm,
-    /// Key rotation (bundleType 6, ZIP 270). No VP deltas.
-    KeyRotation,
-    /// Lockbox disbursement (bundleType 7, TBD).
-    LockboxDisbursement,
 }
 
 impl BundleType {
     /// Try to decode a wire value. Returns `None` for unrecognized types.
     ///
-    /// [`BundleType::Sprout`] and [`BundleType::Tze`] are never returned —
-    /// they have no wire encoding.
+    /// [`BundleType::Sprout`] is never returned — it has no wire encoding.
     pub fn from_u64(v: u64) -> Option<Self> {
         match v {
             0 => Some(Self::Transparent),
-            1 => Some(Self::Reserved),
+            1 => Some(Self::Coinbase),
             2 => Some(Self::Sapling),
             3 => Some(Self::Orchard),
-            4 => Some(Self::Fee),
-            5 => Some(Self::Zip233Nsm),
-            6 => Some(Self::KeyRotation),
-            7 => Some(Self::LockboxDisbursement),
+            4 => Some(Self::Ironwood),
+            5 => Some(Self::Fee),
+            6 => Some(Self::Zip233Nsm),
             _ => None,
         }
     }
@@ -87,24 +81,22 @@ impl BundleType {
     ///
     /// # Panics
     ///
-    /// Panics if called on [`BundleType::Sprout`] or [`BundleType::Tze`],
-    /// which have no wire encoding.
+    /// Panics if called on [`BundleType::Sprout`], which has no wire encoding.
     pub fn to_u64(self) -> u64 {
         match self {
-            Self::Sprout | Self::Tze => panic!("in-memory-only bundle type has no wire encoding"),
+            Self::Sprout => panic!("in-memory-only bundle type has no wire encoding"),
             Self::Transparent => 0,
-            Self::Reserved => 1,
+            Self::Coinbase => 1,
             Self::Sapling => 2,
             Self::Orchard => 3,
-            Self::Fee => 4,
-            Self::Zip233Nsm => 5,
-            Self::KeyRotation => 6,
-            Self::LockboxDisbursement => 7,
+            Self::Ironwood => 4,
+            Self::Fee => 5,
+            Self::Zip233Nsm => 6,
         }
     }
 }
 
-/// Bundle variant identifiers from the V6 Transaction Bundle Type Registry
+/// Bundle variant identifiers from the V7 Transaction Bundle Type Registry
 /// defined in ZIP 248.
 ///
 /// Within a given bundle type, variants allow protocol evolution while
@@ -176,17 +168,19 @@ impl BundleId {
 
     /// Sprout bundle (in-memory only, no wire encoding).
     pub const SPROUT: Self = Self::new(BundleType::Sprout, BundleVariant::Default);
-    /// TZE bundle (in-memory only, no wire encoding).
-    pub const TZE: Self = Self::new(BundleType::Tze, BundleVariant::Default);
     /// Transparent bundle (bundleType 0, variant 0).
     pub const TRANSPARENT: Self = Self::new(BundleType::Transparent, BundleVariant::Default);
+    /// Coinbase bundle (bundleType 1, variant 0).
+    pub const COINBASE: Self = Self::new(BundleType::Coinbase, BundleVariant::Default);
     /// Sapling bundle (bundleType 2, variant 0).
     pub const SAPLING: Self = Self::new(BundleType::Sapling, BundleVariant::Default);
     /// Orchard bundle (bundleType 3, variant 0).
     pub const ORCHARD: Self = Self::new(BundleType::Orchard, BundleVariant::Default);
-    /// Transaction fee (bundleType 4, variant 0, value-only).
+    /// Ironwood bundle (bundleType 4, variant 0).
+    pub const IRONWOOD: Self = Self::new(BundleType::Ironwood, BundleVariant::Default);
+    /// Transaction fee (bundleType 5, variant 0, value-only).
     pub const FEE: Self = Self::new(BundleType::Fee, BundleVariant::Default);
-    /// ZIP 233 NSM field (bundleType 5, variant 0, value-only).
+    /// ZIP 233 NSM field (bundleType 6, variant 0, value-only).
     pub const ZIP233_NSM: Self = Self::new(BundleType::Zip233Nsm, BundleVariant::Default);
 }
 
@@ -197,23 +191,192 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized. The `effect_digest` is
-/// computed using the opaque effects personalization defined in ZIP 248,
-/// allowing any wallet to derive the txid. The `auth_digest` cannot be
-/// computed without understanding the bundle type, so it is left as `None`
-/// when parsed from the wire.
+/// the transaction can still be serialized. ZIP 248 defines no digest for a
+/// bundle a client does not understand — it expects the client to be given
+/// one — so `effect_digest` is filled in with the implementation-defined
+/// flat hash described on [`opaque_effects_personalization`]. The
+/// `auth_digest` cannot be computed without understanding the bundle type,
+/// so it is left as `None` when parsed from the wire.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
     /// Raw effecting-data bytes from the wire.
     pub effect_data: Vec<u8>,
     /// Digest of the effecting data for the txid computation, using the
-    /// opaque effects personalization from ZIP 248 §T.3.
+    /// implementation-defined personalization from
+    /// [`opaque_effects_personalization`].
     pub effect_digest: blake2b_simd::Hash,
     /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
-    /// Digest of the authorizing data. `None` when parsed from the wire;
-    /// set via [`BundleMap::get_unknown_mut`] before computing the auth commitment.
+    /// Digest of the authorizing data, or `None` if it is not known.
+    ///
+    /// Parsing leaves this `None`: ZIP 248 defines no digest for the
+    /// authorizing data of a bundle whose type the client does not
+    /// understand, and this implementation deliberately does not invent one
+    /// (unlike `effect_digest`, which has an implementation-defined flat hash
+    /// so that the txid stays computable). A caller that does understand the
+    /// bundle type can supply the digest through
+    /// [`BundleMap::get_unknown_mut`] before computing the authorizing data
+    /// commitment.
+    ///
+    /// The consequence is that a transaction parsed here carries unknown
+    /// bundles' authorizing data on the wire without committing to it, so this
+    /// implementation cannot detect that data being altered. It cannot
+    /// validate such a bundle either, which is why the omission is tolerable;
+    /// a node that does understand the type must supply the digest.
     pub auth_digest: Option<blake2b_simd::Hash>,
+}
+
+// ---------------------------------------------------------------------------
+// CoinbaseBundle
+// ---------------------------------------------------------------------------
+
+/// The maximum length of the coinbase bundle's `coinbaseData` field.
+///
+/// A coinbase `scriptSig` was limited to 100 bytes, of which the leading push
+/// of the block height took 5; of the 95 bytes that remained, the
+/// `compactSize` length prefix of `coinbaseData` now takes one.
+pub const MAX_COINBASE_DATA_LEN: usize = 94;
+
+/// The largest block height that may appear in a coinbase bundle,
+/// matching the range that ZIP 203 allows for `nExpiryHeight`.
+const MAX_COINBASE_BLOCK_HEIGHT: u32 = 499_999_999;
+
+/// The effecting data of the ZIP 248 coinbase bundle (`bundleType = 1`).
+/// [ZIP 248 §Coinbase Bundle](https://zips.z.cash/zip-0248#coinbase-bundle)
+///
+/// A transaction is a coinbase transaction if and only if it has a coinbase
+/// bundle. The bundle replaces the otherwise-unspendable transparent input
+/// that identified a coinbase transaction in previous transaction versions,
+/// and carries the block height that that input was required to encode.
+///
+/// `block_subsidy` is the whole of the new issuance for the block, and
+/// `lockbox_value` is the part of it that the funding streams deposit into
+/// the deferred pool. Only the difference is paid out by the transaction, so
+/// that difference — not the subsidy — is the bundle's value pool delta.
+///
+/// The coinbase bundle has no authorizing data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoinbaseBundle {
+    block_height: u32,
+    block_subsidy: Zatoshis,
+    lockbox_value: Zatoshis,
+    coinbase_data: Vec<u8>,
+}
+
+impl CoinbaseBundle {
+    /// Constructs a coinbase bundle, returning `None` if any of the field
+    /// constraints in ZIP 248 §"Coinbase Effecting Data" is violated.
+    pub fn from_parts(
+        block_height: u32,
+        block_subsidy: Zatoshis,
+        lockbox_value: Zatoshis,
+        coinbase_data: Vec<u8>,
+    ) -> Option<Self> {
+        if block_height == 0
+            || block_height > MAX_COINBASE_BLOCK_HEIGHT
+            || lockbox_value > block_subsidy
+            || coinbase_data.len() > MAX_COINBASE_DATA_LEN
+        {
+            return None;
+        }
+        Some(Self {
+            block_height,
+            block_subsidy,
+            lockbox_value,
+            coinbase_data,
+        })
+    }
+
+    /// Returns the height of the block in which the transaction is mined.
+    pub fn block_height(&self) -> u32 {
+        self.block_height
+    }
+
+    /// Returns the block subsidy for that block.
+    pub fn block_subsidy(&self) -> Zatoshis {
+        self.block_subsidy
+    }
+
+    /// Returns the part of the block subsidy deposited into the lockbox.
+    pub fn lockbox_value(&self) -> Zatoshis {
+        self.lockbox_value
+    }
+
+    /// Returns the miner-chosen data. Consensus assigns no meaning to it.
+    pub fn coinbase_data(&self) -> &[u8] {
+        &self.coinbase_data
+    }
+
+    /// Returns the value that this bundle contributes to the transparent
+    /// transaction value pool: the block subsidy less the lockbox deposit.
+    ///
+    /// This is the value that
+    /// $\mathsf{mValuePoolDeltas}[(\mathsf{CoinbaseBundleId}, \mathsf{Zec})]$
+    /// is required to equal.
+    pub fn value_pool_delta(&self) -> ZatBalance {
+        // `from_parts` and `read` both reject a lockbox value larger than the
+        // subsidy, so the difference of two in-range amounts is in range.
+        let subsidy = i64::try_from(u64::from(self.block_subsidy)).expect("MAX_MONEY fits in i64");
+        let lockbox = i64::try_from(u64::from(self.lockbox_value)).expect("MAX_MONEY fits in i64");
+        ZatBalance::from_i64(subsidy - lockbox).expect("lockboxValue <= blockSubsidy <= MAX_MONEY")
+    }
+
+    /// Deserializes the coinbase bundle's effecting data.
+    /// [ZIP 248 §Coinbase Effecting Data](https://zips.z.cash/zip-0248#coinbase-effecting-data)
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut u32_buf = [0u8; 4];
+        reader.read_exact(&mut u32_buf)?;
+        let block_height = u32::from_le_bytes(u32_buf);
+
+        let mut u64_buf = [0u8; 8];
+        reader.read_exact(&mut u64_buf)?;
+        let block_subsidy = Zatoshis::from_u64(u64::from_le_bytes(u64_buf)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase blockSubsidy out of valid monetary range",
+            )
+        })?;
+
+        reader.read_exact(&mut u64_buf)?;
+        let lockbox_value = Zatoshis::from_u64(u64::from_le_bytes(u64_buf)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase lockboxValue out of valid monetary range",
+            )
+        })?;
+
+        let data_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+        // Bound the allocation before reading: `coinbaseDataLen` comes from
+        // the wire and is capped by ZIP 248 at `MAX_COINBASE_DATA_LEN`.
+        if data_len > MAX_COINBASE_DATA_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "coinbase coinbaseDataLen exceeds the ZIP 248 limit of 94 bytes",
+            ));
+        }
+        let mut coinbase_data = vec![0u8; data_len];
+        reader.read_exact(&mut coinbase_data)?;
+
+        Self::from_parts(block_height, block_subsidy, lockbox_value, coinbase_data).ok_or_else(
+            || {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "coinbase bundle violates a ZIP 248 field constraint \
+                     (blockHeight range, or lockboxValue > blockSubsidy)",
+                )
+            },
+        )
+    }
+
+    /// Serializes the coinbase bundle's effecting data.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.block_height.to_le_bytes())?;
+        writer.write_all(&u64::from(self.block_subsidy).to_le_bytes())?;
+        writer.write_all(&u64::from(self.lockbox_value).to_le_bytes())?;
+        CompactSize::write(&mut writer, self.coinbase_data.len())?;
+        writer.write_all(&self.coinbase_data)?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -226,25 +389,34 @@ pub struct UnknownBundle {
 #[derive(Debug)]
 pub enum TypedBundle<A: Authorization> {
     Transparent(transparent::Bundle<A::TransparentAuth>),
+    Coinbase(CoinbaseBundle),
     Sprout(sprout::Bundle),
     Sapling(sapling::Bundle<A::SaplingAuth, ZatBalance>),
     Orchard(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
-    #[cfg(zcash_unstable = "zfuture")]
-    Tze(tze::Bundle<A::TzeAuth>),
+    Ironwood(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
 }
+
 impl Clone for TypedBundle<crate::transaction::Authorized> {
     fn clone(&self) -> Self {
         match self {
             TypedBundle::Transparent(b) => TypedBundle::Transparent(b.clone()),
+            TypedBundle::Coinbase(b) => TypedBundle::Coinbase(b.clone()),
             TypedBundle::Sprout(b) => TypedBundle::Sprout(b.clone()),
             TypedBundle::Sapling(b) => TypedBundle::Sapling(b.clone()),
             TypedBundle::Orchard(b) => TypedBundle::Orchard(b.clone()),
-            #[cfg(zcash_unstable = "zfuture")]
-            TypedBundle::Tze(b) => TypedBundle::Tze(b.clone()),
+            TypedBundle::Ironwood(b) => TypedBundle::Ironwood(b.clone()),
         }
     }
 }
 
+impl Clone for BundleMap<crate::transaction::Authorized> {
+    fn clone(&self) -> Self {
+        BundleMap {
+            known: self.known.clone(),
+            unknown: self.unknown.clone(),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // BundleMap
@@ -296,6 +468,15 @@ impl<A: Authorization> BundleMap<A> {
             })
     }
 
+    /// Returns the coinbase bundle, if present. A transaction is a coinbase
+    /// transaction if and only if this returns `Some`.
+    pub fn coinbase(&self) -> Option<&CoinbaseBundle> {
+        self.known.get(&BundleId::COINBASE).and_then(|b| match b {
+            TypedBundle::Coinbase(bundle) => Some(bundle),
+            _ => None,
+        })
+    }
+
     /// Returns the sprout bundle, if present.
     pub fn sprout(&self) -> Option<&sprout::Bundle> {
         self.known.get(&BundleId::SPROUT).and_then(|b| match b {
@@ -320,11 +501,19 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
-    /// Returns the tze bundle, if present.
-    #[cfg(zcash_unstable = "zfuture")]
-    pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
-        self.known.get(&BundleId::TZE).and_then(|b| match b {
-            TypedBundle::Tze(bundle) => Some(bundle),
+    /// Returns the Ironwood bundle, if present.
+    ///
+    /// The Ironwood bundle acts on the *Ironwood pool* using the Orchard
+    /// protocol, so it is represented by the same type as the Orchard bundle.
+    ///
+    /// ZIP 248 leaves the `enableCrossAddress` flag unrestricted in an
+    /// Ironwood bundle, but `orchard::bundle::Flags` has no representation
+    /// for that bit yet, so an Ironwood bundle that sets it cannot currently
+    /// be parsed. This will be lifted when the `orchard` crate implements
+    /// ZIP 2006.
+    pub fn ironwood(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        self.known.get(&BundleId::IRONWOOD).and_then(|b| match b {
+            TypedBundle::Ironwood(bundle) => Some(bundle.as_ref()),
             _ => None,
         })
     }
@@ -341,6 +530,12 @@ impl<A: Authorization> BundleMap<A> {
     pub fn insert_transparent(&mut self, bundle: transparent::Bundle<A::TransparentAuth>) {
         self.known
             .insert(BundleId::TRANSPARENT, TypedBundle::Transparent(bundle));
+    }
+
+    /// Inserts the coinbase bundle.
+    pub fn insert_coinbase(&mut self, bundle: CoinbaseBundle) {
+        self.known
+            .insert(BundleId::COINBASE, TypedBundle::Coinbase(bundle));
     }
 
     /// Insert a Sprout bundle. Uses the in-memory-only [`BundleType::Sprout`].
@@ -361,15 +556,60 @@ impl<A: Authorization> BundleMap<A> {
             .insert(BundleId::ORCHARD, TypedBundle::Orchard(Box::new(bundle)));
     }
 
-    /// Inserts the tze bundle.
-    #[cfg(zcash_unstable = "zfuture")]
-    pub fn insert_tze(&mut self, bundle: tze::Bundle<A::TzeAuth>) {
-        self.known.insert(BundleId::TZE, TypedBundle::Tze(bundle));
+    /// Inserts the Ironwood bundle.
+    pub fn insert_ironwood(&mut self, bundle: orchard::Bundle<A::OrchardAuth, ZatBalance>) {
+        self.known
+            .insert(BundleId::IRONWOOD, TypedBundle::Ironwood(Box::new(bundle)));
     }
 
     /// Insert an opaque bundle whose type is not recognized.
-    pub fn insert_unknown(&mut self, raw_type: u64, raw_variant: u64, bundle: UnknownBundle) {
+    /// Returns an error if the raw key has no `compactSize` encoding, which
+    /// would make the bundle impossible to serialize or digest.
+    pub fn insert_unknown(
+        &mut self,
+        raw_type: u64,
+        raw_variant: u64,
+        bundle: UnknownBundle,
+    ) -> Result<(), WireKeyError> {
+        check_wire_key(raw_type, raw_variant)?;
         self.unknown.insert((raw_type, raw_variant), bundle);
+        Ok(())
+    }
+
+    /// Removes and returns the Sapling bundle, if present.
+    ///
+    /// Lets the transaction builder move a bundle out to authorize it, rather
+    /// than cloning one it is about to replace.
+    pub(crate) fn take_sapling(&mut self) -> Option<sapling::Bundle<A::SaplingAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::SAPLING)? {
+            TypedBundle::Sapling(bundle) => Some(bundle),
+            other => {
+                self.known.insert(BundleId::SAPLING, other);
+                None
+            }
+        }
+    }
+
+    /// Removes and returns the Orchard bundle, if present.
+    pub(crate) fn take_orchard(&mut self) -> Option<orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::ORCHARD)? {
+            TypedBundle::Orchard(bundle) => Some(*bundle),
+            other => {
+                self.known.insert(BundleId::ORCHARD, other);
+                None
+            }
+        }
+    }
+
+    /// Removes and returns the Ironwood bundle, if present.
+    pub(crate) fn take_ironwood(&mut self) -> Option<orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::IRONWOOD)? {
+            TypedBundle::Ironwood(bundle) => Some(*bundle),
+            other => {
+                self.known.insert(BundleId::IRONWOOD, other);
+                None
+            }
+        }
     }
 
     /// Returns a mutable reference to an unknown bundle, if present.
@@ -383,7 +623,9 @@ impl<A: Authorization> BundleMap<A> {
 
     // -- Authorization mapping --
 
-    /// Transforms bundle authorization types using the given per-protocol closures.
+    /// Transforms bundle authorization types using the given per-protocol
+    /// closures. `f_orchard` is applied to both Orchard protocol bundles: the
+    /// Orchard bundle and the Ironwood bundle.
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl FnOnce(
@@ -392,21 +634,15 @@ impl<A: Authorization> BundleMap<A> {
         f_sapling: impl FnOnce(
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
-        f_orchard: impl FnOnce(
+        mut f_orchard: impl FnMut(
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>,
-        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
-            Option<tze::Bundle<A::TzeAuth>>,
-        )
-            -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> BundleMap<B> {
         // Delegate to try_map_authorization with infallible closures.
         self.try_map_authorization::<B, core::convert::Infallible>(
             |b| Ok(f_transparent(b)),
             |b| Ok(f_sapling(b)),
             |b| Ok(f_orchard(b)),
-            #[cfg(zcash_unstable = "zfuture")]
-            |b| Ok(f_tze(b)),
         )
         // Safety: Infallible cannot be constructed, so this never panics.
         .unwrap()
@@ -423,39 +659,38 @@ impl<A: Authorization> BundleMap<A> {
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         )
             -> Result<Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>, E>,
-        f_orchard: impl FnOnce(
+        mut f_orchard: impl FnMut(
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         )
             -> Result<Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>, E>,
-        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
-            Option<tze::Bundle<A::TzeAuth>>,
-        ) -> Result<
-            Option<tze::Bundle<B::TzeAuth>>,
-            E,
-        >,
     ) -> Result<BundleMap<B>, E> {
         let mut transparent_bundle = None;
+        let mut coinbase_bundle = None;
         let mut sprout_bundle = None;
         let mut sapling_bundle = None;
         let mut orchard_bundle = None;
-        #[cfg(zcash_unstable = "zfuture")]
-        let mut tze_bundle = None;
+        let mut ironwood_bundle = None;
         let mut result = BundleMap::new();
 
         for (_id, bundle) in self.known {
             match bundle {
                 TypedBundle::Transparent(b) => transparent_bundle = Some(b),
+                TypedBundle::Coinbase(b) => coinbase_bundle = Some(b),
                 TypedBundle::Sprout(b) => sprout_bundle = Some(b),
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
                 TypedBundle::Orchard(b) => orchard_bundle = Some(*b),
-                #[cfg(zcash_unstable = "zfuture")]
-                TypedBundle::Tze(b) => tze_bundle = Some(b),
+                TypedBundle::Ironwood(b) => ironwood_bundle = Some(*b),
             }
         }
         result.unknown = self.unknown;
 
         if let Some(b) = f_transparent(transparent_bundle)? {
             result.insert_transparent(b);
+        }
+        // The coinbase bundle has no authorizing data, so it passes through
+        // unchanged.
+        if let Some(b) = coinbase_bundle {
+            result.insert_coinbase(b);
         }
         // Sprout bundles pass through unchanged (no authorization to map).
         if let Some(b) = sprout_bundle {
@@ -467,21 +702,13 @@ impl<A: Authorization> BundleMap<A> {
         if let Some(b) = f_orchard(orchard_bundle)? {
             result.insert_orchard(b);
         }
-        #[cfg(zcash_unstable = "zfuture")]
-        if let Some(b) = f_tze(tze_bundle)? {
-            result.insert_tze(b);
+        // The Ironwood bundle is an Orchard protocol bundle acting on the
+        // *Ironwood pool*, so the same authorization mapping applies to it.
+        if let Some(b) = f_orchard(ironwood_bundle)? {
+            result.insert_ironwood(b);
         }
 
         Ok(result)
-    }
-}
-
-impl Clone for BundleMap<crate::transaction::Authorized> {
-    fn clone(&self) -> Self {
-        BundleMap {
-            known: self.known.clone(),
-            unknown: self.unknown.clone(),
-        }
     }
 }
 
@@ -593,6 +820,17 @@ impl ValuePoolDeltas {
         self.set_zec(BundleType::Transparent, BundleVariant::Default, value);
     }
 
+    /// Returns the coinbase bundle's ZEC value pool delta: the block subsidy
+    /// less the part of it deposited into the lockbox.
+    pub fn coinbase_value(&self) -> Option<ZatBalance> {
+        self.get_zec(BundleType::Coinbase)
+    }
+
+    /// Sets the coinbase bundle's ZEC value pool delta.
+    pub fn set_coinbase(&mut self, value: ZatBalance) {
+        self.set_zec(BundleType::Coinbase, BundleVariant::Default, value);
+    }
+
     /// Returns the Sapling bundle's ZEC value pool delta.
     pub fn sapling_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Sapling)
@@ -611,6 +849,16 @@ impl ValuePoolDeltas {
     /// Sets the Orchard bundle's ZEC value pool delta.
     pub fn set_orchard(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Orchard, BundleVariant::Default, value);
+    }
+
+    /// Returns the Ironwood bundle's ZEC value pool delta.
+    pub fn ironwood_value(&self) -> Option<ZatBalance> {
+        self.get_zec(BundleType::Ironwood)
+    }
+
+    /// Sets the Ironwood bundle's ZEC value pool delta.
+    pub fn set_ironwood(&mut self, value: ZatBalance) {
+        self.set_zec(BundleType::Ironwood, BundleVariant::Default, value);
     }
 
     /// Returns the transaction fee as a non-negative amount.
@@ -647,7 +895,7 @@ impl ValuePoolDeltas {
         self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, bal);
     }
 
-    /// Insert a known-type entry. Used during v6 deserialization.
+    /// Insert a known-type entry. Used during v7 deserialization.
     pub fn insert_known(
         &mut self,
         key: ValuePoolDeltaKey,
@@ -657,7 +905,9 @@ impl ValuePoolDeltas {
         self.known.insert(key, (variant, value));
     }
 
-    /// Insert an unknown-type entry. Used during v6 deserialization.
+    /// Insert an unknown-type entry. Used during v7 deserialization.
+    /// Returns an error if the raw key has no `compactSize` encoding, which
+    /// would make the entry impossible to serialize or digest.
     pub fn insert_unknown(
         &mut self,
         bundle_type: u64,
@@ -665,9 +915,11 @@ impl ValuePoolDeltas {
         asset_uuid: [u8; 64],
         variant: u64,
         value: ZatBalance,
-    ) {
+    ) -> Result<(), WireKeyError> {
+        check_wire_key(bundle_type, variant)?;
         self.unknown
             .insert((bundle_type, asset_class, asset_uuid), (variant, value));
+        Ok(())
     }
 
     /// Produce all VP delta entries (known and unknown) in canonical wire
@@ -719,7 +971,7 @@ impl ValuePoolDeltas {
 }
 
 // ---------------------------------------------------------------------------
-// v6 wire format helpers
+// v7 wire format helpers
 // ---------------------------------------------------------------------------
 
 /// A single value pool delta entry as it appears on the wire.
@@ -761,10 +1013,7 @@ impl ValuePoolDeltaEntry {
                     #[cfg(not(feature = "std"))]
                     "ValuePoolDelta assetClass must be 0 or 1",
                     #[cfg(feature = "std")]
-                    alloc::format!(
-                        "ValuePoolDelta assetClass must be 0 or 1, got {:#x}",
-                        _other,
-                    ),
+                    alloc::format!("ValuePoolDelta assetClass must be 0 or 1, got {_other:#x}"),
                 ));
             }
         };
@@ -813,6 +1062,15 @@ pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64
     let bundle_type = CompactSize::read(&mut reader)?;
     let bundle_variant = CompactSize::read(&mut reader)?;
     let data_len = CompactSize::read(&mut reader)? as usize;
+    // The payload is allocated before it is read, so bound the claimed length
+    // by something a transaction could actually contain: no bundle can exceed
+    // the maximum block size.
+    if data_len > MAX_BLOCK_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "v7 bundle data length exceeds the maximum block size",
+        ));
+    }
     let mut data = vec![0u8; data_len];
     reader.read_exact(&mut data)?;
     Ok(((bundle_type, bundle_variant), data))
@@ -834,12 +1092,23 @@ pub fn write_bundle_data_framing<W: Write>(
 
 /// Returns the 16-byte BLAKE2b personalization for the opaque effects digest
 /// of a bundle with the given type and variant.
-/// [ZIP 248 §T.3](https://zips.z.cash/zip-0248#t-3-effects-bundles-digest)
 ///
 /// Layout: `"ZTxIdT" (6) | bundleType (4-byte LE) | 0x56 (1) | bundleVariant (1) | "Hash" (4)`
 ///
-/// This is used for bundle types not understood by the wallet, allowing the
-/// txid to be computed by flat-hashing the raw `vBundleData` bytes.
+/// # Implementation-defined
+///
+/// This scheme is **not** specified by ZIP 248. The ZIP defines a
+/// `bundle_effects_digest` only per bundle type, and expects a wallet that
+/// does not understand a bundle to be *given* that 32-byte digest (see
+/// [ZIP 248 §Implications for Wallets](https://zips.z.cash/zip-0248#implications-for-wallets)).
+///
+/// Flat-hashing the raw `vBundleData` bytes keeps txid computation infallible
+/// for transactions carrying bundle types this implementation does not know,
+/// but the resulting digest is *not* the digest that a validator which
+/// understands the bundle would compute, and so the txid derived from it will
+/// not match consensus. Treat a txid computed over an unknown bundle as
+/// provisional until this implementation understands that bundle type, or is
+/// extended to accept supplied per-bundle digests.
 pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> [u8; 16] {
     let mut p = [0u8; 16];
     p[..6].copy_from_slice(b"ZTxIdT");
@@ -850,12 +1119,67 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
     p
 }
 
+/// A raw `(bundleType, bundleVariant)` pair with no `compactSize` encoding.
+///
+/// Both are `compactSize`-encoded on the wire and in the v7 bundle digests, so
+/// a value above [`MAX_COMPACT_SIZE`] could be neither serialized nor
+/// committed to. Parsed transactions cannot carry one, because `compactSize`
+/// decoding enforces the same bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WireKeyError {
+    /// The raw `bundleType` is out of range.
+    BundleType(u64),
+    /// The raw `bundleVariant` is out of range.
+    BundleVariant(u64),
+}
+
+impl fmt::Display for WireKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WireKeyError::BundleType(value) => write!(
+                f,
+                "bundleType {value} exceeds the maximum compactSize value {MAX_COMPACT_SIZE}"
+            ),
+            WireKeyError::BundleVariant(value) => write!(
+                f,
+                "bundleVariant {value} exceeds the maximum compactSize value {MAX_COMPACT_SIZE}"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for WireKeyError {}
+
+/// Checks that a raw wire key can be `compactSize`-encoded.
+fn check_wire_key(raw_type: u64, raw_variant: u64) -> Result<(), WireKeyError> {
+    if raw_type > u64::from(MAX_COMPACT_SIZE) {
+        return Err(WireKeyError::BundleType(raw_type));
+    }
+    if raw_variant > u64::from(MAX_COMPACT_SIZE) {
+        return Err(WireKeyError::BundleVariant(raw_variant));
+    }
+    Ok(())
+}
+
+/// The wire encoding of a sighash version 0 `sighashInfo` prefix, shared by
+/// `TransparentSighashInfo`, `SaplingSignature` and `OrchardSignature`.
+///
+/// Per [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning),
+/// sighash version 0 has empty `associatedData` for every bundle type, so
+/// `sighashInfo = [0x00]` and the wire encoding is `compactSize(1) || [0x00]`.
+/// Version 0 is the only defined version.
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
+
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
 /// [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning)
 ///
 /// Sighash version 0 encodes as `[0x01, 0x00]` on the wire: compactSize(1) for the
 /// info length, then `0x00` for the version byte. This is the only defined version.
-pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
     reader: &mut R,
     _context: &'static str,
 ) -> io::Result<()> {
@@ -892,15 +1216,16 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
 }
 
 // ---------------------------------------------------------------------------
-// Transparent v6 effect/auth helpers
+// Transparent v7 effect/auth helpers
 // ---------------------------------------------------------------------------
 
-/// Writes transparent effecting data in v6 format.
+/// Writes transparent effecting data in v7 format.
 /// [ZIP 248 §Transparent Effecting Data](https://zips.z.cash/zip-0248#transparent-effecting-data)
 ///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
-pub fn write_v6_transparent_effects<W: Write>(
+#[cfg(zcash_unstable = "nu8")]
+pub fn write_v7_transparent_effects<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
@@ -918,18 +1243,17 @@ pub fn write_v6_transparent_effects<W: Write>(
     Ok(())
 }
 
-/// Writes transparent authorizing data in v6 format.
+/// Writes transparent authorizing data in v7 format.
 /// [ZIP 248 §Transparent Authorizing Data](https://zips.z.cash/zip-0248#transparent-authorizing-data)
 ///
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
-pub fn write_v6_transparent_auth<W: Write>(
+#[cfg(zcash_unstable = "nu8")]
+pub fn write_v7_transparent_auth<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
     for txin in &bundle.vin {
-        // sighashInfo: version 0
-        CompactSize::write(&mut writer, 1)?;
-        writer.write_all(&[0x00])?;
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
         // scriptSig with compactSize length prefix
         txin.script_sig().write(&mut writer)?;
     }
@@ -1065,7 +1389,8 @@ mod tests {
                         .hash(&[4, 5, 6]),
                 ),
             },
-        );
+        )
+        .unwrap();
 
         assert!(!map.is_empty());
         let unknowns: Vec<_> = map.unknown_bundles().collect();

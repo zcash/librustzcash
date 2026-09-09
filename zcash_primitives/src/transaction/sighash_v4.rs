@@ -141,11 +141,9 @@ pub(crate) fn zip143_digests<
 ) -> Zip143Digests<Blake2bHash> {
     let vin = tx
         .transparent_bundle()
-        
         .map_or(&[][..], |b| b.vin.as_slice());
     let vout = tx
         .transparent_bundle()
-        
         .map_or(&[][..], |b| b.vout.as_slice());
 
     Zip143Digests {
@@ -156,17 +154,14 @@ pub(crate) fn zip143_digests<
         },
         joinsplits: tx
             .sprout_bundle()
-            
             .filter(|b| !b.joinsplits.is_empty())
             .map(|b| joinsplits_hash(tx.consensus_branch_id, &b.joinsplits, &b.joinsplit_pubkey)),
         sapling_spends: tx
             .sapling_bundle()
-            
             .filter(|b| !b.shielded_spends().is_empty())
             .map(|b| sapling_spends_hash(b.shielded_spends())),
         sapling_outputs: tx
             .sapling_bundle()
-            
             .filter(|b| !b.shielded_outputs().is_empty())
             .map(|b| sapling_outputs_hash(b.shielded_outputs())),
     }
