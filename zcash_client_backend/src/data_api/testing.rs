@@ -6,6 +6,7 @@ use std::{
     fmt,
     hash::Hash,
     num::NonZeroU32,
+    ops::Range,
 };
 
 #[cfg(feature = "pczt")]
@@ -3570,6 +3571,13 @@ impl WalletWrite for MockWalletDb {
         _retain_with_priority: Option<ScanPriority>,
     ) -> Result<u64, <Self as WalletRead>::Error> {
         Ok(0)
+    }
+
+    fn queue_rescan(
+        &mut self,
+        _range: Range<BlockHeight>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        Ok(())
     }
 
     fn store_decrypted_tx(
