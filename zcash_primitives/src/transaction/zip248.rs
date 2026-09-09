@@ -48,20 +48,21 @@ pub enum BundleType {
     Tze,
     /// Transparent inputs and outputs (bundleType 0).
     Transparent,
-    /// Reserved (bundleType 1). MUST NOT appear in any map.
-    Reserved,
+    /// Coinbase issuance and metadata (bundleType 1). No authorizing data.
+    Coinbase,
     /// Sapling spends and outputs (bundleType 2).
     Sapling,
-    /// Orchard actions (bundleType 3).
+    /// Orchard actions acting on the *Orchard pool* (bundleType 3).
     Orchard,
-    /// Transaction fee, value-only (bundleType 4, ZIP 2002).
+    /// Orchard actions acting on the *Ironwood pool* (bundleType 4).
+    ///
+    /// Uses the same encoding as [`BundleType::Orchard`]; the two differ in
+    /// the pool they act on, and so in their digest personalizations.
+    Ironwood,
+    /// Transaction fee, value-only (bundleType 5, ZIP 2002).
     Fee,
-    /// ZIP 233 NSM field, value-only (bundleType 5).
+    /// ZIP 233 NSM field, value-only (bundleType 6, ZIP 233).
     Zip233Nsm,
-    /// Key rotation (bundleType 6, ZIP 270). No VP deltas.
-    KeyRotation,
-    /// Lockbox disbursement (bundleType 7, TBD).
-    LockboxDisbursement,
 }
 
 impl BundleType {
@@ -72,13 +73,12 @@ impl BundleType {
     pub fn from_u64(v: u64) -> Option<Self> {
         match v {
             0 => Some(Self::Transparent),
-            1 => Some(Self::Reserved),
+            1 => Some(Self::Coinbase),
             2 => Some(Self::Sapling),
             3 => Some(Self::Orchard),
-            4 => Some(Self::Fee),
-            5 => Some(Self::Zip233Nsm),
-            6 => Some(Self::KeyRotation),
-            7 => Some(Self::LockboxDisbursement),
+            4 => Some(Self::Ironwood),
+            5 => Some(Self::Fee),
+            6 => Some(Self::Zip233Nsm),
             _ => None,
         }
     }
@@ -93,13 +93,12 @@ impl BundleType {
         match self {
             Self::Sprout | Self::Tze => panic!("in-memory-only bundle type has no wire encoding"),
             Self::Transparent => 0,
-            Self::Reserved => 1,
+            Self::Coinbase => 1,
             Self::Sapling => 2,
             Self::Orchard => 3,
-            Self::Fee => 4,
-            Self::Zip233Nsm => 5,
-            Self::KeyRotation => 6,
-            Self::LockboxDisbursement => 7,
+            Self::Ironwood => 4,
+            Self::Fee => 5,
+            Self::Zip233Nsm => 6,
         }
     }
 }
@@ -180,13 +179,17 @@ impl BundleId {
     pub const TZE: Self = Self::new(BundleType::Tze, BundleVariant::Default);
     /// Transparent bundle (bundleType 0, variant 0).
     pub const TRANSPARENT: Self = Self::new(BundleType::Transparent, BundleVariant::Default);
+    /// Coinbase bundle (bundleType 1, variant 0).
+    pub const COINBASE: Self = Self::new(BundleType::Coinbase, BundleVariant::Default);
     /// Sapling bundle (bundleType 2, variant 0).
     pub const SAPLING: Self = Self::new(BundleType::Sapling, BundleVariant::Default);
     /// Orchard bundle (bundleType 3, variant 0).
     pub const ORCHARD: Self = Self::new(BundleType::Orchard, BundleVariant::Default);
-    /// Transaction fee (bundleType 4, variant 0, value-only).
+    /// Ironwood bundle (bundleType 4, variant 0).
+    pub const IRONWOOD: Self = Self::new(BundleType::Ironwood, BundleVariant::Default);
+    /// Transaction fee (bundleType 5, variant 0, value-only).
     pub const FEE: Self = Self::new(BundleType::Fee, BundleVariant::Default);
-    /// ZIP 233 NSM field (bundleType 5, variant 0, value-only).
+    /// ZIP 233 NSM field (bundleType 6, variant 0, value-only).
     pub const ZIP233_NSM: Self = Self::new(BundleType::Zip233Nsm, BundleVariant::Default);
 }
 

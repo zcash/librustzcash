@@ -1309,9 +1309,8 @@ impl Transaction {
             }
         }
 
-        // [ZIP 248 §v7 Transaction Bundle Type Registry](https://zips.z.cash/zip-0248#v7-transaction-bundle-type-registry)
-        // bundleType 1 is Reserved and MUST NOT appear in any map.
-        // bundleTypes 4 (fee) and 5 (ZIP 233 NSM) carry only VP delta
+        // [ZIP 248 §V7 Transaction Bundle Type Registry](https://zips.z.cash/zip-0248#v7-transaction-bundle-type-registry)
+        // bundleTypes 5 (fee) and 6 (ZIP 233 NSM) carry only VP delta
         // entries -- the registry marks their effect and auth columns as
         // prohibited, so reject them in mEffectBundles / mAuthBundles.
         for &value_only_bundle in &[
@@ -1328,13 +1327,12 @@ impl Transaction {
                 ));
             }
         }
-        if vp_variants_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
-            || effect_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
-            || auth_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
-        {
+        // The coinbase bundle has effecting data and a value pool delta, but
+        // nothing authorizes it: its mAuthBundles column is marked ❌.
+        if auth_data_by_type.contains_key(&zip248::BundleType::Coinbase.to_u64()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "v7 transaction references the reserved bundleType 1",
+                "v7 transaction has a coinbase bundle in mAuthBundles",
             ));
         }
 
