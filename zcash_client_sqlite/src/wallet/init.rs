@@ -748,12 +748,6 @@ mod tests {
         zip32::DiversifierIndex,
     };
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    use zcash_protocol::value::Zatoshis;
-
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         let result = conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")?

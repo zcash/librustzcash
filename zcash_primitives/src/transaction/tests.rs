@@ -982,7 +982,8 @@ mod zip248_tests {
 
     // -- Whole-transaction roundtrips for the v7 bundle types ------------------
 
-    #[cfg(zcash_v7)]
+    // Gated on `nu7` rather than `zcash_v7`: these tests name `BranchId::Nu7`.
+    #[cfg(zcash_unstable = "nu7")]
     mod bundle_roundtrips {
         use proptest::prelude::*;
 
