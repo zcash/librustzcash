@@ -860,6 +860,13 @@ pub(crate) fn open_shard_note_spendable_across_commitment_free_stretch<T: Shield
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn completed_shard_note_spendable_with_unscanned_gap_below_it<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::completed_shard_note_spendable_with_unscanned_gap_below_it::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn stabilized_note_floor_invalidated_by_reorg<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::stabilized_note_floor_invalidated_by_reorg::<T, _>(
         TestDbFactory::default(),

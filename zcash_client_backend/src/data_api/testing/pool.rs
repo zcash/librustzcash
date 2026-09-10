@@ -174,59 +174,23 @@ const RECOVERY_A_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
 /// [`build_two_account_recovery_fixture`] fixture.
 const RECOVERY_B_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(80_000);
 
-/// Shared construction for the stable- and tip-shard fixtures. Both fixtures
-/// use the same initial chain state and two real blocks (Block A places a
-/// wallet note in shard 1's interior, Block B's scan completes shard 1 via
-/// real leaves and spills 9 leaves into shard 2). They differ only in how
-/// many trailing filler blocks are scanned past Block B:
-/// * [`build_stable_shard_fixture`] appends `PRUNING_DEPTH + 10` trailing
-///   blocks, pushing the pruning floor above shard 1's `subtree_end_height`
-///   so the note stabilizes against the completed-shard interpretation.
-/// * [`build_tip_shard_fixture`] appends only 5 trailing blocks, leaving
-///   the wallet's birthday inside the chain-tip pruning window so the note
-///   stabilizes against the active-shard interpretation.
-///
-/// The block cache also holds [`PRE_BIRTHDAY_BLOCKS`] empty blocks *below*
-/// the account birthday. These are never scanned during fixture setup —
-/// mirroring production, where the chain always has (unscanned) history
-/// below any account's birthday — but they give a rewind-then-rescan flow
-/// real cached blocks to re-scan when a rewind lowers the account birthday.
-/// To decouple the account birthday from the cache floor, the account is
-/// imported mid-fixture (once the pre-birthday blocks exist) rather than
-/// created by `TestBuilder`; its birthday frontier is the chain state of the
-/// cached block at `birthday - 1`.
-///
-/// All block sizes here are well within plausible mainnet limits (the
-/// 300-output-per-block ceiling we use as our model upper bound), and every
-/// block is generated, so the block cache is contiguous from
-/// `birthday - PRE_BIRTHDAY_BLOCKS` to `chain_tip` and any
-/// rewind-then-rescan flow can drive a continuous re-scan.
-///
-/// In the diagram, `X` is the wallet's note commitment, `f` counts
-/// non-wallet filler commitments, `P` is [`PRE_BIRTHDAY_BLOCKS`], and `N` is
-/// `trailing_filler_blocks`. The shard 1/2 boundary falls inside Block B,
-/// whose 30 leaves split 21/9 across it.
-///
-/// ```text
-/// blocks:  |<-(faked state)->|<--P empty blk-->|<------A------>|<------B------>|<-----N blk----->|
-///     birthday-P-1      birthday-P         birthday        birthday+1      birthday+2        chain_tip
-/// leaves:  |<---(2^17-71)--->|<-------0------->|<----X+49f---->|<-----30f----->|<------N f------>|
-/// shards:  |<shard 0>|<--------------------shard 1--------------------->|<-------shard 2------>|...
-/// ```
-///
-/// Wallet notes placed by this fixture:
-///
-/// | height     | position | shard | value      |
-/// |------------|----------|-------|------------|
-/// | `birthday` | 131001   | 1     | 150 000    |
-fn build_shard_1_note_fixture<T, Dsf>(
+/// The number of leaves between the shard 1 fixtures' initial frontier and the end of shard 1.
+/// The frontier ends at position 131000, so shard 1's last position is 131071.
+const SHARD_1_FRONTIER_GAP: u32 = 71;
+
+/// Builds the starting state shared by the shard 1 fixtures: note commitment trees whose
+/// frontier lies [`SHARD_1_FRONTIER_GAP`] leaves short of shard 1's end,
+/// [`PRE_BIRTHDAY_BLOCKS`] cached empty blocks below the birthday, and an account imported
+/// at the birthday. Returns the test state, the account's id, its spending key, and its
+/// viewing key for pool `T`.
+fn build_shard_1_prefix_fixture<T, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
-    trailing_filler_blocks: u32,
 ) -> (
     TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
     <Dsf as DataStoreFactory>::AccountId,
     UnifiedSpendingKey,
+    T::Fvk,
 )
 where
     T: ShieldedPoolTester,
@@ -244,12 +208,11 @@ where
     // account carries the keys that builder-created accounts would have.
     const TEST_SEED: [u8; 32] = [0u8; 32];
 
-    // Initial frontier 71 positions short of shard 1's end (position
-    // 131000). The frontier is unaligned with shard boundaries; a boundary-
-    // aligned frontier would cause `prior_subtree_roots` to cache shard 1
-    // and then `insert_frontier` would fail trying to reinstall its leaf
-    // into the cached-leaf-form shard.
-    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - 71;
+    // The frontier is unaligned with shard boundaries; a boundary-aligned
+    // frontier would cause `prior_subtree_roots` to cache shard 1 and then
+    // `insert_frontier` would fail trying to reinstall its leaf into the
+    // cached-leaf-form shard.
+    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - SHARD_1_FRONTIER_GAP;
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -330,6 +293,70 @@ where
         .import_account_hd("primary", &seed, zip32::AccountId::ZERO, &birthday, None)
         .expect("account import should succeed");
     let account_id = account.id();
+
+    (st, account_id, usk, dfvk)
+}
+
+/// Shared construction for the stable- and tip-shard fixtures. Both fixtures
+/// use the same initial chain state and two real blocks (Block A places a
+/// wallet note in shard 1's interior, Block B's scan completes shard 1 via
+/// real leaves and spills 9 leaves into shard 2). They differ only in how
+/// many trailing filler blocks are scanned past Block B:
+/// * [`build_stable_shard_fixture`] appends `PRUNING_DEPTH + 10` trailing
+///   blocks, pushing the pruning floor above shard 1's `subtree_end_height`
+///   so the note stabilizes against the completed-shard interpretation.
+/// * [`build_tip_shard_fixture`] appends only 5 trailing blocks, leaving
+///   the wallet's birthday inside the chain-tip pruning window so the note
+///   stabilizes against the active-shard interpretation.
+///
+/// The block cache also holds [`PRE_BIRTHDAY_BLOCKS`] empty blocks *below*
+/// the account birthday. These are never scanned during fixture setup —
+/// mirroring production, where the chain always has (unscanned) history
+/// below any account's birthday — but they give a rewind-then-rescan flow
+/// real cached blocks to re-scan when a rewind lowers the account birthday.
+/// To decouple the account birthday from the cache floor, the account is
+/// imported mid-fixture (once the pre-birthday blocks exist) rather than
+/// created by `TestBuilder`; its birthday frontier is the chain state of the
+/// cached block at `birthday - 1`.
+///
+/// All block sizes here are well within plausible mainnet limits (the
+/// 300-output-per-block ceiling we use as our model upper bound), and every
+/// block is generated, so the block cache is contiguous from
+/// `birthday - PRE_BIRTHDAY_BLOCKS` to `chain_tip` and any
+/// rewind-then-rescan flow can drive a continuous re-scan.
+///
+/// In the diagram, `X` is the wallet's note commitment, `f` counts
+/// non-wallet filler commitments, `P` is [`PRE_BIRTHDAY_BLOCKS`], and `N` is
+/// `trailing_filler_blocks`. The shard 1/2 boundary falls inside Block B,
+/// whose 30 leaves split 21/9 across it.
+///
+/// ```text
+/// blocks:  |<-(faked state)->|<--P empty blk-->|<------A------>|<------B------>|<-----N blk----->|
+///     birthday-P-1      birthday-P         birthday        birthday+1      birthday+2        chain_tip
+/// leaves:  |<---(2^17-71)--->|<-------0------->|<----X+49f---->|<-----30f----->|<------N f------>|
+/// shards:  |<shard 0>|<--------------------shard 1--------------------->|<-------shard 2------>|...
+/// ```
+///
+/// Wallet notes placed by this fixture:
+///
+/// | height     | position | shard | value      |
+/// |------------|----------|-------|------------|
+/// | `birthday` | 131001   | 1     | 150 000    |
+fn build_shard_1_note_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+    trailing_filler_blocks: u32,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk, dfvk) = build_shard_1_prefix_fixture::<T, Dsf>(ds_factory, cache);
 
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let filler_value = Zatoshis::const_from_u64(1000);
@@ -7070,6 +7097,96 @@ pub fn open_shard_note_spendable_across_commitment_free_stretch<T, Dsf>(
          depth even though no block there carries a commitment",
     );
     assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// A note's in-shard witness needs every leaf to its right through the shard's end, and none
+/// to its left beyond what the frontier inserted when its block was scanned already supplies.
+/// A note found in the block that completes its shard is therefore spendable while the earlier
+/// block of that shard remains unscanned.
+pub fn completed_shard_note_spendable_with_unscanned_gap_below_it<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    /// The number of non-wallet outputs in Block A1, which precede the wallet note in shard 1.
+    const BLOCK_A1_FILLERS: u32 = 35;
+    const NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
+
+    let (mut st, account_id, usk, dfvk) = build_shard_1_prefix_fixture::<T, Dsf>(ds_factory, cache);
+
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    // Block A1 at the birthday: the first `BLOCK_A1_FILLERS` positions of the gap below the
+    // end of shard 1, all non-wallet fillers.
+    let block_a1_outputs: Vec<_> = (0..BLOCK_A1_FILLERS)
+        .map(|_| {
+            FakeCompactOutput::new(
+                not_our_key.clone(),
+                AddressType::DefaultExternal,
+                filler_value,
+            )
+        })
+        .collect();
+    let (block_a1_height, _, _) = st.generate_next_block_multi(&block_a1_outputs);
+
+    // Block A2: the wallet note, then fillers through the last position of shard 1.
+    let block_a2_output_count = SHARD_1_FRONTIER_GAP - BLOCK_A1_FILLERS;
+    let mut block_a2_outputs = Vec::with_capacity(block_a2_output_count as usize);
+    block_a2_outputs.push(FakeCompactOutput::new(
+        dfvk.clone(),
+        AddressType::DefaultExternal,
+        NOTE_VALUE,
+    ));
+    for _ in 1..block_a2_output_count {
+        block_a2_outputs.push(FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ));
+    }
+    let (block_a2_height, _, _) = st.generate_next_block_multi(&block_a2_outputs);
+
+    // Bury shard 1 beyond the pruning depth.
+    let trailing_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..trailing_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let chain_tip = block_a2_height + trailing_blocks;
+
+    // Scan from Block A2 onward only, leaving Block A1 unscanned below the note.
+    st.wallet_mut().update_chain_tip(chain_tip).unwrap();
+    st.scan_cached_blocks(block_a2_height, 1);
+    let shard_1_root = T::shard_root(&mut st, 1).unwrap();
+    T::put_subtree_roots(
+        &mut st,
+        1,
+        &[CommitmentTreeRoot::from_parts(
+            block_a2_height,
+            shard_1_root,
+        )],
+    )
+    .unwrap();
+    st.scan_cached_blocks(block_a2_height + 1, trailing_blocks as usize);
+
+    let unscanned = st.wallet().suggest_scan_ranges().unwrap();
+    assert!(
+        unscanned
+            .iter()
+            .any(|range| range.block_range().contains(&block_a1_height)),
+        "test invariant: Block A1 must remain unscanned: {unscanned:?}",
+    );
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::default()),
+        NOTE_VALUE,
+        "every leaf after the note through its shard's end is present, so the note is \
+         witnessable and must be spendable",
+    );
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(&mut st, account_id, &usk, NOTE_VALUE);
 }
 
 /// A note's stored anchor floor (`witness_anchor_stable`) is a claim about the chain the
