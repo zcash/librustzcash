@@ -27,10 +27,12 @@ workspace.
   automatically under `suggest_scan_ranges`.
 - The spendability rule for shielded notes now uses a per-note
   `witness_anchor_stable` column on `*_received_notes` (replacing the prior
-  boolean `witness_stabilized` flag). The stored value is a block-height
-  *floor* on the anchors that can witness the note: the wallet has the data
-  needed to construct this note's witness for any anchor at or above that
-  height. (It is a block height, not itself an anchor height.) A note is
+  boolean `witness_stabilized` flag). The stored value is the height through
+  which the note's witness data is settled: every block from the note's own
+  block through it has been scanned. For a note in a completed shard it is the
+  shard's end height; for a note in the open shard it is the pruning floor as
+  of the last scan that reached the tip, never below the note's own height.
+  (It is a block height, not itself an anchor height.) A note is
   spendable when this floor lies at or below the chosen anchor; no
   `scan_queue` range above `Scanned` priority overlaps the portion of the
   chain-tip pruning window at or below the anchor height the confirmations

@@ -344,9 +344,13 @@ pub(crate) fn anchor_frontier_available(
 /// Encodes the wallet's spendability rule for a single note, given the orthogonal predicates
 /// that compose it. All must hold for the note to be spendable.
 ///
-/// 1. **Stored floor at or below the chosen anchor.** `witness_anchor_stable` (the note's
-///    *anchor floor* — the lowest anchor height for which the wallet has the data needed to
-///    construct this note's witness) must be set, and must lie at or below the chosen anchor.
+/// 1. **Stored floor at or below the chosen anchor.** `witness_anchor_stable` is the height
+///    through which the note's witness data is settled: every block from the note's own block
+///    through it has been scanned, and nothing at or below it is re-verified here. For a note
+///    in a completed shard it is the shard's end height; for a note in the open shard it is the
+///    pruning floor as of the last scan that reached the tip, never below the note's own
+///    height. It must be set and lie at or below the chosen anchor; the blocks between it and
+///    the anchor are covered by checks 2 and 3.
 /// 2. **Pruning window fully scanned through the policy anchor.** No `scan_queue` range above
 ///    `Scanned` priority overlaps the portion of the chain-tip pruning window at or below the
 ///    anchor height the confirmations policy implies at the current chain tip

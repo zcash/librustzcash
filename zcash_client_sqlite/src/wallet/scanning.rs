@@ -656,27 +656,23 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Records each note's **anchor-stable height** in `witness_anchor_stable`: the lowest
-/// anchor at which the wallet has the data needed to construct the note's witness. Once
-/// written it is monotonically non-decreasing, except that a truncation of wallet data
-/// (a chain reorg or explicit rewind) clears any stored value above the truncation
-/// height. Invalidation is not done here — [`truncate_to_height_internal`] clears stale
-/// values before re-invoking this function.
+/// Records each note's **anchor-stable height** in `witness_anchor_stable`: the height through
+/// which the note's witness data is settled. Every block from the note's own block through that
+/// height has been scanned, and the height is either at or below the pruning floor or the end
+/// of the note's completed shard, so the spendability rule re-verifies nothing at or below it.
+/// Once written it is monotonically non-decreasing, except that a truncation of wallet data
+/// (a chain reorg or explicit rewind) clears any stored value above the truncation height.
+/// Invalidation is not done here — [`truncate_to_height_internal`] clears stale values before
+/// re-invoking this function.
 ///
 /// [`truncate_to_height_internal`]: super::truncate_to_height_internal
 ///
 /// Three arms:
 ///
 /// - **First-time stabilize** (NULL → anchor-stable height) for notes in a scan-clean shard:
-///   the maximum of three lower bounds on a usable anchor:
-///   - the note's own `t.block` — no anchor below the note's mined height can witness it
-///     (its mined height, available iff the wallet has the block);
-///   - the pruning floor — anchors below it have been pruned, so none there is usable;
-///   - the containing shard's `subtree_end_height` — for a *completed* shard, the height at
-///     which its leaf-to-shard-root path was finalized; although that is the highest height
-///     in the shard, it is a lower bound on the anchors that can witness a note in the
-///     now-complete shard. `NULL` (coalesced to 0, contributing nothing) for the still-active
-///     chain-tip shard, which has no such bound.
+///   for a note in a completed shard, the shard's `subtree_end_height`, the height at which its
+///   leaf-to-shard-root path was finalized; for a note in the still-open chain-tip shard, the
+///   pruning floor, or the note's own `t.block` when the note was mined above it.
 ///
 /// - **Promote on shard completion** (active → completed): once the containing shard has
 ///   completed and reached the pruning floor, advance to `subtree_end_height`. Bounded — it
@@ -712,17 +708,16 @@ pub(crate) fn mark_stabilized_notes(
         // shard free of unscanned ranges has had the note's own block scanned.
         let sql = format!(
             "UPDATE {pool}_received_notes
-             SET witness_anchor_stable = max(
-                 (SELECT t.block
-                  FROM transactions t
-                  WHERE t.id_tx = {pool}_received_notes.transaction_id),
-                 :pruning_floor,
-                 IFNULL(
-                     (SELECT shard.subtree_end_height
-                      FROM {pool}_tree_shards shard
-                      WHERE shard.shard_index
-                            = ({pool}_received_notes.commitment_tree_position >> :shard_height)),
-                     0
+             SET witness_anchor_stable = IFNULL(
+                 (SELECT shard.subtree_end_height
+                  FROM {pool}_tree_shards shard
+                  WHERE shard.shard_index
+                        = ({pool}_received_notes.commitment_tree_position >> :shard_height)),
+                 max(
+                     (SELECT t.block
+                      FROM transactions t
+                      WHERE t.id_tx = {pool}_received_notes.transaction_id),
+                     :pruning_floor
                  )
              )
              WHERE witness_anchor_stable IS NULL

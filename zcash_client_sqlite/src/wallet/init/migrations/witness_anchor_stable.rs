@@ -89,26 +89,25 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // calling `mark_stabilized_notes` so this migration stays stable as that helper evolves.
         //
         // For each note whose containing shard has no unscanned ranges, the stored height is
-        // the maximum of three lower bounds on a usable anchor: the note's own `t.block`, the
-        // pruning floor, and the shard's `subtree_end_height` (`NULL`, coalesced to 0, for the
-        // active chain-tip shard). See `mark_stabilized_notes` for the rationale of each term.
+        // the shard's `subtree_end_height` when the shard is complete, and otherwise the
+        // greater of the note's own `t.block` and the pruning floor. See
+        // `mark_stabilized_notes`.
         if let Some(chain_tip) = chain_tip_height(transaction)? {
             let pruning_floor: u32 = u32::from(pruning_floor(chain_tip));
             let backfill = |table_prefix: &str| -> String {
                 format!(
                     "UPDATE {table_prefix}_received_notes
-                     SET witness_anchor_stable = max(
-                         (SELECT t.block
-                          FROM transactions t
-                          WHERE t.id_tx = {table_prefix}_received_notes.transaction_id),
-                         :pruning_floor,
-                         IFNULL(
-                             (SELECT shard.subtree_end_height
-                              FROM {table_prefix}_tree_shards shard
-                              WHERE shard.shard_index
-                                    = ({table_prefix}_received_notes.commitment_tree_position
-                                       >> :shard_height)),
-                             0
+                     SET witness_anchor_stable = IFNULL(
+                         (SELECT shard.subtree_end_height
+                          FROM {table_prefix}_tree_shards shard
+                          WHERE shard.shard_index
+                                = ({table_prefix}_received_notes.commitment_tree_position
+                                   >> :shard_height)),
+                         max(
+                             (SELECT t.block
+                              FROM transactions t
+                              WHERE t.id_tx = {table_prefix}_received_notes.transaction_id),
+                             :pruning_floor
                          )
                      )
                      WHERE commitment_tree_position IS NOT NULL
