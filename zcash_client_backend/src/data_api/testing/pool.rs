@@ -5464,33 +5464,26 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     .unwrap();
     assert_eq!(st.get_total_balance(acct_id), expected_final);
 
-    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, Some(0)),
-        (100001, Some(1)),
-        (100002, Some(1)),
-        (100007, Some(1)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(3)),
-        (100014, Some(5)),
-        (100020, Some(6)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    // Every scanned height lies within `PRUNING_DEPTH` of the chain tip, so each one carries a
+    // checkpoint in both trees, at the position of the nearest preceding commitment in that
+    // tree.
+    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, Some(0u64))])
+        .chain((100001..=100012).map(|h| (h, Some(1))))
+        .chain([(100013, Some(3))])
+        .chain((100014..=100019).map(|h| (h, Some(5))))
+        .chain([(100020, Some(6))])
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
-    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, None),
-        (100001, None),
-        (100002, Some(0)),
-        (100007, Some(0)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(0)),
-        (100014, Some(2)),
-        (100020, Some(2)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, None), (100001, None)])
+        .chain((100002..=100013).map(|h| (h, Some(0u64))))
+        .chain((100014..=100020).map(|h| (h, Some(2))))
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
     let p0_checkpoints = st
         .wallet()
@@ -6842,7 +6835,8 @@ pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
 /// The anchor for a new transaction is the tree state `trusted` confirmations below the
 /// target, or absent. The wallet never substitutes an older tree state: an anchor older than
 /// the policy depth would publish, on chain, how far behind the tip the wallet was when it
-/// spent.
+/// spent. Every height within the pruning window is checkpointed, so scanned empty blocks do
+/// not move the anchor below the policy depth.
 pub fn anchor_is_policy_depth_state_or_absent<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
@@ -6926,6 +6920,33 @@ where
         st.get_spendable_balance(account_id, policy),
         SHARD_1_NOTE_VALUE
     );
+
+    // Scanned empty blocks carry no new commitments, but every height within the pruning
+    // window is checkpointed, so the anchor stays at the policy depth once it lies among them.
+    let last_filler = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let empty_blocks = u32::from(policy.trusted()) + 2;
+    for _ in 0..empty_blocks {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_filler + 1, empty_blocks as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a wallet synced across empty blocks has an anchor");
+    assert!(
+        policy.anchor_height(target) > last_filler,
+        "test invariant: the policy depth must lie among the empty blocks",
+    );
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
 }
 
 /// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
@@ -6990,6 +7011,64 @@ where
 
     // Scanning the unscanned region makes the shard scan-clean and the note spendable.
     st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// `Checkpoint` retention covers every height within `PRUNING_DEPTH` of the chain tip, so a
+/// commitment-free stretch of blocks never leaves the wallet without an anchor at the policy
+/// depth. A note in the open tip shard, whose floor advances with the pruning floor, therefore
+/// stays spendable across such a stretch.
+pub fn open_shard_note_spendable_across_commitment_free_stretch<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let last_commitment = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // More than `PRUNING_DEPTH` blocks without a shielded output in any pool, scanned as one
+    // batch, so no block-end checkpoint is created for any of them.
+    let stretch = PRUNING_DEPTH + 10;
+    for _ in 0..stretch {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_commitment + 1, stretch as usize);
+
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(
+        anchor,
+        policy.anchor_height(target),
+        "every height within the pruning window is checkpointed, so the anchor is the policy \
+         depth even though no block there carries a commitment",
+    );
     assert_eq!(st.get_spendable_balance(account_id, policy), value);
 }
 
