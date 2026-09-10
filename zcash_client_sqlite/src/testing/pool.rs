@@ -411,6 +411,23 @@ pub(crate) fn empty_boundary_blocks_are_checkpointed_and_retained<T: ShieldedPoo
     )
 }
 
+/// Runs the below-window retention check at a short interval, so a handful of filler blocks
+/// crosses two boundaries.
+#[cfg(feature = "orchard")]
+pub(crate) fn retained_boundaries_below_window_are_usable_anchors<T: ShieldedPoolTester>(
+    scan_order: zcash_client_backend::data_api::testing::pool::BoundaryScanOrder,
+) {
+    zcash_client_backend::data_api::testing::pool::retained_boundaries_below_window_are_usable_anchors::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        AnchorRetentionInterval::custom(NonZeroU32::new(7).expect("nonzero")),
+        scan_order,
+    )
+}
+
 #[cfg(feature = "orchard")]
 pub(crate) fn canonical_crossing_is_bucketed_and_unpadded() {
     zcash_client_backend::data_api::testing::pool::canonical_crossing_is_bucketed_and_unpadded(
@@ -918,6 +935,13 @@ pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+pub(crate) fn open_shard_note_spendable_across_commitment_free_stretch<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 pub(crate) fn stabilized_note_settled_height_invalidated_by_reorg<T: ShieldedPoolTester>() {
