@@ -1003,6 +1003,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_forward() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<OrchardPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::Forward,
+        )
+    }
+
+    #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_tip_first() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<OrchardPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::TipFirst,
+        )
+    }
+
+    #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
