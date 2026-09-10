@@ -25,6 +25,10 @@ workspace.
   otherwise unused shielded action slots with the smallest eligible notes,
   without changing the transaction fee or observable shape. Exhaustive matches
   must add an arm for it.
+- `zcash_client_backend::proposal::ProposalError` has a new
+  `DuplicateShieldedInput` variant. `Step::from_parts` and
+  `Proposal::single_step` return it when a shielded note appears more than once
+  among a step's inputs, and now require `NoteRef: Ord`.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An

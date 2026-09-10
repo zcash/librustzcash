@@ -1094,7 +1094,10 @@ impl<NoteRef> ConsolidationNotes<NoteRef> {
     ///
     /// `funding` and `additional` must be disjoint and contain notes only from the requested
     /// source pool. `additional` must also obey the caller's candidate limit and use the same
-    /// preferred lock tier as `funding`.
+    /// preferred lock tier as `funding`. A selection that repeats a note fails proposal
+    /// construction with [`ProposalError::DuplicateShieldedInput`].
+    ///
+    /// [`ProposalError::DuplicateShieldedInput`]: crate::proposal::ProposalError::DuplicateShieldedInput
     pub fn from_parts(funding: ReceivedNotes<NoteRef>, additional: ReceivedNotes<NoteRef>) -> Self {
         Self {
             funding,

@@ -2249,7 +2249,7 @@ struct EphemeralStepConfig {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
+fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef: Ord>(
     fee_rule: &FeeRuleT,
     tr0_balance: TransactionBalance,
     target_height: TargetHeight,
@@ -2951,6 +2951,195 @@ mod spend_policy_tests {
         assert_eq!(
             policy.locked_input_policy(),
             &LockedInputPolicy::PreferLocked(owners)
+        );
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod consolidation_tests {
+    use incrementalmerkletree::Position;
+    use zcash_keys::address::{Address, UnifiedAddress};
+    use zcash_primitives::transaction::{TxId, fees::zip317::FeeRule as Zip317FeeRule};
+    use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+    use zip321::{Payment, TransactionRequest};
+
+    use ::orchard::{
+        keys::{FullViewingKey, SpendingKey},
+        note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
+
+    use crate::{
+        data_api::{
+            AccountMeta, ConsolidationNotes, InputSource, NoteFilter, ReceivedNotes, TargetValue,
+            anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            testing::TestBuilder,
+            wallet::{ConfirmationsPolicy, TargetHeight},
+        },
+        fees::{DustOutputPolicy, zip317::SingleOutputChangeStrategy},
+        proposal::ProposalError,
+        wallet::{Note, ReceivedNote},
+    };
+
+    use super::{
+        GreedyInputSelector, InputSelector, InputSelectorError, LockFilter, NoteSelection,
+        SpendPolicy,
+    };
+
+    /// An input source whose consolidation result offers its only funding note again as an
+    /// optional candidate, in violation of the disjointness contract.
+    struct OverlappingConsolidationSource {
+        note: ReceivedNote<u32, OrchardNote>,
+    }
+
+    impl InputSource for OverlappingConsolidationSource {
+        type Error = ();
+        type NoteRef = u32;
+        type AccountId = u32;
+
+        fn anchor_computable(
+            &self,
+            _protocol: ShieldedPool,
+            _height: BlockHeight,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        fn get_spendable_note(
+            &self,
+            _txid: &TxId,
+            _protocol: ShieldedPool,
+            _index: u32,
+            _target_height: TargetHeight,
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            _target_value: TargetValue,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn select_unspent_notes(
+            &self,
+            _account: Self::AccountId,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn get_account_metadata(
+            &self,
+            _account: Self::AccountId,
+            _selector: &NoteFilter,
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<AccountMeta, Self::Error> {
+            Err(())
+        }
+
+        fn select_spendable_notes_for_consolidation(
+            &self,
+            _account: Self::AccountId,
+            _value: Zatoshis,
+            source: ShieldedPool,
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+            _max_additional_notes: usize,
+        ) -> Result<ConsolidationNotes<Self::NoteRef>, Self::Error> {
+            let notes = || match source {
+                ShieldedPool::Orchard => {
+                    ReceivedNotes::new(vec![], vec![self.note.clone()], vec![])
+                }
+                _ => ReceivedNotes::empty(),
+            };
+            Ok(ConsolidationNotes::from_parts(notes(), notes()))
+        }
+    }
+
+    /// Consolidation against a store that repeats its funding note as a candidate fails at
+    /// proposal construction instead of yielding a proposal that spends the note twice.
+    #[test]
+    fn prefer_consolidation_rejects_store_result_repeating_a_note() {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let rho: Rho = Option::from(Rho::from_bytes(&[0; 32])).unwrap();
+        let rseed: RandomSeed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho)).unwrap();
+        let note: OrchardNote = Option::from(OrchardNote::from_parts(
+            recipient,
+            NoteValue::from_raw(2_000_000),
+            rho,
+            rseed,
+            NoteVersion::V2,
+        ))
+        .unwrap();
+        let source = OverlappingConsolidationSource {
+            note: ReceivedNote::from_parts(
+                1,
+                TxId::from_bytes([0; 32]),
+                0,
+                note,
+                zip32::Scope::External,
+                Position::from(0),
+                Some(BlockHeight::from_u32(150_000)),
+                None,
+            ),
+        };
+
+        // A height after NU5 and before NU6.3 in the default test network, so the payment and
+        // the spends are both accounted to the Orchard bundle.
+        let params = TestBuilder::<(), ()>::DEFAULT_NETWORK;
+        let target_height = TargetHeight::from(BlockHeight::from_u32(200_000));
+        let anchor_height = BlockHeight::from_u32(199_990);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            Address::Unified(UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap())
+                .to_zcash_address(&params),
+            Zatoshis::const_from_u64(100_000),
+        )])
+        .unwrap();
+        let change_strategy = SingleOutputChangeStrategy::<_, OverlappingConsolidationSource>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let spend_policy = SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+            .with_note_selection(NoteSelection::PreferConsolidation);
+
+        let result = GreedyInputSelector::new().propose_transaction(
+            &params,
+            &source,
+            target_height,
+            anchor_height,
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            ConfirmationsPolicy::MIN,
+            0,
+            request,
+            &change_strategy,
+            &spend_policy,
+            None,
+        );
+
+        assert_matches!(
+            result,
+            Err(InputSelectorError::Proposal(
+                ProposalError::DuplicateShieldedInput
+            ))
         );
     }
 }
