@@ -1606,8 +1606,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
-        let (target_height, _) = self
-            .get_target_and_anchor_heights(NonZeroU32::MIN)?
+        let target_height = wallet::mempool_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
         let TableConstants {

@@ -47,6 +47,16 @@ workspace.
   affected notes re-stabilize from post-truncation chain data once their
   shards are again free of unscanned ranges. Migration to this schema is
   automatic.
+- `WalletRead::get_target_and_anchor_heights`, and the anchor used by
+  `get_wallet_summary`, `propose_transfer`, and `propose_shielding`, now
+  returns the highest checkpoint at or below `min_confirmations` below the
+  target only when every block between that checkpoint and that depth has
+  been scanned, so that the anchor's tree state is the state at that depth;
+  otherwise it returns `None`. It previously returned that checkpoint
+  unconditionally. A wallet whose scanned height lags the chain tip by
+  `min_confirmations` blocks or more therefore reports no spendable shielded
+  balance, and proposals fail with `ScanRequired`, until it has scanned to
+  that depth.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration

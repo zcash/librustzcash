@@ -132,6 +132,39 @@ pub(crate) fn prunable_window_fully_scanned(
     .map_err(SqliteClientError::from)
 }
 
+/// Returns whether every block in `range` is covered by a `scan_queue` entry of `Scanned`
+/// priority. An empty range is fully scanned; heights absent from the queue count as
+/// unscanned.
+pub(crate) fn range_fully_scanned(
+    conn: &rusqlite::Connection,
+    range: std::ops::RangeInclusive<BlockHeight>,
+) -> Result<bool, SqliteClientError> {
+    if range.is_empty() {
+        return Ok(true);
+    }
+    let start_inclusive = i64::from(u32::from(*range.start()));
+    let end_exclusive = i64::from(u32::from(*range.end())) + 1;
+    let scanned_code = priority_code(&ScanPriority::Scanned);
+    // Queue entries are pairwise disjoint, so the clipped lengths sum to the covered length.
+    let covered: i64 = conn.query_row(
+        "SELECT IFNULL(
+             SUM(MIN(block_range_end, :end_exclusive) - MAX(block_range_start, :start_inclusive)),
+             0
+         )
+         FROM scan_queue
+         WHERE priority = :scanned_priority
+           AND block_range_start < :end_exclusive
+           AND block_range_end > :start_inclusive",
+        named_params![
+            ":start_inclusive": start_inclusive,
+            ":end_exclusive": end_exclusive,
+            ":scanned_priority": scanned_code,
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(covered == end_exclusive - start_inclusive)
+}
+
 /// Stamps the chain-tip pruning window with [`ScanPriority::Anchor`], clamped so it does
 /// not overlap pre-birthday `Ignored` ranges. Existing `Scanned` ranges in the window are
 /// preserved (the dominance rule in the spanning tree's `insert` keeps `Scanned` over

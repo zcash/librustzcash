@@ -35,6 +35,13 @@ workspace.
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
   implementation that applies blocks one at a time must be updated.
+- `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
+  now documented to return an anchor whose tree state is exactly the state at
+  `min_confirmations` below the target, and `None` when the backend cannot
+  identify such a state, for example because blocks between its latest
+  checkpoint and that depth are unscanned. An implementation that returned the
+  most recent checkpoint at or below that depth without this condition must be
+  updated.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the

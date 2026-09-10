@@ -147,7 +147,7 @@ use crate::{
     error::{BackendError, SqliteClientError},
     util::Clock,
     wallet::{
-        commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
+        commitment_tree::{SqliteShardStore, max_checkpoint_at_or_below},
         encoding::LEGACY_ADDRESS_INDEX_NULL,
     },
 };
@@ -3352,34 +3352,42 @@ pub(crate) fn mempool_height(
     Ok(chain_tip_height(conn)?.map(|h| TargetHeight::from(h + 1)))
 }
 
+/// Returns the anchor height for a transaction targeting `target_height`.
+///
+/// The anchor is the tree state at the policy depth `target_height - min_confirmations`. It is
+/// identified by the highest checkpoint at or below that depth, which carries the same tree
+/// state as the depth itself when every block between them has been scanned: scanning
+/// checkpoints a block at its last note commitment, so an unbroken scanned range above the
+/// checkpoint added no commitments. Returns `None` when no tree holds such a checkpoint, when
+/// the trees disagree on it, or when any block between it and the policy depth is unscanned.
+/// The wallet then has no anchor; it never substitutes an older tree state, which would reveal
+/// on chain how far behind the tip the wallet was when it spent.
 pub(crate) fn get_anchor_height(
     conn: &rusqlite::Connection,
     target_height: TargetHeight,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
-    let sapling_anchor_height = get_max_checkpointed_height(
-        conn,
-        ShieldedPool::Sapling,
-        target_height,
-        min_confirmations,
-    )?;
+    let policy_depth = target_height.saturating_sub(u32::from(min_confirmations));
 
+    let sapling = max_checkpoint_at_or_below(conn, crate::SAPLING_TABLES_PREFIX, policy_depth)?;
     #[cfg(feature = "orchard")]
-    let orchard_anchor_height = get_max_checkpointed_height(
-        conn,
-        ShieldedPool::Orchard,
-        target_height,
-        min_confirmations,
-    )?;
-
+    let orchard = max_checkpoint_at_or_below(conn, crate::ORCHARD_TABLES_PREFIX, policy_depth)?;
+    #[cfg(feature = "orchard")]
+    let ironwood = max_checkpoint_at_or_below(conn, crate::IRONWOOD_TABLES_PREFIX, policy_depth)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_anchor_height: Option<BlockHeight> = None;
+    let (orchard, ironwood): (Option<BlockHeight>, Option<BlockHeight>) = (None, None);
 
-    Ok(sapling_anchor_height
-        .zip(orchard_anchor_height)
-        .map(|(s, o)| std::cmp::min(s, o))
-        .or(sapling_anchor_height)
-        .or(orchard_anchor_height))
+    let mut present = [sapling, orchard, ironwood].into_iter().flatten();
+    let Some(anchor_height) = present.next() else {
+        return Ok(None);
+    };
+    if present.any(|h| h != anchor_height) {
+        return Ok(None);
+    }
+
+    let state_reaches_policy_depth =
+        scanning::range_fully_scanned(conn, (anchor_height + 1)..=policy_depth)?;
+    Ok(state_reaches_policy_depth.then_some(anchor_height))
 }
 
 pub(crate) fn get_target_and_anchor_heights(
