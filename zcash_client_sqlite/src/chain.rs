@@ -532,6 +532,19 @@ mod tests {
     }
 
     #[test]
+    fn open_shard_note_spendable_across_commitment_free_stretch_sapling() {
+        testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn open_shard_note_spendable_across_commitment_free_stretch_orchard() {
+        testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
     fn stabilized_note_floor_invalidated_by_reorg_sapling() {
         testing::pool::stabilized_note_floor_invalidated_by_reorg::<SaplingPoolTester>()
     }

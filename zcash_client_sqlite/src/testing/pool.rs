@@ -836,6 +836,13 @@ pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>(
     )
 }
 
+pub(crate) fn open_shard_note_spendable_across_commitment_free_stretch<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn stabilized_note_floor_invalidated_by_reorg<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::stabilized_note_floor_invalidated_by_reorg::<T, _>(
         TestDbFactory::default(),

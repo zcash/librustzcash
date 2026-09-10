@@ -3307,4 +3307,91 @@ pub(crate) mod tests {
             );
         }
     }
+    /// `Checkpoint` retention is used only within `PRUNING_DEPTH` of the chain tip: every scanned
+    /// height inside that window is checkpointed in every tree, and no height below it is, so
+    /// scanning old history never creates checkpoints that would be pruned at once.
+    mod checkpoint_window {
+        use rusqlite::Connection;
+        use zcash_client_backend::data_api::{
+            WalletWrite,
+            testing::{
+                AddressType,
+                pool::{ShieldedPoolTester, dsl::TestDsl},
+                sapling::SaplingPoolTester as T,
+            },
+        };
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::{
+            PRUNING_DEPTH,
+            testing::{BlockCache, db::TestDbFactory},
+        };
+
+        fn checkpoint_heights(conn: &Connection, table_prefix: &str) -> Vec<u32> {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT checkpoint_id FROM {table_prefix}_tree_checkpoints ORDER BY checkpoint_id"
+                ))
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<u32>, _>>()
+                .unwrap()
+        }
+
+        #[test]
+        fn checkpoints_exist_only_within_the_pruning_window() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            let (note_block, _, _) =
+                st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+            let filler = Zatoshis::const_from_u64(1000);
+
+            // Mine blocks above the note, every one carrying a commitment, and record the tip.
+            const BLOCKS: u32 = 300;
+            for _ in 0..BLOCKS {
+                st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler);
+            }
+            let tip = note_block + BLOCKS;
+            st.wallet_mut().update_chain_tip(tip).unwrap();
+            // The window is `(window_floor, tip]`.
+            let window_floor = tip - PRUNING_DEPTH;
+
+            // Scan the upper half of the window first, then old history in two batches, so the
+            // second old batch also starts from a frontier below the window.
+            let half = PRUNING_DEPTH / 2;
+            st.scan_cached_blocks(tip - half + 1, half as usize);
+            const OLD_BLOCKS: u32 = 150;
+            assert!(
+                note_block + OLD_BLOCKS <= window_floor,
+                "test invariant: old history must lie below the window",
+            );
+            st.scan_cached_blocks(note_block + 1, (OLD_BLOCKS / 2) as usize);
+            st.scan_cached_blocks(note_block + 1 + OLD_BLOCKS / 2, (OLD_BLOCKS / 2) as usize);
+
+            let check = |table_prefix: &str| {
+                let heights = checkpoint_heights(st.wallet().conn(), table_prefix);
+                let below: Vec<u32> = heights
+                    .iter()
+                    .copied()
+                    .filter(|h| *h > u32::from(note_block) && *h <= u32::from(window_floor))
+                    .collect();
+                assert!(
+                    below.is_empty(),
+                    "{table_prefix}: checkpoints exist below the pruning window: {below:?}"
+                );
+                for h in (u32::from(tip) - half + 1)..=u32::from(tip) {
+                    assert!(
+                        heights.contains(&h),
+                        "{table_prefix}: no checkpoint at scanned window height {h}"
+                    );
+                }
+            };
+            check("sapling");
+            #[cfg(feature = "orchard")]
+            check("orchard");
+        }
+    }
 }

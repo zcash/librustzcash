@@ -6999,6 +6999,66 @@ where
     assert_eq!(st.get_spendable_balance(account_id, policy), value);
 }
 
+/// `Checkpoint` retention covers every height within `PRUNING_DEPTH` of the chain tip, so a
+/// commitment-free stretch of blocks never leaves the wallet without an anchor at the policy
+/// depth. A note in the open tip shard, whose floor advances with the pruning floor, therefore
+/// stays spendable across such a stretch.
+pub fn open_shard_note_spendable_across_commitment_free_stretch<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let last_commitment = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // More than `PRUNING_DEPTH` blocks without a shielded output in any pool, scanned as one
+    // batch, so no block-end checkpoint is created for any of them.
+    let stretch = PRUNING_DEPTH + 10;
+    for _ in 0..stretch {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_commitment + 1, stretch as usize);
+
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(
+        anchor,
+        policy.anchor_height(target),
+        "every height within the pruning window is checkpointed, so the anchor is the policy \
+         depth even though no block there carries a commitment",
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
 /// A note's stored anchor floor (`witness_anchor_stable`) is a claim about the chain the
 /// wallet was observing when the floor was written: every block bearing on the note's
 /// witness context up to that height has been scanned, so the wallet's determination of
