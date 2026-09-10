@@ -67,6 +67,16 @@ workspace.
   wallet rescans the blocks above their remaining settled height.
   `rewind_to_chain_state` first advances each settled height through the blocks
   already scanned. Migration to this schema is automatic.
+- `WalletRead::get_target_and_anchor_heights`, and the anchor used by
+  `get_wallet_summary`, `propose_transfer`, and `propose_shielding`, now
+  returns the highest checkpoint at or below `min_confirmations` below the
+  target only when every block between that checkpoint and that depth has
+  been scanned, so that the anchor's tree state is the state at that depth;
+  otherwise it returns `None`. It previously returned that checkpoint
+  unconditionally. A wallet whose scanned height lags the chain tip by
+  `min_confirmations` blocks or more therefore reports no spendable shielded
+  balance, and proposals fail with `ScanRequired`, until it has scanned to
+  that depth.
 
 ## [0.23.0-pre.2] - 2026-10-13
 

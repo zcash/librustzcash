@@ -118,6 +118,15 @@ workspace.
   commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
   a continuity error at the first block of the batch, instead of as
   `Error::Wallet`.
+- `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
+  now documented to return an anchor whose tree state is exactly the state at
+  `min_confirmations` below the target, and `None` when the backend cannot
+  identify such a state, for example because blocks between its latest
+  checkpoint and that depth are unscanned. An implementation that returned the
+  most recent checkpoint at or below that depth without this condition must be
+  updated. `WalletRead::get_wallet_summary` is now documented to report no
+  shielded value as spendable while `get_target_and_anchor_heights` returns
+  `None`.
 
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
