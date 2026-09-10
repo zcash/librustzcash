@@ -7330,6 +7330,58 @@ pub fn consolidation_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedP
     );
 }
 
+/// Consolidation candidates include notes at or below the marginal fee; funding notes do not.
+pub fn consolidation_selection_offers_dust_as_candidates<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let economic = Zatoshis::const_from_u64(1_000_000);
+    let dust = [
+        MARGINAL_FEE,
+        (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap(),
+    ];
+    st.add_notes_checking_balance([[economic], [dust[0]], [dust[1]]]);
+
+    let account_id = st.test_account().unwrap().id();
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |target| {
+        st.wallet()
+            .select_spendable_notes_for_consolidation(
+                account_id,
+                target,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(&Default::default()),
+                4,
+            )
+            .unwrap()
+            .into_parts()
+    };
+
+    // The economic note covers the target alone, and both dust notes are offered as candidates.
+    let (funding, additional) = select(Zatoshis::const_from_u64(500_000));
+    assert_eq!(funding.total_value().unwrap(), economic);
+    assert_eq!(
+        additional.total_value().unwrap(),
+        (dust[0] + dust[1]).unwrap()
+    );
+
+    // Dust never funds a payment: a target the economic note cannot cover alone stays uncovered
+    // rather than being topped up from dust, and no candidates are offered.
+    let (funding, additional) = select((economic + Zatoshis::const_from_u64(2_000)).unwrap());
+    assert_eq!(funding.total_value().unwrap(), economic);
+    assert!(additional.is_empty());
+}
+
 /// Sapling inputs are not added merely because ZIP 317's grace actions keep the fee unchanged.
 pub fn prefer_consolidation_does_not_grow_sapling_spends(
     dsf: impl DataStoreFactory,
@@ -7378,6 +7430,26 @@ pub fn prefer_consolidation_fills_existing_orchard_actions(
             Zatoshis::const_from_u64(2_000_000),
         ],
     );
+}
+
+/// Pre-NU6.3 Orchard consolidation sweeps a note at or below the marginal fee into a dummy spend
+/// side, which the transaction pays for whether or not it carries value.
+#[cfg(feature = "orchard")]
+pub fn prefer_consolidation_sweeps_dust_into_existing_orchard_actions(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let economic = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([[economic], [MARGINAL_FEE]]);
+
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::PreferConsolidation,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [MARGINAL_FEE, economic]);
 }
 
 #[cfg(feature = "pczt")]

@@ -23,7 +23,8 @@ workspace.
 - A store-backed implementation of
   `InputSource::select_spendable_notes_for_consolidation` that selects necessary
   funding notes largest first, then returns the smallest eligible notes from
-  the same preferred lock tier as optional consolidation candidates.
+  the same preferred lock tier, including notes at or below the ZIP 317
+  marginal fee, as optional consolidation candidates.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration

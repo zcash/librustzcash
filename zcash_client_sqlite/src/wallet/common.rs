@@ -384,6 +384,7 @@ where
             account,
             zats,
             ValueSelection::Accumulate,
+            zip317::MARGINAL_FEE,
             target_height,
             anchor_height,
             confirmations_policy,
@@ -431,6 +432,7 @@ where
         account,
         value,
         ValueSelection::SingleCovering,
+        zip317::MARGINAL_FEE,
         target_height,
         anchor_height,
         confirmations_policy,
@@ -446,6 +448,10 @@ where
 
 /// Selects the fewest eligible notes needed to cover `value`, followed by small notes that the
 /// input selector may use for shape-preserving consolidation.
+///
+/// Funding notes must exceed the ZIP 317 marginal fee. Consolidation candidates may have any
+/// positive value, since the input selector adds them only to spend sides the transaction
+/// already pays for.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_notes_for_consolidation<P: consensus::Parameters, F, Note>(
     conn: &Connection,
@@ -483,6 +489,7 @@ where
         account,
         value,
         ValueSelection::LargestFirst,
+        zip317::MARGINAL_FEE,
         target_height,
         anchor_height,
         confirmations_policy,
@@ -517,6 +524,9 @@ where
                 lock_tier: funding_tier.expect("single_tier implies a funding tier"),
                 limit: max_additional_notes,
             },
+            // A candidate fills a spend side the transaction already pays for, so it need not
+            // cover its own action cost.
+            Zatoshis::ZERO,
             target_height,
             anchor_height,
             confirmations_policy,
@@ -741,7 +751,7 @@ enum ValueSelection {
 /// oldest first; callers take the head.
 ///
 /// - Implementation details
-///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+///   - Notes whose value does not exceed `dust_threshold` are ignored
 ///   - Note spendability is determined using the `anchor_height`
 #[allow(clippy::too_many_arguments)]
 fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
@@ -750,6 +760,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     account: AccountUuid,
     target_value: Zatoshis,
     selection: ValueSelection,
+    dust_threshold: Zatoshis,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
@@ -937,7 +948,7 @@ where
     let target_value_arg = u64::from(target_value);
     let scanned_priority = priority_code(&ScanPriority::Scanned);
     let tip_unscanned_arg = i64::from(tip_unscanned);
-    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let min_value = u64::from(dust_threshold);
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),

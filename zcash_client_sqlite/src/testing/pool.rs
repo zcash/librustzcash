@@ -942,6 +942,20 @@ pub(crate) fn prefer_consolidation_fills_existing_orchard_actions() {
     )
 }
 
+pub(crate) fn consolidation_selection_offers_dust_as_candidates<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::consolidation_selection_offers_dust_as_candidates::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_consolidation_sweeps_dust_into_existing_orchard_actions() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_sweeps_dust_into_existing_orchard_actions(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
 pub(crate) fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::immature_coinbase_outputs_are_excluded_from_note_selection::<T>(

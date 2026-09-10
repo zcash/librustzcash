@@ -789,6 +789,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn consolidation_selection_offers_dust_as_candidates() {
+        testing::pool::consolidation_selection_offers_dust_as_candidates::<SaplingPoolTester>();
+    }
+
+    #[test]
     fn prefer_consolidation_does_not_grow_sapling_spends() {
         testing::pool::prefer_consolidation_does_not_grow_sapling_spends();
     }

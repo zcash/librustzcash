@@ -1868,8 +1868,10 @@ pub trait InputSource {
     ///
     /// Implementations backed by a queryable store should minimize the funding-note count within
     /// lock-tier preference, and return the smallest eligible notes from the funding tier as
-    /// additional candidates. The default implementation preserves the data source's ordinary
-    /// funding behavior and returns no additional candidates.
+    /// additional candidates. Additional candidates may include notes at or below the ZIP 317
+    /// marginal fee: the input selector adds them only to spend sides the transaction already
+    /// pays for. The default implementation preserves the data source's ordinary funding
+    /// behavior and returns no additional candidates.
     #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes_for_consolidation(
         &self,

@@ -1159,6 +1159,16 @@ pub(crate) mod tests {
         testing::pool::prefer_consolidation_fills_existing_orchard_actions();
     }
 
+    #[test]
+    fn consolidation_selection_offers_dust_as_candidates() {
+        testing::pool::consolidation_selection_offers_dust_as_candidates::<OrchardPoolTester>();
+    }
+
+    #[test]
+    fn prefer_consolidation_sweeps_dust_into_existing_orchard_actions() {
+        testing::pool::prefer_consolidation_sweeps_dust_into_existing_orchard_actions();
+    }
+
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
     #[test]
     fn immature_coinbase_outputs_are_excluded_from_note_selection() {
