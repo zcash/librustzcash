@@ -3416,11 +3416,11 @@ pub(crate) fn mempool_height(
 /// Returns the anchor height for a transaction targeting `target_height`.
 ///
 /// The anchor is the tree state at the policy depth `target_height - min_confirmations`. It is
-/// identified by the highest checkpoint at or below that depth, which carries the same tree
-/// state as the depth itself when every block between them has been scanned: scanning
-/// checkpoints a block at its last note commitment, so an unbroken scanned range above the
-/// checkpoint added no commitments. Returns `None` when no tree holds such a checkpoint, when
-/// the trees disagree on it, or when any block between it and the policy depth is unscanned.
+/// identified by the highest checkpoint at or below that depth. Every scanned height within
+/// `PRUNING_DEPTH` of the chain tip is checkpointed, so when the depth lies in that window and
+/// every block up to it has been scanned, that checkpoint is at the depth itself. Returns `None`
+/// when no tree holds such a checkpoint, when the trees disagree on it, or when any block
+/// between it and the policy depth is unscanned.
 /// The wallet then has no anchor; it never substitutes an older tree state, which would reveal
 /// on chain how far behind the tip the wallet was when it spent.
 pub(crate) fn get_anchor_height(

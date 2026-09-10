@@ -2448,12 +2448,16 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             .transpose()
             .map_err(PutBlocksError::Wallet)?
             .flatten();
+        let chain_tip = wallet::chain_tip_height(self.conn.borrow())
+            .map_err(|e| PutBlocksError::Wallet(SqliteClientError::from(e)))?;
+
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
             #[cfg(feature = "transparent-inputs")]
             self.gap_limits,
             from_state,
             blocks,
+            chain_tip,
             anchor_retention.as_ref(),
         )
         .map_err(|error| match error {
