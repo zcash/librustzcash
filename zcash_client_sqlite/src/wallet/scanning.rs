@@ -3088,16 +3088,26 @@ pub(crate) mod tests {
         mark_stabilized_notes(&tx).unwrap();
         tx.commit().unwrap();
 
+        let read_floor = |conn: &rusqlite::Connection, table: &str, pk_col: &str| -> Option<i64> {
+            conn.query_row(
+                &format!("SELECT witness_anchor_stable FROM {table} WHERE {pk_col} = 0"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
         assert_eq!(
-            read_stabilized(&db_data.conn, "sapling_received_notes", "output_index"),
-            1,
-            "sapling note must be stabilized once the gap is filled",
+            read_floor(&db_data.conn, "sapling_received_notes", "output_index"),
+            Some(i64::from(shard_end_height)),
+            "sapling note must stabilize at its completed shard's end height once the gap is \
+             filled",
         );
         #[cfg(feature = "orchard")]
         assert_eq!(
-            read_stabilized(&db_data.conn, "orchard_received_notes", "action_index"),
-            1,
-            "orchard note must be stabilized once the gap is filled",
+            read_floor(&db_data.conn, "orchard_received_notes", "action_index"),
+            Some(i64::from(shard_end_height)),
+            "orchard note must stabilize at its completed shard's end height once the gap is \
+             filled",
         );
     }
     /// The scan queue covers every height from the wallet birthday to the chain tip. A write

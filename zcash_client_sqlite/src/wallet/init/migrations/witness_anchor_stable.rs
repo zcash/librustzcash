@@ -419,12 +419,11 @@ mod tests {
             rows
         };
 
-        // Buried-shard note: `max(low_block, pruning_floor, buried_shard_end)` = the pruning
-        // floor (it lifts the stored height above the shard's own end). Tip-shard note:
-        // `max(tip_block, pruning_floor, 0)` = `tip_block` (the note's own block dominates).
+        // Buried-shard note: its completed shard's end height. Tip-shard note:
+        // `max(tip_block, pruning_floor)` = `tip_block` (the note's own block dominates).
         // Positionless note: excluded by the gate, so `NULL`.
         let expected = vec![
-            (0, Some(i64::from(pruning_floor_h))),
+            (0, Some(i64::from(buried_shard_end))),
             (1, Some(i64::from(tip_block))),
             (2, None),
         ];
