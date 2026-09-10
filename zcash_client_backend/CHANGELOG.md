@@ -19,7 +19,8 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
 - `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
 - `zcash_client_backend::data_api::ll::PutBlockMetaError`
-- `zcash_client_backend::data_api::testing::pool::{b_note_stable_across_rewind_below_birthday,
+- `zcash_client_backend::data_api::testing::pool::{anchor_is_policy_depth_state_or_absent,
+  b_note_stable_across_rewind_below_birthday,
   completed_shard_note_spendable_across_older_birthday_import,
   completed_shard_note_spendable_after_rewind_once_window_rescanned,
   note_in_recently_completed_shard_spendable_once_confirmed,
