@@ -510,6 +510,17 @@ mod tests {
     }
 
     #[test]
+    fn anchor_is_policy_depth_state_or_absent_sapling() {
+        testing::pool::anchor_is_policy_depth_state_or_absent::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn anchor_is_policy_depth_state_or_absent_orchard() {
+        testing::pool::anchor_is_policy_depth_state_or_absent::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn shard_completeness_derives_from_scan_queue_sapling() {
         testing::pool::shard_completeness_derives_from_scan_queue::<SaplingPoolTester>()
     }

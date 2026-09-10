@@ -822,6 +822,13 @@ pub(crate) fn stabilized_note_spendable_across_small_tip_advance<T: ShieldedPool
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn anchor_is_policy_depth_state_or_absent<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::anchor_is_policy_depth_state_or_absent::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
         TestDbFactory::default(),

@@ -6790,6 +6790,125 @@ pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
     );
 }
 
+/// The anchor for a new transaction is the tree state `trusted` confirmations below the
+/// target, or absent. The wallet never substitutes an older tree state: an anchor older than
+/// the policy depth would publish, on chain, how far behind the tip the wallet was when it
+/// spent. Scanned empty blocks add no commitments, so a checkpoint below them still carries
+/// the state at the policy depth and remains the anchor.
+pub fn anchor_is_policy_depth_state_or_absent<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let (mut st, account_id, _usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Synced to the tip: the anchor sits exactly `trusted` below the target.
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Reopen after an offline period longer than the pruning window. The sync loop's first
+    // act is `update_chain_tip`; nothing above the old tip has been scanned.
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let advance = PRUNING_DEPTH + 10;
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + advance)
+        .unwrap();
+
+    assert_eq!(
+        st.wallet()
+            .get_target_and_anchor_heights(policy.trusted())
+            .unwrap(),
+        None,
+        "no checkpoint exists at the policy anchor, so there must be no anchor at all",
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), Zatoshis::ZERO);
+
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    assert_matches!(
+        st.propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy
+        ),
+        Err(Error::ScanRequired)
+    );
+
+    // Catch up. Once the block at the policy anchor is scanned, the anchor returns at exactly
+    // `trusted` below the new target and the note is spendable again.
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    for _ in 0..advance {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(scanned_tip + 1, advance as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a caught-up wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Scanned empty blocks carry no new commitments, so the checkpoint below them is the
+    // tree state at the policy depth and remains the anchor once the depth lies among them.
+    let last_filler = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let empty_blocks = u32::from(policy.trusted()) + 2;
+    for _ in 0..empty_blocks {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_filler + 1, empty_blocks as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a wallet synced across empty blocks has an anchor");
+    assert!(
+        policy.anchor_height(target) > last_filler,
+        "test invariant: the policy depth must lie among the empty blocks",
+    );
+    assert_eq!(anchor, last_filler);
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+}
+
 /// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
 /// stabilized in the open tip shard, whose shard the server later reports complete while the
 /// blocks between the wallet's scanned tip and the shard's end remain unscanned, must not be
