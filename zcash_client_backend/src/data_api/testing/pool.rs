@@ -5109,6 +5109,306 @@ pub fn empty_boundary_blocks_are_checkpointed_and_retained<
     }
 }
 
+/// The order in which [`retained_boundaries_below_window_are_usable_anchors`] scans the batch
+/// that holds the anchor-retention boundaries.
+#[cfg(feature = "orchard")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundaryScanOrder {
+    /// The wallet learns of a distant chain tip, then scans the batch that holds the boundaries.
+    /// The boundaries lie below the checkpoint window.
+    Forward,
+    /// The wallet scans the checkpoint window at the chain tip first, which fills the checkpoint
+    /// budget, and then scans the older batch that holds the boundaries.
+    TipFirst,
+}
+
+/// Whether a tree holds a checkpoint at an anchor height, retains it, and can compute a note's
+/// witness at it.
+#[cfg(feature = "orchard")]
+#[derive(Debug, PartialEq, Eq)]
+struct RetainedAnchorState {
+    checkpointed: bool,
+    retained: bool,
+    witness_computable: bool,
+}
+
+/// Returns the [`RetainedAnchorState`] of `tree` at `anchor_height` for the note at
+/// `note_position`. A witness that the tree cannot compute, for any reason, counts as not
+/// computable.
+#[cfg(feature = "orchard")]
+fn retained_anchor_state<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    note_position: Position,
+    anchor_height: BlockHeight,
+) -> Result<RetainedAnchorState, ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Hashable + Clone + PartialEq,
+{
+    let checkpointed = tree
+        .store()
+        .get_checkpoint(&anchor_height)
+        .map_err(ShardTreeError::Storage)?
+        .is_some();
+    let retained = tree
+        .store()
+        .retained_checkpoints()
+        .map_err(ShardTreeError::Storage)?
+        .contains(&anchor_height);
+    let witness_computable = matches!(
+        tree.witness_at_checkpoint_id(note_position, &anchor_height),
+        Ok(Some(_))
+    );
+    Ok(RetainedAnchorState {
+        checkpointed,
+        retained,
+        witness_computable,
+    })
+}
+
+/// Returns, for each retained checkpoint of `tree`, whether the tree can compute its root.
+#[cfg(feature = "orchard")]
+fn retained_checkpoint_roots<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+) -> Result<BTreeMap<BlockHeight, bool>, ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Hashable + Clone + PartialEq,
+{
+    let retained = tree
+        .store()
+        .retained_checkpoints()
+        .map_err(ShardTreeError::Storage)?;
+    let mut roots = BTreeMap::new();
+    for height in retained {
+        let computable = matches!(tree.root_at_checkpoint_id(&height), Ok(Some(_)));
+        roots.insert(height, computable);
+    }
+    Ok(roots)
+}
+
+/// Anchor-retention boundaries that lie below the checkpoint window, on blocks that carry no
+/// note commitment, are checkpointed and retained in every tree, and each such checkpoint is a
+/// usable anchor: its root is computable, and the received note has a witness there. This holds
+/// whether the wallet scans the boundaries before or after the checkpoint window at the tip.
+#[cfg(feature = "orchard")]
+pub fn retained_boundaries_below_window_are_usable_anchors<
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+    interval: AnchorRetentionInterval,
+    scan_order: BoundaryScanOrder,
+) {
+    /// The number of blocks between the last boundary and the bottom of the checkpoint window.
+    const BLOCKS_BELOW_WINDOW: u32 = 20;
+    /// The number of blocks by which the chain tip advances after the wallet scans the
+    /// checkpoint window, in the tip-first order. The advance creates enough checkpoints to
+    /// exceed the checkpoint budget, so the oldest checkpoints are pruned.
+    const TIP_ADVANCE: u32 = 20;
+
+    let interval_blocks = interval.block_count().get();
+
+    // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
+    // retention is live with its floor at the account birthday.
+    let activation = BlockHeight::from_u32(100_000);
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>();
+
+    let (received_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+    let received = u32::from(received_height);
+    let account_id = st.get_account().id();
+    let note_position = T::select_spendable_notes(
+        &st,
+        account_id,
+        TargetValue::AtLeast(Zatoshis::const_from_u64(1)),
+        TargetHeight::from(received_height + 1),
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap()
+    .first()
+    .expect("the received note is selectable")
+    .note_commitment_tree_position();
+
+    // Boundaries strictly above the received note. Every boundary block is empty, so it has no
+    // checkpoint of its own, and the block below it carries between one and
+    // `MAX_OUTPUTS_BELOW_BOUNDARY` commitments, so the leaf that ends it falls at varying
+    // positions within its subtree.
+    const BOUNDARY_COUNT: u32 = 6;
+    const MAX_OUTPUTS_BELOW_BOUNDARY: u32 = 3;
+    let first_boundary = {
+        let mut b = u32::from(interval.boundary_at_or_above(activation));
+        while b <= received + 1 {
+            b += interval_blocks;
+        }
+        b
+    };
+    let boundaries = (0..BOUNDARY_COUNT)
+        .map(|i| first_boundary + i * interval_blocks)
+        .collect::<Vec<_>>();
+    let batch_end = boundaries[boundaries.len() - 1] + 2;
+    let tip = batch_end + BLOCKS_BELOW_WINDOW + PRUNING_DEPTH;
+
+    // Above the boundary batch every block carries a commitment, so scanning the checkpoint
+    // window creates a checkpoint at each of its heights and exceeds the checkpoint budget.
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler = || {
+        FakeCompactOutput::new(
+            not_our_fvk.clone(),
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        )
+    };
+    for height in (received + 1)..=(tip + TIP_ADVANCE) {
+        let below_batch_end = height <= batch_end;
+        let generated = if below_batch_end && interval.is_boundary(BlockHeight::from_u32(height)) {
+            st.generate_empty_block().0
+        } else if let Some(index) = boundaries
+            .iter()
+            .position(|boundary| below_batch_end && *boundary == height + 1)
+        {
+            let output_count = (index as u32 % MAX_OUTPUTS_BELOW_BOUNDARY) + 1;
+            let outputs = (0..output_count).map(|_| filler()).collect::<Vec<_>>();
+            st.generate_next_block_multi(&outputs).0
+        } else {
+            st.generate_next_block_multi(&[filler()]).0
+        };
+        assert_eq!(u32::from(generated), height, "cache height must track");
+    }
+
+    st.wallet_mut()
+        .update_chain_tip(BlockHeight::from_u32(tip))
+        .unwrap();
+    let window_start = tip - (PRUNING_DEPTH - 1);
+    if scan_order == BoundaryScanOrder::TipFirst {
+        st.scan_cached_blocks(BlockHeight::from_u32(window_start), PRUNING_DEPTH as usize);
+        st.wallet_mut()
+            .update_chain_tip(BlockHeight::from_u32(tip + TIP_ADVANCE))
+            .unwrap();
+        st.scan_cached_blocks(BlockHeight::from_u32(tip + 1), TIP_ADVANCE as usize);
+        let min_checkpoint = match T::SHIELDED_PROTOCOL {
+            ShieldedPool::Sapling => st
+                .wallet_mut()
+                .with_sapling_tree_mut(|tree| {
+                    tree.store()
+                        .min_checkpoint_id()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap(),
+            ShieldedPool::Orchard => st
+                .wallet_mut()
+                .with_orchard_tree_mut(|tree| {
+                    tree.store()
+                        .min_checkpoint_id()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap(),
+            other => {
+                unreachable!("this test covers only Sapling and Orchard, got {other:?}")
+            }
+        };
+        assert!(
+            min_checkpoint > Some(BlockHeight::from_u32(batch_end)),
+            "test invariant: the oldest checkpoint must lie above the boundary batch, \
+             found {min_checkpoint:?}",
+        );
+    }
+    // One batch, covering both boundaries, entirely below the checkpoint window.
+    st.scan_cached_blocks(received_height + 1, (batch_end - received) as usize);
+
+    for &boundary in &boundaries {
+        let anchor_height = BlockHeight::from_u32(boundary);
+        let state = match T::SHIELDED_PROTOCOL {
+            ShieldedPool::Sapling => st
+                .wallet_mut()
+                .with_sapling_tree_mut(|tree| {
+                    retained_anchor_state(tree, note_position, anchor_height)
+                })
+                .unwrap(),
+            ShieldedPool::Orchard => st
+                .wallet_mut()
+                .with_orchard_tree_mut(|tree| {
+                    retained_anchor_state(tree, note_position, anchor_height)
+                })
+                .unwrap(),
+            other => {
+                unreachable!("this test covers only Sapling and Orchard, got {other:?}")
+            }
+        };
+        assert_eq!(
+            state,
+            RetainedAnchorState {
+                checkpointed: true,
+                retained: true,
+                witness_computable: true,
+            },
+            "the empty boundary at height {boundary} must be a retained checkpoint at which the \
+             received note has a witness ({scan_order:?})",
+        );
+    }
+
+    // Each callback must be a closure: `with_*_tree_mut` requires a callback that is generic over
+    // the lifetime of the tree it receives, which a function item does not satisfy.
+    #[allow(clippy::redundant_closure)]
+    let roots = [
+        (
+            "Sapling",
+            st.wallet_mut()
+                .with_sapling_tree_mut(|tree| retained_checkpoint_roots(tree))
+                .unwrap(),
+        ),
+        (
+            "Orchard",
+            st.wallet_mut()
+                .with_orchard_tree_mut(|tree| retained_checkpoint_roots(tree))
+                .unwrap(),
+        ),
+        (
+            "Ironwood",
+            st.wallet_mut()
+                .with_ironwood_tree_mut(|tree| retained_checkpoint_roots(tree))
+                .unwrap()
+                .expect("the data store maintains an Ironwood tree"),
+        ),
+    ];
+    for (pool, roots) in roots {
+        for &boundary in &boundaries {
+            assert!(
+                roots.contains_key(&BlockHeight::from_u32(boundary)),
+                "the {pool} tree must retain the boundary at height {boundary} ({scan_order:?})",
+            );
+        }
+        let unusable = roots
+            .iter()
+            .filter(|(_, computable)| !**computable)
+            .map(|(height, _)| *height)
+            .collect::<Vec<_>>();
+        assert!(
+            unusable.is_empty(),
+            "the {pool} tree cannot compute the root of retained checkpoints {unusable:?} \
+             ({scan_order:?})",
+        );
+    }
+}
+
 #[cfg(feature = "orchard")]
 pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
@@ -5489,33 +5789,26 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     .unwrap();
     assert_eq!(st.get_total_balance(acct_id), expected_final);
 
-    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, Some(0)),
-        (100001, Some(1)),
-        (100002, Some(1)),
-        (100007, Some(1)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(3)),
-        (100014, Some(5)),
-        (100020, Some(6)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    // Every scanned height lies within `PRUNING_DEPTH` of the chain tip, so each one carries a
+    // checkpoint in both trees, at the position of the nearest preceding commitment in that
+    // tree.
+    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, Some(0u64))])
+        .chain((100001..=100012).map(|h| (h, Some(1))))
+        .chain([(100013, Some(3))])
+        .chain((100014..=100019).map(|h| (h, Some(5))))
+        .chain([(100020, Some(6))])
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
-    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, None),
-        (100001, None),
-        (100002, Some(0)),
-        (100007, Some(0)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(0)),
-        (100014, Some(2)),
-        (100020, Some(2)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, None), (100001, None)])
+        .chain((100002..=100013).map(|h| (h, Some(0u64))))
+        .chain((100014..=100020).map(|h| (h, Some(2))))
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
     let p0_checkpoints = st
         .wallet()
@@ -7069,7 +7362,8 @@ pub fn note_in_recently_completed_shard_spendable_once_confirmed<T, Dsf>(
 /// The anchor for a new transaction is the tree state `trusted` confirmations below the
 /// target, or absent. The wallet never substitutes an older tree state: an anchor older than
 /// the policy depth would publish, on chain, how far behind the tip the wallet was when it
-/// spent.
+/// spent. Every height within the pruning window is checkpointed, so scanned empty blocks do
+/// not move the anchor below the policy depth.
 pub fn anchor_is_policy_depth_state_or_absent<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
@@ -7153,6 +7447,33 @@ where
         st.get_spendable_balance(account_id, policy),
         SHARD_1_NOTE_VALUE
     );
+
+    // Scanned empty blocks carry no new commitments, but every height within the pruning
+    // window is checkpointed, so the anchor stays at the policy depth once it lies among them.
+    let last_filler = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let empty_blocks = u32::from(policy.trusted()) + 2;
+    for _ in 0..empty_blocks {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_filler + 1, empty_blocks as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a wallet synced across empty blocks has an anchor");
+    assert!(
+        policy.anchor_height(target) > last_filler,
+        "test invariant: the policy depth must lie among the empty blocks",
+    );
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
 }
 
 /// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
@@ -7217,6 +7538,64 @@ where
 
     // Scanning the unscanned region makes the note spendable.
     st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// `Checkpoint` retention covers every height within `PRUNING_DEPTH` of the chain tip, so a
+/// commitment-free stretch of blocks never leaves the wallet without an anchor at the policy
+/// depth. A note in the open tip shard, whose settled height advances with the pruning floor,
+/// therefore stays spendable across such a stretch.
+pub fn open_shard_note_spendable_across_commitment_free_stretch<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let last_commitment = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // More than `PRUNING_DEPTH` blocks without a shielded output in any pool, scanned as one
+    // batch, so no block-end checkpoint is created for any of them.
+    let stretch = PRUNING_DEPTH + 10;
+    for _ in 0..stretch {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_commitment + 1, stretch as usize);
+
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(
+        anchor,
+        policy.anchor_height(target),
+        "every height within the pruning window is checkpointed, so the anchor is the policy \
+         depth even though no block there carries a commitment",
+    );
     assert_eq!(st.get_spendable_balance(account_id, policy), value);
 }
 
