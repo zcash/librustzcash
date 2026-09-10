@@ -4642,81 +4642,107 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     assert_eq!(spendable.len(), 1);
 }
 
+/// A gap in scanned coverage directly below the policy depth withholds the anchor: the wallet
+/// cannot know that its latest checkpoint carries the tree state at that depth. Scanning the
+/// gap restores the anchor without any new checkpoint, since the gap's blocks add no
+/// commitments.
 pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
-    // Generate a block with funds belonging to our wallet.
     st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500000));
 
-    // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
-    // belong to us so that we can get a checkpoint in the tree.
     let account = st.test_account().cloned().unwrap();
+    let birthday = account.birthday().height();
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = Zatoshis::const_from_u64(10000);
-    let sapling_end_size = st.latest_cached_block().unwrap().sapling_end_size();
-    let orchard_end_size = st.latest_cached_block().unwrap().orchard_end_size();
-    let ironwood_end_size = st.latest_cached_block().unwrap().ironwood_end_size();
-    st.generate_block_at(
-        account.birthday().height() + 10,
-        BlockHash([0; 32]),
-        &[FakeCompactOutput::new(
-            &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
-        )],
-        sapling_end_size,
-        orchard_end_size,
-        ironwood_end_size,
+
+    // Nine empty blocks, then a block carrying a foreign output. Scanning only the last leaves
+    // the wallet with checkpoints at `birthday` and `birthday + 10` and no scanned coverage in
+    // between.
+    const GAP_BLOCKS: u32 = 9;
+    for _ in 0..GAP_BLOCKS {
+        st.generate_empty_block();
+    }
+    let (checkpoint_above_gap, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    assert_eq!(checkpoint_above_gap, birthday + GAP_BLOCKS + 1);
+    st.scan_cached_blocks(checkpoint_above_gap, 1);
+
+    let selection_policy = ConfirmationsPolicy::new_unchecked(
+        1,
+        5,
+        #[cfg(feature = "transparent-inputs")]
         false,
     );
+    let spend_policy = ConfirmationsPolicy::new_symmetrical_unchecked(
+        5,
+        #[cfg(feature = "transparent-inputs")]
+        false,
+    );
+    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let to = T::fvk_default_address(&not_our_key).to_zcash_address(st.network());
+    let request = || {
+        TransactionRequest::new(vec![Payment::without_memo(
+            to.clone(),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap()
+    };
 
-    // Scan the block
-    st.scan_cached_blocks(account.birthday().height() + 10, 1);
-
-    // Verify that our note is considered spendable
+    // The policy depth lies inside the gap: there is no anchor, so nothing is selectable and
+    // a spend is refused rather than built against the older checkpoint.
     let spendable = T::select_spendable_notes(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        TargetHeight::from(account.birthday().height() + 5),
-        ConfirmationsPolicy::new_unchecked(
-            1,
-            5,
-            #[cfg(feature = "transparent-inputs")]
-            false,
-        ),
+        TargetHeight::from(birthday + 5),
+        selection_policy,
         &[],
     )
     .unwrap();
-    assert_eq!(spendable.len(), 1);
-
-    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
-    let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
-
-    let to = T::fvk_default_address(&not_our_key);
-    let req = TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(10000),
-    )])
-    .unwrap();
-
-    // Attempt to spend the note with 5 confirmations
+    assert!(
+        spendable.is_empty(),
+        "the policy depth lies in the unscanned gap, so there is no anchor"
+    );
     assert_matches!(
         st.spend(
             &input_selector,
             &change_strategy,
             account.usk(),
-            req,
+            request(),
             OvkPolicy::Sender,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                5,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            ),
+            spend_policy,
+        ),
+        Err(Error::ScanRequired)
+    );
+
+    // Scanning the gap restores the anchor: the checkpoint at `birthday` carries the tree
+    // state at every height through `birthday + 9`.
+    st.scan_cached_blocks(birthday + 1, GAP_BLOCKS as usize);
+
+    let spendable = T::select_spendable_notes(
+        &st,
+        account.id(),
+        TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
+        TargetHeight::from(birthday + 5),
+        selection_policy,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(spendable.len(), 1);
+    assert_matches!(
+        st.spend(
+            &input_selector,
+            &change_strategy,
+            account.usk(),
+            request(),
+            OvkPolicy::Sender,
+            spend_policy,
         ),
         Ok(_)
     );
@@ -6812,6 +6838,95 @@ pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
         Zatoshis::ZERO,
         "a tip advance reaching the anchor depth must suspend spendability until the \
          wallet has scanned to the new anchor",
+    );
+}
+
+/// The anchor for a new transaction is the tree state `trusted` confirmations below the
+/// target, or absent. The wallet never substitutes an older tree state: an anchor older than
+/// the policy depth would publish, on chain, how far behind the tip the wallet was when it
+/// spent.
+pub fn anchor_is_policy_depth_state_or_absent<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, _usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Synced to the tip: the anchor sits exactly `trusted` below the target.
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Reopen after an offline period longer than the pruning window. The sync loop's first
+    // act is `update_chain_tip`; nothing above the old tip has been scanned.
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let advance = PRUNING_DEPTH + 10;
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + advance)
+        .unwrap();
+
+    assert_eq!(
+        st.wallet()
+            .get_target_and_anchor_heights(policy.trusted())
+            .unwrap(),
+        None,
+        "no checkpoint exists at the policy anchor, so there must be no anchor at all",
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), Zatoshis::ZERO);
+
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    assert_matches!(
+        st.propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy
+        ),
+        Err(Error::ScanRequired)
+    );
+
+    // Catch up. Once the block at the policy anchor is scanned, the anchor returns at exactly
+    // `trusted` below the new target and the note is spendable again.
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    for _ in 0..advance {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(scanned_tip + 1, advance as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a caught-up wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
     );
 }
 
