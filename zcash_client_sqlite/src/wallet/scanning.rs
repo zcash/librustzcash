@@ -3076,4 +3076,211 @@ pub(crate) mod tests {
             "orchard note must be stabilized once the gap is filled",
         );
     }
+    /// The scan queue covers every height from the wallet birthday to the chain tip. A write
+    /// path that learns of a block above the tip through something other than
+    /// `update_chain_tip` must extend the queue, so that no height is ever absent from it.
+    mod queue_contiguity {
+        use rusqlite::Connection;
+        use zcash_client_backend::data_api::{
+            Account, TransactionStatus, WalletRead, WalletWrite,
+            scanning::ScanPriority,
+            testing::{
+                AddressType,
+                pool::{ShieldedPoolTester, dsl::TestDsl},
+                sapling::SaplingPoolTester as T,
+            },
+            wallet::decrypt_and_store_transaction,
+        };
+        use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+        use crate::{
+            testing::{BlockCache, db::TestDbFactory},
+            wallet::scanning::priority_code,
+        };
+
+        /// Returns the queue as `(start, end_exclusive, priority)` rows ordered by start.
+        fn queue_rows(conn: &Connection) -> Vec<(u32, u32, i64)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT block_range_start, block_range_end, priority
+                     FROM scan_queue ORDER BY block_range_start",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        }
+
+        /// Asserts that the queue covers `[start, end_exclusive)` with no absent height, and
+        /// that every entry overlapping `unscanned` has a priority above `Scanned`.
+        fn assert_contiguous(
+            rows: &[(u32, u32, i64)],
+            start: BlockHeight,
+            end_exclusive: BlockHeight,
+            unscanned: std::ops::Range<u32>,
+        ) {
+            let start = u32::from(start);
+            let end_exclusive = u32::from(end_exclusive);
+            let scanned = priority_code(&ScanPriority::Scanned);
+            let mut cursor = start;
+            for (s, e, p) in rows
+                .iter()
+                .copied()
+                .filter(|(_, e, _)| *e > start)
+                .take_while(|(s, _, _)| *s < end_exclusive)
+            {
+                assert!(
+                    s <= cursor,
+                    "heights [{cursor}, {s}) are absent from the scan queue: {rows:?}"
+                );
+                cursor = cursor.max(e);
+                if s < unscanned.end && e > unscanned.start {
+                    assert!(
+                        p > scanned,
+                        "unscanned heights [{s}, {e}) carry priority {p}: {rows:?}"
+                    );
+                }
+            }
+            assert!(
+                cursor >= end_exclusive,
+                "the scan queue ends at {cursor}, below {end_exclusive}: {rows:?}"
+            );
+        }
+
+        #[test]
+        fn out_of_order_scan_backfills_the_queue() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            let (birthday_block, _, _) =
+                st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+
+            const GAP_BLOCKS: u32 = 9;
+            for _ in 0..GAP_BLOCKS {
+                st.generate_empty_block();
+            }
+            let (above_gap, _, _) = st.generate_next_block(
+                &not_our_key,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(above_gap, 1);
+
+            assert_eq!(st.wallet().chain_height().unwrap(), Some(above_gap));
+            assert_contiguous(
+                &queue_rows(st.wallet().conn()),
+                birthday_block,
+                above_gap + 1,
+                (u32::from(birthday_block) + 1)..u32::from(above_gap),
+            );
+        }
+
+        #[test]
+        fn stored_transaction_above_the_tip_extends_the_queue() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            let (birthday_block, _, _) =
+                st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+            let txid = st.spend_to(&to, Zatoshis::const_from_u64(10_000));
+            let tx = st
+                .wallet()
+                .get_transaction(txid)
+                .unwrap()
+                .expect("the created transaction is stored");
+            let tip = st.wallet().chain_height().unwrap().unwrap();
+            let mined_height = tip + 50;
+
+            let network = *st.network();
+            decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(mined_height))
+                .unwrap();
+
+            assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height));
+            assert_contiguous(
+                &queue_rows(st.wallet().conn()),
+                birthday_block,
+                mined_height + 1,
+                (u32::from(tip) + 1)..u32::from(mined_height + 1),
+            );
+        }
+
+        #[test]
+        fn mined_status_above_the_tip_extends_the_queue() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            let (birthday_block, _, _) =
+                st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+            let txid = st.spend_to(&to, Zatoshis::const_from_u64(10_000));
+            let tip = st.wallet().chain_height().unwrap().unwrap();
+            let mined_height = tip + 50;
+
+            st.wallet_mut()
+                .set_transaction_status(txid, TransactionStatus::Mined(mined_height))
+                .unwrap();
+
+            assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height));
+            assert_contiguous(
+                &queue_rows(st.wallet().conn()),
+                birthday_block,
+                mined_height + 1,
+                (u32::from(tip) + 1)..u32::from(mined_height + 1),
+            );
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        #[test]
+        fn received_utxo_above_the_tip_extends_the_queue() {
+            use transparent::{
+                bundle::{OutPoint, TxOut},
+                keys::TransparentKeyScope,
+            };
+            use zcash_client_backend::wallet::WalletTransparentOutput;
+            use zcash_keys::keys::UnifiedAddressRequest;
+
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            let (birthday_block, _, _) =
+                st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let account_id = st.get_account().id();
+            let taddr = *st
+                .wallet()
+                .get_last_generated_address_matching(
+                    account_id,
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap()
+                .unwrap()
+                .transparent()
+                .unwrap();
+            let tip = st.wallet().chain_height().unwrap().unwrap();
+            let mined_height = tip + 50;
+
+            let utxo = WalletTransparentOutput::from_parts(
+                OutPoint::fake(),
+                TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into()),
+                Some(mined_height),
+                Some(account_id),
+                Some(TransparentKeyScope::EXTERNAL),
+                None,
+            )
+            .unwrap();
+            st.wallet_mut()
+                .put_received_transparent_utxo(&utxo)
+                .unwrap();
+
+            assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height));
+            assert_contiguous(
+                &queue_rows(st.wallet().conn()),
+                birthday_block,
+                mined_height + 1,
+                (u32::from(tip) + 1)..u32::from(mined_height + 1),
+            );
+        }
+    }
 }
