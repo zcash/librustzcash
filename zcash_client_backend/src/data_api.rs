@@ -4190,12 +4190,26 @@ pub trait WalletWrite:
     ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>>;
 
     /// Adds a transparent UTXO received by the wallet to the data store.
+    ///
+    /// The output's mined height, if any, must be the height of a block on the main chain. If it is above the
+    /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
+    /// blocks above the previous chain tip as not yet scanned.
+    ///
+    /// The operation is atomic: implementations must apply the whole update or none of it. After
+    /// an error the caller may assume that nothing was persisted.
     fn put_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput<<Self as WalletRead>::AccountId>,
     ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
+    ///
+    /// The transaction's mined height, if any, must be the height of a block on the main chain. If it is above the
+    /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
+    /// blocks above the previous chain tip as not yet scanned.
+    ///
+    /// The operation is atomic: implementations must apply the whole update or none of it. After
+    /// an error the caller may assume that nothing was persisted.
     fn store_decrypted_tx(
         &mut self,
         received_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
@@ -4377,6 +4391,13 @@ pub trait WalletWrite:
     /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
     /// scanning; as a consequence, the wallet must actively query to determine whether such
     /// transactions have been mined.
+    ///
+    /// For [`TransactionStatus::Mined`], the mined height must be the height of a block on the main chain. If it is above the
+    /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
+    /// blocks above the previous chain tip as not yet scanned.
+    ///
+    /// The operation is atomic: implementations must apply the whole update or none of it. After
+    /// an error the caller may assume that nothing was persisted.
     fn set_transaction_status(
         &mut self,
         _txid: TxId,

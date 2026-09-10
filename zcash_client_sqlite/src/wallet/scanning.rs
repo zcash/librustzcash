@@ -642,6 +642,14 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     let query_range = extended_range.clone().unwrap_or_else(|| range.clone());
 
+    // A range scanned above everything the queue covers must not leave the heights between
+    // the prior chain tip and the range absent from the queue. Widening the replacement to
+    // start at the prior chain tip makes the spanning tree backfill that gap as `Historic`.
+    let query_range = match chain_tip_height(conn)? {
+        Some(prior_tip) if prior_tip + 1 < query_range.start => (prior_tip + 1)..query_range.end,
+        _ => query_range,
+    };
+
     let scanned = ScanRange::from_parts(range.clone(), ScanPriority::Scanned);
 
     // If any of the extended range actually extends beyond the scanned range, we need to
@@ -911,6 +919,22 @@ fn tip_shard_end_height(
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .map_err(SqliteClientError::from)
+}
+
+/// Extends the scan queue through `height` when it lies above the known chain tip, so that the
+/// queue stays contiguous when the wallet learns of a block above the tip through a path other
+/// than [`update_chain_tip`]. A wallet with no known chain tip is left unchanged.
+pub(crate) fn extend_chain_tip_to<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    if let Some(chain_tip) = chain_tip_height(conn)?
+        && chain_tip < height
+    {
+        update_chain_tip(conn, params, height)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn update_chain_tip<P: consensus::Parameters>(
@@ -3236,6 +3260,7 @@ pub(crate) mod tests {
         use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
         use crate::{
+            error::SqliteClientError,
             testing::{BlockCache, db::TestDbFactory},
             wallet::scanning::priority_code,
         };
@@ -3298,6 +3323,29 @@ pub(crate) mod tests {
                 cursor >= end_exclusive,
                 "the scan queue ends at {cursor}, below {end_exclusive}: {rows:?}"
             );
+        }
+
+        /// The wallet state that a write above the chain tip changes: the scan queue, the mined
+        /// height of each transaction, and the number of received transparent outputs.
+        type TipWriteState = (Vec<(u32, u32, i64)>, Vec<(Vec<u8>, Option<u32>)>, i64);
+
+        fn tip_write_state(conn: &Connection) -> TipWriteState {
+            let mut stmt = conn
+                .prepare("SELECT txid, mined_height FROM transactions ORDER BY id_tx")
+                .unwrap();
+            let transactions = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let utxo_count = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM transparent_received_outputs",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (queue_rows(conn), transactions, utxo_count)
         }
 
         #[test]
@@ -3426,6 +3474,97 @@ pub(crate) mod tests {
                 mined_height + 1,
                 (u32::from(tip) + 1)..u32::from(mined_height + 1),
             );
+        }
+
+        #[test]
+        fn stored_transaction_above_the_tip_rolls_back_on_error() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+            let txid = st.spend_to(&to, Zatoshis::const_from_u64(10_000));
+            let tx = st
+                .wallet()
+                .get_transaction(txid)
+                .unwrap()
+                .expect("the created transaction is stored");
+            let mined_height = st.wallet().chain_height().unwrap().unwrap() + 50;
+            let state_before = tip_write_state(st.wallet().conn());
+
+            let network = *st.network();
+            let result: Result<(), SqliteClientError> =
+                st.wallet_mut().db_mut().transactionally(|wdb| {
+                    decrypt_and_store_transaction(&network, wdb, &tx, Some(mined_height))?;
+                    // Fail after the write; everything in this transaction must roll back.
+                    Err(SqliteClientError::AccountUnknown)
+                });
+            assert!(matches!(result, Err(SqliteClientError::AccountUnknown)));
+
+            assert_eq!(tip_write_state(st.wallet().conn()), state_before);
+        }
+
+        #[test]
+        fn mined_status_above_the_tip_rolls_back_on_error() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+            let txid = st.spend_to(&to, Zatoshis::const_from_u64(10_000));
+            let mined_height = st.wallet().chain_height().unwrap().unwrap() + 50;
+            let state_before = tip_write_state(st.wallet().conn());
+
+            let result: Result<(), SqliteClientError> =
+                st.wallet_mut().db_mut().transactionally(|wdb| {
+                    wdb.set_transaction_status(txid, TransactionStatus::Mined(mined_height))?;
+                    // Fail after the write; everything in this transaction must roll back.
+                    Err(SqliteClientError::AccountUnknown)
+                });
+            assert!(matches!(result, Err(SqliteClientError::AccountUnknown)));
+
+            assert_eq!(tip_write_state(st.wallet().conn()), state_before);
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        #[test]
+        fn received_utxo_above_the_tip_rolls_back_on_error() {
+            let mut st =
+                TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+                    .build::<T>();
+            st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+            let account_id = st.get_account().id();
+            let taddr = *st
+                .wallet()
+                .get_last_generated_address_matching(
+                    account_id,
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap()
+                .unwrap()
+                .transparent()
+                .unwrap();
+            let mined_height = st.wallet().chain_height().unwrap().unwrap() + 50;
+            let utxo = WalletTransparentOutput::from_parts(
+                OutPoint::fake(),
+                TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into()),
+                Some(mined_height),
+                Some(account_id),
+                Some(TransparentKeyScope::EXTERNAL),
+                None,
+            )
+            .unwrap();
+            let state_before = tip_write_state(st.wallet().conn());
+
+            let result: Result<(), SqliteClientError> =
+                st.wallet_mut().db_mut().transactionally(|wdb| {
+                    wdb.put_received_transparent_utxo(&utxo)?;
+                    // Fail after the write; everything in this transaction must roll back.
+                    Err(SqliteClientError::AccountUnknown)
+                });
+            assert!(matches!(result, Err(SqliteClientError::AccountUnknown)));
+
+            assert_eq!(tip_write_state(st.wallet().conn()), state_before);
         }
     }
 }

@@ -98,6 +98,12 @@ workspace.
   `set_account_name`.
 - `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
   `Anchor`, ordered between `ChainTip` and `Verify`.
+- `zcash_client_backend::data_api::WalletWrite::{put_received_transparent_utxo,
+  store_decrypted_tx, set_transaction_status}` and
+  `zcash_client_backend::data_api::ll::LowLevelWalletWrite::set_transaction_status`
+  now require a mined height to be the height of a block on the main chain. An
+  implementation must advance its chain tip to a mined height above it, and
+  treat the blocks above the previous chain tip as not yet scanned.
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
   returns `Result<(), PutBlockMetaError<Self::Error>>`. An implementation that
   already holds a block at the given height with a different hash returns
