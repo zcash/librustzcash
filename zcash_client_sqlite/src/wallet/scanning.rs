@@ -679,6 +679,18 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     Ok(())
 }
 
+/// An SQL condition that holds when every block after a note's own block `t.block` is scanned,
+/// through the end of the note's shard when the shard is complete, and through the chain tip
+/// when it is not. The enclosing query binds `t` to the note's transaction, `shard` to the
+/// note's `*_tree_shards` row, and the `:scanned_priority` parameter.
+const NOTE_SCANNED_ABOVE_CONDITION: &str = "NOT EXISTS (
+    SELECT 1 FROM scan_queue q
+    WHERE q.priority > :scanned_priority
+      AND q.block_range_end > t.block + 1
+      AND (shard.subtree_end_height IS NULL
+           OR q.block_range_start <= shard.subtree_end_height)
+)";
+
 /// Records each note's **anchor-stable height** in `witness_anchor_stable`: the height through
 /// which the note's witness data is settled. Every block from the note's own block through that
 /// height has been scanned, and the height is either at or below the pruning floor or the end
@@ -692,10 +704,14 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 ///
 /// Three arms:
 ///
-/// - **First-time stabilize** (NULL → anchor-stable height) for notes in a scan-clean shard:
-///   for a note in a completed shard, the shard's `subtree_end_height`, the height at which its
-///   leaf-to-shard-root path was finalized; for a note in the still-open chain-tip shard, the
-///   pruning floor, or the note's own `t.block` when the note was mined above it.
+/// - **First-time stabilize** (NULL → anchor-stable height) for notes scanned above their own
+///   block, meaning that every block after the note's own block is scanned, through the
+///   shard's end for a completed shard and through the chain tip for the open one: for a note in a completed shard, the
+///   shard's `subtree_end_height`, the height at which its leaf-to-shard-root path was
+///   finalized; for a note in the still-open chain-tip shard, the pruning floor, or the note's
+///   own `t.block` when the note was mined above it. Blocks before the note's own block are
+///   irrelevant: the frontier inserted when that block was scanned supplies the left side of
+///   the note's witness.
 ///
 /// - **Promote on shard completion** (active → completed): once the containing shard has
 ///   completed and reached the pruning floor, advance to `subtree_end_height`. Bounded — it
@@ -720,39 +736,29 @@ pub(crate) fn mark_stabilized_notes(
         shard_height: u8,
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
-        // For a note with no stored value whose containing shard has no unscanned ranges,
-        // write the height through which the note's witness data is settled. For a completed
-        // shard this is the shard's `subtree_end_height`. For the still-active chain-tip shard,
-        // whose `subtree_end_height` is `NULL`, it is the greater of the note's own block
-        // `t.block` and the pruning floor. `t.block` rather than `t.mined_height` because
-        // `block` is FK-bound to `blocks` and is only non-NULL once the wallet has processed
-        // the block — guaranteed here, since a shard free of unscanned ranges has had the
-        // note's own block scanned.
+        // For a note with no stored value that is scanned above its own block, write the
+        // anchor-stable height: the completed shard's `subtree_end_height`, or for the open
+        // shard the pruning floor, never below the note's own `t.block`. `t.block` rather than
+        // `t.mined_height` because `block` is FK-bound to `blocks` and is only non-NULL once the
+        // wallet has processed the block.
+        let scanned_above = NOTE_SCANNED_ABOVE_CONDITION;
         let sql = format!(
-            "UPDATE {pool}_received_notes
-             SET witness_anchor_stable = IFNULL(
-                 (SELECT shard.subtree_end_height
-                  FROM {pool}_tree_shards shard
-                  WHERE shard.shard_index
-                        = ({pool}_received_notes.commitment_tree_position >> :shard_height)),
-                 max(
-                     (SELECT t.block
-                      FROM transactions t
-                      WHERE t.id_tx = {pool}_received_notes.transaction_id),
-                     :pruning_floor
-                 )
-             )
-             WHERE witness_anchor_stable IS NULL
-               AND commitment_tree_position IS NOT NULL
-               AND (commitment_tree_position >> :shard_height) NOT IN (
-                   SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
-               )"
+            "UPDATE {pool}_received_notes AS rn
+             SET witness_anchor_stable = IFNULL(shard.subtree_end_height, max(t.block, :pruning_floor))
+             FROM transactions t, {pool}_tree_shards shard
+             WHERE t.id_tx = rn.transaction_id
+               AND shard.shard_index = (rn.commitment_tree_position >> :shard_height)
+               AND rn.witness_anchor_stable IS NULL
+               AND rn.commitment_tree_position IS NOT NULL
+               AND t.block IS NOT NULL
+               AND {scanned_above}"
         );
         conn.execute(
             &sql,
             named_params![
                 ":pruning_floor": pruning_floor,
                 ":shard_height": shard_height,
+                ":scanned_priority": priority_code(&ScanPriority::Scanned),
             ],
         )?;
         Ok(())
@@ -765,26 +771,29 @@ pub(crate) fn mark_stabilized_notes(
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
         // The join to `shards` is itself the completion-check gate — only completed shards at
-        // or below the pruning floor and free of unscanned ranges contribute a row. The `<`
-        // predicate makes this a no-op for rows already at `subtree_end_height` (e.g. notes
-        // that hit the completed-shard arm in the same call).
+        // or below the pruning floor contribute a row, and the note must be scanned above its
+        // own block through the shard's end. The `<` predicate
+        // makes this a no-op for rows already at `subtree_end_height` (e.g. notes that hit the
+        // completed-shard arm in the same call).
+        let scanned_above = NOTE_SCANNED_ABOVE_CONDITION;
         let sql = format!(
             "UPDATE {pool}_received_notes AS rn
              SET witness_anchor_stable = shard.subtree_end_height
-             FROM {pool}_tree_shards AS shard
+             FROM {pool}_tree_shards AS shard, transactions t
              WHERE rn.witness_anchor_stable < shard.subtree_end_height
                AND rn.commitment_tree_position IS NOT NULL
                AND shard.subtree_end_height <= :pruning_floor
                AND (rn.commitment_tree_position >> :shard_height) = shard.shard_index
-               AND shard.shard_index NOT IN (
-                   SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
-               )"
+               AND t.id_tx = rn.transaction_id
+               AND t.block IS NOT NULL
+               AND {scanned_above}"
         );
         conn.execute(
             &sql,
             named_params![
                 ":pruning_floor": pruning_floor,
                 ":shard_height": shard_height,
+                ":scanned_priority": priority_code(&ScanPriority::Scanned),
             ],
         )?;
         Ok(())
@@ -2983,14 +2992,11 @@ pub(crate) mod tests {
         assert_eq!(remaining, 0);
     }
 
-    /// Regression test: a note whose containing shard's `subtree_end_height` is known
-    /// (e.g. populated by `put_shard_roots`) and lies at or below the pruning floor must
-    /// NOT be treated as stabilized if any block inside the shard's extent is covered by
-    /// a non-Scanned `scan_queue` range. An earlier criterion that only required
-    /// `subtree_end_height <= last_scanned - (PRUNING_DEPTH - 1)` could spuriously
-    /// stabilize such a note even though the wallet was missing the intra-shard
-    /// commitments inside the unscanned gap, stranding the note at spend time. The fix is
-    /// the per-shard view-based check in `mark_stabilized_notes`.
+    /// A note whose containing shard's `subtree_end_height` is known (e.g. populated by
+    /// `put_shard_roots`) and lies at or below the pruning floor must not be stabilized while
+    /// a non-`Scanned` `scan_queue` range covers any block between the note's own block and the
+    /// shard's end: the wallet lacks the commitments in that range, so it cannot build the
+    /// note's witness.
     #[test]
     fn gap_in_scanned_coverage_prevents_stabilization() {
         let network = Network::TestNetwork;
@@ -3010,19 +3016,17 @@ pub(crate) mod tests {
 
         // Scenario: the `scan_queue` partition covers `[birthday, chain_tip_exclusive)`
         // with a non-Scanned (here: Historic) gap `[low_end, high_start)` in the middle.
-        // Shard 0's block extent is `(birthday, shard_end_height]`, which overlaps that
-        // gap. The shard's end lies below the pruning floor, so the only remaining
-        // barrier to stabilization is the view-based unscanned-range check.
+        // The note's block lies below that gap, and shard 0 ends above it. The shard's end
+        // lies below the pruning floor, so the only remaining barrier to stabilization is the
+        // unscanned range between the note and the shard's end.
         //
         //   birthday          low_end  gap    high_start           shard_end         max_scanned
         //   |--- Scanned --------|---Historic---|--------- Scanned -------|-- Scanned -----|
         //                                                 ^
         //                                   shard 0's extent covers (birthday, shard_end],
         //                                   which straddles the non-Scanned gap.
-        // All heights sit above the NU5 testnet activation height (1,842,420) so that each
-        // pool's shard scan-range view actually joins the shard to the scan_queue rows
-        // below — otherwise the shard's view-frame extent would be empty and the gap
-        // couldn't overlap.
+        // All heights sit above the NU5 testnet activation height (1,842,420), so both the
+        // Sapling and Orchard pools are active.
         let base: u32 = 2_000_000;
         let birthday_height: u32 = base + 1;
         let note_block: u32 = base + 100; // mined height of the note's transaction (in shard 0)
@@ -3089,7 +3093,7 @@ pub(crate) mod tests {
         // Seed a single transaction mined at `note_block`. `first_time_stabilize` reads
         // `transactions.block` (FK-bound to `blocks`, hence non-NULL only once the wallet has
         // the block) as one term of the anchor-floor `max`, so the note can only stabilize
-        // when its block is recorded — as it is for any note in a scan-clean shard.
+        // when its block is recorded — as it is for any note scanned above its own block.
         db_data
             .conn
             .execute(
@@ -3127,9 +3131,9 @@ pub(crate) mod tests {
             .unwrap();
 
         // Shard 0 with `subtree_end_height = shard_end_height`. Its block extent is
-        // `(birthday, shard_end_height]`, which overlaps the non-Scanned gap. Its end
-        // lies below the pruning floor, so the criterion's only remaining barrier is the
-        // view-based unscanned-range check.
+        // `(birthday, shard_end_height]`, which overlaps the non-Scanned gap above the note.
+        // Its end lies below the pruning floor, so the only remaining barrier to
+        // stabilization is that gap.
         for pool in ["sapling", "orchard"] {
             db_data
                 .conn
@@ -3201,8 +3205,8 @@ pub(crate) mod tests {
         );
 
         // Replace the three ranges with a single contiguous Scanned range
-        // `[birthday, chain_tip_exclusive)`. The view should now return no rows for
-        // shard 0, so the note stabilizes.
+        // `[birthday, chain_tip_exclusive)`. No unscanned range now lies above the note, so
+        // the note stabilizes.
         db_data.conn.execute("DELETE FROM scan_queue", []).unwrap();
         db_data
             .conn

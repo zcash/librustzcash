@@ -29,7 +29,7 @@ use crate::{
             push_lock_params,
         },
         pool_code,
-        scanning::{parse_priority_code, priority_code},
+        scanning::priority_code,
     },
 };
 
@@ -361,16 +361,18 @@ pub(crate) fn anchor_frontier_available(
 ///    between `update_chain_tip` and the next scan, when the tip has advanced by fewer than
 ///    `min_confirmations` blocks) cannot participate in a witness against the anchor's root and
 ///    does not block. The caller computes this wallet-state-wide predicate once per call.
-/// 3. **Witness region below the window is durable.** Either the note's shard is scan-clean —
-///    every block in its range is scanned, so every leaf after the note within the shard is
-///    present and the path to the shard root can be built regardless of gaps elsewhere below
-///    the window — or its stored floor reaches the bottom of the window: no `scan_queue` range
-///    above `Scanned` separates `witness_anchor_stable` from the window. `pruning_region_gap_top`
-///    (the top of the highest such gap, computed once per call) encodes that boundary; a note in
-///    a shard that is not scan-clean is durable iff its floor lies at or above it. Cleanliness
-///    is judged from the scan queue, never from the subtree-root table: a root reported by the
-///    server says nothing about which of the shard's leaves the wallet holds. Use
-///    [`is_shard_scan_clean`] on the shard's `v_*_shards_scan_state.max_priority`.
+/// 3. **Witness region below the window is durable.** Either the note's shard is complete and
+///    scan-clean for the note — every block after the note's own block through the shard's end
+///    is scanned, so every leaf to the note's right within the shard is present and the path to
+///    the shard root can be built; the leaves to its left are supplied by the frontier inserted
+///    when the note's block was scanned, so blocks before the note are irrelevant — or its
+///    stored floor reaches the bottom of the window: no `scan_queue` range above `Scanned`
+///    separates `witness_anchor_stable` from the window. `pruning_region_gap_top` (the top of
+///    the highest such gap, computed once per call) encodes that boundary; a note that is not
+///    scan-clean is durable iff its floor lies at or above it. Cleanliness is judged from the
+///    scan queue, never from the subtree-root table alone: a root reported by the server says
+///    nothing about which of the shard's leaves the wallet holds. Use
+///    [`note_shard_scan_clean_condition`] to compute it in SQL.
 /// 4. **Anchor frontier available.** The wallet's shardtree must have a frontier at the chosen
 ///    anchor height (a checkpoint from which a witness against that anchor can be reconstructed).
 ///    Use [`anchor_frontier_available`] to compute this once per pool per call.
@@ -392,9 +394,10 @@ pub(crate) fn is_note_spendable_at_anchor(
         .zip(anchor_height)
         .is_some_and(|(stored, chosen)| stored <= chosen);
 
-    // Check 3. A scan-clean shard holds every leaf after the note, so the note is witnessable
-    // regardless of gaps elsewhere below the window. Otherwise the note is witnessable only if
-    // no unscanned range separates its stable floor from the bottom of the pruning window.
+    // Check 3. A note that is scan-clean has every leaf to its right within its completed
+    // shard, so it is witnessable regardless of gaps elsewhere below the window. Otherwise the
+    // note is witnessable only if no unscanned range separates its stable floor from the
+    // bottom of the pruning window.
     let region_below_window_durable = shard_scan_clean
         || match (pruning_region_gap_top, witness_anchor_stable) {
             (None, _) => true,
@@ -409,24 +412,25 @@ pub(crate) fn is_note_spendable_at_anchor(
         && confirmations_met
 }
 
-/// Returns whether a shard is scan-clean, given the highest `scan_queue` priority overlapping
-/// its block range as reported by `v_*_shards_scan_state.max_priority`: every block in the range
-/// is scanned, so the wallet holds every leaf in the shard. A note with no scan-state row (an
-/// unpositioned note, or a shard without a row) is not scan-clean.
-///
-/// Returns [`SqliteClientError::CorruptedData`] if the stored priority code is unknown.
-pub(crate) fn is_shard_scan_clean(max_priority: Option<i64>) -> Result<bool, SqliteClientError> {
-    max_priority
-        .map(|code| {
-            parse_priority_code(code)
-                .map(|priority| priority <= ScanPriority::Scanned)
-                .ok_or_else(|| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Priority code {code} not recognized."
-                    ))
-                })
-        })
-        .unwrap_or(Ok(false))
+/// Returns the SQL condition, over a received-notes row `rn`, its transaction `t`, and its shard
+/// row `shard`, that the note is *scan-clean*: its shard is complete, and no `scan_queue` range
+/// above `Scanned` priority overlaps the blocks after the note's own block through the shard's
+/// end. Every leaf to the note's right within the shard is then present, while the leaves to its
+/// left are supplied by the frontier inserted when the note's block was scanned. A note in the
+/// open chain-tip shard is never scan-clean by this condition; its durability is judged by its
+/// stored floor instead.
+pub(crate) fn note_shard_scan_clean_condition() -> String {
+    format!(
+        "(shard.subtree_end_height IS NOT NULL
+          AND t.block IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM scan_queue q
+              WHERE q.priority > {scanned}
+                AND q.block_range_start <= shard.subtree_end_height
+                AND q.block_range_end > t.block + 1
+          ))",
+        scanned = priority_code(&ScanPriority::Scanned),
+    )
 }
 
 /// Returns the top of the highest unscanned region at or below the pruning floor: the maximum
@@ -585,8 +589,10 @@ where
         table_prefix,
         output_index_col,
         note_reconstruction_cols,
+        shard_height,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
+    let shard_scan_clean = note_shard_scan_clean_condition();
 
     // Select all unspent notes belonging to the given account, ignoring dust notes.
     let mut stmt_select_notes = conn.prepare_cached(&format!(
@@ -596,16 +602,15 @@ where
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
              rn.witness_anchor_stable,
-             scan_state.max_priority,
+             {shard_scan_clean} AS shard_scan_clean,
              IFNULL(t.trust_status, 0) AS trust_status,
              MAX(tt.mined_height) AS max_shielding_input_height,
              MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
          FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-         LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-            ON rn.commitment_tree_position >= scan_state.start_position
-            AND rn.commitment_tree_position < scan_state.end_position_exclusive
+         LEFT OUTER JOIN {table_prefix}_tree_shards shard
+            ON shard.shard_index = (rn.commitment_tree_position >> {shard_height})
          LEFT OUTER JOIN transparent_received_output_spends ros
             ON ros.transaction_id = t.id_tx
          LEFT OUTER JOIN transparent_received_outputs tro
@@ -659,7 +664,7 @@ where
             let witness_anchor_stable = row
                 .get::<_, Option<u32>>("witness_anchor_stable")?
                 .map(BlockHeight::from);
-            let shard_scan_clean = is_shard_scan_clean(row.get::<_, Option<i64>>("max_priority")?)?;
+            let shard_scan_clean = row.get::<_, bool>("shard_scan_clean")?;
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
@@ -786,8 +791,10 @@ where
         table_prefix,
         output_index_col,
         note_reconstruction_cols,
+        shard_height,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
+    let shard_scan_clean = note_shard_scan_clean_condition();
 
     // The chain-tip pruning window must be fully scanned up to the policy anchor for any
     // stabilized note to be selectable; otherwise witness construction against the anchor
@@ -863,7 +870,7 @@ where
         "id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, witness_anchor_stable, max_priority, trust_status,
+                mined_height, witness_anchor_stable, shard_scan_clean, trust_status,
                 max_shielding_input_height, min_shielding_input_trust"
     );
     // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
@@ -899,16 +906,15 @@ where
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
                  rn.witness_anchor_stable,
-                 scan_state.max_priority,
+                 {shard_scan_clean} AS shard_scan_clean,
                  IFNULL(t.trust_status, 0) AS trust_status,
                  MAX(tt.mined_height) AS max_shielding_input_height,
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-                ON rn.commitment_tree_position >= scan_state.start_position
-                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             LEFT OUTER JOIN {table_prefix}_tree_shards shard
+                ON shard.shard_index = (rn.commitment_tree_position >> {shard_height})
              LEFT OUTER JOIN transparent_received_output_spends ros
                 ON ros.transaction_id = t.id_tx
              LEFT OUTER JOIN transparent_received_outputs tro
@@ -931,10 +937,10 @@ where
              AND rn.witness_anchor_stable IS NOT NULL
              AND rn.witness_anchor_stable <= :anchor_height
              AND :prunable_window_scanned = 1
-             -- Check 3: a scan-clean shard holds every leaf after the note; otherwise the
-             -- stored floor must reach the bottom of the pruning window (no unscanned range
-             -- separating it from the window).
-             AND (scan_state.max_priority <= :scanned_priority
+             -- Check 3: a scan-clean note has every leaf to its right within its completed
+             -- shard; otherwise the stored floor must reach the bottom of the pruning window
+             -- (no unscanned range separating it from the window).
+             AND ({shard_scan_clean}
                   OR :pruning_region_gap_top IS NULL
                   OR rn.witness_anchor_stable >= :pruning_region_gap_top)
              AND rn.id NOT IN rarray(:exclude)
@@ -967,7 +973,6 @@ where
     let target_value_arg = u64::from(target_value);
     let prunable_window_scanned_arg = i64::from(prunable_window_scanned);
     let pruning_region_gap_top = pruning_gap_top.map(u32::from);
-    let scanned_priority = priority_code(&ScanPriority::Scanned);
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
@@ -978,7 +983,6 @@ where
         (":exclude", &excluded_ptr),
         (":prunable_window_scanned", &prunable_window_scanned_arg),
         (":pruning_region_gap_top", &pruning_region_gap_top),
-        (":scanned_priority", &scanned_priority),
         (":min_value", &min_value),
     ];
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
@@ -992,7 +996,7 @@ where
             .get::<_, Option<u32>>("max_shielding_input_height")?
             .map(BlockHeight::from);
         let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
-        let shard_scan_clean = is_shard_scan_clean(row.get::<_, Option<i64>>("max_priority")?)?;
+        let shard_scan_clean = row.get::<_, bool>("shard_scan_clean")?;
         let note = to_spendable_note(params, protocol, row)?;
 
         Ok(note.map(|n| {

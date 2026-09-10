@@ -41,14 +41,15 @@ workspace.
   below the anchor height the confirmations policy implies at the current chain
   tip (a not-yet-scanned tip extension strictly above that anchor does not
   suspend spendability); the note's witness region below the window is durable
-  (every block in its shard's range has been scanned, or its floor reaches the
-  bottom of the window with no unscanned range in between); the chosen anchor's
-  tree root is constructable; and the note has met its confirmations-policy
-  threshold. A truncation of wallet data (`rewind_to_chain_state`,
-  `truncate_to_height`, or `truncate_to_chain_state`) clears any stored floor
-  above the truncation height; affected notes re-stabilize from post-truncation
-  chain data once their shards are again free of unscanned ranges. Migration to
-  this schema is automatic.
+  (its shard is complete and every block after the note's own block through the
+  shard's end has been scanned, or its floor reaches the bottom of the window
+  with no unscanned range in between); the chosen anchor's tree root is
+  constructable; and the note has met its confirmations-policy threshold. A
+  truncation of wallet data (`rewind_to_chain_state`, `truncate_to_height`, or
+  `truncate_to_chain_state`) clears any stored floor above the truncation
+  height; affected notes re-stabilize from post-truncation chain data once their
+  shards are again free of unscanned ranges. Migration to this schema is
+  automatic.
 - `WalletWrite::put_blocks` creates note commitment tree checkpoints only within
   `PRUNING_DEPTH` blocks of the chain tip, and creates one at every scanned
   height in that window whether or not the block carries a shielded output.

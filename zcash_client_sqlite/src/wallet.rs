@@ -2736,7 +2736,12 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
             Zatoshis,
         ) -> Result<(), SqliteClientError>,
     {
-        let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+        let TableConstants {
+            table_prefix,
+            shard_height,
+            ..
+        } = table_constants::<SqliteClientError>(protocol)?;
+        let shard_scan_clean = common::note_shard_scan_clean_condition();
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
 
@@ -2751,7 +2756,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     rn.witness_anchor_stable,
-                    scan_state.max_priority,
+                    {shard_scan_clean} AS shard_scan_clean,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2760,9 +2765,8 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-                ON rn.commitment_tree_position >= scan_state.start_position
-                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             LEFT OUTER JOIN {table_prefix}_tree_shards shard
+                ON shard.shard_index = (rn.commitment_tree_position >> {shard_height})
              LEFT OUTER JOIN transparent_received_output_spends ros
                 ON ros.transaction_id = t.id_tx
              LEFT OUTER JOIN transparent_received_outputs tro
@@ -2818,8 +2822,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
                 target_height,
             );
 
-            let shard_scan_clean =
-                common::is_shard_scan_clean(row.get::<_, Option<i64>>("max_priority")?)?;
+            let shard_scan_clean = row.get::<_, bool>("shard_scan_clean")?;
 
             let confirmations_met = confirmations_policy.confirmations_until_spendable(
                 target_height,
@@ -4625,7 +4628,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     // that this truncation discards; if it survived, it would continue to vouch for the
     // note's witness context after the wallet has re-scanned a (possibly divergent)
     // chain over those heights. Clear such floors so that affected notes re-stabilize
-    // from post-truncation chain data once their shards are scan-clean again.
+    // from post-truncation chain data once they are again scanned above their own blocks.
     {
         let clear_stale_floors = |table_prefix: &str| {
             conn.execute(

@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{SAPLING_SHARD_HEIGHT, scanning::ScanPriority};
 use zcash_protocol::consensus;
 
 #[cfg(feature = "orchard")]
@@ -25,7 +25,11 @@ use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT
 use super::{note_locking, witness_stabilized_notes};
 use crate::{
     SAPLING_TABLES_PREFIX,
-    wallet::{chain_tip_height, init::WalletMigrationError, scanning::pruning_floor},
+    wallet::{
+        chain_tip_height,
+        init::WalletMigrationError,
+        scanning::{priority_code, pruning_floor},
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -88,31 +92,32 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // deliberately *not* consulted; see the module docs. The SQL is inlined rather than
         // calling `mark_stabilized_notes` so this migration stays stable as that helper evolves.
         //
-        // For each note whose containing shard has no unscanned ranges, the stored height is
-        // the shard's `subtree_end_height` when the shard is complete, and otherwise the
-        // greater of the note's own `t.block` and the pruning floor. See
+        // For each note scanned above its own block (every block after the note's own block is
+        // scanned, through the shard's end for a completed shard and through the chain tip for
+        // the open one), the stored height is the shard's `subtree_end_height` when the shard is complete, and
+        // otherwise the greater of the note's own `t.block` and the pruning floor. See
         // `mark_stabilized_notes`.
         if let Some(chain_tip) = chain_tip_height(transaction)? {
             let pruning_floor: u32 = u32::from(pruning_floor(chain_tip));
+            let scanned_priority = priority_code(&ScanPriority::Scanned);
             let backfill = |table_prefix: &str| -> String {
                 format!(
-                    "UPDATE {table_prefix}_received_notes
+                    "UPDATE {table_prefix}_received_notes AS rn
                      SET witness_anchor_stable = IFNULL(
-                         (SELECT shard.subtree_end_height
-                          FROM {table_prefix}_tree_shards shard
-                          WHERE shard.shard_index
-                                = ({table_prefix}_received_notes.commitment_tree_position
-                                   >> :shard_height)),
-                         max(
-                             (SELECT t.block
-                              FROM transactions t
-                              WHERE t.id_tx = {table_prefix}_received_notes.transaction_id),
-                             :pruning_floor
-                         )
+                         shard.subtree_end_height,
+                         max(t.block, :pruning_floor)
                      )
-                     WHERE commitment_tree_position IS NOT NULL
-                       AND (commitment_tree_position >> :shard_height) NOT IN (
-                           SELECT shard_index FROM v_{table_prefix}_shard_unscanned_ranges
+                     FROM transactions t, {table_prefix}_tree_shards shard
+                     WHERE t.id_tx = rn.transaction_id
+                       AND shard.shard_index = (rn.commitment_tree_position >> :shard_height)
+                       AND rn.commitment_tree_position IS NOT NULL
+                       AND t.block IS NOT NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM scan_queue q
+                           WHERE q.priority > :scanned_priority
+                             AND q.block_range_end > t.block + 1
+                             AND (shard.subtree_end_height IS NULL
+                                  OR q.block_range_start <= shard.subtree_end_height)
                        )"
                 )
             };
@@ -121,6 +126,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 named_params![
                     ":pruning_floor": pruning_floor,
                     ":shard_height": SAPLING_SHARD_HEIGHT,
+                    ":scanned_priority": scanned_priority,
                 ],
             )?;
             #[cfg(feature = "orchard")]
@@ -129,6 +135,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 named_params![
                     ":pruning_floor": pruning_floor,
                     ":shard_height": ORCHARD_SHARD_HEIGHT,
+                    ":scanned_priority": scanned_priority,
                 ],
             )?;
             #[cfg(feature = "orchard")]
@@ -137,6 +144,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 named_params![
                     ":pruning_floor": pruning_floor,
                     ":shard_height": IRONWOOD_SHARD_HEIGHT,
+                    ":scanned_priority": scanned_priority,
                 ],
             )?;
             #[cfg(not(feature = "orchard"))]
@@ -331,9 +339,9 @@ mod tests {
                 .unwrap();
         }
 
-        // A single contiguous `Scanned` range over `[birthday, chain_tip + 1)`: every shard is
-        // scan-clean (nothing above `Scanned` overlaps), so the backfill's unscanned-range
-        // gate admits all positioned notes.
+        // A single contiguous `Scanned` range over `[birthday, chain_tip + 1)`: nothing above
+        // `Scanned` overlaps any note, so the backfill's unscanned-range gate admits all
+        // positioned notes.
         db_data
             .conn
             .execute(
