@@ -2201,6 +2201,13 @@ pub trait WalletRead {
     /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
     /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
     /// or `Ok(None)` if the wallet has no summary data available.
+    ///
+    /// The summary reports a shielded note as spendable only if the wallet can build its witness
+    /// at the anchor that [`WalletRead::get_target_and_anchor_heights`] returns for the trusted
+    /// confirmations of `confirmations_policy`. While that function returns `None`, for example
+    /// while the wallet scans the blocks it missed when it was offline for `min_confirmations`
+    /// blocks or more, the summary reports no shielded value as spendable. It reports the value
+    /// of such notes in [`Balance::value_pending_spendability`].
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
@@ -2289,12 +2296,19 @@ pub trait WalletRead {
     /// [`ScanPriority::Verify`]: crate::data_api::scanning::ScanPriority
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
 
-    /// Returns the default target height (for the block in which a new
-    /// transaction would be mined) and anchor height (to use for a new
-    /// transaction), given the range of block heights that the backend
-    /// knows about.
+    /// Returns the target height for a new transaction (the height of the block in which it
+    /// would be mined, one above the chain tip) and the anchor height to use for it.
     ///
-    /// This will return `Ok(None)` if no block data is present in the database.
+    /// The anchor is the note commitment tree state at the policy depth, `min_confirmations`
+    /// below the target. The returned height identifies a checkpoint carrying exactly that
+    /// state; it may lie below the policy depth when every block between the two has been
+    /// scanned and added no commitments.
+    ///
+    /// Returns `Ok(None)` if the chain tip is unknown, or if the backend cannot identify such
+    /// a checkpoint, for example because a block between its latest checkpoint and the policy
+    /// depth has not been scanned. An implementation must not return an anchor carrying an
+    /// older tree state: doing so reveals on chain how far behind the tip the wallet was when
+    /// it spent.
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,

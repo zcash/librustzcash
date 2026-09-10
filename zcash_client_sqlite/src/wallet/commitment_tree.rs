@@ -6,7 +6,6 @@ use std::{
     error, fmt,
     io::{self, Cursor},
     marker::PhantomData,
-    num::NonZeroU32,
     ops::Range,
     sync::Arc,
 };
@@ -19,7 +18,7 @@ use shardtree::{
 };
 
 use zcash_client_backend::{
-    data_api::{chain::CommitmentTreeRoot, wallet::TargetHeight},
+    data_api::chain::CommitmentTreeRoot,
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
@@ -34,8 +33,6 @@ use {
     shardtree::{ShardTree, store::memory::MemoryShardStore},
     zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
 };
-
-use super::common::{TableConstants, table_constants};
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -946,30 +943,25 @@ pub(crate) fn get_checkpoint(
         .transpose()
 }
 
-pub(crate) fn get_max_checkpointed_height(
+/// Returns the height of the highest checkpoint at or below `max_height` in the tree with the
+/// given table prefix, if any.
+pub(crate) fn max_checkpoint_at_or_below(
     conn: &rusqlite::Connection,
-    protocol: ShieldedPool,
-    target_height: TargetHeight,
-    min_confirmations: NonZeroU32,
-) -> Result<Option<BlockHeight>, SqliteClientError> {
-    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
-    let max_checkpoint_height = target_height - u32::from(min_confirmations);
-
-    // We exclude from consideration all checkpoints having heights greater than the maximum
-    // checkpoint height. The checkpoint depth is the number of excluded checkpoints + 1.
+    table_prefix: &'static str,
+    max_height: BlockHeight,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
     conn.query_row(
         &format!(
             "SELECT checkpoint_id
              FROM {table_prefix}_tree_checkpoints
-             WHERE checkpoint_id <= :max_checkpoint_height
+             WHERE checkpoint_id <= :max_height
              ORDER BY checkpoint_id DESC
              LIMIT 1",
         ),
-        named_params![":max_checkpoint_height": u32::from(max_checkpoint_height)],
+        named_params![":max_height": u32::from(max_height)],
         |row| row.get::<_, u32>(0).map(BlockHeight::from),
     )
     .optional()
-    .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn get_checkpoint_at_depth(
