@@ -44,6 +44,13 @@ workspace.
   now pays a unified address with every receiver of that address. Previously
   it omitted the transparent receiver of an address that also had a shielded
   receiver.
+- `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
+  now documented to return an anchor whose tree state is exactly the state at
+  `min_confirmations` below the target, and `None` when the backend cannot
+  identify such a state, for example because blocks between its latest
+  checkpoint and that depth are unscanned. An implementation that returned the
+  most recent checkpoint at or below that depth without this condition must be
+  updated.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,

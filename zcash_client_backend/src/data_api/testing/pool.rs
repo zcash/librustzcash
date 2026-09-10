@@ -6779,10 +6779,8 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
 /// in the witness — must not veto spendability.
 ///
 /// Once the advance reaches the anchor depth, the policy anchor lies in unscanned
-/// territory. The only anchor the wallet could construct a witness against is a stale,
-/// checkpoint-clamped one; spending against it would reveal the wallet's lagging view
-/// of the chain to a network observer, so the wallet must instead report zero spendable
-/// value until it has scanned forward.
+/// territory, so the wallet has no anchor and must report zero spendable value until it
+/// has scanned forward.
 pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
