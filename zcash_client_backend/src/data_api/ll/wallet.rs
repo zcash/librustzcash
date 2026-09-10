@@ -1,8 +1,13 @@
-use std::{collections::BTreeMap, hash::Hash, ops::Range};
-#[cfg(feature = "orchard")]
-use {
-    crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint, std::collections::BTreeSet,
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    hash::Hash,
+    ops::Range,
 };
+
+use shardtree::store::Checkpoint;
+
+#[cfg(feature = "orchard")]
+use crate::data_api::ORCHARD_SHARD_HEIGHT;
 
 use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator},
@@ -650,11 +655,19 @@ where
 ///   boundary block containing no shielded outputs in any pool would otherwise leave a permanent
 ///   hole in the retained grid, and the anchor there could never be proved against. `None`
 ///   disables anchor retention.
+/// - `chain_tip`: The wallet's view of the chain tip, if known. `Checkpoint` retention is used
+///   only within `PRUNING_DEPTH` blocks of the later of this height and the last block in
+///   `blocks`: every scanned height inside that window receives a checkpoint in every tree,
+///   whether or not a block there carries a commitment, so that an anchor exists at the
+///   confirmations-policy depth. A block-end checkpoint below the window is not created, since
+///   it would be pruned as soon as the window advanced; its commitment keeps only the marking
+///   that protects a wallet note. Retained anchor heights are checkpointed regardless.
 pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+    chain_tip: Option<BlockHeight>,
     anchor_retention: Option<&AnchorRetention>,
 ) -> Result<(), PutBlocksError<SE, TE>>
 where
@@ -680,6 +693,49 @@ where
     // We will have a start position and a last scanned height in all cases where
     // `blocks` is non-empty.
     if let Some(last_scanned_height) = last_scanned_height {
+        // `Checkpoint` retention is used only within `PRUNING_DEPTH` of the chain tip. A
+        // block-end checkpoint below that window would be pruned as soon as the window advanced,
+        // so such a commitment keeps only the marking that protects a wallet note.
+        let reference_tip =
+            chain_tip.map_or(last_scanned_height, |tip| tip.max(last_scanned_height));
+        let checkpoint_floor = reference_tip.saturating_sub(PRUNING_DEPTH);
+
+        // The tree position at the end of every block that carries a commitment, recorded
+        // before demotion so that a checkpoint ensured below the window (a retained anchor)
+        // still lands on the right tree state.
+        let sapling_block_ends = block_end_positions(
+            Position::from(from_state.final_sapling_tree().tree_size()),
+            &sapling_commitments,
+        );
+        #[cfg(feature = "orchard")]
+        let orchard_block_ends = block_end_positions(
+            Position::from(from_state.final_orchard_tree().tree_size()),
+            &orchard_commitments,
+        );
+        #[cfg(feature = "orchard")]
+        let ironwood_block_ends = block_end_positions(
+            Position::from(from_state.final_ironwood_tree().tree_size()),
+            &ironwood_commitments,
+        );
+
+        demote_checkpoints_at_or_below(
+            &mut sapling_commitments,
+            checkpoint_floor,
+            anchor_retention,
+        );
+        #[cfg(feature = "orchard")]
+        demote_checkpoints_at_or_below(
+            &mut orchard_commitments,
+            checkpoint_floor,
+            anchor_retention,
+        );
+        #[cfg(feature = "orchard")]
+        demote_checkpoints_at_or_below(
+            &mut ironwood_commitments,
+            checkpoint_floor,
+            anchor_retention,
+        );
+
         // Create subtrees from the note commitments in parallel.
         const CHUNK_SIZE: usize = 1024;
         let sapling_subtrees = build_subtrees::<_, SAPLING_SHARD_HEIGHT>(
@@ -708,64 +764,75 @@ where
         // checkpoint at every height that is checkpointed in any of the other trees, so the set of
         // heights to ensure for a given tree is the union of the checkpoint heights of the others.
         //
-        // The heights the anchor-retention policy retains within this batch are added to every
-        // pool's ensure set. Scanning checkpoints a block only at its last note commitment, so a
-        // grid boundary landing on a block with no shielded outputs in ANY pool would otherwise
-        // never be checkpointed at all — and a retention policy can only keep alive a checkpoint
-        // that exists. The ensured checkpoint carries the tree state as of the last commitment at
-        // or before the boundary, which is exactly the state a ZIP 318 anchor at that height
-        // commits to.
+        // Every scanned height inside the checkpoint window is added to every pool's ensure set,
+        // so that a checkpoint exists at each of them whether or not a block there carries a
+        // commitment. The heights the anchor-retention policy retains within this batch are added
+        // likewise: a grid boundary landing on a block with no shielded outputs in ANY pool would
+        // otherwise never be checkpointed at all, and a retention policy can only keep alive a
+        // checkpoint that exists. An ensured checkpoint carries the tree state as of the last
+        // commitment at or before its height, which is exactly the state an anchor at that
+        // height commits to.
+        let window_heights = (u32::from(from_state.block_height()) + 1
+            ..=u32::from(last_scanned_height))
+            .map(BlockHeight::from)
+            .filter(|height| *height > checkpoint_floor)
+            .collect::<BTreeSet<BlockHeight>>();
+        let sapling_checkpoint_positions = checkpoint_positions(&sapling_subtrees);
         #[cfg(feature = "orchard")]
-        let (
-            missing_sapling_checkpoints,
-            missing_orchard_checkpoints,
-            missing_ironwood_checkpoints,
-        ) = {
-            let sapling_checkpoint_positions = checkpoint_positions(&sapling_subtrees);
-            let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
-            let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
+        let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
+        #[cfg(feature = "orchard")]
+        let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
+        #[cfg(not(feature = "orchard"))]
+        let (orchard_checkpoint_positions, ironwood_checkpoint_positions) = (
+            BTreeMap::<BlockHeight, Position>::new(),
+            BTreeMap::<BlockHeight, Position>::new(),
+        );
 
-            let [ensure_sapling, ensure_orchard, ensure_ironwood] = batch_ensure_heights(
-                &sapling_checkpoint_positions.keys().copied().collect(),
-                &orchard_checkpoint_positions.keys().copied().collect(),
-                &ironwood_checkpoint_positions.keys().copied().collect(),
-                anchor_retention,
-                from_state.block_height() + 1..=last_scanned_height,
-            );
+        let [ensure_sapling, ensure_orchard, ensure_ironwood] = batch_ensure_heights(
+            &sapling_checkpoint_positions.keys().copied().collect(),
+            &orchard_checkpoint_positions.keys().copied().collect(),
+            &ironwood_checkpoint_positions.keys().copied().collect(),
+            anchor_retention,
+            from_state.block_height() + 1..=last_scanned_height,
+            &window_heights,
+        );
+        #[cfg(not(feature = "orchard"))]
+        let _ = (ensure_orchard, ensure_ironwood);
 
-            (
-                ensure_checkpoints(
-                    ensure_sapling.iter(),
-                    &sapling_checkpoint_positions,
-                    from_state.final_sapling_tree(),
-                ),
-                ensure_checkpoints(
-                    ensure_orchard.iter(),
-                    &orchard_checkpoint_positions,
-                    from_state.final_orchard_tree(),
-                ),
-                ensure_checkpoints(
-                    ensure_ironwood.iter(),
-                    &ironwood_checkpoint_positions,
-                    from_state.final_ironwood_tree(),
-                ),
-            )
-        };
+        let missing_sapling_checkpoints = ensure_checkpoints(
+            ensure_sapling.iter(),
+            &sapling_checkpoint_positions.keys().copied().collect(),
+            &sapling_block_ends,
+            from_state.final_sapling_tree(),
+        );
+        #[cfg(feature = "orchard")]
+        let missing_orchard_checkpoints = ensure_checkpoints(
+            ensure_orchard.iter(),
+            &orchard_checkpoint_positions.keys().copied().collect(),
+            &orchard_block_ends,
+            from_state.final_orchard_tree(),
+        );
+        #[cfg(feature = "orchard")]
+        let missing_ironwood_checkpoints = ensure_checkpoints(
+            ensure_ironwood.iter(),
+            &ironwood_checkpoint_positions.keys().copied().collect(),
+            &ironwood_block_ends,
+            from_state.final_ironwood_tree(),
+        );
 
         // Update the Sapling note commitment tree with all newly read note commitments
         {
             let mut sapling_subtrees = sapling_subtrees.into_iter();
-            #[cfg(feature = "orchard")]
             let mut missing_checkpoints = missing_sapling_checkpoints.into_iter();
             wallet_db.with_sapling_tree_mut(|sapling_tree| {
                 update_tree(
                     "Sapling",
                     from_state.final_sapling_tree(),
                     from_state.block_height(),
+                    checkpoint_floor,
                     sapling_tree,
                     anchor_retention,
                     &mut sapling_subtrees,
-                    #[cfg(feature = "orchard")]
                     &mut missing_checkpoints,
                 )
                 .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
@@ -786,6 +853,7 @@ where
                     "Orchard",
                     from_state.final_orchard_tree(),
                     from_state.block_height(),
+                    checkpoint_floor,
                     orchard_tree,
                     anchor_retention,
                     &mut orchard_subtrees,
@@ -809,6 +877,7 @@ where
                     "Ironwood",
                     from_state.final_ironwood_tree(),
                     from_state.block_height(),
+                    checkpoint_floor,
                     ironwood_tree,
                     anchor_retention,
                     &mut ironwood_subtrees,
@@ -1597,7 +1666,6 @@ where
 }
 
 /// Produces an overall set of checkpoints from a list of subtrees.
-#[cfg(feature = "orchard")]
 pub fn checkpoint_positions<H>(
     subtrees: &[(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)],
 ) -> BTreeMap<BlockHeight, Position> {
@@ -1609,48 +1677,34 @@ pub fn checkpoint_positions<H>(
 }
 
 /// Produces the checkpoints that must be added to a pool's note commitment tree so that it
-/// gains a checkpoint at each of the requested heights, drawing position information from the
-/// existing checkpoint positions (or from the provided frontier when no preceding checkpoint
-/// exists). Heights at which a checkpoint already exists are skipped.
-#[cfg(feature = "orchard")]
+/// gains a checkpoint at each of the requested heights. A height in `created_checkpoints` is
+/// skipped, since inserting the batch's subtrees creates its checkpoint. Any other height
+/// receives a checkpoint at the position recorded in `block_end_positions` for the nearest block
+/// at or below it that carries a commitment, or at the provided frontier's position when no
+/// such block precedes it in the batch.
 pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
-    // An iterator of checkpoints heights for which we wish to ensure that
-    // checkpoints exists.
     ensure_heights: I,
-    // The map of checkpoint positions from which we will draw note commitment tree
-    // position information for the newly created checkpoints.
-    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
-    // The frontier whose position will be used for an inserted checkpoint when
-    // there is no preceding checkpoint in existing_checkpoint_positions.
+    created_checkpoints: &BTreeSet<BlockHeight>,
+    block_end_positions: &BTreeMap<BlockHeight, Position>,
     state_final_tree: &Frontier<H, DEPTH>,
 ) -> Vec<(BlockHeight, Checkpoint)> {
     ensure_heights
-        .flat_map(|ensure_height| {
-            existing_checkpoint_positions
+        .filter(|ensure_height| !created_checkpoints.contains(ensure_height))
+        .map(|ensure_height| {
+            let checkpoint = block_end_positions
                 .range::<BlockHeight, _>(..=*ensure_height)
                 .last()
                 .map_or_else(
                     || {
-                        Some((
-                            *ensure_height,
-                            state_final_tree
-                                .value()
-                                .map_or_else(Checkpoint::tree_empty, |t| {
-                                    Checkpoint::at_position(t.position())
-                                }),
-                        ))
+                        state_final_tree
+                            .value()
+                            .map_or_else(Checkpoint::tree_empty, |t| {
+                                Checkpoint::at_position(t.position())
+                            })
                     },
-                    |(existing_checkpoint_height, position)| {
-                        if *existing_checkpoint_height < *ensure_height {
-                            Some((*ensure_height, Checkpoint::at_position(*position)))
-                        } else {
-                            // The checkpoint already exists, so we don't need to
-                            // do anything.
-                            None
-                        }
-                    },
-                )
-                .into_iter()
+                    |(_, position)| Checkpoint::at_position(*position),
+                );
+            (*ensure_height, checkpoint)
         })
         .collect::<Vec<_>>()
 }
@@ -1733,7 +1787,6 @@ where
 /// for it equals the union of all three pools' checkpoint heights, so all three trees end up
 /// checkpointed at the same set of heights. When one pool has no checkpoints, the sets returned for
 /// the other two reduce to each other's heights, matching the prior two-pool behavior.
-#[cfg(feature = "orchard")]
 pub fn cross_pool_ensure_heights(
     sapling: &BTreeSet<BlockHeight>,
     orchard: &BTreeSet<BlockHeight>,
@@ -1772,15 +1825,19 @@ pub fn cross_pool_ensure_heights(
 /// by other means — accumulating updates in memory and flushing in bulk, or building shards out of
 /// band — composes the same set rather than rediscovering the rule, which is why the two obligations
 /// live behind one function instead of at each call site.
-#[cfg(feature = "orchard")]
 pub fn batch_ensure_heights(
     sapling: &BTreeSet<BlockHeight>,
     orchard: &BTreeSet<BlockHeight>,
     ironwood: &BTreeSet<BlockHeight>,
     anchor_retention: Option<&AnchorRetention>,
     range: std::ops::RangeInclusive<BlockHeight>,
+    window_heights: &BTreeSet<BlockHeight>,
 ) -> [BTreeSet<BlockHeight>; 3] {
     let mut ensure = cross_pool_ensure_heights(sapling, orchard, ironwood);
+
+    for pool in ensure.iter_mut() {
+        pool.extend(window_heights.iter().copied());
+    }
 
     if let Some(retention) = anchor_retention {
         let retained = retention.retained_in_range(range);
@@ -1795,20 +1852,27 @@ pub fn batch_ensure_heights(
 /// Updates the given note commitment tree with all newly read note commitments starting
 /// at the block `frontier_height + 1`.
 ///
+/// `Checkpoint` retention is used only above `checkpoint_floor`: the frontier is checkpointed
+/// there, and `missing_checkpoints` supplies the checkpoints for scanned heights above it that
+/// no commitment created. Below the floor the frontier's leaf is kept as a reference only.
+///
 /// If `anchor_retention` is `Some`, every checkpoint the policy
-/// [retains](AnchorRetention::retains) is kept as a durable anchor.
+/// [retains](AnchorRetention::retains) is kept as a durable anchor, and the frontier is
+/// checkpointed at a retained height regardless of the floor.
 ///
 /// This is generic over the [`ShardStore`] backing the tree, so stores that maintain their note
 /// commitment trees by other means (for example, accumulating updates in memory and flushing
 /// them in bulk) can reuse the exact tree-update logic that [`put_blocks`] applies.
+#[allow(clippy::too_many_arguments)]
 pub fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     protocol: &'static str,
     frontier: &Frontier<S::H, DEPTH>,
     frontier_height: BlockHeight,
+    checkpoint_floor: BlockHeight,
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
     anchor_retention: Option<&AnchorRetention>,
     subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
-    #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
+    missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
 ) -> Result<(), ShardTreeError<S::Error>>
 where
     S: ShardStore<CheckpointId = BlockHeight>,
@@ -1818,15 +1882,20 @@ where
         "{protocol} initial tree size at {frontier_height:?}: {:?}",
         frontier.tree_size()
     );
-    // We insert the frontier with `Checkpoint` retention because we need to be
-    // able to truncate the tree back to this point.
-    tree.insert_frontier(
-        frontier.clone(),
+    // Inside the checkpoint window the frontier is inserted with `Checkpoint` retention, so
+    // that the tree can be truncated back to this point. Below the window such a checkpoint
+    // would be pruned as soon as the window advanced, so the leaf is kept as a reference only.
+    let frontier_retention = if frontier_height > checkpoint_floor
+        || should_retain_anchor(anchor_retention, frontier_height)
+    {
         Retention::Checkpoint {
             id: frontier_height,
             marking: Marking::Reference,
-        },
-    )?;
+        }
+    } else {
+        Retention::Reference
+    };
+    tree.insert_frontier(frontier.clone(), frontier_retention)?;
     retain_anchor_checkpoint(tree, anchor_retention, frontier_height)?;
 
     for (subtree, checkpoints) in subtrees {
@@ -1841,33 +1910,69 @@ where
         tree.insert_tree(subtree, checkpoints)?;
     }
 
-    // Ensure we have a tree checkpoint for each checkpointed block height.
-    // We skip all checkpoints below the minimum retained checkpoint in the
-    // tree, because branches below this height may be pruned.
-    #[cfg(feature = "orchard")]
-    {
-        let min_checkpoint_height = tree
-            .store()
-            .min_checkpoint_id()
-            .map_err(ShardTreeError::Storage)?
-            .expect("At least one checkpoint was inserted (by insert_frontier)");
+    // Ensure we have a tree checkpoint for each height that requires one. We skip all
+    // checkpoints below the minimum retained checkpoint in the tree, because branches below
+    // this height may be pruned.
+    let min_checkpoint_height = tree
+        .store()
+        .min_checkpoint_id()
+        .map_err(ShardTreeError::Storage)?;
 
-        for (height, checkpoint) in missing_checkpoints {
-            if height > min_checkpoint_height {
-                debug!(
-                    "Adding missing {protocol} checkpoint for height: {:?}: {:?}",
-                    height,
-                    checkpoint.position()
-                );
-                tree.store_mut()
-                    .add_checkpoint(height, checkpoint.clone())
-                    .map_err(ShardTreeError::Storage)?;
-                retain_anchor_checkpoint(tree, anchor_retention, height)?;
-            }
+    for (height, checkpoint) in missing_checkpoints {
+        if min_checkpoint_height.is_none_or(|min| height > min) {
+            debug!(
+                "Adding missing {protocol} checkpoint for height: {:?}: {:?}",
+                height,
+                checkpoint.position()
+            );
+            tree.store_mut()
+                .add_checkpoint(height, checkpoint.clone())
+                .map_err(ShardTreeError::Storage)?;
+            retain_anchor_checkpoint(tree, anchor_retention, height)?;
         }
     }
 
     Ok(())
+}
+
+/// Returns the tree position at the end of each block in `commitments` that carries a
+/// commitment, keyed by block height. The scanner marks a block's last commitment with
+/// `Checkpoint` retention, which is what identifies the block end here.
+fn block_end_positions<H>(
+    start_position: Position,
+    commitments: &[Option<(H, Retention<BlockHeight>)>],
+) -> BTreeMap<BlockHeight, Position> {
+    commitments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, entry)| match entry {
+            Some((_, Retention::Checkpoint { id, .. })) => Some((*id, start_position + i as u64)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Replaces `Checkpoint` retention at or below `floor` with the retention that keeps only the
+/// commitment's marking: a wallet note's commitment stays `Marked`, a referenced commitment stays
+/// `Reference`, and any other commitment becomes `Ephemeral`. A height the anchor-retention
+/// policy retains keeps its checkpoint regardless of the floor.
+fn demote_checkpoints_at_or_below<H>(
+    commitments: &mut [Option<(H, Retention<BlockHeight>)>],
+    floor: BlockHeight,
+    anchor_retention: Option<&AnchorRetention>,
+) {
+    for (_, retention) in commitments.iter_mut().flatten() {
+        if let Retention::Checkpoint { id, marking } = retention
+            && *id <= floor
+            && !should_retain_anchor(anchor_retention, *id)
+        {
+            *retention = match marking {
+                Marking::Marked => Retention::Marked,
+                Marking::Reference => Retention::Reference,
+                Marking::None => Retention::Ephemeral,
+            };
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2105,6 +2210,7 @@ mod tests {
             &iw_cp,
             Some(&retention),
             h(1_150)..=h(1_250),
+            &BTreeSet::new(),
         );
 
         for (pool, heights) in [
@@ -2131,7 +2237,14 @@ mod tests {
         let ironwood = BTreeSet::from([h(160)]);
 
         assert_eq!(
-            batch_ensure_heights(&sapling, &orchard, &ironwood, None, h(1)..=h(1_000)),
+            batch_ensure_heights(
+                &sapling,
+                &orchard,
+                &ironwood,
+                None,
+                h(1)..=h(1_000),
+                &BTreeSet::new()
+            ),
             cross_pool_ensure_heights(&sapling, &orchard, &ironwood)
         );
     }

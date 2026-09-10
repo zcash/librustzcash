@@ -47,6 +47,13 @@ workspace.
   affected notes re-stabilize from post-truncation chain data once their
   shards are again free of unscanned ranges. Migration to this schema is
   automatic.
+- `WalletWrite::put_blocks` creates note commitment tree checkpoints only within
+  `PRUNING_DEPTH` blocks of the chain tip, and creates one at every scanned
+  height in that window whether or not the block carries a shielded output.
+  Scanning older blocks no longer creates checkpoints, and a wallet that is
+  synced to the tip always holds a checkpoint at the anchor height its
+  confirmations policy implies, so a stretch of blocks without shielded outputs
+  no longer leaves notes in the open tip shard unspendable.
 - `WalletRead::get_target_and_anchor_heights`, and the anchor used by
   `get_wallet_summary`, `propose_transfer`, and `propose_shielding`, now
   returns the highest checkpoint at or below `min_confirmations` below the

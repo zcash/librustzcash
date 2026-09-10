@@ -35,6 +35,20 @@ workspace.
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
   implementation that applies blocks one at a time must be updated.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks` takes the wallet's
+  view of the chain tip as a new `chain_tip: Option<BlockHeight>` argument, and
+  `zcash_client_backend::data_api::ll::wallet::update_tree` takes a
+  `checkpoint_floor: BlockHeight` argument and its `missing_checkpoints`
+  argument unconditionally. `Checkpoint` retention is now used only within
+  `PRUNING_DEPTH` blocks of the chain tip: every scanned height in that window
+  receives a checkpoint in every tree, whether or not a block there carries a
+  commitment, and a block-end checkpoint below the window is not created; such
+  a commitment keeps only the marking that protects a wallet note.
+  `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights` takes the
+  window's heights as a new argument,
+  `zcash_client_backend::data_api::ll::wallet::ensure_checkpoints` takes the set
+  of checkpoints the batch creates and the block-end tree positions as separate
+  arguments, and these helpers are available without the `orchard` feature.
 - `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
   now documented to return an anchor whose tree state is exactly the state at
   `min_confirmations` below the target, and `None` when the backend cannot

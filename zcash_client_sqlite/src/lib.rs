@@ -2287,6 +2287,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             self.gap_limits,
             from_state,
             blocks,
+            wallet::chain_tip_height(self.conn.borrow())?,
             anchor_retention.as_ref(),
         )
         .map_err(SqliteClientError::from)
