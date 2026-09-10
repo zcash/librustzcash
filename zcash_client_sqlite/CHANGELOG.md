@@ -59,6 +59,14 @@ workspace.
   that depth.
 
 ### Fixed
+- `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
+  `WalletWrite::set_transaction_status`, and
+  `WalletWrite::put_received_transparent_utxo` now extend the scan queue when
+  they learn of a block above the known chain tip, so the queue stays
+  contiguous from the wallet birthday to the tip. Previously a range scanned
+  above the queue's coverage, or a transaction or transparent output mined
+  above the known tip, left the intervening heights absent from the queue and
+  from `suggest_scan_ranges`.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
   accounts_new.zcashd_legacy_address_index`. In such a database every account

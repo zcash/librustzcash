@@ -621,6 +621,14 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     let query_range = extended_range.clone().unwrap_or_else(|| range.clone());
 
+    // A range scanned above everything the queue covers must not leave the heights between
+    // the prior chain tip and the range absent from the queue. Widening the replacement to
+    // start at the prior chain tip makes the spanning tree backfill that gap as `Historic`.
+    let query_range = match chain_tip_height(conn)? {
+        Some(prior_tip) if prior_tip + 1 < query_range.start => (prior_tip + 1)..query_range.end,
+        _ => query_range,
+    };
+
     let scanned = ScanRange::from_parts(range.clone(), ScanPriority::Scanned);
 
     // If any of the extended range actually extends beyond the scanned range, we need to
@@ -897,6 +905,22 @@ fn tip_shard_end_height(
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .map_err(SqliteClientError::from)
+}
+
+/// Extends the scan queue through `height` when it lies above the known chain tip, so that the
+/// queue stays contiguous when the wallet learns of a block above the tip through a path other
+/// than [`update_chain_tip`]. A wallet with no known chain tip is left unchanged.
+pub(crate) fn extend_chain_tip_to<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    if let Some(chain_tip) = chain_tip_height(conn)?
+        && chain_tip < height
+    {
+        update_chain_tip(conn, params, height)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn update_chain_tip<P: consensus::Parameters>(
@@ -3082,7 +3106,7 @@ pub(crate) mod tests {
     mod queue_contiguity {
         use rusqlite::Connection;
         use zcash_client_backend::data_api::{
-            Account, TransactionStatus, WalletRead, WalletWrite,
+            TransactionStatus, WalletRead, WalletWrite,
             scanning::ScanPriority,
             testing::{
                 AddressType,
@@ -3239,7 +3263,7 @@ pub(crate) mod tests {
                 bundle::{OutPoint, TxOut},
                 keys::TransparentKeyScope,
             };
-            use zcash_client_backend::wallet::WalletTransparentOutput;
+            use zcash_client_backend::{data_api::Account, wallet::WalletTransparentOutput};
             use zcash_keys::keys::UnifiedAddressRequest;
 
             let mut st =

@@ -2298,6 +2298,9 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         #[cfg(feature = "transparent-inputs")]
         return {
+            if let Some(mined_height) = _output.mined_height() {
+                wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+            }
             let (account_id, _, key_scope, utxo_id) =
                 wallet::transparent::put_received_transparent_utxo(
                     self.conn.0,
@@ -2331,6 +2334,9 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         d_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let Some(mined_height) = d_tx.mined_height() {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
         store_decrypted_tx(
@@ -2498,6 +2504,9 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.0,
             &self.params,
@@ -2787,6 +2796,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.borrow(), &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.borrow(),
             &self.params,
