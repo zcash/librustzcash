@@ -66,6 +66,14 @@ workspace.
   returns that receiver. A migration restores the transparent receiver to such
   addresses that `zcash_client_sqlite 0.23.0-pre.1` stored without it, if the
   wallet has not exposed them.
+- `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
+  `WalletWrite::set_transaction_status`, and
+  `WalletWrite::put_received_transparent_utxo` now extend the scan queue when
+  they learn of a block above the known chain tip, so the queue stays
+  contiguous from the wallet birthday to the tip. Previously a range scanned
+  above the queue's coverage, or a transaction or transparent output mined
+  above the known tip, left the intervening heights absent from the queue and
+  from `suggest_scan_ranges`.
 
 ## [0.23.0-pre.1] - 2026-10-06
 
