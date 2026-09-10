@@ -403,6 +403,10 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
     /// Updates transaction metadata to reflect that the given transaction status has been
     /// observed.
+    ///
+    /// For [`TransactionStatus::Mined`], the mined height must be the height of a block on the main chain. If it is above the
+    /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
+    /// blocks above the previous chain tip as not yet scanned.
     fn set_transaction_status(
         &mut self,
         txid: TxId,
