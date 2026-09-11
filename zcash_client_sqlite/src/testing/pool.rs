@@ -292,6 +292,38 @@ pub(crate) fn unmanaged_policy_never_sweeps() {
     )
 }
 
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_policy_splits_change_into_deficit_rungs() {
+    zcash_client_backend::data_api::testing::pool::ladder_policy_splits_change_into_deficit_rungs(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn single_bucket_target_matches_split_policy_counts() {
+    zcash_client_backend::data_api::testing::pool::single_bucket_target_matches_split_policy_counts(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_policy_sweeps_only_surplus() {
+    zcash_client_backend::data_api::testing::pool::ladder_policy_sweeps_only_surplus(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn pending_change_counts_toward_the_target() {
+    zcash_client_backend::data_api::testing::pool::pending_change_counts_toward_the_target(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn prefer_fewest_does_not_grow_sapling_spends() {
     zcash_client_backend::data_api::testing::pool::prefer_fewest_does_not_grow_sapling_spends(
         TestDbFactory::default(),

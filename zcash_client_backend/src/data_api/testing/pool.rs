@@ -10466,8 +10466,8 @@ pub fn consolidation_candidates_are_grouped_by_slot_cost<T: ShieldedPoolTester>(
     );
 }
 
-/// The padded action count a sweep may grow a bundle to under a target of four notes: the shape a
-/// payment with one output and a four-way change split would have had.
+/// The padded action count a sweep may grow a bundle to: the [`LadderPolicy::max_actions`] these
+/// tests give their policies, five being the width that suits hardware-signed wallets.
 pub const ACTION_CAP: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 
 /// A sweep fills the spend sides an Orchard bundle already pays for, taking the smallest note
@@ -10566,42 +10566,20 @@ pub fn ladder_target_excludes_notes_at_the_rung(dsf: impl DataStoreFactory, cach
         [dust],
     ]);
 
-    let account_id = st.test_account().unwrap().id();
-    let recipient_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
-    let recipient =
-        OrchardPoolTester::fvk_default_address(&recipient_fvk).to_zcash_address(st.network());
-    let request = TransactionRequest::new(vec![Payment::without_memo(
-        recipient,
-        Zatoshis::const_from_u64(100_000),
-    )])
-    .unwrap();
-    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
-        Zip317FeeRule::standard(),
-        None,
-        ShieldedPool::Orchard,
-        DustOutputPolicy::default(),
-    );
     // The four notes at the rung leave bucket one at its target of four once the funding note is
     // spent, so change is a single output and no note at or above 100,000 is a candidate.
+    let rung = Zatoshis::const_from_u64(100_000);
+    let payment = Zatoshis::const_from_u64(100_000);
     let note_management = LadderPolicy::new(
-        TargetDistribution::single_bucket(
-            Zatoshis::const_from_u64(100_000),
-            NonZeroUsize::new(4).unwrap(),
-        ),
+        TargetDistribution::single_bucket(rung, NonZeroUsize::new(4).unwrap()),
         ACTION_CAP,
     );
-    let proposal = st
-        .propose_transfer_with_policy_and_note_management(
-            account_id,
-            &GreedyInputSelector::new(),
-            &change_strategy,
-            &note_management,
-            request,
-            ConfirmationsPolicy::MIN,
-            &SpendPolicy::shielded_pools([ShieldedPool::Orchard])
-                .with_note_selection(NoteSelection::PreferFewest),
-        )
-        .unwrap();
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        payment,
+        NoteSelection::PreferFewest,
+        &note_management,
+    );
 
     let step = proposal.steps().first();
     let mut selected = step
@@ -10689,4 +10667,254 @@ pub fn prefer_fewest_does_not_grow_sapling_spends(
         ),
         [funding],
     );
+}
+
+/// The payment the ladder-policy tests propose to an external Orchard address.
+#[cfg(feature = "orchard")]
+const MANAGED_PAYMENT: Zatoshis = Zatoshis::const_from_u64(1_000_000);
+
+/// A target over rungs of one, two and five million zatoshis, asking for two notes at the first
+/// rung and one at each of the others. Bucket zero, below the first rung, is asked for none, so
+/// the four counts cover the three rungs and that bucket.
+#[cfg(feature = "orchard")]
+fn million_ladder_target() -> TargetDistribution {
+    let ladder =
+        ValueLadder::new([1_000_000, 2_000_000, 5_000_000].map(Zatoshis::const_from_u64)).unwrap();
+    TargetDistribution::new(ladder, [0, 2, 1, 1]).unwrap()
+}
+
+/// Proposes `amount` to a fixed external Orchard address under the given funding mode and
+/// note-management policy, with a change strategy that realizes the policy's split plan.
+// `Proposal` reaches this module only through the `transparent-inputs` import group, so the
+// return type spells its path.
+#[cfg(feature = "orchard")]
+fn propose_managed_orchard_payment<Cache, Dsf, NoteT>(
+    st: &mut TestDsl<TestScenario<OrchardPoolTester, Cache, Dsf>>,
+    amount: Zatoshis,
+    note_selection: NoteSelection,
+    note_management: &NoteT,
+) -> crate::proposal::Proposal<Zip317FeeRule, <Dsf::DataStore as InputSource>::NoteRef>
+where
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+    NoteT: NoteManagementPolicy,
+{
+    let account_id = st.test_account().unwrap().id();
+    let recipient_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let recipient =
+        OrchardPoolTester::fvk_default_address(&recipient_fvk).to_zcash_address(st.network());
+    let request = TransactionRequest::new(vec![Payment::without_memo(recipient, amount)]).unwrap();
+    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+        Zip317FeeRule::standard(),
+        None,
+        ShieldedPool::Orchard,
+        DustOutputPolicy::default(),
+    );
+
+    st.propose_transfer_with_policy_and_note_management(
+        account_id,
+        &GreedyInputSelector::new(),
+        &change_strategy,
+        note_management,
+        request,
+        ConfirmationsPolicy::MIN,
+        &SpendPolicy::shielded_pools([ShieldedPool::Orchard]).with_note_selection(note_selection),
+    )
+    .expect("the wallet can fund the payment")
+}
+
+/// Change is split into the rungs the wallet lacks, largest first, with the residual on the
+/// largest piece and no piece below the ladder's first rung.
+#[cfg(feature = "orchard")]
+pub fn ladder_policy_splits_change_into_deficit_rungs(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    st.add_notes_checking_balance([[funding]]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    let step = proposal.steps().first();
+    let mut change = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|change| change.value())
+        .collect::<Vec<_>>();
+    change.sort_unstable();
+
+    // Spending the funding note empties every bucket, so the deficits are the whole target. One
+    // spend against one payment output and four change outputs is five Orchard actions.
+    let rungs = [1_000_000, 1_000_000, 2_000_000, 5_000_000].map(Zatoshis::const_from_u64);
+    let payment_outputs = 1;
+    let actions = u64::try_from(rungs.len() + payment_outputs).unwrap();
+    let fee = (MARGINAL_FEE * actions).unwrap();
+    let rung_total = rungs.iter().sum::<Option<Zatoshis>>().unwrap();
+    let residual = ((funding - MANAGED_PAYMENT).unwrap() - (rung_total + fee).unwrap()).unwrap();
+    assert_eq!(
+        change,
+        [rungs[0], rungs[1], rungs[2], (rungs[3] + residual).unwrap()]
+    );
+    assert_eq!(step.balance().fee_required(), fee);
+}
+
+/// A single-bucket target reproduces the retired split policy's output count: the target count
+/// less the notes the wallet already holds at or above the rung.
+#[cfg(feature = "orchard")]
+pub fn single_bucket_target_matches_split_policy_counts(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let rung = Zatoshis::const_from_u64(1_000_000);
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    let above_rung = [1_500_000, 1_500_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance([[funding], [above_rung[0]], [above_rung[1]]]);
+
+    let target_count = NonZeroUsize::new(5).unwrap();
+    let policy = LadderPolicy::new(
+        TargetDistribution::single_bucket(rung, target_count),
+        ACTION_CAP,
+    );
+    // `PreferFewest` funds from the largest note, so which note pays does not depend on the order
+    // the blocks were added.
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::PreferFewest,
+        &policy,
+    );
+    let step = proposal.steps().first();
+
+    let values = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|change| change.value())
+        .collect::<Vec<_>>();
+    // The funding note leaves the wallet holding only the notes above the rung.
+    assert_eq!(
+        values.len(),
+        target_count.get() - above_rung.len(),
+        "the target count less the notes already at or above the rung: {values:?}",
+    );
+    assert!(
+        values.iter().all(|value| *value >= rung),
+        "every piece of a single-bucket split reaches the rung: {values:?}",
+    );
+}
+
+/// A sweep takes notes only from the buckets the wallet holds too many of, and never takes a
+/// bucket below its target; a note below the ladder's first rung is always in surplus.
+#[cfg(feature = "orchard")]
+pub fn ladder_policy_sweeps_only_surplus(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    // Bucket one holds three notes against a target of two; bucket two holds the one it is asked
+    // for; and one note falls below the ladder, which never asks for such a note. That note is
+    // also below the marginal fee, so it cannot pay for a spend side of its own and only the
+    // free list can carry it.
+    let bucket_one = [1_000_000, 1_100_000, 1_200_000].map(Zatoshis::const_from_u64);
+    let at_target = Zatoshis::const_from_u64(2_500_000);
+    let below_ladder = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    st.add_notes_checking_balance([
+        [funding],
+        [bucket_one[0]],
+        [bucket_one[1]],
+        [bucket_one[2]],
+        [at_target],
+        [below_ladder],
+    ]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::PreferFewest,
+        &policy,
+    );
+    let step = proposal.steps().first();
+    let mut inputs = step
+        .shielded_inputs()
+        .expect("the proposal spends Orchard notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect::<Vec<_>>();
+    inputs.sort_unstable();
+
+    // The law: bucket one is in surplus by one note and bucket two is not in surplus at all.
+    assert!(
+        inputs
+            .iter()
+            .filter(|value| bucket_one.contains(*value))
+            .count()
+            <= 1,
+        "bucket one keeps the two notes its target asks for",
+    );
+    assert!(
+        !inputs.contains(&at_target),
+        "a bucket already at its target is not swept",
+    );
+    // The outcome the law leaves open: bucket one's cap of one bounds the economic regime to one
+    // note, so the two regimes tie at one note each, and a tie goes to the free regime. The note
+    // below the ladder takes the single free spend side.
+    assert_eq!(inputs, [below_ladder, funding]);
+}
+
+/// Change awaiting confirmation counts toward the target, so a second payment does not split for
+/// the notes the first has already created.
+#[cfg(feature = "orchard")]
+pub fn pending_change_counts_toward_the_target(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    st.add_notes_checking_balance([[funding], [funding]]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let account = st.test_account().cloned().unwrap();
+
+    // The unspent funding note meets the top bucket's target, so the first payment splits only
+    // for the three notes the two lower buckets lack.
+    let first = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    assert_eq!(first.steps().first().balance().proposed_change().len(), 3);
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &first,
+        )
+        .unwrap();
+    let tx = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the created transaction was stored");
+
+    // Store the transaction without mining it, so that its change outputs are pending receipts.
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None).unwrap();
+
+    // The two pending 1,000,000 pieces fill bucket one and the residual-carrying piece lands in
+    // the top bucket, so only bucket two is still short; a one-piece plan is realized as a single
+    // change output.
+    let second = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    assert_eq!(second.steps().first().balance().proposed_change().len(), 1);
 }

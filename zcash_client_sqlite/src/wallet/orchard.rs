@@ -1031,6 +1031,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn ladder_policy_splits_change_into_deficit_rungs() {
+        testing::pool::ladder_policy_splits_change_into_deficit_rungs()
+    }
+
+    #[test]
+    fn single_bucket_target_matches_split_policy_counts() {
+        testing::pool::single_bucket_target_matches_split_policy_counts()
+    }
+
+    #[test]
+    fn ladder_policy_sweeps_only_surplus() {
+        testing::pool::ladder_policy_sweeps_only_surplus()
+    }
+
+    #[test]
+    fn pending_change_counts_toward_the_target() {
+        testing::pool::pending_change_counts_toward_the_target()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<OrchardPoolTester>()
