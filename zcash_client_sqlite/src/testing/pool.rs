@@ -1037,3 +1037,10 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
         BlockCache::new(),
     );
 }
+
+pub(crate) fn reorg_below_scanned_height_is_a_continuity_error<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::reorg_below_scanned_height_is_a_continuity_error::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}

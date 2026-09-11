@@ -548,4 +548,15 @@ mod tests {
     fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
+
+    #[test]
+    fn reorg_below_scanned_height_is_a_continuity_error_sapling() {
+        testing::pool::reorg_below_scanned_height_is_a_continuity_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn reorg_below_scanned_height_is_a_continuity_error_orchard() {
+        testing::pool::reorg_below_scanned_height_is_a_continuity_error::<OrchardPoolTester>()
+    }
 }

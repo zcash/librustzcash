@@ -10139,3 +10139,66 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
         Ok(_)
     );
 }
+
+/// A block downloaded for a height the wallet has already scanned, carrying a different hash,
+/// is a chain reorg. Scanning must report it as a continuity error before any wallet state is
+/// written, so that the sync loop rewinds, rather than surface it from the storage layer as a
+/// conflict the loop cannot classify.
+pub fn reorg_below_scanned_height_is_a_continuity_error<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::chain::error::Error as ChainError;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (note_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    const SCANNED_BLOCKS: u32 = 10;
+    for _ in 0..SCANNED_BLOCKS {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(note_height + 1, SCANNED_BLOCKS as usize);
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+
+    // Replace the three blocks above the fork with different ones, leaving the wallet's rows
+    // for those heights in place.
+    const REORG_DEPTH: u32 = 3;
+    let fork_height = scanned_tip - REORG_DEPTH;
+    st.truncate_cache_to_height(fork_height);
+    for _ in 0..REORG_DEPTH {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let stored_hash = st
+        .wallet()
+        .block_metadata(fork_height + 1)
+        .unwrap()
+        .expect("the block above the fork was scanned")
+        .block_hash();
+
+    let result = st.try_scan_cached_blocks(fork_height + 1, REORG_DEPTH as usize);
+    assert_matches!(
+        result,
+        Err(ChainError::Scan(ref err)) if err.is_continuity_error() && err.at_height() == fork_height + 1
+    );
+
+    // Nothing was written: the recorded tip and the stored block are as before.
+    assert_eq!(st.wallet().chain_height().unwrap(), Some(scanned_tip));
+    assert_eq!(
+        st.wallet()
+            .block_metadata(fork_height + 1)
+            .unwrap()
+            .map(|meta| meta.block_hash()),
+        Some(stored_hash),
+    );
+}

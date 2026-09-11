@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+
 ### Changed
 - `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
   implementation to also return the transparent receiver that the wallet tracks
