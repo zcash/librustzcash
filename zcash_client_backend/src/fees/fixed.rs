@@ -1,7 +1,5 @@
 //! Change strategies designed for use with a fixed fee.
 
-use core::marker::PhantomData;
-
 use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
 use zcash_protocol::{
     ShieldedPool,
@@ -10,12 +8,13 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::anchor_retention::PoolMigrationParams;
-use crate::data_api::{InputSource, wallet::TargetHeight};
+use crate::{
+    data_api::{anchor_retention::PoolMigrationParams, wallet::TargetHeight},
+    note_management::SplitPlan,
+};
 
 use super::{
-    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, SplitPolicy,
-    TransactionBalance,
+    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, TransactionBalance,
     common::{SinglePoolBalanceConfig, single_pool_output_balance},
     sapling as sapling_fees,
 };
@@ -23,25 +22,24 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
-use super::orchard as orchard_fees;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::builder::BundlePadding;
+use {super::orchard as orchard_fees, zcash_primitives::transaction::builder::BundlePadding};
 
 /// A change strategy that proposes change as a single output. The output pool is chosen
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
 /// fallback when the transaction has no shielded inputs). Fee calculation is delegated
 /// to the provided fee rule.
-pub struct SingleOutputChangeStrategy<I> {
+///
+/// This strategy never splits change; a splitting note-management policy has no effect under it.
+pub struct SingleOutputChangeStrategy {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
-    meta_source: PhantomData<I>,
 }
 
-impl<I> SingleOutputChangeStrategy<I> {
+impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
     /// and change memo.
     ///
@@ -60,7 +58,6 @@ impl<I> SingleOutputChangeStrategy<I> {
             dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
-            meta_source: PhantomData,
         }
     }
 
@@ -80,24 +77,12 @@ impl<I> SingleOutputChangeStrategy<I> {
     }
 }
 
-impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
+impl ChangeStrategy for SingleOutputChangeStrategy {
     type FeeRule = FixedFeeRule;
     type Error = BalanceError;
-    type MetaSource = I;
-    type AccountMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
-    }
-
-    fn fetch_wallet_meta(
-        &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as InputSource>::AccountId,
-        _target_height: TargetHeight,
-        _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
-    ) -> Result<Self::AccountMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
-        Ok(())
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -112,15 +97,13 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        _wallet_meta: &Self::AccountMetaT,
+        _split_plan: &SplitPlan,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
             self.fee_rule.fixed_fee(),
-            &split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
@@ -128,9 +111,10 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             0,
         );
 
+        // This strategy never splits change, whatever the caller's plan asks for.
         single_pool_output_balance(
             cfg,
-            None,
+            &SplitPlan::SingleOutput,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -166,11 +150,12 @@ mod tests {
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment},
+        data_api::wallet::input_selection::SaplingPayment,
         fees::{
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
             tests::{TestSaplingInput, TestTransparentInput},
         },
+        note_management::SplitPlan,
     };
 
     #[cfg(feature = "orchard")]
@@ -179,7 +164,7 @@ mod tests {
     #[test]
     fn change_without_dust() {
         let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
-        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             fee_rule,
             None,
             ShieldedPool::Sapling,
@@ -210,7 +195,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -224,7 +209,7 @@ mod tests {
     #[test]
     fn dust_change() {
         let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
-        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             fee_rule,
             None,
             ShieldedPool::Sapling,
@@ -262,7 +247,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(

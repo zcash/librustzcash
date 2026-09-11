@@ -47,8 +47,8 @@ const ZIP318_RADIX: u64 = 10;
 /// requested rung below this is raised to it.
 const MIN_RUNG: Zatoshis = Zatoshis::const_from_u64(1);
 
-/// The number of change outputs a policy that does not split change asks for.
-const SINGLE_CHANGE_OUTPUT: usize = 1;
+/// The number of change outputs produced when change is not split.
+pub(crate) const SINGLE_CHANGE_OUTPUT: usize = 1;
 
 /// Returns the pool in which note management maintains a note distribution at `target_height`:
 /// Ironwood once NU6.3 is active, Orchard otherwise. Sapling is never this pool.
@@ -387,7 +387,8 @@ pub enum SplitPlan {
     /// One change output carrying the whole change value.
     SingleOutput,
     /// Change split into these values; a strategy realizes the longest affordable prefix and adds
-    /// the residual to [`SplitPieces::largest`].
+    /// the residual to [`SplitPieces::largest`]. A plan of which at most one piece is affordable is
+    /// realized as a single change output carrying the whole change.
     Pieces(SplitPieces),
 }
 

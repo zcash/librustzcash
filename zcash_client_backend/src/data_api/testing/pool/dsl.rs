@@ -31,6 +31,7 @@ use crate::{
         },
     },
     fees::StandardFeeRule,
+    note_management::Unmanaged,
     proposal::Proposal,
     wallet::{LockOwner, OutputRef, OvkPolicy},
 };
@@ -622,12 +623,13 @@ where
         )])
         .unwrap();
         let network = *self.network();
-        propose_transfer::<_, _, _, _, Infallible>(
+        propose_transfer::<_, _, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
             account_id,
             &input_selector,
             &change_strategy,
+            &Unmanaged,
             request,
             ConfirmationsPolicy::MIN,
             &SpendPolicy::default(),

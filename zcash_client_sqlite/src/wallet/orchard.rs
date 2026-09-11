@@ -1750,9 +1750,9 @@ pub(crate) mod tests {
             },
             decrypt_transaction,
             fees::{
-                DustOutputPolicy, SplitPolicy, StandardFeeRule, standard,
-                zip317::MultiOutputChangeStrategy,
+                DustOutputPolicy, StandardFeeRule, standard, zip317::MultiOutputChangeStrategy,
             },
+            note_management::{LadderPolicy, TargetDistribution},
             proto::{ProposalDecodingError, proposal},
             wallet::OvkPolicy,
         };
@@ -1775,10 +1775,7 @@ pub(crate) mod tests {
 
         use crate::{
             error::SqliteClientError,
-            testing::{
-                BlockCache,
-                db::{TestDb, TestDbFactory},
-            },
+            testing::{BlockCache, db::TestDbFactory},
             wallet::orchard::select_spendable_ironwood_notes,
         };
         use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey};
@@ -1802,7 +1799,7 @@ pub(crate) mod tests {
         // Ironwood is active the change strategy observes the Orchard turnstile: change goes to
         // Orchard only when Orchard notes are spent and strictly less value returns to the pool
         // than the notes remove; otherwise Orchard-preferred change flows onward to Ironwood.
-        fn orchard_change_strategy() -> standard::SingleOutputChangeStrategy<TestDb> {
+        fn orchard_change_strategy() -> standard::SingleOutputChangeStrategy {
             standard::SingleOutputChangeStrategy::new(
                 StandardFeeRule::Zip317,
                 None,
@@ -1839,7 +1836,7 @@ pub(crate) mod tests {
         }
 
         /// An Orchard-funded payment after NU6.3 returns a single change output to Orchard even
-        /// under a split policy: Orchard is no longer the most recent pool.
+        /// under a splitting note-management policy: Orchard is no longer the most recent pool.
         #[test]
         fn orchard_change_is_not_split_after_nu6_3() {
             let mut st = TestBuilder::new()
@@ -1861,25 +1858,29 @@ pub(crate) mod tests {
                 st.scan_cached_blocks(h, 1);
             }
 
-            // The 2,000,000 note paying 100,000 leaves about 1,880,000 of change. A four-way
-            // split would give about 470,000 per output, far above the 100,000 floor, so the
-            // policy would split here were Orchard eligible: the single output asserted below is
-            // the pool gate, not a value shortfall.
-            let change_strategy = MultiOutputChangeStrategy::<_, TestDb>::new(
+            // The 2,000,000 note paying 100,000 leaves about 1,880,000 of change, which easily
+            // affords the four 100,000-zatoshi pieces the target asks for, so the policy would
+            // split here were Orchard eligible: the single output asserted below is the pool
+            // gate, not a value shortfall.
+            let change_strategy = MultiOutputChangeStrategy::new(
                 zip317::FeeRule::standard(),
                 None,
                 ShieldedPool::Orchard,
                 DustOutputPolicy::default(),
-                SplitPolicy::with_min_output_value(
-                    NonZeroUsize::new(4).unwrap(),
+            );
+            let note_management = LadderPolicy::new(
+                TargetDistribution::single_bucket(
                     Zatoshis::const_from_u64(100_000),
+                    NonZeroUsize::new(4).unwrap(),
                 ),
+                NonZeroUsize::new(9).unwrap(),
             );
             let proposal = st
-                .propose_transfer_with_policy(
+                .propose_transfer_with_policy_and_note_management(
                     account.id(),
                     &GreedyInputSelector::new(),
                     &change_strategy,
+                    &note_management,
                     orchard_payment_request(st.network(), 100_000),
                     ConfirmationsPolicy::MIN,
                     &SpendPolicy::shielded_pools([ShieldedPool::Orchard]),

@@ -4,6 +4,7 @@ use {
     crate::{
         data_api::CoinbaseFilter,
         fees::{ChangeValue, StandardFeeRule},
+        note_management::SplitPlan,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
     std::convert::Infallible,
@@ -44,6 +45,7 @@ use crate::{
         anchor_retention::PoolMigrationParams, wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
+    note_management::{NoteManagementPolicy, most_recent_shielded_pool},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -201,9 +203,12 @@ pub trait InputSelector {
     /// account's transparent UTXOs may additionally be spent. Spending transparent funds, or
     /// combining notes across shielded pools, reduces privacy, so the caller must opt in
     /// explicitly by naming the permitted sources.
+    ///
+    /// `note_management` supplies the change split handed to `change_strategy` on each fee
+    /// iteration; see [`NoteManagementPolicy`](crate::note_management::NoteManagementPolicy).
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn propose_transaction<ParamsT, ChangeT>(
+    fn propose_transaction<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -214,6 +219,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
     ) -> Result<
@@ -227,7 +233,8 @@ pub trait InputSelector {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy;
 }
 
 /// A strategy for selecting transaction inputs and proposing transaction outputs
@@ -255,13 +262,17 @@ pub trait ShieldingSelector {
     ///
     /// The `output_filter` parameter controls which transparent outputs are eligible for
     /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
+    ///
+    /// `note_management` supplies the split of the shielded output value; see
+    /// [`NoteManagementPolicy`].
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn propose_shielding<ParamsT, ChangeT>(
+    fn propose_shielding<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
@@ -281,7 +292,8 @@ pub trait ShieldingSelector {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy;
 
     /// Performs input selection and returns a proposal for the construction of a transaction
     /// that shields coinbase transparent outputs to an arbitrary shielded recipient.
@@ -788,7 +800,7 @@ impl<DbT> GreedyInputSelector<DbT> {
     >
     where
         DbT: InputSource,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
         let max_money = Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY);
         let mut total_opt: Option<Zatoshis> = Some(Zatoshis::ZERO);
@@ -861,7 +873,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     type InputSource = DbT;
 
     #[allow(clippy::type_complexity)]
-    fn propose_transaction<ParamsT, ChangeT>(
+    fn propose_transaction<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -872,6 +884,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
     ) -> Result<
@@ -881,7 +894,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     where
         ParamsT: consensus::Parameters,
         Self::InputSource: InputSource,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
     {
         let (sapling_supported, orchard_supported) =
             proposed_version.map_or(Ok((true, true)), |v| {
@@ -1052,6 +1066,25 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
+        // The note-management context is read once per proposal; every per-iteration decision is
+        // a pure function of it and of the notes selected so far. Notes excluded as dust later in
+        // the loop are counted as present here, which errs toward fewer change pieces.
+        let note_context = note_management
+            .fetch(
+                wallet_db,
+                params,
+                account,
+                target_height,
+                &[],
+                LockFilter::Policy(spend_policy.locked_input_policy()),
+            )
+            .map_err(InputSelectorError::DataSource)?;
+        let managed_pool = most_recent_shielded_pool(params, target_height);
+        let request_total = transaction_request
+            .total()
+            .map_err(|_| ProposalError::RequestTotalInvalid)?
+            .expect("all payments previously checked to have amount values");
+
         // The single pool-preference order that governs both which pools notes are
         // selected from and which of the selected notes are spent: the pool matching
         // the payment's outputs comes first, and later pools are drawn upon only when
@@ -1168,19 +1201,60 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 vec![]
             };
 
-            let selected_input_ids = sapling_inputs.iter().map(|(id, _)| id);
-            #[cfg(feature = "orchard")]
-            let selected_input_ids =
-                selected_input_ids.chain(orchard_inputs.iter().map(|(id, _)| id));
-            #[cfg(feature = "orchard")]
-            let selected_input_ids =
-                selected_input_ids.chain(ironwood_inputs.iter().map(|(id, _)| id));
+            // The notes this iteration would spend from the managed pool are no longer present
+            // for the purpose of planning the change split. Only the trimmed per-pool sets are
+            // spent; a pool whose bundle this iteration does not require contributes nothing.
+            let spent_in_managed_pool: Vec<Zatoshis> = match managed_pool {
+                ShieldedPool::Sapling => sapling_inputs
+                    .iter()
+                    .map(sapling::InputView::value)
+                    .collect(),
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard => orchard_inputs
+                    .iter()
+                    .map(orchard_fees::InputView::value)
+                    .collect(),
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Ironwood => ironwood_inputs
+                    .iter()
+                    .map(orchard_fees::InputView::value)
+                    .collect(),
+                #[cfg(not(feature = "orchard"))]
+                ShieldedPool::Orchard | ShieldedPool::Ironwood => vec![],
+            };
+            let iteration_context =
+                note_management.without_spent(&note_context, &spent_in_managed_pool);
 
-            let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
-
-            let wallet_meta = change_strategy
-                .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
-                .map_err(InputSelectorError::DataSource)?;
+            #[cfg(feature = "transparent-inputs")]
+            let transparent_total = transparent_inputs
+                .iter()
+                .map(WalletTransparentOutput::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(not(feature = "transparent-inputs"))]
+            let transparent_total = Zatoshis::ZERO;
+            let sapling_total = sapling_inputs
+                .iter()
+                .map(sapling::InputView::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(feature = "orchard")]
+            let orchard_family_total = orchard_inputs
+                .iter()
+                .chain(ironwood_inputs.iter())
+                .map(orchard_fees::InputView::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(not(feature = "orchard"))]
+            let orchard_family_total = Zatoshis::ZERO;
+            let inputs_total = (sapling_total + orchard_family_total + transparent_total)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            // An upper bound on the change: the fee has not been computed yet, and can only
+            // reduce it.
+            let split_plan = note_management.split_plan(
+                &iteration_context,
+                (inputs_total - request_total).unwrap_or(Zatoshis::ZERO),
+            );
 
             #[cfg(not(feature = "transparent-inputs"))]
             let ephemeral_output_value = None;
@@ -1228,7 +1302,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             &empty_ironwood_view,
                             Some(EphemeralBalance::Input(Zatoshis::ZERO)),
-                            &wallet_meta,
+                            // Transaction 1 of a ZIP 320 pair is fully transparent and produces
+                            // no shielded change to split.
+                            &SplitPlan::SingleOutput,
                         ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
                         Err(ChangeError::DustInputs { .. }) => {
@@ -1253,7 +1329,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         #[cfg(feature = "orchard")]
                         &empty_ironwood_view,
                         Some(EphemeralBalance::Input(tr1_required_input_value)),
-                        &wallet_meta,
+                        &SplitPlan::SingleOutput,
                     )?;
                     assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
@@ -1323,7 +1399,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 #[cfg(feature = "orchard")]
                 &ironwood_view,
                 ephemeral_output_value.map(EphemeralBalance::Output),
-                &wallet_meta,
+                &split_plan,
             );
 
             match tr0_balance {
@@ -2029,11 +2105,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
     type InputSource = DbT;
 
     #[allow(clippy::type_complexity)]
-    fn propose_shielding<ParamsT, ChangeT>(
+    fn propose_shielding<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
@@ -2048,7 +2125,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
     {
         let mut transparent_inputs = gather_shielding_inputs::<DbT, ChangeT::Error>(
             wallet_db,
@@ -2060,9 +2138,26 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             &self.locked_input_policy,
         )?;
 
-        let wallet_meta = change_strategy
-            .fetch_wallet_meta(wallet_db, to_account, target_height, &[])
+        let note_context = note_management
+            .fetch(
+                wallet_db,
+                params,
+                to_account,
+                target_height,
+                &[],
+                LockFilter::Policy(&self.locked_input_policy),
+            )
             .map_err(InputSelectorError::DataSource)?;
+        // A shielding transaction spends no shielded notes, so nothing leaves the managed pool.
+        let note_context = note_management.without_spent(&note_context, &[]);
+        // Every selected input's value becomes change, less the fee; dust pruning can only
+        // lower that, so this is an upper bound on the change.
+        let inputs_total = transparent_inputs
+            .iter()
+            .map(WalletTransparentOutput::value)
+            .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+            .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+        let split_plan = note_management.split_plan(&note_context, inputs_total);
 
         let balance = compute_shielding_balance_with_dust_retry::<DbT, ChangeT, ParamsT>(
             change_strategy,
@@ -2071,7 +2166,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             anchor_height,
             zip318,
             &mut transparent_inputs,
-            &wallet_meta,
+            &split_plan,
         )?;
 
         if balance.total() >= shielding_threshold {
@@ -2430,7 +2525,7 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
     anchor_height: BlockHeight,
     zip318: &PoolMigrationParams,
     transparent_inputs: &mut Vec<WalletTransparentOutput<()>>,
-    wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
+    split_plan: &SplitPlan,
 ) -> Result<
     TransactionBalance,
     InputSelectorError<
@@ -2442,17 +2537,17 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
 >
 where
     DbT: InputSource,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
     ParamsT: consensus::Parameters,
 {
-    let trial = compute_shielding_balance::<DbT, ChangeT, ParamsT>(
+    let trial = compute_shielding_balance::<ChangeT, ParamsT>(
         change_strategy,
         params,
         target_height,
         anchor_height,
         zip318,
         transparent_inputs,
-        wallet_meta,
+        split_plan,
     );
 
     match trial {
@@ -2461,14 +2556,14 @@ where
             let exclusions: BTreeSet<OutPoint> = transparent.into_iter().collect();
             transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
 
-            compute_shielding_balance::<DbT, ChangeT, ParamsT>(
+            compute_shielding_balance::<ChangeT, ParamsT>(
                 change_strategy,
                 params,
                 target_height,
                 anchor_height,
                 zip318,
                 transparent_inputs,
-                wallet_meta,
+                split_plan,
             )
             .map_err(InputSelectorError::Change)
         }
@@ -2487,18 +2582,17 @@ where
 /// version's action-count policy.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::type_complexity)]
-fn compute_shielding_balance<DbT, ChangeT, ParamsT>(
+fn compute_shielding_balance<ChangeT, ParamsT>(
     change_strategy: &ChangeT,
     params: &ParamsT,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     zip318: &PoolMigrationParams,
     transparent_inputs: &[WalletTransparentOutput<()>],
-    wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
+    split_plan: &SplitPlan,
 ) -> Result<TransactionBalance, ChangeError<ChangeT::Error, Infallible>>
 where
-    DbT: InputSource,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
     ParamsT: consensus::Parameters,
 {
     #[cfg(feature = "orchard")]
@@ -2527,7 +2621,7 @@ where
         #[cfg(feature = "orchard")]
         &empty_ironwood_view,
         None,
-        wallet_meta,
+        split_plan,
     )
 }
 

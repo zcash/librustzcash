@@ -27,6 +27,26 @@ workspace.
   change only when the change is returned to the most recent shielded pool at
   the target height (Ironwood once NU6.3 is active, Orchard before that).
   Change returned to any other pool is a single output.
+- `zcash_client_backend::fees::ChangeStrategy` no longer has the `MetaSource` and
+  `AccountMetaT` associated types or the `fetch_wallet_meta` method.
+  `compute_balance` takes a `&note_management::SplitPlan` in place of the
+  wallet metadata argument.
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`,
+  `fees::standard::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}` and
+  `fees::fixed::SingleOutputChangeStrategy` no longer take a metadata-source
+  type parameter. `MultiOutputChangeStrategy::new` no longer takes a
+  `SplitPolicy`; the split is supplied per transaction by the note-management
+  policy.
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` splits change
+  into the pieces the policy asks for, with the residual added to the largest
+  piece, rather than into equal pieces.
+- `zcash_client_backend::data_api::wallet::{propose_transfer, propose_shielding,
+  shield_transparent_funds}`, `input_selection::InputSelector::propose_transaction`
+  and `input_selection::ShieldingSelector::propose_shielding` take a
+  `&impl note_management::NoteManagementPolicy` after the change strategy. Pass
+  `note_management::SingleOutputPolicy` to keep single-output change; callers
+  that used a `SplitPolicy` construct `note_management::LadderPolicy::new(
+  TargetDistribution::single_bucket(min_value, target_count), max_actions)`.
 - `zcash_client_backend::proposal::Step::from_parts` (and therefore
   `Proposal::single_step`) now returns `ProposalError::ChainDoubleSpend` when a
   step spends the same transparent output or shielded note more than once;
@@ -37,6 +57,9 @@ workspace.
   implementation that applies blocks one at a time must be updated.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
+
+### Removed
+- `zcash_client_backend::fees::{MetaSource, SplitPolicy}`.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the

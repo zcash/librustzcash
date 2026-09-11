@@ -1046,8 +1046,8 @@ pub(crate) fn unspent_notes_meta(
         )
     };
 
-    // Evaluates the provided note filter conditions against the wallet database in order to
-    // determine the minimum value of notes to be produced by note splitting.
+    // Evaluates the provided note filter conditions against the wallet database to obtain the
+    // lower bound on note value that the metadata selection below counts notes against.
     fn min_note_value(
         conn: &rusqlite::Connection,
         account: AccountUuid,

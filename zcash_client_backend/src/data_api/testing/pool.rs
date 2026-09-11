@@ -51,10 +51,10 @@ use crate::{
     },
     decrypt_transaction,
     fees::{
-        self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
+        self, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
-    note_management::{NoteHistogram, ValueLadder},
+    note_management::{LadderPolicy, NoteHistogram, TargetDistribution, ValueLadder},
     scanning::ScanError,
     wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
@@ -80,7 +80,10 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    crate::{
+        data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+        note_management::Unmanaged,
+    },
     std::collections::BTreeMap,
     zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
@@ -2021,8 +2024,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
 }
 
-/// A change strategy whose [`SplitPolicy`] asks for more notes than the account holds returns
-/// change as multiple outputs.
+/// A note-management policy that asks for more notes than the account holds returns change as
+/// multiple outputs.
 ///
 /// Valid only for a `T` whose pool is
 /// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) at the target
@@ -2052,25 +2055,46 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::with_min_output_value(
-            NonZeroUsize::new(2).unwrap(),
+    );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
             Zatoshis::const_from_u64(100_0000),
+            NonZeroUsize::new(2).unwrap(),
         ),
+        NonZeroUsize::new(9).unwrap(),
     );
 
     let account = st.test_account().cloned().unwrap();
     let proposal = st
-        .propose_transfer(
+        .propose_transfer_with_note_management(
             account.id(),
             &input_selector,
             &change_strategy,
-            request.clone(),
+            &note_management,
+            request,
             ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
     let step = &proposal.steps().head;
     assert_eq!(step.balance().proposed_change().len(), 2);
+    // 6,500,000 less the 1,000,000 payment and a 15,000 fee leaves 5,485,000 of change. The
+    // target asks for two notes of at least 1,000,000, and the residual rides on the largest
+    // piece rather than being divided evenly.
+    let mut change_values = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|c| c.value())
+        .collect::<Vec<_>>();
+    change_values.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(
+        change_values,
+        vec![
+            Zatoshis::const_from_u64(448_5000),
+            Zatoshis::const_from_u64(100_0000)
+        ]
+    );
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
@@ -2161,30 +2185,43 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let (h, _) = st.generate_next_block_including(sent_tx_id);
     st.scan_cached_blocks(h, 1);
 
-    // Now, create another proposal with more outputs requested. We have two change notes;
-    // we'll spend one of them, and then we'll generate 7 splits.
+    // Now, create another proposal with more outputs requested. The account holds the two change
+    // notes of the first transaction, whose values differ because the residual rides on the
+    // largest piece; the payment below is small enough that either note covers it alone, so
+    // exactly one is spent whichever the selector reaches first, leaving the account seven notes
+    // short of this target.
     let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
         Zip317FeeRule::standard(),
         Some(change_memo.into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::with_min_output_value(
-            NonZeroUsize::new(8).unwrap(),
-            Zatoshis::const_from_u64(10_0000),
-        ),
     );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
+            Zatoshis::const_from_u64(10_0000),
+            NonZeroUsize::new(8).unwrap(),
+        ),
+        NonZeroUsize::new(9).unwrap(),
+    );
+    let small_request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_0000),
+    )])
+    .unwrap();
 
     let proposal = st
-        .propose_transfer(
+        .propose_transfer_with_note_management(
             account.id(),
             &input_selector,
             &change_strategy,
-            request,
+            &note_management,
+            small_request,
             ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
     let step = &proposal.steps().head;
+    assert_eq!(step.shielded_inputs().unwrap().notes().len(), 1);
     assert_eq!(step.balance().proposed_change().len(), 7);
 }
 
@@ -2199,9 +2236,9 @@ pub fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
-    // 6,500,000 paying 1,000,000 leaves about 5,490,000 of change. A two-way split would give
-    // about 2,745,000 per output, far above the 1,000,000 floor, so the policy would split here
-    // were the pool eligible: the single output below is the pool gate, not a value shortfall.
+    // 6,500,000 paying 1,000,000 leaves about 5,490,000 of change, which easily affords the
+    // four 100,000-zatoshi pieces the target asks for, so the policy would split here were the
+    // pool eligible: the single output below is the pool gate, not a value shortfall.
     st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(650_0000));
 
     let to_extsk = T::sk(&[0xf5; 32]);
@@ -2216,17 +2253,21 @@ pub fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>(
         None,
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::with_min_output_value(
-            NonZeroUsize::new(2).unwrap(),
-            Zatoshis::const_from_u64(100_0000),
+    );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
+            Zatoshis::const_from_u64(100_000),
+            NonZeroUsize::new(4).unwrap(),
         ),
+        NonZeroUsize::new(9).unwrap(),
     );
     let account = st.test_account().cloned().unwrap();
     let proposal = st
-        .propose_transfer(
+        .propose_transfer_with_note_management(
             account.id(),
             &GreedyInputSelector::new(),
             &change_strategy,
+            &note_management,
             request,
             ConfirmationsPolicy::MIN,
         )
@@ -3180,7 +3221,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
         TransferErrT<
             Dsf::DataStore,
             GreedyInputSelector<Dsf::DataStore>,
-            SingleOutputChangeStrategy<Dsf::DataStore>,
+            SingleOutputChangeStrategy,
         >,
     > {
         let proposal = st.propose_standard_transfer(
@@ -8156,12 +8197,13 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
 
     let account = st.get_account();
     let network = *st.network();
-    let result = propose_transfer::<_, _, _, _, Infallible>(
+    let result = propose_transfer::<_, _, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
         account.id(),
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),
@@ -9012,12 +9054,13 @@ where
     let account_id = st.get_account().id();
     let network = *st.network();
     // The test network's most recent upgrade is NU5, so version 5 is a valid explicit request.
-    let proposal = propose_transfer::<_, _, _, _, Infallible>(
+    let proposal = propose_transfer::<_, _, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
         account_id,
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),

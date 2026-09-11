@@ -4,8 +4,6 @@
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
 
-use core::marker::PhantomData;
-
 use zcash_primitives::transaction::fees::{FeeRule, transparent, zip317 as prim_zip317};
 use zcash_protocol::{
     ShieldedPool,
@@ -15,20 +13,13 @@ use zcash_protocol::{
 };
 
 use crate::{
-    data_api::{
-        AccountMeta, InputSource, NoteFilter,
-        anchor_retention::PoolMigrationParams,
-        wallet::{
-            TargetHeight,
-            input_selection::{LockFilter, LockedInputPolicy},
-        },
-    },
+    data_api::{anchor_retention::PoolMigrationParams, wallet::TargetHeight},
     fees::StandardFeeRule,
+    note_management::SplitPlan,
 };
 
 use super::{
-    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, MetaSource, SplitPolicy,
-    TransactionBalance,
+    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, TransactionBalance,
     common::{SinglePoolBalanceConfig, single_pool_output_balance},
     sapling as sapling_fees,
 };
@@ -72,17 +63,18 @@ impl Zip317FeeRule for StandardFeeRule {
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
 /// fallback when the transaction has no shielded inputs). Fee calculation is delegated
 /// to the provided fee rule.
-pub struct SingleOutputChangeStrategy<R, I> {
+///
+/// This strategy never splits change; a splitting note-management policy has no effect under it.
+pub struct SingleOutputChangeStrategy<R> {
     fee_rule: R,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
-    meta_source: PhantomData<I>,
 }
 
-impl<R, I> SingleOutputChangeStrategy<R, I> {
+impl<R> SingleOutputChangeStrategy<R> {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
     /// fee parameters and change memo.
     ///
@@ -101,7 +93,6 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
             dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
-            meta_source: PhantomData,
         }
     }
 
@@ -121,29 +112,16 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
     }
 }
 
-impl<R, I> ChangeStrategy for SingleOutputChangeStrategy<R, I>
+impl<R> ChangeStrategy for SingleOutputChangeStrategy<R>
 where
     R: Zip317FeeRule + Clone,
-    I: MetaSource,
     <R as FeeRule>::Error: From<BalanceError>,
 {
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
-    type MetaSource = I;
-    type AccountMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
-    }
-
-    fn fetch_wallet_meta(
-        &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as MetaSource>::AccountId,
-        _target_height: TargetHeight,
-        _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
-    ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
-        Ok(())
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -158,15 +136,13 @@ where
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        _wallet_meta: &Self::AccountMetaT,
+        _split_plan: &SplitPlan,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
             self.fee_rule.marginal_fee(),
-            &split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
@@ -174,9 +150,10 @@ where
             self.fee_rule.grace_actions(),
         );
 
+        // This strategy never splits change, whatever the caller's plan asks for.
         single_pool_output_balance(
             cfg,
-            None,
+            &SplitPlan::SingleOutput,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -198,51 +175,39 @@ where
     }
 }
 
-/// A change strategy that attempts to split the change value into some number of equal-sized notes
-/// as dictated by the included [`SplitPolicy`] value.
+/// A ZIP 317 change strategy that realizes the change pieces a note-management policy asks for;
+/// see [`crate::note_management`].
 ///
-/// Change returned to any pool other than
-/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) is a single
-/// output; see [`SplitPolicy`].
-pub struct MultiOutputChangeStrategy<R, I> {
+/// The [`DustOutputPolicy`] given at construction governs the total change value. How that total
+/// is divided into pieces is the note-management policy's responsibility.
+pub struct MultiOutputChangeStrategy<R> {
     fee_rule: R,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
-    split_policy: SplitPolicy,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
-    meta_source: PhantomData<I>,
 }
 
-impl<R, I> MultiOutputChangeStrategy<R, I> {
+impl<R> MultiOutputChangeStrategy<R> {
     /// Constructs a new [`MultiOutputChangeStrategy`] with the specified ZIP 317
-    /// fee parameters, change memo, and change splitting policy.
-    ///
-    /// This change strategy will fall back to creating a single change output if insufficient
-    /// change value is available to create notes with at least the minimum value dictated by the
-    /// split policy.
+    /// fee parameters and change memo.
     ///
     /// - `fallback_change_pool`: the pool to which change will be sent if when more than one
     ///   shielded pool is enabled via feature flags, and the transaction has no shielded inputs.
-    /// - `split_policy`: A policy value describing how the change value should be returned as
-    ///   multiple notes.
     pub fn new(
         fee_rule: R,
         change_memo: Option<MemoBytes>,
         fallback_change_pool: ShieldedPool,
         dust_output_policy: DustOutputPolicy,
-        split_policy: SplitPolicy,
     ) -> Self {
         Self {
             fee_rule,
             change_memo,
             fallback_change_pool,
             dust_output_policy,
-            split_policy,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
-            meta_source: PhantomData,
         }
     }
 
@@ -252,8 +217,7 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
     ///
     /// The default is [`TransparentChangePolicy::ShieldChange`]. This policy has no effect on
     /// transactions that involve any shielded flows. When transparent change is produced, it is
-    /// always emitted as a single output; the [`SplitPolicy`] configured for this strategy applies
-    /// only to shielded change.
+    /// always emitted as a single output; a split plan applies only to shielded change.
     #[cfg(feature = "transparent-inputs")]
     pub fn with_transparent_change_policy(
         mut self,
@@ -264,44 +228,16 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
     }
 }
 
-impl<R, I> ChangeStrategy for MultiOutputChangeStrategy<R, I>
+impl<R> ChangeStrategy for MultiOutputChangeStrategy<R>
 where
     R: Zip317FeeRule + Clone,
-    I: InputSource,
     <R as FeeRule>::Error: From<BalanceError>,
 {
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
-    type MetaSource = I;
-    type AccountMetaT = AccountMeta;
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
-    }
-
-    fn fetch_wallet_meta(
-        &self,
-        meta_source: &Self::MetaSource,
-        account: <Self::MetaSource as InputSource>::AccountId,
-        target_height: TargetHeight,
-        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error> {
-        let note_selector = NoteFilter::ExceedsMinValue(
-            self.split_policy
-                .min_split_output_value()
-                .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
-        );
-
-        // Account metadata feeds change-splitting decisions, which reason about the
-        // notes that selection can actually draw on; locked notes are excluded from
-        // selection, so they are excluded here as well.
-        meta_source.get_account_metadata(
-            account,
-            &note_selector,
-            target_height,
-            exclude,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        )
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -316,14 +252,13 @@ where
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        wallet_meta: &Self::AccountMetaT,
+        split_plan: &SplitPlan,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
             self.fee_rule.marginal_fee(),
-            &self.split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
@@ -333,7 +268,7 @@ where
 
         single_pool_output_balance(
             cfg,
-            Some(wallet_meta),
+            split_plan,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -382,18 +317,17 @@ mod tests {
 
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta,
             anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
-            testing::MockWalletDb,
             wallet::input_selection::SaplingPayment,
         },
         fees::{
-            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
         },
+        note_management::SplitPlan,
     };
-    use core::{convert::Infallible, num::NonZeroUsize};
+    use core::convert::Infallible;
     use zcash_protocol::{
         ShieldedPool,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
@@ -407,7 +341,7 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -438,7 +372,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -452,20 +386,17 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn change_without_dust_multi() {
-        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = MultiOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
             DustOutputPolicy::default(),
-            SplitPolicy::with_min_output_value(
-                NonZeroUsize::new(5).unwrap(),
-                Zatoshis::const_from_u64(100_0000),
-            ),
         );
 
         {
-            // spend a single Orchard note and produce 5 outputs
-            let balance = |existing_notes, total| {
+            // spend a single Orchard note, realizing as many 1,000,000-zatoshi pieces as the
+            // change affords
+            let balance = |pieces: usize| {
                 change_strategy.compute_balance(
                     &Network::TestNetwork,
                     Network::TestNetwork
@@ -487,30 +418,33 @@ mod tests {
                     ),
                     &orchard_fees::EmptyBundleView,
                     None,
-                    &AccountMeta::new(None, Some(PoolMeta::new(existing_notes, total)), None),
+                    &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); pieces]),
                 )
             };
 
+            // The residual rides on the largest piece: 7,500,000 - 1,000,000 - 30,000 of fee
+            // leaves 6,470,000 of change, of which four pieces take 1,000,000 each.
             assert_matches!(
-                balance(0, Zatoshis::ZERO),
+                balance(5),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(247_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(30000)
             );
 
+            // Three pieces are three change outputs, and the smaller bundle costs less.
             assert_matches!(
-                balance(2, Zatoshis::const_from_u64(100_0000)),
+                balance(3),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(448_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(20000)
             );
@@ -540,21 +474,17 @@ mod tests {
                 ),
                 &orchard_fees::EmptyBundleView,
                 None,
-                &AccountMeta::new(
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    None,
-                ),
+                &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
             );
 
             assert_matches!(
                 result,
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(197_5000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(100_0000), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(25000)
             );
@@ -586,12 +516,7 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
-                // after excluding the inputs we're spending, we have no notes in the wallet
-                &AccountMeta::new(
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    None,
-                ),
+                &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
             );
 
             assert_matches!(
@@ -627,12 +552,7 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
-                // after excluding the inputs we're spending, we have no notes in the wallet
-                &AccountMeta::new(
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    None,
-                ),
+                &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
             );
 
             assert_matches!(
@@ -676,12 +596,7 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
-                // after excluding the inputs we're spending, we have no notes in the wallet
-                &AccountMeta::new(
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
-                    None,
-                ),
+                &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
             );
 
             assert_matches!(
@@ -696,7 +611,7 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn cross_pool_change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
@@ -729,7 +644,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -743,7 +658,7 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_v3_change_counts_spends_and_outputs_separately() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
@@ -775,7 +690,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -790,15 +705,11 @@ mod tests {
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn orchard_fallback_change_pool_is_promoted_to_ironwood_after_nu6_3() {
         // A caller that names Orchard as its fallback change pool.
-        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = MultiOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
             DustOutputPolicy::default(),
-            SplitPolicy::with_min_output_value(
-                NonZeroUsize::new(2).unwrap(),
-                Zatoshis::const_from_u64(100_0000),
-            ),
         );
 
         // A single transparent UTXO, shielded to the change pool. The fallback pool only
@@ -830,9 +741,9 @@ mod tests {
         // This transaction is not one half of a ZIP 320 pair, so it has no ephemeral balance.
         let ephemeral_balance = None;
 
-        // No note counts are known for the account, so the split policy proposes a single
-        // change output: the assertions below are about the pool it lands in, not the split.
-        let wallet_meta = AccountMeta::new(None, None, None);
+        // The policy asks for a single change output: the assertions below are about the pool it
+        // lands in, not the split.
+        let split_plan = SplitPlan::SingleOutput;
 
         // The Orchard bundle version whose action-count policy applies at each height. The
         // Orchard view is empty in both cases and so contributes no actions, but the version
@@ -870,7 +781,7 @@ mod tests {
             &pre_nu6_3_orchard_view,
             &ironwood_view,
             ephemeral_balance,
-            &wallet_meta,
+            &split_plan,
         );
 
         assert_matches!(
@@ -897,7 +808,7 @@ mod tests {
             &post_nu6_3_orchard_view,
             &ironwood_view,
             ephemeral_balance,
-            &wallet_meta,
+            &split_plan,
         );
 
         assert_matches!(
@@ -914,7 +825,7 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn the_change_strategy_records_the_dummy_outputs_it_costed() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
@@ -963,7 +874,7 @@ mod tests {
                     &orchard_view,
                     &ironwood_view,
                     None,
-                    &(),
+                    &SplitPlan::SingleOutput,
                 )
                 .expect("the input covers the payment and its fee")
                 .dummy_outputs()
@@ -985,7 +896,7 @@ mod tests {
         // Ironwood view must contribute its own actions to the fee rather than
         // being treated as zero. Compare two otherwise-identical balances that
         // differ only by the presence of an Ironwood output.
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Orchard,
@@ -1024,7 +935,7 @@ mod tests {
                 &orchard_view,
                 &orchard_fees::EmptyBundleView,
                 None,
-                &(),
+                &SplitPlan::SingleOutput,
             )
             .unwrap();
 
@@ -1044,7 +955,7 @@ mod tests {
                     &orchard_outputs[..],
                 ),
                 None,
-                &(),
+                &SplitPlan::SingleOutput,
             )
             .unwrap();
 
@@ -1076,7 +987,7 @@ mod tests {
     }
 
     fn change_with_transparent_payments(dust_output_policy: DustOutputPolicy) {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1110,7 +1021,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1124,7 +1035,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_no_change() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1157,7 +1068,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1171,7 +1082,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_change() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1204,7 +1115,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1218,7 +1129,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_dust_change() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1257,7 +1168,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1271,7 +1182,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_with_transparent_change() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1308,7 +1219,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1322,7 +1233,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_exact_match_with_transparent_change() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1357,7 +1268,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1371,7 +1282,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_policy_has_no_effect_on_shielded_flows() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1404,7 +1315,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1418,21 +1329,17 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_is_not_split() {
-        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = MultiOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
             DustOutputPolicy::default(),
-            SplitPolicy::with_min_output_value(
-                NonZeroUsize::new(5).unwrap(),
-                Zatoshis::const_from_u64(100_0000),
-            ),
         )
         .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
 
-        // Spend a single transparent UTXO with change value sufficient to produce five
-        // split outputs under the split policy; because the change is returned to the
-        // transparent pool, it must nevertheless be emitted as a single output.
+        // Spend a single transparent UTXO with change value sufficient to produce every piece
+        // the plan asks for; because the change is returned to the transparent pool, it must
+        // nevertheless be emitted as a single output.
         let result = change_strategy.compute_balance::<_, Infallible>(
             &Network::TestNetwork,
             Network::TestNetwork
@@ -1458,7 +1365,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &AccountMeta::new(Some(PoolMeta::new(0, Zatoshis::ZERO)), None, None),
+            &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
         );
 
         assert_matches!(
@@ -1472,7 +1379,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_rejects_dust() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1509,7 +1416,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1523,7 +1430,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_allows_dust() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1562,7 +1469,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1576,7 +1483,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_dust_added_to_fee() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1612,7 +1519,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1637,7 +1544,7 @@ mod tests {
     }
 
     fn change_with_allowable_dust(dust_output_policy: DustOutputPolicy) {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1677,7 +1584,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         assert_matches!(
@@ -1690,7 +1597,7 @@ mod tests {
 
     #[test]
     fn change_with_disallowed_dust() {
-        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
@@ -1732,7 +1639,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &SplitPlan::SingleOutput,
         );
 
         // We will get an error here, because the dust input isn't free to add
@@ -1743,19 +1650,15 @@ mod tests {
         );
     }
 
-    /// Sapling is never the most recent shielded pool, so a policy that would split change five
+    /// Sapling is never the most recent shielded pool, so a plan that would split change five
     /// ways still returns a single Sapling change output.
     #[test]
     fn sapling_change_is_not_split() {
-        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = MultiOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Sapling,
             DustOutputPolicy::default(),
-            SplitPolicy::with_min_output_value(
-                NonZeroUsize::new(5).unwrap(),
-                Zatoshis::const_from_u64(100_0000),
-            ),
         );
         let balance = change_strategy.compute_balance(
             &Network::TestNetwork,
@@ -1780,7 +1683,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &AccountMeta::new(Some(PoolMeta::new(0, Zatoshis::ZERO)), None, None),
+            &SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]),
         );
         // One spend, two outputs: the two-action floor, 10_000 zatoshis of fee.
         assert_matches!(
@@ -1792,20 +1695,16 @@ mod tests {
     }
 
     /// After NU6.3 the turnstile lets an Orchard spend return change to Orchard, but Orchard is no
-    /// longer the most recent pool, so that change is a single output; the same policy still
-    /// splits change that lands in Ironwood.
+    /// longer the most recent pool, so that change is a single output; the same plan still splits
+    /// change that lands in Ironwood.
     #[test]
     #[cfg(feature = "orchard")]
     fn only_ironwood_change_is_split_after_nu6_3() {
-        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+        let change_strategy = MultiOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedPool::Ironwood,
             DustOutputPolicy::default(),
-            SplitPolicy::with_min_output_value(
-                NonZeroUsize::new(5).unwrap(),
-                Zatoshis::const_from_u64(100_0000),
-            ),
         );
         // The height at which every upgrade through NU6.2 activates on the network below.
         const PRE_NU6_3_ACTIVATION: BlockHeight = BlockHeight::from_u32(100_000);
@@ -1831,7 +1730,7 @@ mod tests {
             .activation_height(NetworkUpgrade::Nu6_3)
             .expect("NU6.3 activates on this network")
             .into();
-        let wallet_meta = AccountMeta::new(None, None, Some(PoolMeta::new(0, Zatoshis::ZERO)));
+        let split_plan = SplitPlan::new(vec![Zatoshis::const_from_u64(100_0000); 5]);
         let payment = [OrchardPayment::new(Zatoshis::const_from_u64(100_0000))];
         let balance_for = |orchard_inputs: &[TestOrchardInput],
                            ironwood_inputs: &[TestOrchardInput]| {
@@ -1854,7 +1753,7 @@ mod tests {
                     &payment[..],
                 ),
                 None,
-                &wallet_meta,
+                &split_plan,
             )
         };
         let note = [TestOrchardInput {
