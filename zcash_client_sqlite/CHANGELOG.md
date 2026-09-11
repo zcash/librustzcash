@@ -31,6 +31,10 @@ workspace.
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
 
+### Changed
+- `WalletDb::from_connection` (and therefore `for_path`) now sets the
+  connection's prepared-statement cache capacity to 256.
+
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
