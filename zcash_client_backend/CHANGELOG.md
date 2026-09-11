@@ -11,7 +11,12 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::note_management::most_recent_shielded_pool`.
+- `zcash_client_backend::note_management`: `ValueLadder`, `NoteHistogram`,
+  `TargetDistribution`, `SplitPlan`, `SplitPieces`, `NoteManagementError`, and
+  `most_recent_shielded_pool`.
+- `zcash_client_backend::note_management::testing` (under the `test-dependencies`
+  feature): `arb_value_ladder`, `arb_target_distribution`, `arb_note_histogram`,
+  and `max_arb_value`.
 
 ### Changed
 - `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` now splits
