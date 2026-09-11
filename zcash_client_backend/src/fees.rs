@@ -512,10 +512,12 @@ impl Default for DustOutputPolicy {
 /// A policy that describes how change output should be split into multiple notes for the purpose
 /// of note management.
 ///
-/// If an account contains at least [`Self::target_output_count`] notes having at least value
-/// [`Self::min_split_output_value`], this policy will recommend a single output; if the account
-/// contains fewer such notes, this policy will recommend that multiple outputs be produced in
-/// order to achieve the target.
+/// Splitting applies only to change returned to
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool); change to
+/// any other pool is a single output. Within that pool, if an account contains at least
+/// [`Self::target_output_count`] notes having at least value [`Self::min_split_output_value`],
+/// this policy will recommend a single output; if the account contains fewer such notes, this
+/// policy will recommend that multiple outputs be produced in order to achieve the target.
 #[derive(Clone, Copy, Debug)]
 pub struct SplitPolicy {
     target_output_count: NonZeroUsize,

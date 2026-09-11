@@ -17,7 +17,10 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::{AccountMeta, wallet::TargetHeight};
+use crate::{
+    data_api::{AccountMeta, wallet::TargetHeight},
+    note_management::most_recent_shielded_pool,
+};
 
 use super::{
     ChangeError, ChangeValue, DummyOutputCounts, DustAction, DustOutputPolicy, EphemeralBalance,
@@ -551,6 +554,13 @@ where
         (total_in - total_out_with_min_fee).unwrap_or(Zatoshis::ZERO),
     );
 
+    // Change is split only in the most recent shielded pool; a distribution is maintained
+    // nowhere else, and an older pool is drained by migration rather than refilled by splits.
+    // This NU6.3 lookup is deliberately distinct from the turnstile flag given to
+    // `select_change_pool`: when a pool newer than Ironwood arrives, the most recent pool
+    // advances while the turnstile stays anchored to NU6.3.
+    let splitting_permitted = change_pool == most_recent_shielded_pool(cfg.params, target_height);
+
     let (target_change_count, target_change_counts) = if wants_transparent_change {
         // Transparent change is always emitted as a single output; the note-splitting policy
         // exists to improve the spendability of shielded notes and does not apply to
@@ -565,12 +575,16 @@ where
             },
         )
     } else {
-        let target_change_count = wallet_meta.map_or(1, |m| {
-            usize::from(cfg.split_policy.target_output_count)
-                // If we cannot determine a total note count, fall back to a single output
-                .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
-                .max(1)
-        });
+        let target_change_count = if splitting_permitted {
+            wallet_meta.map_or(1, |m| {
+                usize::from(cfg.split_policy.target_output_count)
+                    // If we cannot determine a total note count, fall back to a single output
+                    .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
+                    .max(1)
+            })
+        } else {
+            1
+        };
         let target_change_counts = OutputManifest {
             transparent: 0,
             sapling: if change_pool == ShieldedPool::Sapling {
@@ -672,12 +686,13 @@ where
             let total_out_with_max_fee = (subtotal_out + max_fee).ok_or_else(overflow)?;
 
             // We obtain a split count based on the total number of notes of sufficient size
-            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
+            // available in the wallet, irrespective of pool; it applies only when the change
+            // lands in the most recent shielded pool. If we don't have any wallet metadata
             // available, we fall back to generating a single change output. Transparent change is
             // always emitted as a single output.
             let split_count = if wants_transparent_change {
                 1
-            } else {
+            } else if splitting_permitted {
                 usize::from(wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
                     cfg.split_policy.split_count(
                         wm.total_note_count(),
@@ -688,6 +703,8 @@ where
                         (total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
                     )
                 }))
+            } else {
+                1
             };
 
             // If we don't have as many change outputs as we expected, recompute the fee.

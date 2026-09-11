@@ -200,6 +200,10 @@ where
 
 /// A change strategy that attempts to split the change value into some number of equal-sized notes
 /// as dictated by the included [`SplitPolicy`] value.
+///
+/// Change returned to any pool other than
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) is a single
+/// output; see [`SplitPolicy`].
 pub struct MultiOutputChangeStrategy<R, I> {
     fee_rule: R,
     change_memo: Option<MemoBytes>,
@@ -369,7 +373,11 @@ mod tests {
             data_api::wallet::{TargetHeight, input_selection::OrchardPayment},
             fees::{orchard as orchard_fees, tests::TestOrchardInput},
         },
-        zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
+        zcash_protocol::{
+            PoolType,
+            local_consensus::LocalNetwork,
+            zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
+        },
     };
 
     use crate::{
@@ -442,11 +450,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "orchard")]
     fn change_without_dust_multi() {
         let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedPool::Sapling,
+            ShieldedPool::Orchard,
             DustOutputPolicy::default(),
             SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(5).unwrap(),
@@ -455,7 +464,7 @@ mod tests {
         );
 
         {
-            // spend a single Sapling note and produce 5 outputs
+            // spend a single Orchard note and produce 5 outputs
             let balance = |existing_notes, total| {
                 change_strategy.compute_balance(
                     &Network::TestNetwork,
@@ -467,20 +476,18 @@ mod tests {
                     &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
+                    &sapling_fees::EmptyBundleView,
                     &(
-                        sapling::builder::BundleType::DEFAULT,
-                        &[TestSaplingInput {
+                        ::orchard::bundle::BundleVersion::orchard_v2(),
+                        &[TestOrchardInput {
                             note_id: 0,
                             value: Zatoshis::const_from_u64(750_0000),
                         }][..],
-                        &[SaplingPayment::new(Zatoshis::const_from_u64(100_0000))][..],
+                        &[OrchardPayment::new(Zatoshis::const_from_u64(100_0000))][..],
                     ),
-                    #[cfg(feature = "orchard")]
-                    &orchard_fees::EmptyBundleView,
-                    #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    &AccountMeta::new(Some(PoolMeta::new(existing_notes, total)), None, None),
+                    &AccountMeta::new(None, Some(PoolMeta::new(existing_notes, total)), None),
                 )
             };
 
@@ -488,11 +495,11 @@ mod tests {
                 balance(0, Zatoshis::ZERO),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(129_4000), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(30000)
             );
@@ -501,16 +508,16 @@ mod tests {
                 balance(2, Zatoshis::const_from_u64(100_0000)),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(216_0000), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(20000)
             );
         }
 
         {
-            // spend a single Sapling note and produce 4 outputs, as the value of the note isn't
+            // spend a single Orchard note and produce 4 outputs, as the value of the note isn't
             // sufficient to produce 5
             let result = change_strategy.compute_balance(
                 &Network::TestNetwork,
@@ -522,17 +529,15 @@ mod tests {
                 &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
+                &sapling_fees::EmptyBundleView,
                 &(
-                    sapling::builder::BundleType::DEFAULT,
-                    &[TestSaplingInput {
+                    ::orchard::bundle::BundleVersion::orchard_v2(),
+                    &[TestOrchardInput {
                         note_id: 0,
                         value: Zatoshis::const_from_u64(600_0000),
                     }][..],
-                    &[SaplingPayment::new(Zatoshis::const_from_u64(100_0000))][..],
+                    &[OrchardPayment::new(Zatoshis::const_from_u64(100_0000))][..],
                 ),
-                #[cfg(feature = "orchard")]
-                &orchard_fees::EmptyBundleView,
-                #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
                 &AccountMeta::new(
@@ -546,10 +551,10 @@ mod tests {
                 result,
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::orchard(Zatoshis::const_from_u64(124_3750), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(25000)
             );
@@ -1735,6 +1740,145 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::DustInputs { sapling, .. }) if sapling == vec![2]
+        );
+    }
+
+    /// Sapling is never the most recent shielded pool, so a policy that would split change five
+    /// ways still returns a single Sapling change output.
+    #[test]
+    fn sapling_change_is_not_split() {
+        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+            SplitPolicy::with_min_output_value(
+                NonZeroUsize::new(5).unwrap(),
+                Zatoshis::const_from_u64(100_0000),
+            ),
+        );
+        let balance = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(750_0000),
+                }][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(100_0000))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &AccountMeta::new(Some(PoolMeta::new(0, Zatoshis::ZERO)), None, None),
+        );
+        // One spend, two outputs: the two-action floor, 10_000 zatoshis of fee.
+        assert_matches!(
+            balance,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(649_0000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10000)
+        );
+    }
+
+    /// After NU6.3 the turnstile lets an Orchard spend return change to Orchard, but Orchard is no
+    /// longer the most recent pool, so that change is a single output; the same policy still
+    /// splits change that lands in Ironwood.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn only_ironwood_change_is_split_after_nu6_3() {
+        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Ironwood,
+            DustOutputPolicy::default(),
+            SplitPolicy::with_min_output_value(
+                NonZeroUsize::new(5).unwrap(),
+                Zatoshis::const_from_u64(100_0000),
+            ),
+        );
+        // The height at which every upgrade through NU6.2 activates on the network below.
+        const PRE_NU6_3_ACTIVATION: BlockHeight = BlockHeight::from_u32(100_000);
+        // The height at which NU6.3 activates on the network below.
+        const NU6_3_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+        let network = LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(PRE_NU6_3_ACTIVATION),
+            blossom: Some(PRE_NU6_3_ACTIVATION),
+            heartwood: Some(PRE_NU6_3_ACTIVATION),
+            canopy: Some(PRE_NU6_3_ACTIVATION),
+            nu5: Some(PRE_NU6_3_ACTIVATION),
+            nu6: Some(NU6_3_ACTIVATION),
+            nu6_1: Some(NU6_3_ACTIVATION),
+            nu6_2: Some(NU6_3_ACTIVATION),
+            nu6_3: Some(NU6_3_ACTIVATION),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: None,
+            #[cfg(zcash_unstable = "nutachyon")]
+            nu_tachyon: None,
+        };
+        let post_nu6_3_height: TargetHeight = network
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("NU6.3 activates on this network")
+            .into();
+        let wallet_meta = AccountMeta::new(None, None, Some(PoolMeta::new(0, Zatoshis::ZERO)));
+        let payment = [OrchardPayment::new(Zatoshis::const_from_u64(100_0000))];
+        let balance_for = |orchard_inputs: &[TestOrchardInput],
+                           ironwood_inputs: &[TestOrchardInput]| {
+            change_strategy.compute_balance::<_, u32>(
+                &network,
+                post_nu6_3_height,
+                BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &sapling_fees::EmptyBundleView,
+                &(
+                    ::orchard::bundle::BundleVersion::orchard_v3(),
+                    orchard_inputs,
+                    &[] as &[OrchardPayment],
+                ),
+                &(
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                    ironwood_inputs,
+                    &payment[..],
+                ),
+                None,
+                &wallet_meta,
+            )
+        };
+        let note = [TestOrchardInput {
+            note_id: 0,
+            value: Zatoshis::const_from_u64(750_0000),
+        }];
+
+        // Orchard-funded: change is strictly less than the input, so it may return to Orchard,
+        // and it does so as one output.
+        let orchard_funded = balance_for(&note, &[]).unwrap();
+        assert_eq!(orchard_funded.proposed_change().len(), 1);
+        assert_eq!(
+            orchard_funded.proposed_change()[0].output_pool(),
+            PoolType::ORCHARD
+        );
+
+        // Ironwood-funded: the most recent pool, so the five-way split applies.
+        let ironwood_funded = balance_for(&[], &note).unwrap();
+        assert_eq!(ironwood_funded.proposed_change().len(), 5);
+        assert!(
+            ironwood_funded
+                .proposed_change()
+                .iter()
+                .all(|change| change.output_pool() == PoolType::IRONWOOD)
         );
     }
 }

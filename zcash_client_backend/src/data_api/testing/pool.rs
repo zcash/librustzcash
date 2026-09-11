@@ -2025,6 +2025,12 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
 }
 
+/// A change strategy whose [`SplitPolicy`] asks for more notes than the account holds returns
+/// change as multiple outputs.
+///
+/// Valid only for a `T` whose pool is
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) at the target
+/// height; [`change_outside_the_most_recent_pool_is_not_split`] covers the converse.
 pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
@@ -2184,6 +2190,57 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 
     let step = &proposal.steps().head;
     assert_eq!(step.balance().proposed_change().len(), 7);
+}
+
+/// A pool that is not the most recent shielded pool receives a single change output even under a
+/// policy that would split it.
+///
+/// Valid only for a `T` whose pool is not
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) at the target
+/// height; [`send_with_multiple_change_outputs`] covers the converse.
+pub fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    // 6,500,000 paying 1,000,000 leaves about 5,490,000 of change. A two-way split would give
+    // about 2,745,000 per output, far above the 1,000,000 floor, so the policy would split here
+    // were the pool eligible: the single output below is the pool gate, not a value shortfall.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(650_0000));
+
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(100_0000),
+    )])
+    .unwrap();
+    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+        Zip317FeeRule::standard(),
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+        SplitPolicy::with_min_output_value(
+            NonZeroUsize::new(2).unwrap(),
+            Zatoshis::const_from_u64(100_0000),
+        ),
+    );
+    let account = st.test_account().cloned().unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().proposed_change().len(), 1);
+    assert_eq!(
+        step.balance().proposed_change()[0].output_pool(),
+        PoolType::Shielded(T::SHIELDED_PROTOCOL)
+    );
 }
 
 #[cfg(feature = "transparent-inputs")]

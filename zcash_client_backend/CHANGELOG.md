@@ -10,7 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::note_management::most_recent_shielded_pool`.
+
 ### Changed
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` now splits
+  change only when the change is returned to the most recent shielded pool at
+  the target height (Ironwood once NU6.3 is active, Orchard before that).
+  Change returned to any other pool is a single output.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An

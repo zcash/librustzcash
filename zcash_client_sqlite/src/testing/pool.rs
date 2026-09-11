@@ -177,11 +177,18 @@ pub(crate) fn spend_everything_multi_step_single_note_proposed_transfer<T: Shiel
     )
 }
 
+#[cfg(feature = "orchard")]
 pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+pub(crate) fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::change_outside_the_most_recent_pool_is_not_split::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 #[cfg(feature = "transparent-inputs")]

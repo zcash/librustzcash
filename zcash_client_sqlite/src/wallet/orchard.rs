@@ -1715,7 +1715,11 @@ pub(crate) mod tests {
     ///    that pool than the transaction's Orchard inputs remove from it.
     #[cfg(feature = "orchard")]
     mod ironwood_privacy_invariants {
-        use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+        use std::{
+            collections::HashMap,
+            convert::Infallible,
+            num::{NonZeroU32, NonZeroUsize},
+        };
 
         use proptest::prelude::*;
 
@@ -1735,7 +1739,10 @@ pub(crate) mod tests {
                 },
             },
             decrypt_transaction,
-            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            fees::{
+                DustOutputPolicy, SplitPolicy, StandardFeeRule, standard,
+                zip317::MultiOutputChangeStrategy,
+            },
             proto::{ProposalDecodingError, proposal},
             wallet::OvkPolicy,
         };
@@ -1819,6 +1826,61 @@ pub(crate) mod tests {
                 Zatoshis::from_u64(payment_zats).unwrap(),
             )])
             .unwrap()
+        }
+
+        /// An Orchard-funded payment after NU6.3 returns a single change output to Orchard even
+        /// under a split policy: Orchard is no longer the most recent pool.
+        #[test]
+        fn orchard_change_is_not_split_after_nu6_3() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+            let account = st.test_account().cloned().unwrap();
+            let received = OrchardPoolTester::test_account_fvk(&st);
+            let (height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(2_000_000),
+            );
+            st.scan_cached_blocks(height, 1);
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            // The 2,000,000 note paying 100,000 leaves about 1,880,000 of change. A four-way
+            // split would give about 470,000 per output, far above the 100,000 floor, so the
+            // policy would split here were Orchard eligible: the single output asserted below is
+            // the pool gate, not a value shortfall.
+            let change_strategy = MultiOutputChangeStrategy::<_, TestDb>::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Orchard,
+                DustOutputPolicy::default(),
+                SplitPolicy::with_min_output_value(
+                    NonZeroUsize::new(4).unwrap(),
+                    Zatoshis::const_from_u64(100_000),
+                ),
+            );
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Orchard]),
+                )
+                .unwrap();
+            let step = proposal.steps().first();
+            assert_eq!(step.balance().proposed_change().len(), 1);
+            assert_eq!(
+                step.balance().proposed_change()[0].output_pool(),
+                PoolType::ORCHARD
+            );
         }
 
         /// When the caller restricts the spend policy to the Orchard pool, input selection may

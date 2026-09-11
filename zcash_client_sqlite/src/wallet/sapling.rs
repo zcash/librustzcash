@@ -556,8 +556,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn send_with_multiple_change_outputs() {
-        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+    fn change_outside_the_most_recent_pool_is_not_split() {
+        testing::pool::change_outside_the_most_recent_pool_is_not_split::<SaplingPoolTester>()
     }
 
     #[test]
