@@ -13,6 +13,8 @@ workspace.
 ### Added
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::get_note_histogram`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were

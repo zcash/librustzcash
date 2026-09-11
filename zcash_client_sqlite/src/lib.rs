@@ -71,6 +71,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::{NoteHistogram, ValueLadder},
     proto::compact_formats::CompactBlock,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
@@ -1234,6 +1235,38 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             orchard_pool_meta,
             ironwood_pool_meta,
         ))
+    }
+
+    fn get_note_histogram(
+        &self,
+        account: Self::AccountId,
+        pool: ShieldedPool,
+        ladder: &ValueLadder,
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<Option<NoteHistogram>, Self::Error> {
+        // Without the `orchard` feature, `table_constants` has no arm for the Orchard or
+        // Ironwood pools, so the query that answers for them cannot be built.
+        #[cfg(not(feature = "orchard"))]
+        if pool != ShieldedPool::Sapling {
+            return Ok(None);
+        }
+
+        let values = wallet::common::unspent_note_values(
+            self.conn.borrow(),
+            pool,
+            target_height,
+            account,
+            exclude,
+            lock_filter,
+        )?;
+
+        Ok(Some(NoteHistogram::from_values(
+            ladder.clone(),
+            values.spendable,
+            values.pending,
+        )))
     }
 }
 

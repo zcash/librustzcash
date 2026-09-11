@@ -972,6 +972,16 @@ pub(crate) fn select_unspent_note_meta(
     Ok(res)
 }
 
+/// Interprets a note value read from the database, which is stored as a signed integer.
+///
+/// Returns [`SqliteClientError::CorruptedData`] if the stored value is negative or greater than
+/// `MAX_MONEY`.
+fn zatoshis(value: i64) -> Result<Zatoshis, SqliteClientError> {
+    Zatoshis::from_nonnegative_i64(value).map_err(|_| {
+        SqliteClientError::CorruptedData(format!("Received note value out of range: {value}"))
+    })
+}
+
 pub(crate) fn unspent_notes_meta(
     conn: &rusqlite::Connection,
     protocol: ShieldedPool,
@@ -994,12 +1004,6 @@ pub(crate) fn unspent_notes_meta(
         })
         .collect();
     let excluded_ptr = Rc::new(excluded);
-
-    fn zatoshis(value: i64) -> Result<Zatoshis, SqliteClientError> {
-        Zatoshis::from_nonnegative_i64(value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative received note value: {value}"))
-        })
-    }
 
     // This is an aggregation, not a value-target selection, so no tier ordering applies; only the
     // eligibility filter (Part A) is imposed.
@@ -1161,6 +1165,99 @@ pub(crate) fn unspent_notes_meta(
     } else {
         Ok(None)
     }
+}
+
+/// The values of an account's unspent notes in one pool, partitioned by whether the note's own
+/// transaction is mined.
+pub(crate) struct UnspentNoteValues {
+    /// Values of notes whose transaction is mined.
+    pub(crate) spendable: Vec<Zatoshis>,
+    /// Values of notes whose transaction is not yet mined.
+    pub(crate) pending: Vec<Zatoshis>,
+}
+
+/// Returns the values of the account's unspent notes of `protocol`, partitioned by whether the
+/// note's transaction is mined.
+///
+/// A note is omitted if it is listed in `exclude`, if it is ineligible under `lock_filter`, if a
+/// spending transaction has it spent, or if its own transaction has expired. No further
+/// spendability check is applied, so a note reported as mined may still lack the required
+/// confirmations, await the scan of its shard, be of undetermined key scope, or have no
+/// derivable nullifier.
+///
+/// `account` is the account that received the notes. `target_height` is the height at which the
+/// notes would be spent; it decides spend expiry, lock expiry, and receipt expiry.
+pub(crate) fn unspent_note_values(
+    conn: &rusqlite::Connection,
+    protocol: ShieldedPool,
+    target_height: TargetHeight,
+    account: AccountUuid,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<UnspentNoteValues, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+    // The query enumerates notes rather than selecting against a value target, so no tier
+    // ordering applies; only the eligibility filter is imposed.
+    let eligible_condition = output_eligible_condition(lock_filter, "rn");
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let account_uuid = account.0;
+    let target_height_arg = u32::from(target_height);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":account_uuid", &account_uuid),
+        (":exclude", &excluded_ptr),
+        (":target_height", &target_height_arg),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT rn.value, transactions.mined_height IS NOT NULL AS is_mined
+         FROM {table_prefix}_received_notes rn
+         INNER JOIN accounts a ON a.id = rn.account_id
+         INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
+         WHERE a.uuid = :account_uuid
+         AND a.ufvk IS NOT NULL
+         AND rn.id NOT IN rarray(:exclude)
+         AND rn.id NOT IN ({}) -- the note is unspent
+         AND ({}) -- the note's transaction is unexpired
+         AND ({eligible_condition}) -- the note is eligible under the lock filter",
+        spent_notes_clause(table_prefix),
+        tx_unexpired_condition("transactions"),
+    ))?;
+
+    let rows = stmt.query_and_then(&sql_params[..], |row| {
+        Ok::<_, SqliteClientError>((
+            zatoshis(row.get("value")?)?,
+            row.get::<_, bool>("is_mined")?,
+        ))
+    })?;
+
+    let mut result = UnspentNoteValues {
+        spendable: Vec::new(),
+        pending: Vec::new(),
+    };
+    for row in rows {
+        let (value, is_mined) = row?;
+        if is_mined {
+            result.spendable.push(value);
+        } else {
+            result.pending.push(value);
+        }
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]

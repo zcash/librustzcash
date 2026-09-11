@@ -101,6 +101,7 @@ use crate::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     decrypt::DecryptedOutput,
+    note_management::{NoteHistogram, ValueLadder},
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
@@ -1884,6 +1885,38 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error>;
+
+    /// Returns a histogram of the account's unspent notes in `pool` over `ladder`, or `None`
+    /// when the store cannot provide one.
+    ///
+    /// The counts cover the unspent notes of `account` in `pool` that are eligible under
+    /// `lock_filter` and whose transaction has not expired as of `target_height`; `target_height`
+    /// decides spend expiry, lock expiry, and receipt expiry, and notes listed in `exclude` are
+    /// omitted. Each such note is counted once, under `spendable` if its transaction is mined and
+    /// under `pending` if it is not, so `spendable` also counts notes that could not be spent at
+    /// `target_height`: notes that lack the required confirmations, notes whose shard is not yet
+    /// scanned, notes of undetermined key scope, and notes for which no nullifier can be derived.
+    /// Counting those notes as present errs toward fewer split pieces, and may let a sweep take a
+    /// bucket below its target when the bucket is measured in notes that are spendable now.
+    ///
+    /// Bucket 0 includes notes worth no more than the [ZIP 317] marginal fee. A consolidation
+    /// sweep may still take such a note into a free slot.
+    ///
+    /// The default implementation returns `None`. A note-management policy given `None` does not
+    /// manage the distribution.
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317
+    fn get_note_histogram(
+        &self,
+        _account: Self::AccountId,
+        _pool: ShieldedPool,
+        _ladder: &ValueLadder,
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<Option<NoteHistogram>, Self::Error> {
+        Ok(None)
+    }
 
     /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
     /// spendable as of the provided `target_height`.

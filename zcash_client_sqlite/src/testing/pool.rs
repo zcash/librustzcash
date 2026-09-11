@@ -191,6 +191,21 @@ pub(crate) fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTe
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn note_histogram_buckets_unspent_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_histogram_buckets_unspent_notes::<T, _, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn note_histogram_counts_pending_until_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_histogram_counts_pending_until_expiry::<
+        T,
+        _,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(

@@ -18,6 +18,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
+        builder::DEFAULT_TX_EXPIRY_DELTA,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -34,8 +35,8 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, TargetValue, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
@@ -45,7 +46,7 @@ use crate::{
         },
         wallet::{
             ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            input_selection::{GreedyInputSelector, LockFilter, LockedInputPolicy},
         },
     },
     decrypt_transaction,
@@ -53,8 +54,9 @@ use crate::{
         self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
+    note_management::{NoteHistogram, ValueLadder},
     scanning::ScanError,
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
+    wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
@@ -110,10 +112,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
-    zcash_primitives::transaction::{
-        builder::DEFAULT_TX_EXPIRY_DELTA,
-        fees::{FeeRule, transparent::InputSize, zip317},
-    },
+    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
     zcash_protocol::{
         TxId,
         value::{BalanceError, MAX_MONEY, ZatBalance},
@@ -133,10 +132,7 @@ use {
 };
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use {
-    crate::data_api::wallet::input_selection::LockedInputPolicy,
-    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
-};
+use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
 pub mod dsl;
 use dsl::{TestDsl, TestNoteConfig};
@@ -9880,4 +9876,191 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
         step.is_canonical_crossing(&zip318, canonical_fee),
         "the second crossing must still be canonical"
     );
+}
+
+/// The store buckets an account's unspent notes over the caller's ladder, omitting excluded notes
+/// and notes locked on another owner's behalf.
+///
+/// Valid only for a store whose `get_note_histogram` returns `Some`.
+pub fn note_histogram_buckets_unspent_notes<T: ShieldedPoolTester, Dsf, TC>(dsf: Dsf, cache: TC)
+where
+    Dsf: DataStoreFactory,
+    TC: TestCache,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values = [5_000_000, 20_000_000, 200_000_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance(values.map(|v| [v]));
+
+    let account_id = st.test_account().unwrap().id();
+    let ladder = ValueLadder::new([
+        Zatoshis::const_from_u64(10_000_000),
+        Zatoshis::const_from_u64(100_000_000),
+    ])
+    .unwrap();
+    let target_height = TargetHeight::from(st.scanned_block_height() + 1);
+    let histogram = |db: &Dsf::DataStore, exclude: &[<Dsf::DataStore as InputSource>::NoteRef]| {
+        db.get_note_histogram(
+            account_id,
+            T::SHIELDED_PROTOCOL,
+            &ladder,
+            target_height,
+            exclude,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap()
+        .expect("the store under test provides histograms")
+    };
+
+    let all = histogram(st.wallet(), &[]);
+    assert_eq!(
+        (all.spendable(0), all.spendable(1), all.spendable(2)),
+        (1, 1, 1)
+    );
+    assert_eq!((all.pending(0), all.pending(1), all.pending(2)), (0, 0, 0));
+
+    // Excluding the bucket-1 note empties that bucket and leaves the others alone.
+    let without_middle = histogram(st.wallet(), &[st.note_id_by_value(values[1])]);
+    assert_eq!(without_middle.spendable(0), 1);
+    assert_eq!(without_middle.spendable(1), 0);
+    assert_eq!(without_middle.spendable(2), 1);
+
+    // A note locked on another owner's behalf is ineligible under `LockedInputPolicy::Exclude`.
+    let locked = st.note_ref_by_value(values[2]);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(
+                &[locked],
+                LockOwner::new([1; 32]),
+                BlockHeight::from(u32::MAX)
+            )
+            .unwrap(),
+        1
+    );
+    let with_lock = histogram(st.wallet(), &[]);
+    assert_eq!(with_lock.spendable(0), 1);
+    assert_eq!(with_lock.spendable(1), 1);
+    assert_eq!(with_lock.spendable(2), 0);
+
+    // The counts are scoped to the requested pool: the account's notes do not leak into another
+    // pool's histogram. A store that cannot answer for that pool at all returns `None`, which
+    // leaves nothing to check.
+    let other_pool = st
+        .wallet()
+        .get_note_histogram(
+            account_id,
+            if T::SHIELDED_PROTOCOL == ShieldedPool::Sapling {
+                ShieldedPool::Orchard
+            } else {
+                ShieldedPool::Sapling
+            },
+            &ladder,
+            target_height,
+            &[],
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap();
+    if let Some(other_pool) = other_pool {
+        assert_eq!(other_pool, NoteHistogram::empty(ladder.clone()));
+    }
+}
+
+/// A note whose transaction is not yet mined is counted as pending, and stops being counted once
+/// that transaction expires.
+///
+/// Valid only for a store whose `get_note_histogram` returns `Some`.
+pub fn note_histogram_counts_pending_until_expiry<T: ShieldedPoolTester, Dsf, TC>(
+    dsf: Dsf,
+    cache: TC,
+) where
+    Dsf: DataStoreFactory,
+    TC: TestCache,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // The funding note falls in bucket 2; paying most of it away leaves change in bucket 1.
+    let funding_value = Zatoshis::const_from_u64(200_000_000);
+    let payment_value = Zatoshis::const_from_u64(150_000_000);
+    st.add_a_single_note_checking_balance(funding_value);
+
+    let ladder = ValueLadder::new([
+        Zatoshis::const_from_u64(10_000_000),
+        Zatoshis::const_from_u64(100_000_000),
+    ])
+    .unwrap();
+    let account = st.test_account().cloned().unwrap();
+    let histogram = |db: &Dsf::DataStore, target_height: TargetHeight| {
+        db.get_note_histogram(
+            account.id(),
+            T::SHIELDED_PROTOCOL,
+            &ladder,
+            target_height,
+            &[],
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap()
+        .expect("the store under test provides histograms")
+    };
+
+    let before = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(before.spendable(2), 1);
+    assert_eq!(before.pending(1), 0);
+
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        payment_value,
+    )])
+    .unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    assert_eq!(proposal.steps().head.balance().proposed_change().len(), 1);
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap();
+    assert_eq!(txids.len(), 1);
+    let tx = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the created transaction was stored");
+
+    // Store the transaction without mining it, so that its change output is a pending receipt and
+    // its input is spent by an unmined transaction.
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None).unwrap();
+
+    let unmined = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(unmined.pending(1), 1);
+    assert_eq!(unmined.spendable(1), 0);
+    assert_eq!(unmined.spendable(2), 0);
+
+    // Advance the chain past the transaction's expiry height. Neither the change output nor the
+    // spend of the funding note can ever take effect now.
+    st.add_empty_blocks(usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap() + 1);
+
+    let expired = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(expired.pending(1), 0);
+    assert_eq!(expired.spendable(1), 0);
+    assert_eq!(expired.spendable(2), 1);
 }

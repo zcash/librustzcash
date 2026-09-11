@@ -17,6 +17,8 @@ workspace.
 - `zcash_client_backend::note_management::testing` (under the `test-dependencies`
   feature): `arb_value_ladder`, `arb_target_distribution`, `arb_note_histogram`,
   and `max_arb_value`.
+- `zcash_client_backend::data_api::InputSource::get_note_histogram`, with a
+  default implementation.
 
 ### Changed
 - `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` now splits

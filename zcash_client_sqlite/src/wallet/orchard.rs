@@ -856,6 +856,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn note_histogram_buckets_unspent_notes() {
+        testing::pool::note_histogram_buckets_unspent_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn note_histogram_counts_pending_until_expiry() {
+        testing::pool::note_histogram_counts_pending_until_expiry::<OrchardPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<OrchardPoolTester>()
