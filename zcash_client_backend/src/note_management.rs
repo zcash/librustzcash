@@ -617,6 +617,10 @@ impl SweepCaps {
     /// The result has one entry per value, in the same order. Present candidates ascending by
     /// value, so that the notes admitted from a bucket are its smallest.
     pub fn admit_all(&self, values: &[Zatoshis]) -> Vec<bool> {
+        debug_assert!(
+            values.is_sorted(),
+            "sweep candidates must be presented ascending by value",
+        );
         match self {
             SweepCaps::Unrestricted => vec![true; values.len()],
             SweepCaps::PerBucket(caps) => {

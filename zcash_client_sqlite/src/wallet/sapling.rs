@@ -654,6 +654,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn prefer_fewest_does_not_grow_sapling_spends() {
+        testing::pool::prefer_fewest_does_not_grow_sapling_spends()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>()

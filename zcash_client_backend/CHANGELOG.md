@@ -54,6 +54,10 @@ workspace.
   `note_management::SingleOutputPolicy` to keep single-output change; callers
   that used a `SplitPolicy` construct `note_management::LadderPolicy::new(
   TargetDistribution::single_bucket(min_value, target_count), max_actions)`.
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `input_selection::GreedyInputSelector` may now spend additional small notes
+  under any `NoteSelection` when the note-management policy admits a sweep:
+  `SingleOutputPolicy` sweeps, `Unmanaged` does not.
 - `zcash_client_backend::proposal::Step::from_parts` (and therefore
   `Proposal::single_step`) now returns `ProposalError::ChainDoubleSpend` when a
   step spends the same transparent output or shielded note more than once;

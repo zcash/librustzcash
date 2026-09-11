@@ -244,6 +244,61 @@ pub(crate) fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedP
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_fills_existing_orchard_actions() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_fills_existing_orchard_actions(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_never_enlarges_under_a_single_output_strategy() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_never_enlarges_under_a_single_output_strategy(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_prefers_the_free_regime_on_a_tie() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_prefers_the_free_regime_on_a_tie(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_target_excludes_notes_at_the_rung() {
+    zcash_client_backend::data_api::testing::pool::ladder_target_excludes_notes_at_the_rung(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn accumulate_funding_also_sweeps_free_slots() {
+    zcash_client_backend::data_api::testing::pool::accumulate_funding_also_sweeps_free_slots(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn unmanaged_policy_never_sweeps() {
+    zcash_client_backend::data_api::testing::pool::unmanaged_policy_never_sweeps(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_does_not_grow_sapling_spends() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_does_not_grow_sapling_spends(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(

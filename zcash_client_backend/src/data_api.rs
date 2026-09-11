@@ -1183,6 +1183,16 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         return self.sapling.is_empty() && self.orchard.is_empty() && self.ironwood.is_empty();
     }
 
+    /// Appends each pool's notes from `other` to this collection.
+    pub(crate) fn append(&mut self, mut other: Self) {
+        self.sapling.append(&mut other.sapling);
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard.append(&mut other.orchard);
+            self.ironwood.append(&mut other.ironwood);
+        }
+    }
+
     /// Consumes this collection, returning one holding only the OLDEST single note whose value
     /// alone is at least `value`, drawn from the first pool in `sources` that holds one; the
     /// result is empty when no single note qualifies. Age is the note's commitment tree

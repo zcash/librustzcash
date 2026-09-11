@@ -742,10 +742,11 @@ impl ConfirmationsPolicy {
 /// [`create_proposed_transactions`].
 ///
 /// `note_management` governs the distribution of note values the account maintains: it decides
-/// how each transaction's change is split. Pass [`SingleOutputPolicy`] for a single change
-/// output, or [`Unmanaged`] to leave the account's note distribution alone. A splitting policy
-/// takes effect only under a change strategy that splits, and only for change returned to the
-/// most recent shielded pool.
+/// how each transaction's change is split, and which small notes the transaction sweeps in
+/// beside the inputs that fund it. Pass [`SingleOutputPolicy`] for a single change output and a
+/// sweep confined to spend sides the transaction already pays for, or [`Unmanaged`] to leave the
+/// account's note distribution alone. A splitting policy takes effect only under a change
+/// strategy that splits, and only for change returned to the most recent shielded pool.
 ///
 /// [`Unmanaged`]: crate::note_management::Unmanaged
 ///

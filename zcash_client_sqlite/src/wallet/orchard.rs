@@ -1001,6 +1001,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn prefer_fewest_fills_existing_orchard_actions() {
+        testing::pool::prefer_fewest_fills_existing_orchard_actions()
+    }
+
+    #[test]
+    fn prefer_fewest_never_enlarges_under_a_single_output_strategy() {
+        testing::pool::prefer_fewest_never_enlarges_under_a_single_output_strategy()
+    }
+
+    #[test]
+    fn prefer_fewest_prefers_the_free_regime_on_a_tie() {
+        testing::pool::prefer_fewest_prefers_the_free_regime_on_a_tie()
+    }
+
+    #[test]
+    fn ladder_target_excludes_notes_at_the_rung() {
+        testing::pool::ladder_target_excludes_notes_at_the_rung()
+    }
+
+    #[test]
+    fn accumulate_funding_also_sweeps_free_slots() {
+        testing::pool::accumulate_funding_also_sweeps_free_slots()
+    }
+
+    #[test]
+    fn unmanaged_policy_never_sweeps() {
+        testing::pool::unmanaged_policy_never_sweeps()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<OrchardPoolTester>()
@@ -1873,8 +1903,10 @@ pub(crate) mod tests {
             data_api::{
                 Account, TargetValue, WalletCommitmentTrees, WalletRead, WalletWrite,
                 testing::{
-                    AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
-                    pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+                    AddressType, IronwoodFvk, TestBuilder,
+                    orchard::OrchardPoolTester,
+                    pool::{ACTION_CAP, ShieldedPoolTester},
+                    sapling::SaplingPoolTester,
                 },
                 wallet::{
                     ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
@@ -1888,7 +1920,7 @@ pub(crate) mod tests {
             fees::{
                 DustOutputPolicy, StandardFeeRule, standard, zip317::MultiOutputChangeStrategy,
             },
-            note_management::{LadderPolicy, TargetDistribution},
+            note_management::{LadderPolicy, SingleOutputPolicy, TargetDistribution},
             proto::{ProposalDecodingError, proposal},
             wallet::OvkPolicy,
         };
@@ -1917,6 +1949,14 @@ pub(crate) mod tests {
         use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey};
         use rand_core::OsRng;
         use transparent::builder::TransparentSigningSet;
+
+        /// The action cap of a target of five notes: one action wider than [`ACTION_CAP`], so
+        /// that a payment with one output and a five-way change split is within it.
+        const WIDE_ACTION_CAP: NonZeroUsize = NonZeroUsize::new(6).unwrap();
+
+        /// An action cap narrower than the target it accompanies asks for, so that realizing the
+        /// whole change split would carry the bundle past the envelope.
+        const TIGHT_ACTION_CAP: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 
         // A network on which Ironwood (NU6.3) is active from the Sapling activation height, so
         // received Ironwood notes are offered by input selection (which gates on NU6.3 activation).
@@ -2089,6 +2129,366 @@ pub(crate) mod tests {
                 .unwrap();
 
             assert_eq!(input_pool_counts(&proposal), (0, 2, 0));
+        }
+
+        /// A sweep fills otherwise-dummy spend sides of an Ironwood bundle: with a four-way change
+        /// split the payment already pays for five actions, and the four smallest notes ride in
+        /// them at no change to the fee.
+        #[test]
+        fn prefer_fewest_fills_existing_ironwood_actions() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 60_000, 50_000, 40_000, 30_000, 20_000, 10_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+            );
+            // Spending the only note at or above 100,000 leaves the account four notes short of
+            // its target, so change is split four ways and every smaller note is a candidate.
+            let note_management = LadderPolicy::new(
+                TargetDistribution::single_bucket(
+                    Zatoshis::const_from_u64(100_000),
+                    NonZeroUsize::new(4).unwrap(),
+                ),
+                ACTION_CAP,
+            );
+            let proposal = st
+                .propose_transfer_with_policy_and_note_management(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    &note_management,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            let mut selected_values = step
+                .shielded_inputs()
+                .expect("the proposal spends Ironwood notes")
+                .notes()
+                .iter()
+                .map(|note| note.note().value().into_u64())
+                .collect::<Vec<_>>();
+            selected_values.sort_unstable();
+            assert_eq!(selected_values, [10_000, 20_000, 30_000, 40_000, 2_000_000]);
+            assert_eq!(step.balance().proposed_change().len(), 4);
+            // One payment output and four change outputs: five actions, which the funding spend
+            // alone would also have paid for.
+            assert_eq!(
+                step.balance().fee_required(),
+                (zip317::MARGINAL_FEE * 5u64).unwrap()
+            );
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+                Ok(5),
+            );
+        }
+
+        /// A sweep stops at the envelope: under a five-note target the bundle may reach six
+        /// actions, and no further however many candidates remain.
+        #[test]
+        fn prefer_fewest_fills_up_to_the_split_envelope() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 40_000, 30_000, 20_000, 10_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+            );
+            let note_management = LadderPolicy::new(
+                TargetDistribution::single_bucket(
+                    Zatoshis::const_from_u64(100_000),
+                    NonZeroUsize::new(5).unwrap(),
+                ),
+                WIDE_ACTION_CAP,
+            );
+            let proposal = st
+                .propose_transfer_with_policy_and_note_management(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    &note_management,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 5);
+            assert_eq!(step.balance().proposed_change().len(), 5);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+                Ok(6),
+            );
+        }
+
+        /// An Orchard-funded payment sweeps nothing after NU6.3: a distribution is maintained only
+        /// in the most recent shielded pool, which Orchard no longer is.
+        #[test]
+        fn prefer_fewest_does_not_grow_orchard_v3_actions() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = OrchardPoolTester::test_account_fvk(&st);
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(2_000_000),
+            );
+            st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(first_height, 2);
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let proposal = st
+                .propose_transfer_with_policy_and_note_management(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    &SingleOutputPolicy,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            assert_eq!(input_pool_counts(&proposal), (0, 1, 0));
+        }
+
+        /// A sweep is accepted even though it widens the change split: the value it adds affords
+        /// pieces of the plan the funding value alone could not, and the wider shape is still
+        /// within the envelope.
+        #[test]
+        fn prefer_fewest_accepts_a_wider_split_within_the_envelope() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 400_000, 300_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+            );
+            // Paying 200,000 from the 2,000,000 note leaves 1,800,000 before fees, which covers
+            // the three 600,000 pieces the target asks for; the fee of a four-output bundle does
+            // not, so funding alone affords two of them.
+            let note_management = LadderPolicy::new(
+                TargetDistribution::single_bucket(
+                    Zatoshis::const_from_u64(600_000),
+                    NonZeroUsize::new(3).unwrap(),
+                ),
+                WIDE_ACTION_CAP,
+            );
+            let proposal = st
+                .propose_transfer_with_policy_and_note_management(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    &note_management,
+                    orchard_payment_request(st.network(), 200_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            // Both notes below the rung are swept, and the third change piece becomes affordable.
+            assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 3);
+            assert_eq!(step.balance().proposed_change().len(), 3);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+                Ok(4),
+            );
+        }
+
+        /// The envelope rejects an attempt whose value would widen the change split past the
+        /// policy's action cap, and the sweep falls back to the largest attempt that fits.
+        #[test]
+        fn prefer_fewest_rejects_a_sweep_beyond_the_envelope() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 300_000, 7_000, 6_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+            );
+            // Paying 200,000 from the 2,000,000 note leaves 1,800,000 before fees, exactly the
+            // four 450,000 pieces the target asks for; the fee of a five-output bundle leaves
+            // room for only three, so the funding-only bundle is four actions, which is also the
+            // cap. Sweeping the 300,000 note would afford the fourth piece and a fifth action,
+            // which the envelope refuses; sweeping the two small notes does not.
+            let note_management = LadderPolicy::new(
+                TargetDistribution::single_bucket(
+                    Zatoshis::const_from_u64(450_000),
+                    NonZeroUsize::new(4).unwrap(),
+                ),
+                TIGHT_ACTION_CAP,
+            );
+            let proposal = st
+                .propose_transfer_with_policy_and_note_management(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    &note_management,
+                    orchard_payment_request(st.network(), 200_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            let mut selected_values = step
+                .shielded_inputs()
+                .expect("the proposal spends Ironwood notes")
+                .notes()
+                .iter()
+                .map(|note| note.note().value().into_u64())
+                .collect::<Vec<_>>();
+            selected_values.sort_unstable();
+            assert_eq!(selected_values, [6_000, 7_000, 2_000_000]);
+            assert_eq!(step.balance().proposed_change().len(), 3);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+                Ok(4),
+            );
         }
 
         /// An Orchard-funded payment after NU6.3 returns a single change output to Orchard even
