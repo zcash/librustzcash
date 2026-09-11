@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
+  commitment tree conflict as `PutBlocksError::Continuity` rather than as
+  `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
+  note commitment tree errors.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

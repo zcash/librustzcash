@@ -10,7 +10,23 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
+- `zcash_client_backend::data_api::PutBlocksError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
+- `zcash_client_backend::data_api::chain::error::Error` implements
+  `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
+
 ### Changed
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
+  `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
+  commitment tree conflict as `PutBlocksError::Continuity` and any other failure
+  as `PutBlocksError::Wallet`; callers that matched on `Self::Error` match on
+  `PutBlocksError::Wallet` instead.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a note
+  commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
+  a continuity error at the first block of the batch, instead of as
+  `Error::Wallet`.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` and
   `shield_transparent_funds` accept a `SpendingKeys` whose `UnifiedSpendingKey`
   holds keys for only some protocols. They return
