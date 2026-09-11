@@ -24,6 +24,8 @@ workspace.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
 - `zcash_client_backend::data_api::chain::error::Error` implements
   `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
+- `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+- `zcash_client_backend::data_api::testing::pool::{reorg_below_scanned_height_is_a_continuity_error}`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
