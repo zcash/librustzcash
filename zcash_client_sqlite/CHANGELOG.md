@@ -34,6 +34,10 @@ workspace.
   of at the chain tip.
 - From NU7 activation, the wallet retains anchor checkpoints on the scaled ZIP 318
   anchor grid (every 432 blocks rather than every 144).
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
+  commitment tree conflict as `PutBlocksError::Continuity` rather than as
+  `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
+  note commitment tree errors.
 
 ## [0.23.0-pre.2] - 2026-10-13
 

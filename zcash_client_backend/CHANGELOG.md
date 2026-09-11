@@ -19,6 +19,11 @@ workspace.
   (under the `test-dependencies` feature)
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::{RequirementCovered, DustInputsNotGiven, ExcludedNoteSelected, UnrequestedPoolSelected}`
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetention::spacing`
+- `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
+- `zcash_client_backend::data_api::PutBlocksError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
+- `zcash_client_backend::data_api::chain::error::Error` implements
+  `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
@@ -76,6 +81,15 @@ workspace.
   expiry modulus at heights from NU7 activation.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method
   `set_account_name`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
+  `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
+  commitment tree conflict as `PutBlocksError::Continuity` and any other failure
+  as `PutBlocksError::Wallet`; callers that matched on `Self::Error` match on
+  `PutBlocksError::Wallet` instead.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a note
+  commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
+  a continuity error at the first block of the batch, instead of as
+  `Error::Wallet`.
 
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.

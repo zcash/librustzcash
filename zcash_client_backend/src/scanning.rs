@@ -12,7 +12,7 @@ use std::{
     hash::Hash,
 };
 
-use incrementalmerkletree::{Marking, Position, Retention};
+use incrementalmerkletree::{Address, Marking, Position, Retention};
 use sapling::{SaplingIvk, note_encryption::SaplingDomain};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
@@ -737,6 +737,17 @@ pub enum ScanError {
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
 
+    /// The note commitment data of a batch of scanned blocks, or the chain state the batch
+    /// extends, conflicts with note commitment tree state the wallet already holds.
+    CommitmentTreeConflict {
+        /// The shielded pool whose note commitment tree rejected the data.
+        pool: ShieldedPool,
+        /// The height of the first block of the rejected batch.
+        at_height: BlockHeight,
+        /// The address of the tree node at which the conflict was detected.
+        address: Address,
+    },
+
     /// The block height field of the proposed new block is not equal to the height of the previous
     /// block + 1.
     BlockHeightDiscontinuity {
@@ -795,6 +806,7 @@ impl ScanError {
         match self {
             EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
+            CommitmentTreeConflict { .. } => true,
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
             TreeSizeUnknown { .. } => false,
@@ -810,6 +822,7 @@ impl ScanError {
         match self {
             EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
+            CommitmentTreeConflict { at_height, .. } => *at_height,
             BlockHeightDiscontinuity { new_height, .. } => *new_height,
             TreeSizeMismatch { at_height, .. } => *at_height,
             TreeSizeUnknown { at_height, .. } => *at_height,
@@ -836,6 +849,14 @@ impl fmt::Display for ScanError {
             PrevHashMismatch { at_height } => write!(
                 f,
                 "The parent hash of proposed block does not correspond to the block hash at height {at_height}."
+            ),
+            CommitmentTreeConflict {
+                pool,
+                at_height,
+                address,
+            } => write!(
+                f,
+                "The {pool:?} note commitment data of the batch of blocks beginning at height {at_height} conflicts with the wallet's note commitment tree at {address:?}."
             ),
             BlockHeightDiscontinuity {
                 prev_height,
