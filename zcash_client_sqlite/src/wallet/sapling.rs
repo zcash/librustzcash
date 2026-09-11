@@ -209,6 +209,32 @@ pub(crate) fn select_single_spendable_sapling_note<P: consensus::Parameters>(
     )
 }
 
+/// Selects the fewest spendable Sapling notes covering `value`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_fewest_spendable_sapling_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
+    super::common::select_fewest_spendable_notes(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
+    )
+}
+
 pub(crate) fn select_unspent_note_meta(
     conn: &Connection,
     wallet_birthday: BlockHeight,
@@ -568,6 +594,31 @@ pub(crate) mod tests {
     #[test]
     fn note_histogram_counts_pending_until_expiry() {
         testing::pool::note_histogram_counts_pending_until_expiry::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_uses_fewest_funding_notes() {
+        testing::pool::prefer_fewest_uses_fewest_funding_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_funding_is_uncapped() {
+        testing::pool::prefer_fewest_funding_is_uncapped::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_proposes_whenever_accumulate_would() {
+        testing::pool::prefer_fewest_proposes_whenever_accumulate_would::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_refreshes_funding_after_fee_growth() {
+        testing::pool::prefer_fewest_refreshes_funding_after_fee_growth::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fewest_selection_skips_unconfirmed_and_excluded_notes() {
+        testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<SaplingPoolTester>()
     }
 
     #[test]

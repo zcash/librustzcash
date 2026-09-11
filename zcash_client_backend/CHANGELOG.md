@@ -21,8 +21,12 @@ workspace.
   and `max_arb_value`.
 - `zcash_client_backend::data_api::InputSource::get_note_histogram`, with a
   default implementation.
+- `zcash_client_backend::data_api::InputSource::select_fewest_spendable_notes`,
+  with a default implementation that delegates to `select_spendable_notes`.
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::input_selection::NoteSelection` has a
+  new `PreferFewest` variant. Exhaustive matches must add an arm for it.
 - `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` now splits
   change only when the change is returned to the most recent shielded pool at
   the target height (Ironwood once NU6.3 is active, Orchard before that).

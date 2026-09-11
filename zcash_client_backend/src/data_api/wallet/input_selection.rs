@@ -521,6 +521,14 @@ pub enum NoteSelection {
     /// achievable only under single-note funding; multi-note funding is not an error, but the
     /// resulting proposal does not have the canonical shape.
     PreferSingle,
+    /// Fund with the fewest notes.
+    ///
+    /// Funding is tried one pool at a time in preference order; the first pool that covers the
+    /// target alone funds the payment, otherwise selection falls back to ordinary multi-pool
+    /// accumulation. Sweeping is independent of the funding mode: whenever the funding pool is
+    /// the most recent shielded pool, the note-management policy passed to the proposal may
+    /// sweep small notes into the transaction; see [`crate::note_management`].
+    PreferFewest,
 }
 
 impl Default for SpendPolicy {
@@ -868,6 +876,24 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
+/// The value the shielded notes of one fee iteration must cover.
+///
+/// Under [`NoteSelection::PreferFewest`] the gathered transparent value has already been netted
+/// out of the requirement, so the shielded side owes only `consolidation_target`; under every
+/// other mode the shielded side is selected against the whole `amount_required` and the
+/// transparent value is applied by the change strategy.
+fn shielded_target(
+    note_selection: NoteSelection,
+    amount_required: Zatoshis,
+    consolidation_target: Zatoshis,
+) -> Zatoshis {
+    if note_selection == NoteSelection::PreferFewest {
+        consolidation_target
+    } else {
+        amount_required
+    }
+}
+
 impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
@@ -1065,6 +1091,17 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
+        // Under `PreferFewest`: the shielded value still needed after gathered transparent
+        // value, and the single pool whose fewest-note selection covered it.
+        let mut consolidation_target = Zatoshis::ZERO;
+        let mut _consolidation_source: Option<ShieldedPool> = None;
+        // Under `PreferFewest`: for each pool whose fewest-note selection fell short, the total
+        // it did reach. A store that overrides `select_fewest_spendable_notes` returns every
+        // eligible note when it falls short, and `exclude` only grows, so that total is an upper
+        // bound on everything the pool can ever offer, whatever the target becomes. The
+        // best-effort default provides no such bound, so the memo may under-estimate a pool's
+        // total; that only skips the pool sooner and falls back to multi-pool accumulation.
+        let mut pool_shortfalls: BTreeMap<ShieldedPool, Zatoshis> = BTreeMap::new();
 
         // The note-management context is read once per proposal; every per-iteration decision is
         // a pure function of it and of the notes selected so far. Notes excluded as dust later in
@@ -1141,16 +1178,24 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("all shielded pools are present in pool_values")
                 };
 
+                // The notes being trimmed were selected at the end of the previous iteration,
+                // against the target as it stood then; the same target governs the trimming.
+                let shielded_amount_required = shielded_target(
+                    spend_policy.note_selection(),
+                    amount_required,
+                    consolidation_target,
+                );
+
                 let use_pools: Vec<ShieldedPool> = if let Some(single) = pool_preference
                     .iter()
-                    .find(|p| value_of(**p) >= amount_required)
+                    .find(|p| value_of(**p) >= shielded_amount_required)
                 {
                     vec![*single]
                 } else {
                     let mut running = Zatoshis::ZERO;
                     let mut used = vec![];
                     for pool in &pool_preference {
-                        if running >= amount_required {
+                        if running >= shielded_amount_required {
                             break;
                         }
                         running = (running + value_of(*pool))
@@ -1506,6 +1551,34 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         amount_at_transparent_gather = required;
                         transparent_inputs_changed = true;
                     }
+
+                    // Fewest-note funding covers only what the transparent inputs do not, so that
+                    // a single shielded note can still fund the remainder of a mixed payment.
+                    if spend_policy.note_selection() == NoteSelection::PreferFewest {
+                        let previous_target = consolidation_target;
+                        #[cfg(feature = "transparent-inputs")]
+                        {
+                            let transparent_value = transparent_inputs
+                                .iter()
+                                .map(WalletTransparentOutput::value)
+                                .try_fold(Zatoshis::ZERO, |total, value| total + value)
+                                .ok_or(InputSelectorError::Selection(
+                                    GreedyInputSelectorError::Balance(BalanceError::Overflow),
+                                ))?;
+                            consolidation_target =
+                                (required - transparent_value).unwrap_or(Zatoshis::ZERO);
+                        }
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        {
+                            consolidation_target = required;
+                        }
+                        // The recorded totals remain valid bounds when a transparent re-gather
+                        // lowers the target, so discarding them here is conservative rather than
+                        // load-bearing: it re-queries the pools once the requirement has moved.
+                        if consolidation_target < previous_target {
+                            pool_shortfalls.clear();
+                        }
+                    }
                 }
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
@@ -1526,7 +1599,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // amount alone is tried first; when no pool holds one, selection falls back to
             // ordinary accumulation, which still funds the payment but cannot produce the
             // single-input shape the caller preferred.
-            let single_note = match spend_policy.note_selection() {
+            //
+            // Under `NoteSelection::PreferFewest`, fewest-note funding is tried from each pool in
+            // preference order and every partial result is discarded when no single pool covers
+            // the target, so the preference never breaks liveness or changes the pool-affinity
+            // fallback. Termination: `consolidation_target` only grows across iterations except
+            // on a transparent re-gather, which sets `transparent_inputs_changed`; largest-first
+            // prefixes are monotone in the target, and the fallback covers a larger target, so
+            // `new_available` is monotone.
+            let preferred_notes = match spend_policy.note_selection() {
                 NoteSelection::PreferSingle => Some(
                     wallet_db
                         .select_single_spendable_note(
@@ -1541,14 +1622,71 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .map_err(InputSelectorError::DataSource)?,
                 )
                 .filter(|notes| !notes.is_empty()),
+                NoteSelection::PreferFewest => {
+                    _consolidation_source = None;
+                    let mut covering = None;
+                    if consolidation_target > Zatoshis::ZERO {
+                        for source in pool_preference.iter().copied() {
+                            // This pool already fell short of a smaller target; see
+                            // `pool_shortfalls`.
+                            if pool_shortfalls
+                                .get(&source)
+                                .is_some_and(|reached| *reached < consolidation_target)
+                            {
+                                continue;
+                            }
+                            let funding = wallet_db
+                                .select_fewest_spendable_notes(
+                                    account,
+                                    consolidation_target,
+                                    source,
+                                    target_height,
+                                    confirmations_policy,
+                                    &exclude,
+                                    LockFilter::Policy(spend_policy.locked_input_policy()),
+                                )
+                                .map_err(InputSelectorError::DataSource)?;
+                            let reached = funding.total_value()?;
+                            if reached >= consolidation_target {
+                                covering = Some((source, funding));
+                                break;
+                            }
+                            pool_shortfalls.insert(source, reached);
+                        }
+                    }
+                    match covering {
+                        Some((source, funding)) => {
+                            _consolidation_source = Some(source);
+                            Some(funding)
+                        }
+                        // Nothing is owed from shielded funds; select nothing. This cannot stall
+                        // the growth guard below: the target is zero only before the first
+                        // balance computation has set it, or after a transparent re-gather
+                        // covered the whole requirement, and both of those iterations end with
+                        // `transparent_inputs_changed` set (a first-iteration `DustInputs` can
+                        // only arise from the gathered transparent inputs, which it prunes).
+                        None if consolidation_target == Zatoshis::ZERO => {
+                            Some(ReceivedNotes::empty())
+                        }
+                        // No single pool covers: ordinary multi-pool accumulation below.
+                        None => None,
+                    }
+                }
                 NoteSelection::Accumulate => None,
             };
-            shielded_inputs = match single_note {
-                Some(single) => single,
+            // The balance computation above has refreshed both targets, so this is the value the
+            // notes selected for the NEXT iteration must cover.
+            let selection_target = shielded_target(
+                spend_policy.note_selection(),
+                amount_required,
+                consolidation_target,
+            );
+            shielded_inputs = match preferred_notes {
+                Some(notes) => notes,
                 None => wallet_db
                     .select_spendable_notes(
                         account,
-                        TargetValue::AtLeast(amount_required),
+                        TargetValue::AtLeast(selection_target),
                         &pool_preference,
                         target_height,
                         confirmations_policy,

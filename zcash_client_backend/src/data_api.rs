@@ -1854,6 +1854,50 @@ pub trait InputSource {
         .map(|notes| notes.into_single_covering(value, sources))
     }
 
+    /// Returns the fewest spendable notes from `source` whose total value covers `value`.
+    ///
+    /// Notes are drawn from the lock tier `lock_filter` prefers; the other admitted tier is
+    /// drawn upon only when the preferred tier cannot cover `value` alone. When the pool cannot
+    /// cover `value` at all, every eligible note is returned so that the caller can detect the
+    /// shortfall. A `value` of zero selects no notes. Notes worth no more than the ZIP 317
+    /// marginal fee are never returned.
+    ///
+    /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
+    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only a
+    /// [`LockFilter::Policy`] is supported: this selection is specified in terms of the lock
+    /// tier a policy prefers, which [`LockFilter::Unfiltered`] does not define.
+    ///
+    /// The default implementation is BEST-EFFORT: it delegates to
+    /// [`Self::select_spendable_notes`], so it returns the oldest covering prefix rather than the
+    /// smallest one, prefers neither lock tier, may return fewer than every eligible note when
+    /// the pool falls short, and may return notes worth no more than the marginal fee. An
+    /// implementation backed by a queryable store should override it with a direct query, so that
+    /// the properties above hold.
+    #[allow(clippy::too_many_arguments)]
+    fn select_fewest_spendable_notes(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        if value == Zatoshis::ZERO {
+            return Ok(ReceivedNotes::empty());
+        }
+        self.select_spendable_notes(
+            account,
+            TargetValue::AtLeast(value),
+            &[source],
+            target_height,
+            confirmations_policy,
+            exclude,
+            lock_filter,
+        )
+    }
+
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
     /// target height. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
     /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).

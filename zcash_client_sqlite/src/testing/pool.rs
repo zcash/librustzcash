@@ -206,6 +206,38 @@ pub(crate) fn note_histogram_counts_pending_until_expiry<T: ShieldedPoolTester>(
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn prefer_fewest_uses_fewest_funding_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_uses_fewest_funding_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_proposes_whenever_accumulate_would<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_proposes_whenever_accumulate_would::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn prefer_fewest_funding_is_uncapped<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_funding_is_uncapped::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_refreshes_funding_after_fee_growth<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_refreshes_funding_after_fee_growth::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(

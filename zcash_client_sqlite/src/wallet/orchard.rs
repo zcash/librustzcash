@@ -291,6 +291,58 @@ pub(crate) fn select_single_spendable_ironwood_note<P: consensus::Parameters>(
     )
 }
 
+/// Selects the fewest spendable Orchard notes covering `value`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_fewest_spendable_orchard_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::select_fewest_spendable_notes(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Orchard,
+        to_received_note,
+        lock_filter,
+    )
+}
+
+/// Selects the fewest spendable Ironwood notes covering `value`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_fewest_spendable_ironwood_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::select_fewest_spendable_notes(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Ironwood,
+        to_received_note,
+        lock_filter,
+    )
+}
+
 /// Return all Orchard notes that were received at or before `height`
 /// and unspent as of `height`, for the given account.
 ///
@@ -863,6 +915,31 @@ pub(crate) mod tests {
     #[test]
     fn note_histogram_counts_pending_until_expiry() {
         testing::pool::note_histogram_counts_pending_until_expiry::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_uses_fewest_funding_notes() {
+        testing::pool::prefer_fewest_uses_fewest_funding_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_funding_is_uncapped() {
+        testing::pool::prefer_fewest_funding_is_uncapped::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_proposes_whenever_accumulate_would() {
+        testing::pool::prefer_fewest_proposes_whenever_accumulate_would::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_refreshes_funding_after_fee_growth() {
+        testing::pool::prefer_fewest_refreshes_funding_after_fee_growth::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fewest_selection_skips_unconfirmed_and_excluded_notes() {
+        testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<OrchardPoolTester>()
     }
 
     #[test]
@@ -1744,7 +1821,8 @@ pub(crate) mod tests {
                 wallet::{
                     ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
                     input_selection::{
-                        GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                        GreedyInputSelector, LockFilter, LockedInputPolicy, NoteSelection,
+                        SpendPolicy,
                     },
                 },
             },
@@ -1833,6 +1911,126 @@ pub(crate) mod tests {
                 Zatoshis::from_u64(payment_zats).unwrap(),
             )])
             .unwrap()
+        }
+
+        /// A pool recorded as falling short is not queried again on a later selection pass.
+        ///
+        /// The Ironwood pool leads the preference order for an Orchard-receiver payment but
+        /// cannot cover it, so the first selection pass records its shortfall. Fee growth then
+        /// forces a second pass (the Orchard prefix chosen first does not cover its own actions'
+        /// fee), and that pass takes the memo's skip branch for Ironwood before funding from
+        /// Orchard again, with one more note than before.
+        ///
+        /// The memo is an optimization that must not change the outcome, so the outcome is what
+        /// is asserted: a skip predicate that excluded a pool still able to cover the target
+        /// would surface here as `InsufficientFunds`, or as funding drawn from the wrong pool.
+        /// It cannot detect a predicate that skips too little, since a recorded total is an
+        /// upper bound on availability rather than a decision.
+        #[test]
+        fn prefer_fewest_skips_a_pool_known_to_fall_short() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let orchard_fvk = OrchardPoolTester::test_account_fvk(&st);
+            let ironwood_fvk = IronwoodFvk(orchard_fvk.clone());
+            // The Ironwood pool leads the preference order but cannot cover the payment.
+            let (first_height, _, _) = st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(400_000),
+            );
+            st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            // Calibrated as `prefer_fewest_refreshes_funding_after_fee_growth` is: the
+            // largest-first prefix that covers the first requirement does not cover the
+            // requirement that its own actions produce.
+            for value in [220_000, 200_000, 200_000, 200_000, 200_000, 50_000, 10_000] {
+                st.generate_next_block(
+                    &orchard_fvk,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, 9);
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    orchard_payment_request(st.network(), 1_000_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood, ShieldedPool::Orchard])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            assert_eq!(input_pool_counts(&proposal), (0, 6, 0));
+        }
+
+        /// An insufficient preferred pool is discarded before trying the next covering pool.
+        #[test]
+        fn prefer_fewest_uses_first_single_pool_that_covers() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let orchard_fvk = OrchardPoolTester::test_account_fvk(&st);
+            let ironwood_fvk = IronwoodFvk(orchard_fvk.clone());
+            let (first_height, _, _) = st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(400_000),
+            );
+            st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            for value in [
+                180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 600_000, 600_000,
+            ] {
+                st.generate_next_block(
+                    &orchard_fvk,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, 10);
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    orchard_payment_request(st.network(), 1_000_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood, ShieldedPool::Orchard])
+                        .with_note_selection(NoteSelection::PreferFewest),
+                )
+                .unwrap();
+
+            assert_eq!(input_pool_counts(&proposal), (0, 2, 0));
         }
 
         /// An Orchard-funded payment after NU6.3 returns a single change output to Orchard even

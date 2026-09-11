@@ -1042,6 +1042,70 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         Ok(ReceivedNotes::empty())
     }
 
+    fn select_fewest_spendable_notes(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        match source {
+            ShieldedPool::Sapling => Ok(ReceivedNotes::new(
+                wallet::sapling::select_fewest_spendable_sapling_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+                #[cfg(feature = "orchard")]
+                vec![],
+                #[cfg(feature = "orchard")]
+                vec![],
+            )),
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => Ok(ReceivedNotes::new(
+                vec![],
+                wallet::orchard::select_fewest_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+                vec![],
+            )),
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => Ok(ReceivedNotes::new(
+                vec![],
+                vec![],
+                wallet::orchard::select_fewest_spendable_ironwood_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+            )),
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => Err(
+                SqliteClientError::UnsupportedPoolType(PoolType::Shielded(source)),
+            ),
+        }
+    }
+
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
