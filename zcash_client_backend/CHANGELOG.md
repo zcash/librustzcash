@@ -18,6 +18,10 @@ workspace.
   change only when the change is returned to the most recent shielded pool at
   the target height (Ironwood once NU6.3 is active, Orchard before that).
   Change returned to any other pool is a single output.
+- `zcash_client_backend::proposal::Step::from_parts` (and therefore
+  `Proposal::single_step`) now returns `ProposalError::ChainDoubleSpend` when a
+  step spends the same transparent output or shielded note more than once;
+  previously only `Proposal::multi_step` performed this check.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
