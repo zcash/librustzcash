@@ -10,7 +10,7 @@ use crate::{
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::{
-    WalletWrite,
+    WalletRead, WalletWrite,
     anchor_retention::AnchorRetentionInterval,
     chain::{ChainState, error::Error},
     testing::{
@@ -654,17 +654,17 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
     }
 }
 
-/// Regression test: a note-commitment-tree error encountered while storing scanned blocks via
-/// `put_blocks` must surface as [`SqliteClientError::PutBlocksCommitmentTree`], carrying the
-/// affected shielded pool and the range of block heights being added, rather than as the bare
-/// `CommitmentTree` variant.
+/// A note commitment tree conflict encountered while storing scanned blocks via `put_blocks` is a
+/// chain-continuity failure: the batch, or the `from_state` it extends, disagrees with tree state
+/// the wallet already holds, so a sync loop must rewind and re-fetch rather than abort. The
+/// failure is reported at the first block of the batch, and nothing from the batch is persisted.
 ///
-/// The error is forced by scanning a contiguous range of wallet A's blocks but supplying a
+/// The conflict is forced by scanning a contiguous range of wallet A's blocks but supplying a
 /// `from_state` whose frontier was captured from a second wallet that scanned the same number of
 /// blocks with different note values: the chain state has the same tree shape (so it passes
 /// `put_blocks`' sequentiality checks) but conflicting node hashes, so `insert_frontier` inside
 /// `put_blocks` fails.
-pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
+pub(crate) fn put_blocks_commitment_tree_conflict_is_a_continuity_error<T: ShieldedPoolTester>() {
     // Wallet A: scan an initial range of blocks and capture its (consistent) chain state at the
     // last scanned height.
     let mut wallet_a =
@@ -766,19 +766,21 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
         &bad_from_state,
         scan_blocks as usize,
     ) {
-        Err(Error::Wallet(SqliteClientError::PutBlocksCommitmentTree {
-            pool,
-            block_range,
-            ..
-        })) => {
-            assert_eq!(pool, T::SHIELDED_PROTOCOL);
-            // `put_blocks` reports the range as `from_state.block_height()..(last_scanned + 1)`,
-            // i.e. starting at the frontier/`from_state` height and ending one past the last
-            // scanned block.
-            assert_eq!(block_range, (from_height - 1)..(from_height + scan_blocks));
+        Err(Error::Scan(err)) if err.is_continuity_error() => {
+            assert_eq!(err.at_height(), from_height);
         }
-        other => panic!("expected PutBlocksCommitmentTree error, got {other:?}"),
+        other => panic!("expected a continuity error, got {other:?}"),
     }
+
+    // Nothing from the rejected batch was persisted.
+    assert_eq!(
+        wallet_a
+            .wallet()
+            .block_max_scanned()
+            .unwrap()
+            .map(|meta| meta.block_height()),
+        Some(from_height - 1)
+    );
 }
 
 pub(crate) fn rewind_to_chain_state_deep<T: ShieldedPoolTester>() {
