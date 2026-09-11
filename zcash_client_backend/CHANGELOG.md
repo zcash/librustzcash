@@ -13,6 +13,11 @@ workspace.
 ### Added
 - `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+- `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
+- `zcash_client_backend::data_api::PutBlocksError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
+- `zcash_client_backend::data_api::chain::error::Error` implements
+  `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
 
 ### Changed
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a block at
@@ -20,6 +25,15 @@ workspace.
   there as `Error::Scan(ScanError::BlockHashMismatch)`, a continuity error at that
   height, and writes nothing. Previously the block was passed to
   `WalletWrite::put_blocks`, and any conflict surfaced as `Error::Wallet`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
+  `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
+  commitment tree conflict as `PutBlocksError::Continuity` and any other failure
+  as `PutBlocksError::Wallet`; callers that matched on `Self::Error` match on
+  `PutBlocksError::Wallet` instead.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a note
+  commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
+  a continuity error at the first block of the batch, instead of as
+  `Error::Wallet`.
 - `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
   implementation to also return the transparent receiver that the wallet tracks
   at the diversifier index of an exposed unified address that omits it, as an

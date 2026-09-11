@@ -58,9 +58,10 @@ use zcash_client_backend::{
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        OutputLockStore, PutBlocksError, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -94,7 +95,7 @@ use zcash_protocol::{
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::SqliteClientError,
+    error::{PutBlocksTransactionError, SqliteClientError},
     wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
@@ -1990,8 +1991,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.put_blocks(from_state, blocks))
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
+        self.transactionally(|wdb| {
+            wdb.put_blocks(from_state, blocks)
+                .map_err(PutBlocksTransactionError::Batch)
+        })
+        .map_err(PutBlocksTransactionError::into_put_blocks_error)
     }
 
     fn put_received_transparent_utxo(
@@ -2416,7 +2421,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
         // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
         // retention grids are retained as durable anchors. The activation height is `None` (and so
         // anchor retention is inactive) on networks that do not yet have an assigned NU6.3
@@ -2441,9 +2446,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                     core::iter::once(self.anchor_retention_interval).chain(committed),
                 ))
             })
-            .transpose()?
+            .transpose()
+            .map_err(PutBlocksError::Wallet)?
             .flatten();
-
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
             #[cfg(feature = "transparent-inputs")]
@@ -2452,7 +2457,10 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             blocks,
             anchor_retention.as_ref(),
         )
-        .map_err(SqliteClientError::from)
+        .map_err(|error| match error {
+            ll::wallet::PutBlocksError::Continuity(error) => PutBlocksError::Continuity(error),
+            other => PutBlocksError::Wallet(SqliteClientError::from(other)),
+        })
     }
 
     fn put_received_transparent_utxo(

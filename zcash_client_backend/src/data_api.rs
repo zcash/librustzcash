@@ -102,6 +102,7 @@ use crate::{
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
+    scanning::ScanError,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
@@ -3510,6 +3511,36 @@ impl AccountBirthday {
     }
 }
 
+/// Errors returned by [`WalletWrite::put_blocks`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PutBlocksError<E> {
+    /// The batch, or the chain state it extends, conflicts with chain state the wallet already
+    /// holds; nothing from the batch was persisted. The carried error is a continuity error whose
+    /// height is the first block of the batch.
+    Continuity(ScanError),
+    /// The wallet failed to persist the batch.
+    Wallet(E),
+}
+
+impl<E: fmt::Display> fmt::Display for PutBlocksError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PutBlocksError::Continuity(e) => write!(f, "{e}"),
+            PutBlocksError::Wallet(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for PutBlocksError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PutBlocksError::Continuity(e) => Some(e),
+            PutBlocksError::Wallet(e) => Some(e),
+        }
+    }
+}
+
 /// This trait encapsulates the write capabilities required to update stored wallet data.
 ///
 /// # Adding accounts
@@ -3994,11 +4025,18 @@ pub trait WalletWrite:
     /// - `from_state` must be the chain state for the block height prior to the first
     ///   block in `blocks`.
     /// - `blocks` must be sequential, in order of increasing block height.
+    ///
+    /// ### Errors
+    /// - [`PutBlocksError::Continuity`] if the note commitment data of `blocks`, or the trees of
+    ///   `from_state`, conflict with note commitment tree state the wallet already holds. The
+    ///   caller should recover as from any other continuity error reported while scanning, by
+    ///   rewinding below the error's height.
+    /// - [`PutBlocksError::Wallet`] if persisting the batch fails.
     fn put_blocks(
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error>;
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>>;
 
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(

@@ -114,7 +114,7 @@ fn real_test_prover() -> &'static LocalTxProver {
 }
 use crate::{
     data_api::{
-        MaxSpendMode, OutputLockStore, TargetValue,
+        MaxSpendMode, OutputLockStore, PutBlocksError, TargetValue,
         error::{LockError, RewindError},
         wallet::TargetHeight,
     },
@@ -3665,7 +3665,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _from_state: &ChainState,
         _blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
         Ok(())
     }
 

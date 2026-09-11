@@ -18,6 +18,10 @@ workspace.
 - `WalletRead::list_addresses` now also returns the transparent receiver that
   the wallet tracks at the index of an exposed unified address that omits it,
   as an `Address::Transparent` entry with that diversifier index.
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
+  commitment tree conflict as `PutBlocksError::Continuity` rather than as
+  `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
+  note commitment tree errors.
 
 ### Fixed
 - Unified addresses that the wallet generates to fill its transparent gap limit

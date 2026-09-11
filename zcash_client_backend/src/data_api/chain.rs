@@ -604,14 +604,14 @@ impl ChainState {
 /// ## Errors
 ///
 /// - [`Error::BlockSource`] if the requested blocks cannot be read from `block_source`.
-/// - [`Error::Scan`] if a scanned block violates chain-continuity rules or contains note
-///   commitments that cannot be reconciled with the wallet's note commitment tree(s).
+/// - [`Error::Scan`] if a scanned block violates chain-continuity rules, or if the scanned note
+///   commitment data (or `from_state`) conflicts with the wallet's note commitment tree(s). The
+///   latter is reported by [`WalletWrite::put_blocks`] as
+///   [`PutBlocksError::Continuity`](crate::data_api::PutBlocksError::Continuity) and is a
+///   continuity error at the first block of the batch.
 /// - [`Error::Wallet`] if a wallet-database operation fails. This covers reading the tracked
 ///   viewing keys, block metadata, and nullifiers, as well as persisting the scanned blocks via
-///   [`WalletWrite::put_blocks`]. In particular, a failure to update the note commitment trees
-///   with the scanned data is reported here (for example, the `zcash_client_sqlite` backend
-///   surfaces such a failure as a `PutBlocksCommitmentTree` error identifying the affected
-///   shielded pool and block range).
+///   [`WalletWrite::put_blocks`].
 ///
 /// ## Panics
 ///
@@ -723,9 +723,7 @@ where
         },
     )?;
 
-    data_db
-        .put_blocks(from_state, scanned_blocks)
-        .map_err(Error::Wallet)?;
+    data_db.put_blocks(from_state, scanned_blocks)?;
     Ok(scan_summary)
 }
 

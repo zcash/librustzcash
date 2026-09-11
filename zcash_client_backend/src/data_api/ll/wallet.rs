@@ -11,7 +11,11 @@ use rayon::{
 use tracing::{debug, info, trace, warn};
 
 use incrementalmerkletree::{Hashable, Marking, Position, Retention, frontier::Frontier};
-use shardtree::{LocatedPrunableTree, ShardTree, error::ShardTreeError, store::ShardStore};
+use shardtree::{
+    LocatedPrunableTree, ShardTree,
+    error::{InsertionError, ShardTreeError},
+    store::ShardStore,
+};
 use transparent::{address::TransparentAddress, bundle::OutPoint};
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
 use zcash_primitives::transaction::Transaction;
@@ -29,6 +33,7 @@ use crate::{
         WalletCommitmentTrees, anchor_retention::AnchorRetention, chain::ChainState,
         ll::ReceivedShieldedOutput,
     },
+    scanning::ScanError,
     wallet::{Recipient, WalletTransparentOutput},
 };
 
@@ -132,6 +137,11 @@ pub enum PutBlocksError<SE, TE> {
         prev_height: BlockHeight,
         block_height: BlockHeight,
     },
+    /// The note commitment data of the batch, or the chain state it extends, conflicts with
+    /// tree state the wallet already holds. The carried error is a continuity error at the first
+    /// block of the batch. Block data written before the conflict was detected remains in the
+    /// caller's transaction, so the caller must roll that transaction back.
+    Continuity(ScanError),
     /// Wraps an error produced by the underlying data storage system.
     Storage(SE),
     /// Wraps an error produced by [`shardtree`] insertion.
@@ -152,6 +162,34 @@ pub enum PutBlocksError<SE, TE> {
     },
     #[cfg(feature = "transparent-inputs")]
     GapAddresses(GapAddressesError<SE>),
+}
+
+impl<SE, TE> PutBlocksError<SE, TE> {
+    /// Classifies an error from updating the note commitment tree of `pool` with the batch of
+    /// blocks above `from_height` through `last_scanned_height`. A conflict with existing tree
+    /// state is a continuity error at the batch's first block; any other error is reported
+    /// against the batch's block range.
+    fn tree_update(
+        pool: ShieldedPool,
+        from_height: BlockHeight,
+        last_scanned_height: BlockHeight,
+        error: ShardTreeError<TE>,
+    ) -> Self {
+        match error {
+            ShardTreeError::Insert(InsertionError::Conflict(address)) => {
+                PutBlocksError::Continuity(ScanError::CommitmentTreeConflict {
+                    pool,
+                    at_height: from_height + 1,
+                    address,
+                })
+            }
+            error => PutBlocksError::ShardTreeForBlockRange {
+                pool,
+                block_range: from_height..(last_scanned_height + 1),
+                error,
+            },
+        }
+    }
 }
 
 impl<SE, TE> From<ShardTreeError<TE>> for PutBlocksError<SE, TE> {
@@ -775,10 +813,13 @@ where
                     #[cfg(feature = "orchard")]
                     &mut missing_checkpoints,
                 )
-                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
-                    pool: ShieldedPool::Sapling,
-                    block_range: from_state.block_height()..(last_scanned_height + 1),
-                    error,
+                .map_err(|error| {
+                    PutBlocksError::tree_update(
+                        ShieldedPool::Sapling,
+                        from_state.block_height(),
+                        last_scanned_height,
+                        error,
+                    )
                 })
             })?;
         }
@@ -798,10 +839,13 @@ where
                     &mut orchard_subtrees,
                     &mut missing_checkpoints,
                 )
-                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
-                    pool: ShieldedPool::Orchard,
-                    block_range: from_state.block_height()..(last_scanned_height + 1),
-                    error,
+                .map_err(|error| {
+                    PutBlocksError::tree_update(
+                        ShieldedPool::Orchard,
+                        from_state.block_height(),
+                        last_scanned_height,
+                        error,
+                    )
                 })
             })?;
         }
@@ -821,10 +865,13 @@ where
                     &mut ironwood_subtrees,
                     &mut missing_checkpoints,
                 )
-                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
-                    pool: ShieldedPool::Ironwood,
-                    block_range: from_state.block_height()..(last_scanned_height + 1),
-                    error,
+                .map_err(|error| {
+                    PutBlocksError::tree_update(
+                        ShieldedPool::Ironwood,
+                        from_state.block_height(),
+                        last_scanned_height,
+                        error,
+                    )
                 })
             })?;
         }
