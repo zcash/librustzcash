@@ -1899,13 +1899,11 @@ pub trait InputSource {
     /// Counting those notes as present errs toward fewer split pieces, and may let a sweep take a
     /// bucket below its target when the bucket is measured in notes that are spendable now.
     ///
-    /// Bucket 0 includes notes worth no more than the [ZIP 317] marginal fee. A consolidation
-    /// sweep may still take such a note into a free slot.
+    /// Bucket 0 holds notes below the ladder's first rung; a consolidation sweep may still take
+    /// such a note into a free slot.
     ///
     /// The default implementation returns `None`. A note-management policy given `None` does not
     /// manage the distribution.
-    ///
-    /// [ZIP 317]: https://zips.z.cash/zip-0317
     fn get_note_histogram(
         &self,
         _account: Self::AccountId,

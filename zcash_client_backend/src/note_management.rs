@@ -3,8 +3,18 @@
 //!
 //! A [`ValueLadder`] partitions note values into buckets. A [`TargetDistribution`] assigns a
 //! target count to each bucket, and a [`NoteHistogram`] records how many notes an account holds
-//! in each. A `NoteManagementPolicy` turns the difference between the two into a [`SplitPlan`]
-//! for a transaction's change and a `ConsolidationPlan` for the small notes it may sweep.
+//! in each. A [`NoteManagementPolicy`] turns the difference between the two into a [`SplitPlan`]
+//! for a transaction's change and a [`ConsolidationPlan`] for the small notes it may sweep.
+//!
+//! The residual of the change beyond the planned pieces is added to the largest piece, so that
+//! piece may land in a higher bucket than the one it was planned for. A sweep fills free slots
+//! (spend sides the transaction's real outputs already pay for) with notes of any positive value,
+//! and enlarging slots only with notes that pay for themselves; see [`ConsolidationBudget`].
+//!
+//! Every approximation in the planner errs toward the account holding fewer notes, with one
+//! exception: the histogram's lock filter excludes the notes another in-flight proposal has
+//! locked, so a proposal built concurrently with another sees fewer notes than the account holds
+//! and may plan more pieces than it needs.
 
 use core::{fmt, num::NonZeroUsize};
 
@@ -16,7 +26,10 @@ use zcash_protocol::{
     zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE},
 };
 
-use crate::data_api::wallet::TargetHeight;
+use crate::data_api::{
+    InputSource,
+    wallet::{TargetHeight, input_selection::LockFilter},
+};
 
 /// The significands of the [ZIP 318] denomination series.
 ///
@@ -33,6 +46,9 @@ const ZIP318_RADIX: u64 = 10;
 /// The smallest value a ladder rung may take: one zatoshi. Every rung must be positive, so a
 /// requested rung below this is raised to it.
 const MIN_RUNG: Zatoshis = Zatoshis::const_from_u64(1);
+
+/// The number of change outputs a policy that does not split change asks for.
+const SINGLE_CHANGE_OUTPUT: usize = 1;
 
 /// Returns the pool in which note management maintains a note distribution at `target_height`:
 /// Ironwood once NU6.3 is active, Orchard otherwise. Sapling is never this pool.
@@ -56,6 +72,9 @@ pub enum NoteManagementError {
     InvalidLadder,
     /// A target must have one count per bucket of its ladder, and no count for bucket zero.
     InvalidTarget,
+    /// Sweep caps must have one cap per bucket of their ladder, and no positive cap above a zero
+    /// cap.
+    InvalidSweepCaps,
 }
 
 impl fmt::Display for NoteManagementError {
@@ -68,6 +87,10 @@ impl fmt::Display for NoteManagementError {
             NoteManagementError::InvalidTarget => write!(
                 f,
                 "A target distribution must have one count per bucket of its ladder, and the count for bucket zero must be zero."
+            ),
+            NoteManagementError::InvalidSweepCaps => write!(
+                f,
+                "Sweep caps must have one cap for each bucket of their ladder, and no positive cap above a zero cap."
             ),
         }
     }
@@ -391,6 +414,569 @@ impl SplitPlan {
     }
 }
 
+/// The shape of one shielded bundle of a converged funding-only balance.
+///
+/// Dummy outputs are the padding the balance recorded for the bundle beyond its real outputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BundleShape {
+    spends: usize,
+    payment_outputs: usize,
+    change_outputs: usize,
+    dummy_outputs: usize,
+}
+
+impl BundleShape {
+    /// Constructs a shape. The counts are those of one bundle of a converged funding-only
+    /// balance: its spends fund the payment, and its dummy outputs are the padding the balance
+    /// recorded beyond the bundle's real outputs.
+    pub fn new(
+        spends: usize,
+        payment_outputs: usize,
+        change_outputs: usize,
+        dummy_outputs: usize,
+    ) -> Self {
+        Self {
+            spends,
+            payment_outputs,
+            change_outputs,
+            dummy_outputs,
+        }
+    }
+
+    /// Spends in the bundle.
+    pub fn spends(&self) -> usize {
+        self.spends
+    }
+
+    /// Outputs of the bundle that pay the transaction's recipients.
+    pub fn payment_outputs(&self) -> usize {
+        self.payment_outputs
+    }
+
+    /// Outputs of the bundle that return change to the wallet.
+    pub fn change_outputs(&self) -> usize {
+        self.change_outputs
+    }
+
+    /// Payment outputs plus change outputs.
+    pub fn real_outputs(&self) -> usize {
+        self.payment_outputs.saturating_add(self.change_outputs)
+    }
+
+    /// The action count the bundle was costed for: real outputs plus dummy outputs.
+    ///
+    /// Note management manages only action-based (Orchard-family) bundles, in which each action
+    /// carries one spend and one output, so this output count is also an action count.
+    pub fn padded_actions(&self) -> usize {
+        self.real_outputs().saturating_add(self.dummy_outputs)
+    }
+}
+
+/// The consolidation slots an input selector may fill in one shielded bundle, by cost.
+///
+/// A free slot is a spend side paired with a real output the transaction already pays for; a note
+/// of any positive value may fill one. An enlarging slot is a spend side beyond those real
+/// outputs: filling one either opens an action or takes a padding side, and in either case the
+/// note must exceed `economic_floor`, because the fee rule admits a dust input only against a real
+/// output. A candidate ceiling, when present, bounds the value of every candidate strictly from
+/// above.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConsolidationBudget {
+    free_slots: usize,
+    enlarging_slots: usize,
+    economic_floor: Zatoshis,
+    candidate_ceiling: Option<Zatoshis>,
+}
+
+impl ConsolidationBudget {
+    /// Constructs a budget. A note of any positive value may fill a free slot; a note filling an
+    /// enlarging slot must exceed `economic_floor`; and every candidate must stay strictly below
+    /// `candidate_ceiling` when it is bounded.
+    pub fn new(
+        free_slots: usize,
+        enlarging_slots: usize,
+        economic_floor: Zatoshis,
+        candidate_ceiling: Option<Zatoshis>,
+    ) -> Self {
+        Self {
+            free_slots,
+            enlarging_slots,
+            economic_floor,
+            candidate_ceiling,
+        }
+    }
+
+    /// Spend sides the transaction already pays for.
+    pub fn free_slots(&self) -> usize {
+        self.free_slots
+    }
+
+    /// Spend sides beyond the bundle's real outputs. Filling one either opens an action or takes
+    /// a padding side; either way the note must exceed [`ConsolidationBudget::economic_floor`],
+    /// because the fee rule admits a dust input only against a real output.
+    pub fn enlarging_slots(&self) -> usize {
+        self.enlarging_slots
+    }
+
+    /// The value a note must exceed to fill an enlarging slot.
+    pub fn economic_floor(&self) -> Zatoshis {
+        self.economic_floor
+    }
+
+    /// The value every candidate must stay strictly below, if bounded.
+    pub fn candidate_ceiling(&self) -> Option<Zatoshis> {
+        self.candidate_ceiling
+    }
+
+    /// The most notes a sweep can take: every slot of either kind.
+    pub fn economic_capacity(&self) -> usize {
+        self.free_slots.saturating_add(self.enlarging_slots)
+    }
+}
+
+/// A limit, for each bucket of a ladder, on the number of notes a sweep may take from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BucketCaps {
+    ladder: ValueLadder,
+    caps: Vec<usize>,
+}
+
+impl BucketCaps {
+    /// Constructs caps over `ladder`, taking at most `caps[b]` notes from bucket `b`.
+    ///
+    /// Fails with [`NoteManagementError::InvalidSweepCaps`] unless there is exactly one cap per
+    /// bucket of the ladder, and no bucket above a zero-capped bucket at or above bucket one is
+    /// itself capped above zero. That zero suffix is what makes [`BucketCaps::ceiling`] a bound on
+    /// everything the caps admit.
+    pub fn new(ladder: ValueLadder, caps: Vec<usize>) -> Result<Self, NoteManagementError> {
+        let zero_suffix = match caps.iter().skip(1).position(|cap| *cap == 0) {
+            Some(first_zero) => caps[first_zero + 1..].iter().all(|cap| *cap == 0),
+            None => true,
+        };
+        if caps.len() != ladder.bucket_count() || !zero_suffix {
+            return Err(NoteManagementError::InvalidSweepCaps);
+        }
+        Ok(Self { ladder, caps })
+    }
+
+    /// Caps that let a sweep take each bucket down to its target, and no further.
+    ///
+    /// `histogram` must count notes over the same ladder as `target`.
+    ///
+    /// The cap on a bucket is its surplus, except that the lowest bucket above bucket zero that is
+    /// not in surplus, and every bucket above it, is capped at zero: a sweep works upward from the
+    /// smallest notes, and one [`BucketCaps::ceiling`] then describes everything it may take.
+    pub fn for_surpluses(target: &TargetDistribution, histogram: &NoteHistogram) -> Self {
+        let ladder = target.ladder().clone();
+        let mut caps = target.surpluses(histogram);
+        if let Some(bucket) = (1..ladder.bucket_count()).find(|bucket| caps[*bucket] == 0) {
+            for cap in caps[bucket..].iter_mut() {
+                *cap = 0;
+            }
+        }
+        Self { ladder, caps }
+    }
+
+    /// The ladder whose buckets these caps are indexed by.
+    pub fn ladder(&self) -> &ValueLadder {
+        &self.ladder
+    }
+
+    /// The most notes a sweep may take from `bucket`; zero for a bucket outside the ladder's
+    /// range.
+    pub fn cap(&self, bucket: usize) -> usize {
+        self.caps.get(bucket).copied().unwrap_or(0)
+    }
+
+    /// The value at or above which these caps admit nothing: the rung of the lowest bucket above
+    /// bucket zero whose cap is zero, or `None` when every such bucket admits notes.
+    ///
+    /// The caps are authoritative. This bound is derived from them, so that a store's candidate
+    /// query returns no note the caps would deny.
+    pub fn ceiling(&self) -> Option<Zatoshis> {
+        (1..self.ladder.bucket_count())
+            .find(|bucket| self.cap(*bucket) == 0)
+            .and_then(|bucket| self.ladder.rung_value(bucket))
+    }
+}
+
+/// How many notes a sweep may take from each bucket.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SweepCaps {
+    /// Any candidate may be swept.
+    Unrestricted,
+    /// Notes may be swept only within these per-bucket caps.
+    PerBucket(BucketCaps),
+}
+
+impl SweepCaps {
+    /// Whether each of `values` is admitted, taking them in the order given and charging each
+    /// admitted value against its bucket's cap.
+    ///
+    /// The result has one entry per value, in the same order. Present candidates ascending by
+    /// value, so that the notes admitted from a bucket are its smallest.
+    pub fn admit_all(&self, values: &[Zatoshis]) -> Vec<bool> {
+        match self {
+            SweepCaps::Unrestricted => vec![true; values.len()],
+            SweepCaps::PerBucket(caps) => {
+                let mut remaining = caps.caps.clone();
+                values
+                    .iter()
+                    .map(|value| {
+                        let bucket = caps.ladder.bucket_of(*value);
+                        match remaining.get_mut(bucket) {
+                            Some(cap) if *cap > 0 => {
+                                *cap -= 1;
+                                true
+                            }
+                            _ => false,
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// The value at or above which these caps admit nothing, if bounded.
+    ///
+    /// See [`BucketCaps::ceiling`].
+    pub fn ceiling(&self) -> Option<Zatoshis> {
+        match self {
+            SweepCaps::Unrestricted => None,
+            SweepCaps::PerBucket(caps) => caps.ceiling(),
+        }
+    }
+}
+
+/// What a sweep may do to one shielded bundle: the slots it may fill, the action count it may not
+/// exceed, and the caps on the notes it takes from each bucket.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConsolidationPlan {
+    pub(crate) budget: ConsolidationBudget,
+    pub(crate) envelope: usize,
+    pub(crate) sweep_caps: SweepCaps,
+}
+
+impl ConsolidationPlan {
+    /// Constructs a plan from a slot budget, an envelope and per-bucket caps.
+    ///
+    /// The budget must be derived from the same [`BundleShape`] as the envelope, and its candidate
+    /// ceiling must equal the caps' own [`SweepCaps::ceiling`]. [`ConsolidationPlan::for_shape`]
+    /// derives all three from one shape and so satisfies this by construction.
+    pub fn new(budget: ConsolidationBudget, envelope: usize, sweep_caps: SweepCaps) -> Self {
+        debug_assert_eq!(budget.candidate_ceiling(), sweep_caps.ceiling());
+        Self {
+            budget,
+            envelope,
+            sweep_caps,
+        }
+    }
+
+    /// The plan for a bundle of the given shape, under a policy that would never split change
+    /// beyond `max_change_outputs` outputs.
+    ///
+    /// The slots and the envelope follow from the shape, and the budget's candidate ceiling from
+    /// `sweep_caps`. `action_cap`, when set, is the padded action count a sweep may grow the
+    /// bundle to; a bundle already wider than the cap keeps the shape it was costed for.
+    pub fn for_shape(
+        shape: &BundleShape,
+        max_change_outputs: usize,
+        action_cap: Option<NonZeroUsize>,
+        economic_floor: Zatoshis,
+        sweep_caps: SweepCaps,
+    ) -> Self {
+        let (free, enlarging, envelope) = slots_for(shape, max_change_outputs, action_cap);
+        let budget =
+            ConsolidationBudget::new(free, enlarging, economic_floor, sweep_caps.ceiling());
+        Self::new(budget, envelope, sweep_caps)
+    }
+
+    /// The slots the sweep may fill.
+    pub fn budget(&self) -> ConsolidationBudget {
+        self.budget
+    }
+
+    /// The action count the swept bundle may not exceed: the count an ordinary payment under the
+    /// same policy could have reached.
+    pub fn envelope(&self) -> usize {
+        self.envelope
+    }
+
+    /// The caps on the notes the sweep takes from each bucket.
+    pub fn sweep_caps(&self) -> &SweepCaps {
+        &self.sweep_caps
+    }
+}
+
+/// A policy that turns an account's note holdings into a change split and a sweep budget.
+///
+/// [`NoteManagementPolicy::fetch`] reads the store once per proposal; every other method is a pure
+/// function of the context it returned.
+///
+/// A policy that returns `None` from [`NoteManagementPolicy::consolidation_plan`] never sweeps,
+/// and must return `None` for every shape and context. The associated
+/// [`NoteManagementPolicy::Context`] makes the trait ineligible for `dyn` dispatch, so a choice of
+/// policy made at runtime is expressed as an enum that implements the trait.
+pub trait NoteManagementPolicy {
+    /// What the policy needs from the wallet, fetched once per proposal.
+    type Context;
+
+    /// Reads the policy's context for `account` as of `target_height`.
+    ///
+    /// Notes identified in `exclude` are omitted, and locked notes are admitted according to
+    /// `lock_filter` (see [`LockFilter`]; a [`LockFilter::Policy`] carrying the default
+    /// [`LockedInputPolicy::Exclude`] admits none).
+    ///
+    /// [`LockedInputPolicy::Exclude`]: crate::data_api::wallet::input_selection::LockedInputPolicy::Exclude
+    fn fetch<I: InputSource, P: consensus::Parameters>(
+        &self,
+        source: &I,
+        params: &P,
+        account: I::AccountId,
+        target_height: TargetHeight,
+        exclude: &[I::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<Self::Context, I::Error>;
+
+    /// The context that remains after notes of the given values are spent from the pool the policy
+    /// manages.
+    fn without_spent(&self, context: &Self::Context, spent: &[Zatoshis]) -> Self::Context;
+
+    /// The change pieces a transaction should produce, given an upper bound on its change value.
+    ///
+    /// The bound is an upper bound: a change strategy realizes the longest prefix of the plan that
+    /// the change affords once fees are known.
+    fn split_plan(&self, context: &Self::Context, change_upper_bound: Zatoshis) -> SplitPlan;
+
+    /// The sweep a converged balance admits in the bundle of the pool the policy manages, or
+    /// `None` if the policy never sweeps.
+    ///
+    /// `economic_floor` is the value a note must exceed for its spend side to pay for itself.
+    fn consolidation_plan(
+        &self,
+        context: &Self::Context,
+        shape: &BundleShape,
+        economic_floor: Zatoshis,
+    ) -> Option<ConsolidationPlan>;
+}
+
+/// The free slots, enlarging slots and envelope of a bundle whose change would never be split
+/// beyond `max_change_outputs`, in that order.
+///
+/// The envelope is the action count an ordinary payment under the same policy could have reached,
+/// held to `action_cap` where one is set; a bundle that returns no change to this pool cannot grow
+/// beyond the count it was costed for, and neither can one already wider than the cap.
+fn slots_for(
+    shape: &BundleShape,
+    max_change_outputs: usize,
+    action_cap: Option<NonZeroUsize>,
+) -> (usize, usize, usize) {
+    let real = shape.real_outputs();
+    let padded = shape.padded_actions();
+    let envelope = if shape.change_outputs() > 0 {
+        let uncapped = shape.payment_outputs().saturating_add(max_change_outputs);
+        let capped = action_cap.map_or(uncapped, |cap| uncapped.min(cap.get()));
+        padded.max(capped)
+    } else {
+        padded
+    };
+    let free = real.saturating_sub(shape.spends());
+    let enlarging = envelope.saturating_sub(shape.spends().max(real));
+    (free, enlarging, envelope)
+}
+
+/// A policy that neither splits change nor sweeps: a single change output, and inputs chosen only
+/// to fund the payment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Unmanaged;
+
+impl NoteManagementPolicy for Unmanaged {
+    type Context = ();
+
+    fn fetch<I: InputSource, P: consensus::Parameters>(
+        &self,
+        _source: &I,
+        _params: &P,
+        _account: I::AccountId,
+        _target_height: TargetHeight,
+        _exclude: &[I::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<Self::Context, I::Error> {
+        Ok(())
+    }
+
+    fn without_spent(&self, _context: &Self::Context, _spent: &[Zatoshis]) -> Self::Context {}
+
+    fn split_plan(&self, _context: &Self::Context, _change_upper_bound: Zatoshis) -> SplitPlan {
+        SplitPlan::SingleOutput
+    }
+
+    fn consolidation_plan(
+        &self,
+        _context: &Self::Context,
+        _shape: &BundleShape,
+        _economic_floor: Zatoshis,
+    ) -> Option<ConsolidationPlan> {
+        None
+    }
+}
+
+/// A policy that never splits change and sweeps only within the bundle shape a payment with a
+/// single change output could have had.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SingleOutputPolicy;
+
+impl NoteManagementPolicy for SingleOutputPolicy {
+    type Context = ();
+
+    fn fetch<I: InputSource, P: consensus::Parameters>(
+        &self,
+        _source: &I,
+        _params: &P,
+        _account: I::AccountId,
+        _target_height: TargetHeight,
+        _exclude: &[I::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<Self::Context, I::Error> {
+        Ok(())
+    }
+
+    fn without_spent(&self, _context: &Self::Context, _spent: &[Zatoshis]) -> Self::Context {}
+
+    fn split_plan(&self, _context: &Self::Context, _change_upper_bound: Zatoshis) -> SplitPlan {
+        SplitPlan::SingleOutput
+    }
+
+    fn consolidation_plan(
+        &self,
+        _context: &Self::Context,
+        shape: &BundleShape,
+        economic_floor: Zatoshis,
+    ) -> Option<ConsolidationPlan> {
+        Some(ConsolidationPlan::for_shape(
+            shape,
+            SINGLE_CHANGE_OUTPUT,
+            None,
+            economic_floor,
+            SweepCaps::Unrestricted,
+        ))
+    }
+}
+
+/// A policy that maintains a static [`TargetDistribution`] in the most recent shielded pool.
+///
+/// Change is split into the rungs the account lacks, largest first, and a sweep takes only the
+/// notes of buckets the account holds too many of.
+///
+/// The policy has no context when the store supplies no histogram, or supplies one over a ladder
+/// other than the target's. It then behaves as [`SingleOutputPolicy`]: a single change output, and
+/// a sweep into free and padding slots under unrestricted caps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LadderPolicy {
+    target: TargetDistribution,
+    max_actions: NonZeroUsize,
+}
+
+impl LadderPolicy {
+    /// Constructs a policy that maintains `target` in bundles of at most `max_actions` padded
+    /// actions.
+    pub fn new(target: TargetDistribution, max_actions: NonZeroUsize) -> Self {
+        Self {
+            target,
+            max_actions,
+        }
+    }
+
+    /// The target this policy maintains.
+    pub fn target(&self) -> &TargetDistribution {
+        &self.target
+    }
+
+    /// The padded action count a sweep may grow the managed bundle to.
+    ///
+    /// A bundle already wider than the cap keeps its shape and its free slots. Five suits
+    /// hardware-signed wallets.
+    pub fn max_actions(&self) -> NonZeroUsize {
+        self.max_actions
+    }
+}
+
+impl NoteManagementPolicy for LadderPolicy {
+    type Context = Option<NoteHistogram>;
+
+    fn fetch<I: InputSource, P: consensus::Parameters>(
+        &self,
+        source: &I,
+        params: &P,
+        account: I::AccountId,
+        target_height: TargetHeight,
+        exclude: &[I::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<Self::Context, I::Error> {
+        let histogram = source.get_note_histogram(
+            account,
+            most_recent_shielded_pool(params, target_height),
+            self.target.ladder(),
+            target_height,
+            exclude,
+            lock_filter,
+        )?;
+        // Counts over another ladder do not answer the question the target asks.
+        Ok(histogram.filter(|histogram| histogram.ladder() == self.target.ladder()))
+    }
+
+    fn without_spent(&self, context: &Self::Context, spent: &[Zatoshis]) -> Self::Context {
+        context
+            .as_ref()
+            .map(|histogram| histogram.without(spent.iter().copied()))
+    }
+
+    fn split_plan(&self, context: &Self::Context, change_upper_bound: Zatoshis) -> SplitPlan {
+        let Some(histogram) = context else {
+            return SplitPlan::SingleOutput;
+        };
+        let ladder = self.target.ladder();
+        let deficits = self.target.deficits(histogram);
+        let mut remaining = change_upper_bound;
+        let mut pieces = Vec::new();
+        for bucket in (1..ladder.bucket_count()).rev() {
+            let Some(rung) = ladder.rung_value(bucket) else {
+                continue;
+            };
+            for _ in 0..deficits[bucket] {
+                match remaining - rung {
+                    Some(rest) => {
+                        pieces.push(rung);
+                        remaining = rest;
+                    }
+                    // What the change cannot afford once it cannot afford again; a lower rung
+                    // may still fit.
+                    None => break,
+                }
+            }
+        }
+        SplitPlan::new(pieces)
+    }
+
+    fn consolidation_plan(
+        &self,
+        context: &Self::Context,
+        shape: &BundleShape,
+        economic_floor: Zatoshis,
+    ) -> Option<ConsolidationPlan> {
+        let Some(histogram) = context else {
+            return SingleOutputPolicy.consolidation_plan(&(), shape, economic_floor);
+        };
+        Some(ConsolidationPlan::for_shape(
+            shape,
+            self.target.total(),
+            Some(self.max_actions),
+            economic_floor,
+            SweepCaps::PerBucket(BucketCaps::for_surpluses(&self.target, histogram)),
+        ))
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::{
@@ -453,13 +1039,16 @@ mod tests {
     use core::num::NonZeroUsize;
 
     use proptest::prelude::*;
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
     use zcash_protocol::{
         value::{COIN, Zatoshis},
         zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE, is_canonical_denomination},
     };
 
     use super::{
-        NoteHistogram, SplitPlan, TargetDistribution, ValueLadder,
+        BucketCaps, BundleShape, ConsolidationBudget, LadderPolicy, NoteHistogram,
+        NoteManagementError, NoteManagementPolicy, SingleOutputPolicy, SplitPlan, SweepCaps,
+        TargetDistribution, Unmanaged, ValueLadder,
         testing::{arb_note_histogram, arb_target_distribution, arb_value_ladder, max_arb_value},
     };
 
@@ -631,6 +1220,271 @@ mod tests {
         assert_eq!(SplitPlan::SingleOutput.max_outputs(), NonZeroUsize::MIN);
     }
 
+    /// The padded action count a sweep may grow a managed bundle to in these tests.
+    const ACTION_CAP: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+
+    /// A target of one note in each of the buckets opened by the 1, 2 and 5 ZEC rungs.
+    fn ladder_target() -> TargetDistribution {
+        let ladder = ValueLadder::new([zat(COIN), zat(2 * COIN), zat(5 * COIN)]).unwrap();
+        TargetDistribution::new(ladder, [0, 1, 1, 1]).unwrap()
+    }
+
+    #[test]
+    fn split_plan_fills_deficits_from_the_top_rung_down() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        // The wallet holds one note, in the bucket the 2 ZEC rung opens.
+        let context = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [zat(3 * COIN)],
+            [],
+        ));
+        let plan = policy.split_plan(&context, zat(9 * COIN));
+        assert_eq!(plan, SplitPlan::new(vec![zat(5 * COIN), zat(COIN)]));
+    }
+
+    #[test]
+    fn split_plan_drops_pieces_the_change_cannot_afford() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        let context = Some(NoteHistogram::empty(policy.target().ladder().clone()));
+        // A 5 ZEC piece does not fit in 4 ZEC of change; the 2 and 1 ZEC pieces do.
+        assert_eq!(
+            policy.split_plan(&context, zat(4 * COIN)),
+            SplitPlan::new(vec![zat(2 * COIN), zat(COIN)])
+        );
+        // Change below the lowest rung buys no piece at all.
+        assert_eq!(
+            policy.split_plan(&context, zat(COIN / 2)),
+            SplitPlan::SingleOutput
+        );
+    }
+
+    #[test]
+    fn no_histogram_means_a_single_output_and_free_slots_only() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        assert_eq!(
+            policy.split_plan(&None, zat(9 * COIN)),
+            SplitPlan::SingleOutput
+        );
+        let plan = policy
+            .consolidation_plan(&None, &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(
+            plan.budget(),
+            ConsolidationBudget::new(1, 0, MARGINAL_FEE, None)
+        );
+        assert_eq!(plan.envelope(), 2);
+        assert_eq!(plan.sweep_caps(), &SweepCaps::Unrestricted);
+    }
+
+    #[test]
+    fn consolidation_plan_caps_sweeps_at_each_bucket_surplus() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        // Bucket 0 holds two notes, both surplus; bucket 1 holds three, two of them surplus;
+        // bucket 2 holds exactly the note the target asks for; bucket 3 is empty.
+        let context = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [
+                zat(COIN / 3),
+                zat(COIN / 2),
+                zat(COIN),
+                zat(11 * COIN / 10),
+                zat(12 * COIN / 10),
+                zat(2 * COIN),
+            ],
+            [],
+        ));
+        let plan = policy
+            .consolidation_plan(&context, &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        // One payment output plus the target's three notes of change.
+        assert_eq!(plan.envelope(), 4);
+        // Bucket 2 is the lowest bucket above bucket zero that is not in surplus, so its rung
+        // bounds the candidates.
+        assert_eq!(
+            plan.budget(),
+            ConsolidationBudget::new(1, 2, MARGINAL_FEE, Some(zat(2 * COIN)))
+        );
+        // Candidates are considered ascending; the third note of bucket 1 exhausts its surplus.
+        assert_eq!(
+            plan.sweep_caps().admit_all(&[
+                zat(COIN / 3),
+                zat(COIN / 2),
+                zat(COIN),
+                zat(11 * COIN / 10),
+                zat(12 * COIN / 10),
+            ]),
+            [true, true, true, true, false]
+        );
+    }
+
+    #[test]
+    fn consolidation_plan_leaves_candidates_unbounded_when_every_bucket_is_in_surplus() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        // Two notes in each bucket above bucket zero, against a target of one apiece.
+        let context = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [
+                zat(COIN),
+                zat(COIN),
+                zat(2 * COIN),
+                zat(2 * COIN),
+                zat(5 * COIN),
+                zat(5 * COIN),
+            ],
+            [],
+        ));
+        let plan = policy
+            .consolidation_plan(&context, &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(plan.budget().candidate_ceiling(), None);
+        assert_eq!(plan.sweep_caps().ceiling(), None);
+        // Each bucket gives up its one surplus note and no more.
+        assert_eq!(
+            plan.sweep_caps()
+                .admit_all(&[zat(COIN), zat(COIN), zat(2 * COIN), zat(2 * COIN)]),
+            [true, false, true, false]
+        );
+    }
+
+    #[test]
+    fn consolidation_plan_bounds_candidates_at_the_first_rung_held_at_target() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        // Bucket 1 holds exactly the note the target asks for, so nothing at or above the first
+        // rung may be swept, even though bucket 3 is in surplus.
+        let context = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [
+                zat(COIN / 3),
+                zat(COIN / 2),
+                zat(COIN),
+                zat(5 * COIN),
+                zat(5 * COIN),
+            ],
+            [],
+        ));
+        let plan = policy
+            .consolidation_plan(&context, &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(plan.budget().candidate_ceiling(), Some(zat(COIN)));
+        assert_eq!(
+            plan.sweep_caps()
+                .admit_all(&[zat(COIN / 3), zat(COIN / 2), zat(COIN), zat(5 * COIN)]),
+            [true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn consolidation_plan_holds_the_envelope_to_the_action_cap() {
+        let ladder = ValueLadder::new([zat(COIN), zat(2 * COIN), zat(5 * COIN)]).unwrap();
+        // Six notes of target plus the payment output ask for more actions than the cap allows.
+        let target = TargetDistribution::new(ladder.clone(), [0, 3, 2, 1]).unwrap();
+        let policy = LadderPolicy::new(target, ACTION_CAP);
+        let context = Some(NoteHistogram::from_values(ladder, [zat(COIN / 2)], []));
+        let plan = policy
+            .consolidation_plan(&context, &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(plan.envelope(), ACTION_CAP.get());
+        // One free slot, and the cap leaves room for three more spends.
+        assert_eq!(plan.budget().free_slots(), 1);
+        assert_eq!(plan.budget().enlarging_slots(), 3);
+    }
+
+    #[test]
+    fn a_bundle_wider_than_the_action_cap_keeps_its_shape_and_its_free_slots() {
+        let policy = LadderPolicy::new(ladder_target(), ACTION_CAP);
+        let context = Some(NoteHistogram::empty(policy.target().ladder().clone()));
+        // Eight real outputs, well past the cap.
+        let shape = BundleShape::new(1, 7, 1, 0);
+        let plan = policy
+            .consolidation_plan(&context, &shape, MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(plan.envelope(), shape.padded_actions());
+        // The eight outputs less the one spend the transaction already has.
+        assert_eq!(plan.budget().free_slots(), 7);
+        assert_eq!(plan.budget().enlarging_slots(), 0);
+    }
+
+    #[test]
+    fn bucket_caps_require_one_cap_per_bucket_and_a_zero_suffix() {
+        let ladder = ValueLadder::new([zat(COIN), zat(2 * COIN)]).unwrap();
+        assert_eq!(
+            BucketCaps::new(ladder.clone(), vec![0, 1]),
+            Err(NoteManagementError::InvalidSweepCaps)
+        );
+        // A bucket capped above zero over a bucket capped at zero would put sweepable notes above
+        // the ceiling.
+        assert_eq!(
+            BucketCaps::new(ladder.clone(), vec![0, 0, 5]),
+            Err(NoteManagementError::InvalidSweepCaps)
+        );
+        assert!(BucketCaps::new(ladder, vec![0, 1, 2]).is_ok());
+    }
+
+    #[test]
+    fn single_bucket_target_splits_change_into_the_notes_it_lacks() {
+        let target = TargetDistribution::single_bucket(zat(COIN), NonZeroUsize::new(4).unwrap());
+        let policy = LadderPolicy::new(target, ACTION_CAP);
+        // Two of the four notes the target asks for are already held; the note below the rung is
+        // not one of them.
+        let context = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [zat(COIN), zat(3 * COIN), zat(COIN / 2)],
+            [],
+        ));
+        assert_eq!(
+            policy.split_plan(&context, zat(10 * COIN)),
+            SplitPlan::new(vec![zat(COIN), zat(COIN)])
+        );
+        // A wallet already at the target splits nothing.
+        let at_target = Some(NoteHistogram::from_values(
+            policy.target().ladder().clone(),
+            [zat(COIN), zat(COIN), zat(COIN), zat(COIN)],
+            [],
+        ));
+        assert_eq!(
+            policy.split_plan(&at_target, zat(10 * COIN)),
+            SplitPlan::SingleOutput
+        );
+    }
+
+    #[test]
+    fn unmanaged_policy_neither_splits_nor_sweeps() {
+        let policy = Unmanaged;
+        assert_eq!(
+            policy.split_plan(&(), zat(9 * COIN)),
+            SplitPlan::SingleOutput
+        );
+        assert_eq!(
+            policy.consolidation_plan(&(), &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE),
+            None
+        );
+    }
+
+    #[test]
+    fn single_output_policy_never_splits_and_sweeps_only_within_the_costed_shape() {
+        let policy = SingleOutputPolicy;
+        assert_eq!(
+            policy.split_plan(&(), zat(9 * COIN)),
+            SplitPlan::SingleOutput
+        );
+        let plan = policy
+            .consolidation_plan(&(), &BundleShape::new(1, 1, 1, 0), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(
+            plan.budget(),
+            ConsolidationBudget::new(1, 0, MARGINAL_FEE, None)
+        );
+        assert_eq!(plan.envelope(), 2);
+        // A bundle whose only spare output is padding opens an enlarging slot, not a free one.
+        let padded = policy
+            .consolidation_plan(&(), &BundleShape::new(1, 1, 0, 1), MARGINAL_FEE)
+            .unwrap();
+        assert_eq!(
+            padded.budget(),
+            ConsolidationBudget::new(0, 1, MARGINAL_FEE, None)
+        );
+    }
+
     proptest! {
         /// `bucket_of` is monotone and agrees with the half-open rung intervals.
         #[test]
@@ -733,6 +1587,87 @@ mod tests {
                     prop_assert_eq!(planned.largest(), descending[0]);
                     prop_assert_eq!(planned.iter().collect::<Vec<_>>(), descending);
                 }
+            }
+        }
+
+        /// Split pieces are rung values of deficit buckets, largest first, never more numerous
+        /// than the target asks for, and never worth more than the change bound.
+        #[test]
+        fn split_plan_respects_deficits_and_affordability(
+            counts in proptest::collection::vec(0usize..=3, 3..=5),
+            spendable in proptest::collection::vec(0u64..=6 * COIN, 0..=8),
+            change in 0u64..=20 * COIN,
+        ) {
+            // A ladder of `counts.len() - 1` rungs has exactly `counts.len()` buckets.
+            let ladder = ValueLadder::new(
+                (1..counts.len()).map(|i| zat(i as u64 * COIN))
+            ).unwrap();
+            let mut counts = counts;
+            counts[0] = 0;
+            let target = TargetDistribution::new(ladder.clone(), counts).unwrap();
+            let histogram = NoteHistogram::from_values(
+                ladder.clone(),
+                spendable.iter().copied().map(zat),
+                [],
+            );
+            let deficits = target.deficits(&histogram);
+            let plan = LadderPolicy::new(target.clone(), ACTION_CAP).split_plan(&Some(histogram), zat(change));
+            let pieces: Vec<Zatoshis> = match &plan {
+                SplitPlan::SingleOutput => vec![],
+                SplitPlan::Pieces(pieces) => pieces.iter().collect(),
+            };
+            let total: u64 = pieces.iter().copied().map(u64::from).sum();
+            prop_assert!(total <= change);
+            prop_assert!(pieces.len() <= target.total());
+            prop_assert!(pieces.windows(2).all(|w| w[0] >= w[1]));
+            let mut used = vec![0usize; ladder.bucket_count()];
+            for piece in &pieces {
+                let bucket = ladder.bucket_of(*piece);
+                prop_assert_eq!(ladder.rung_value(bucket), Some(*piece), "pieces are rung values");
+                used[bucket] += 1;
+            }
+            for bucket in 0..ladder.bucket_count() {
+                prop_assert!(used[bucket] <= deficits[bucket]);
+            }
+        }
+
+        /// A sweep admitted by the caps never takes a bucket below its target.
+        #[test]
+        fn sweep_caps_never_breach_the_target(
+            counts in proptest::collection::vec(0usize..=3, 3..=5),
+            spendable in proptest::collection::vec(0u64..=6 * COIN, 0..=12),
+        ) {
+            let ladder = ValueLadder::new(
+                (1..counts.len()).map(|i| zat(i as u64 * COIN))
+            ).unwrap();
+            let mut counts = counts;
+            counts[0] = 0;
+            let target = TargetDistribution::new(ladder.clone(), counts.clone()).unwrap();
+            let mut values: Vec<Zatoshis> = spendable.iter().copied().map(zat).collect();
+            values.sort_unstable();
+            let histogram = NoteHistogram::from_values(ladder.clone(), values.iter().copied(), []);
+            let plan = LadderPolicy::new(target, ACTION_CAP)
+                .consolidation_plan(
+                    &Some(histogram.clone()),
+                    &BundleShape::new(1, 1, 1, 0),
+                    MARGINAL_FEE,
+                )
+                .unwrap();
+            let admitted = plan.sweep_caps().admit_all(&values);
+            let swept: Vec<Zatoshis> = values
+                .iter()
+                .zip(&admitted)
+                .filter(|(_, admitted)| **admitted)
+                .map(|(value, _)| *value)
+                .collect();
+            if let Some(ceiling) = plan.budget().candidate_ceiling() {
+                prop_assert!(swept.iter().all(|value| *value < ceiling));
+            }
+            let after = histogram.without(swept.iter().copied());
+            for (bucket, target_count) in counts.iter().enumerate().skip(1) {
+                prop_assert!(
+                    after.present(bucket) >= (*target_count).min(histogram.present(bucket))
+                );
             }
         }
     }

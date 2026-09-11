@@ -12,8 +12,10 @@ workspace.
 
 ### Added
 - `zcash_client_backend::note_management`: `ValueLadder`, `NoteHistogram`,
-  `TargetDistribution`, `SplitPlan`, `SplitPieces`, `NoteManagementError`, and
-  `most_recent_shielded_pool`.
+  `TargetDistribution`, `SplitPlan`, `SplitPieces`, `BundleShape`,
+  `ConsolidationBudget`, `BucketCaps`, `SweepCaps`, `ConsolidationPlan`,
+  `NoteManagementPolicy`, `Unmanaged`, `SingleOutputPolicy`, `LadderPolicy`,
+  `NoteManagementError`, and `most_recent_shielded_pool`.
 - `zcash_client_backend::note_management::testing` (under the `test-dependencies`
   feature): `arb_value_ladder`, `arb_target_distribution`, `arb_note_histogram`,
   and `max_arb_value`.
