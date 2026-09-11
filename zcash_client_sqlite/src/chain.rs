@@ -411,14 +411,16 @@ mod tests {
     }
 
     #[test]
-    fn put_blocks_commitment_tree_error_sapling() {
-        testing::pool::put_blocks_commitment_tree_error::<SaplingPoolTester>()
+    fn put_blocks_commitment_tree_conflict_is_a_continuity_error_sapling() {
+        testing::pool::put_blocks_commitment_tree_conflict_is_a_continuity_error::<SaplingPoolTester>(
+        )
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn put_blocks_commitment_tree_error_orchard() {
-        testing::pool::put_blocks_commitment_tree_error::<OrchardPoolTester>()
+    fn put_blocks_commitment_tree_conflict_is_a_continuity_error_orchard() {
+        testing::pool::put_blocks_commitment_tree_conflict_is_a_continuity_error::<OrchardPoolTester>(
+        )
     }
 
     #[test]
