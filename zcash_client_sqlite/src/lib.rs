@@ -57,10 +57,11 @@ use zcash_client_backend::{
     TransferType,
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        BlockMetadata, ConsolidationCandidates, DecryptedTransaction, InputSource, NoteFilter,
+        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -71,7 +72,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
-    note_management::{NoteHistogram, ValueLadder},
+    note_management::{ConsolidationBudget, NoteHistogram, ValueLadder},
     proto::compact_formats::CompactBlock,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
@@ -1099,6 +1100,86 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     lock_filter,
                 )?,
             )),
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => Err(
+                SqliteClientError::UnsupportedPoolType(PoolType::Shielded(source)),
+            ),
+        }
+    }
+
+    fn select_consolidation_candidates(
+        &self,
+        account: Self::AccountId,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+        budget: ConsolidationBudget,
+    ) -> Result<ConsolidationCandidates<Self::NoteRef>, Self::Error> {
+        match source {
+            ShieldedPool::Sapling => {
+                let (free, economic) = wallet::sapling::select_sapling_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(
+                        free,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                    ReceivedNotes::new(
+                        economic,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                ))
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => {
+                let (free, economic) = wallet::orchard::select_orchard_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(vec![], free, vec![]),
+                    ReceivedNotes::new(vec![], economic, vec![]),
+                ))
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => {
+                let (free, economic) = wallet::orchard::select_ironwood_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(vec![], vec![], free),
+                    ReceivedNotes::new(vec![], vec![], economic),
+                ))
+            }
             #[cfg(not(feature = "orchard"))]
             ShieldedPool::Orchard | ShieldedPool::Ironwood => Err(
                 SqliteClientError::UnsupportedPoolType(PoolType::Shielded(source)),

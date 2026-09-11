@@ -13,6 +13,7 @@ use zcash_client_backend::{
         ll::ReceivedSaplingOutput,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::ConsolidationBudget,
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
@@ -232,6 +233,32 @@ pub(crate) fn select_fewest_spendable_sapling_notes<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         to_received_note,
         lock_filter,
+    )
+}
+
+/// Selects Sapling consolidation candidates within `budget`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_sapling_consolidation_candidates<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    budget: ConsolidationBudget,
+) -> Result<super::common::ConsolidationCandidateLists<sapling::Note>, SqliteClientError> {
+    super::common::select_consolidation_candidates(
+        conn,
+        params,
+        account,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
+        budget,
     )
 }
 
@@ -619,6 +646,11 @@ pub(crate) mod tests {
     #[test]
     fn fewest_selection_skips_unconfirmed_and_excluded_notes() {
         testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn consolidation_candidates_are_grouped_by_slot_cost() {
+        testing::pool::consolidation_candidates_are_grouped_by_slot_cost::<SaplingPoolTester>()
     }
 
     #[test]

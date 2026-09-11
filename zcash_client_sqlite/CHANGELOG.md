@@ -18,6 +18,9 @@ workspace.
 - `WalletDb` implements
   `zcash_client_backend::data_api::InputSource::select_fewest_spendable_notes`,
   selecting notes largest first within the preferred lock tier.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::select_consolidation_candidates`,
+  drawing the smallest notes from the preferred lock tier.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were

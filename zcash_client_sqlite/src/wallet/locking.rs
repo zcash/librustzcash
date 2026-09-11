@@ -358,23 +358,51 @@ pub(crate) fn push_lock_params<'a>(
 pub(crate) fn locked_tier_expr(
     lock_filter: LockFilter<'_>,
     tbl: &str,
-) -> Option<(String, &'static str)> {
+) -> Option<(String, TierPreference)> {
     match lock_filter {
         LockFilter::Policy(policy) if policy.admits_locked() => {
-            let direction = if policy.prefers_locked() {
-                "DESC"
+            let preference = if policy.prefers_locked() {
+                TierPreference::Locked
             } else {
-                "ASC"
+                TierPreference::Unlocked
             };
             Some((
                 format!(
                     "(CASE WHEN {tbl}.lock_expiry_height IS NOT NULL \
                       AND {tbl}.lock_expiry_height >= :target_height THEN 1 ELSE 0 END)"
                 ),
-                direction,
+                preference,
             ))
         }
         _ => None,
+    }
+}
+
+/// The lock tier a selection policy draws upon first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TierPreference {
+    /// Unlocked outputs come first.
+    Unlocked,
+    /// Owned-locked outputs come first.
+    Locked,
+}
+
+impl TierPreference {
+    /// The `ORDER BY` direction that puts the preferred tier first, given that the tier key is
+    /// `1` for a locked output and `0` for an unlocked one.
+    pub(crate) fn sql_direction(&self) -> &'static str {
+        match self {
+            TierPreference::Unlocked => "ASC",
+            TierPreference::Locked => "DESC",
+        }
+    }
+
+    /// The value of the tier key identifying the preferred tier.
+    pub(crate) fn preferred_tier(&self) -> i64 {
+        match self {
+            TierPreference::Unlocked => 0,
+            TierPreference::Locked => 1,
+        }
     }
 }
 
@@ -587,7 +615,7 @@ mod tests {
             let conn = candidates_db(candidates);
             let eligible_condition = output_eligible_condition(lock_filter, "t");
             let tier_key = locked_tier_expr(lock_filter, "t")
-                .map(|(expr, direction)| format!("{expr} {direction}"));
+                .map(|(expr, preference)| format!("{expr} {}", preference.sql_direction()));
             let window_frame = match &tier_key {
                 Some(k) => format!("ORDER BY {k}, t.id ROWS UNBOUNDED PRECEDING"),
                 None => "ROWS UNBOUNDED PRECEDING".to_string(),
@@ -1191,6 +1219,14 @@ mod tests {
             )
         }
 
+        #[test]
+        fn consolidation_candidates_come_from_the_preferred_tier() {
+            pool::consolidation_candidates_come_from_the_preferred_tier::<SaplingPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
         proptest::proptest! {
             // Each case builds a fresh wallet and replays an operation sequence, so keep the
             // case count moderate; the sequences themselves explore the expiry boundaries.
@@ -1296,6 +1332,14 @@ mod tests {
         #[test]
         fn fewest_selection_honors_lock_tier_preference() {
             pool::fewest_selection_honors_lock_tier_preference::<OrchardPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
+        #[test]
+        fn consolidation_candidates_come_from_the_preferred_tier() {
+            pool::consolidation_candidates_come_from_the_preferred_tier::<OrchardPoolTester>(
                 TestDbFactory::default(),
                 BlockCache::new(),
             )

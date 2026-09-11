@@ -232,6 +232,12 @@ pub(crate) fn prefer_fewest_refreshes_funding_after_fee_growth<T: ShieldedPoolTe
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn consolidation_candidates_are_grouped_by_slot_cost<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::consolidation_candidates_are_grouped_by_slot_cost::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<
         T,

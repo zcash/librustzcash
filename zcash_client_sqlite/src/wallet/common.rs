@@ -10,6 +10,7 @@ use zcash_client_backend::{
         scanning::ScanPriority,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::ConsolidationBudget,
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
@@ -492,6 +493,73 @@ where
     )
 }
 
+/// Free-slot candidates followed by economic-slot candidates from one pool.
+pub(crate) type ConsolidationCandidateLists<Note> = (
+    Vec<ReceivedNote<ReceivedNoteId, Note>>,
+    Vec<ReceivedNote<ReceivedNoteId, Note>>,
+);
+
+/// Selects consolidation candidates from `protocol`: the smallest eligible notes of any positive
+/// value for the budget's free slots, and the smallest notes above the budget's floor for its
+/// full economic capacity, both from the lock tier `lock_filter` prefers and both bounded above
+/// by the budget's candidate ceiling.
+///
+/// A candidate fills a spend side the transaction already pays for, so it need not cover its own
+/// action cost; the free list therefore admits notes at or below the ZIP 317 marginal fee.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_consolidation_candidates<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedPool,
+    to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
+    budget: ConsolidationBudget,
+) -> Result<ConsolidationCandidateLists<Note>, SqliteClientError>
+where
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    let Some(anchor_height) =
+        get_anchor_height(conn, target_height, confirmations_policy.trusted())?
+    else {
+        return Ok((vec![], vec![]));
+    };
+    let smallest = |limit: usize, dust_threshold: Zatoshis| {
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+        select_spendable_notes_matching_value(
+            conn,
+            params,
+            account,
+            // `SmallestFirst` never reads the target value.
+            Zatoshis::ZERO,
+            ValueSelection::SmallestFirst {
+                limit,
+                ceiling: budget.candidate_ceiling(),
+            },
+            dust_threshold,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            exclude,
+            protocol,
+            &to_spendable_note,
+            lock_filter,
+        )
+    };
+    let free = smallest(budget.free_slots(), Zatoshis::ZERO)?;
+    let economic = smallest(budget.economic_capacity(), budget.economic_floor())?;
+    Ok((free, economic))
+}
+
 /// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
@@ -674,9 +742,39 @@ enum ValueSelection {
     Accumulate,
     /// Accumulate larger notes first after honoring lock-tier preference.
     LargestFirst,
+    /// Return up to `limit` notes in ascending value order from the lock tier the filter
+    /// prefers, taking only notes worth strictly less than `ceiling` when one is given.
+    SmallestFirst {
+        limit: usize,
+        ceiling: Option<Zatoshis>,
+    },
     /// Select only the oldest eligible notes whose individual values cover the target alone,
     /// oldest first.
     SingleCovering,
+}
+
+/// The rule that ends a selection as its rows are read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cutoff {
+    /// Take every row the query returns; the selection terminated in SQL.
+    All,
+    /// Take at most this many rows.
+    Limit(usize),
+    /// Take rows until their total reaches this value.
+    CoverValue(Zatoshis),
+}
+
+/// The `so_far` expression of a selection that does not terminate on a running sum. SQLite has
+/// no way to omit a CTE column per selection mode, so the column is present and constant.
+const NO_RUNNING_SUM: &str = "0";
+
+/// The parts of a note selection that depend on its [`ValueSelection`] mode: the running-sum
+/// expression of the shared `eligible` CTE, the selection over that CTE, and the rule that ends
+/// the read.
+struct SelectionShape {
+    so_far: String,
+    tail: String,
+    cutoff: Cutoff,
 }
 
 /// Selects the set of spendable notes whose sum will be equal or greater that the
@@ -685,6 +783,7 @@ enum ValueSelection {
 ///
 /// [`ValueSelection::LargestFirst`] returns the first confirmed descending-value prefix that
 /// covers the target, or every eligible note when the target cannot be covered.
+/// [`ValueSelection::SmallestFirst`] returns a bounded ascending-value prefix from one lock tier.
 /// [`ValueSelection::SingleCovering`] returns notes whose individual value covers the target,
 /// oldest first; callers take the head.
 ///
@@ -755,26 +854,24 @@ where
     // (`ORDER BY so_far`).
     let tier = locked_tier_expr(lock_filter, "rn");
     let window_frame = match &tier {
-        Some((expr, direction)) => format!(
-            "ORDER BY {expr} {direction}, rn.commitment_tree_position, rn.id ROWS UNBOUNDED PRECEDING"
+        Some((expr, preference)) => format!(
+            "ORDER BY {expr} {}, rn.commitment_tree_position, rn.id ROWS UNBOUNDED PRECEDING",
+            preference.sql_direction()
         ),
         None => "ORDER BY rn.commitment_tree_position, rn.id ROWS UNBOUNDED PRECEDING".to_string(),
     };
-    // The running sum is meaningful only where the selection terminates on it; the value-ordered
-    // selections apply their cutoff in Rust, over the confirmed rows.
-    let so_far = match selection {
-        ValueSelection::Accumulate | ValueSelection::SingleCovering => {
-            format!("SUM(value) OVER ({window_frame})")
-        }
-        ValueSelection::LargestFirst => "0".to_string(),
-    };
+    // The tier a preference policy draws first. A filter with no preference admits a single
+    // tier, which the constant tier column below reports as 0.
+    let preferred_tier = tier
+        .as_ref()
+        .map_or(0, |(_, preference)| preference.preferred_tier());
     // The single-covering tail selects FROM the CTE, where `rn` is out of scope, so the tier
     // expression is materialized as a CTE column with the direction applied at the ordering
     // site; a constant stands in when the lock filter admits only one tier and no preference
     // applies.
     let (tier_column, tier_direction) = tier
         .as_ref()
-        .map(|(expr, direction)| (expr.as_str(), *direction))
+        .map(|(expr, preference)| (expr.as_str(), preference.sql_direction()))
         .unwrap_or(("0", "ASC"));
     let crossing_note_subquery =
         "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1";
@@ -785,33 +882,62 @@ where
                 mined_height, witness_stabilized, trust_status,
                 max_shielding_input_height, min_shielding_input_trust"
     );
-    // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
-    // takes every note below the running-sum threshold plus the threshold-crossing note;
-    // single-covering takes the individually sufficient notes ordered by lock tier first and
-    // age second — the same key order the accumulation window uses, so a `PreferUnlocked` or
-    // `PreferLocked` caller draws its preferred tier before an older note of the other tier —
-    // and relies on the caller to take the head (the Rust-side confirmations filter below may
-    // drop leading rows, so the limit cannot be applied in SQL).
-    let selection_tail = match selection {
-        ValueSelection::Accumulate => format!(
-            "SELECT {result_columns}
+    // The `eligible` CTE is shared; the running sum over it, the selection from it, and the rule
+    // that ends the read all follow from the selection mode. Accumulation takes every note below
+    // the running-sum threshold plus the threshold-crossing note, and single-covering takes the
+    // individually sufficient notes ordered by lock tier first and age second — the same key
+    // order the accumulation window uses, so a `PreferUnlocked` or `PreferLocked` caller draws
+    // its preferred tier before an older note of the other tier; both terminate in SQL and rely
+    // on the caller to take what it needs. The value-ordered modes order in SQL but terminate in
+    // Rust, because the confirmations filter below may drop rows a running sum would have
+    // counted, so their running sum is a constant.
+    let running_sum = format!("SUM(value) OVER ({window_frame})");
+    let shape = match selection {
+        ValueSelection::Accumulate => SelectionShape {
+            so_far: running_sum,
+            tail: format!(
+                "SELECT {result_columns}
          FROM eligible WHERE so_far < :target_value
          UNION
          SELECT {result_columns}
          FROM ({crossing_note_subquery})"
-        ),
-        ValueSelection::LargestFirst => format!(
-            "SELECT {result_columns}
+            ),
+            cutoff: Cutoff::All,
+        },
+        ValueSelection::LargestFirst => SelectionShape {
+            so_far: NO_RUNNING_SUM.to_string(),
+            tail: format!(
+                "SELECT {result_columns}
          FROM eligible
          ORDER BY lock_tier {tier_direction}, value DESC, commitment_tree_position, id"
-        ),
-        ValueSelection::SingleCovering => format!(
-            "SELECT {result_columns}
+            ),
+            cutoff: Cutoff::CoverValue(target_value),
+        },
+        ValueSelection::SmallestFirst { limit, .. } => SelectionShape {
+            so_far: NO_RUNNING_SUM.to_string(),
+            tail: format!(
+                "SELECT {result_columns}
+         FROM eligible
+         WHERE lock_tier = :selected_lock_tier
+         AND (:candidate_ceiling IS NULL OR value < :candidate_ceiling)
+         ORDER BY value ASC, commitment_tree_position, id"
+            ),
+            cutoff: Cutoff::Limit(limit),
+        },
+        ValueSelection::SingleCovering => SelectionShape {
+            so_far: running_sum,
+            tail: format!(
+                "SELECT {result_columns}
          FROM eligible WHERE value >= :target_value
          ORDER BY lock_tier {tier_direction}, commitment_tree_position, id"
-        ),
+            ),
+            cutoff: Cutoff::All,
+        },
     };
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
+    let spent_notes = spent_notes_clause(table_prefix);
+    let so_far = &shape.so_far;
+    let tail = &shape.tail;
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
              SELECT
@@ -857,12 +983,11 @@ where
                  )
              )
              AND rn.id NOT IN rarray(:exclude)
-             AND rn.id NOT IN ({}) -- the note is not spent
+             AND rn.id NOT IN ({spent_notes}) -- the note is not spent
              AND ({eligible_condition}) -- the note is eligible under the lock filter
              GROUP BY rn.id
          )
-         {selection_tail}",
-        spent_notes_clause(table_prefix),
+         {tail}",
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -894,13 +1019,24 @@ where
         (":tip_unscanned", &tip_unscanned_arg),
         (":min_value", &min_value),
     ];
-    // Only the running-sum selections reference the target value; binding a parameter the
-    // statement does not name is an error.
-    if matches!(
-        selection,
-        ValueSelection::Accumulate | ValueSelection::SingleCovering
-    ) {
+    // A selection that terminates in SQL is exactly one that compares against the target value
+    // there; binding a parameter the statement does not name is an error.
+    if shape.cutoff == Cutoff::All {
         sql_params.push((":target_value", &target_value_arg));
+    }
+    // An `Option<u64>` binds as SQL NULL when absent, which the ceiling condition treats as
+    // unbounded.
+    let (selected_lock_tier, candidate_ceiling) = match selection {
+        ValueSelection::SmallestFirst { ceiling, .. } => {
+            (Some(preferred_tier), Some(ceiling.map(u64::from)))
+        }
+        _ => (None, None),
+    };
+    if let Some(selected_lock_tier) = &selected_lock_tier {
+        sql_params.push((":selected_lock_tier", selected_lock_tier));
+    }
+    if let Some(candidate_ceiling) = &candidate_ceiling {
+        sql_params.push((":candidate_ceiling", candidate_ceiling));
     }
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
@@ -955,12 +1091,16 @@ where
             ) == 0;
 
         if has_confirmations {
+            // The bound is checked before the note is taken, so a zero limit selects nothing.
+            if let Cutoff::Limit(limit) = shape.cutoff
+                && result.len() >= limit
+            {
+                break;
+            }
             result.push(note);
-            // The running sum in SQL counts rows the confirmations filter may drop, so a
-            // value-ordered selection stops here instead.
-            if selection == ValueSelection::LargestFirst {
+            if let Cutoff::CoverValue(target) = shape.cutoff {
                 selected_value = (selected_value + value).ok_or(BalanceError::Overflow)?;
-                if selected_value >= target_value {
+                if selected_value >= target {
                     break;
                 }
             }

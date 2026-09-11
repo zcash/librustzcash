@@ -22,7 +22,10 @@ workspace.
 - `zcash_client_backend::data_api::InputSource::get_note_histogram`, with a
   default implementation.
 - `zcash_client_backend::data_api::InputSource::select_fewest_spendable_notes`,
-  with a default implementation that delegates to `select_spendable_notes`.
+  with a default implementation.
+- `zcash_client_backend::data_api::ConsolidationCandidates` and
+  `InputSource::select_consolidation_candidates`, with a default implementation
+  returning no candidates.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::input_selection::NoteSelection` has a

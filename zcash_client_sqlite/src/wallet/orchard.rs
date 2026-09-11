@@ -14,6 +14,7 @@ use zcash_client_backend::{
         ll::ReceivedOrchardOutput,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::ConsolidationBudget,
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
@@ -340,6 +341,58 @@ pub(crate) fn select_fewest_spendable_ironwood_notes<P: consensus::Parameters>(
         ShieldedPool::Ironwood,
         to_received_note,
         lock_filter,
+    )
+}
+
+/// Selects Orchard consolidation candidates within `budget`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_orchard_consolidation_candidates<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    budget: ConsolidationBudget,
+) -> Result<super::common::ConsolidationCandidateLists<Note>, SqliteClientError> {
+    super::common::select_consolidation_candidates(
+        conn,
+        params,
+        account,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Orchard,
+        to_received_note,
+        lock_filter,
+        budget,
+    )
+}
+
+/// Selects Ironwood consolidation candidates within `budget`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_ironwood_consolidation_candidates<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    budget: ConsolidationBudget,
+) -> Result<super::common::ConsolidationCandidateLists<Note>, SqliteClientError> {
+    super::common::select_consolidation_candidates(
+        conn,
+        params,
+        account,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Ironwood,
+        to_received_note,
+        lock_filter,
+        budget,
     )
 }
 
@@ -940,6 +993,11 @@ pub(crate) mod tests {
     #[test]
     fn fewest_selection_skips_unconfirmed_and_excluded_notes() {
         testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn consolidation_candidates_are_grouped_by_slot_cost() {
+        testing::pool::consolidation_candidates_are_grouped_by_slot_cost::<OrchardPoolTester>()
     }
 
     #[test]

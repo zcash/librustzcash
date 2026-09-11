@@ -1603,8 +1603,11 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     // key (Part B): the preferred tier is drawn upon first, with value-descending order retained as
     // a secondary key within each tier. For `Exclude`/`Unfiltered` the ordering is unchanged.
     let order_by_sql = match locked_tier_expr(lock_filter, "u") {
-        Some((expr, direction)) => {
-            format!("{expr} {direction}, u.value_zat DESC, u.output_index")
+        Some((expr, preference)) => {
+            format!(
+                "{expr} {}, u.value_zat DESC, u.output_index",
+                preference.sql_direction()
+            )
         }
         None => "u.value_zat DESC, u.output_index".to_string(),
     };

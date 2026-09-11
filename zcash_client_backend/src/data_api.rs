@@ -101,7 +101,7 @@ use crate::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     decrypt::DecryptedOutput,
-    note_management::{NoteHistogram, ValueLadder},
+    note_management::{ConsolidationBudget, NoteHistogram, ValueLadder},
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
@@ -1281,6 +1281,47 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     }
 }
 
+/// Consolidation candidates from one pool, grouped by the slot cost they can bear.
+///
+/// `free` holds the smallest eligible notes of any positive value; `economic` holds the smallest
+/// eligible notes worth more than the budget's floor. Both ascend by value. The lists may
+/// overlap: a selector spends notes from exactly one of them.
+#[derive(Debug)]
+pub struct ConsolidationCandidates<NoteRef> {
+    free: ReceivedNotes<NoteRef>,
+    economic: ReceivedNotes<NoteRef>,
+}
+
+impl<NoteRef> ConsolidationCandidates<NoteRef> {
+    /// Constructs an empty candidate set.
+    pub fn empty() -> Self {
+        Self {
+            free: ReceivedNotes::empty(),
+            economic: ReceivedNotes::empty(),
+        }
+    }
+
+    /// Constructs a candidate set from its free-slot and economic-slot lists.
+    pub fn from_parts(free: ReceivedNotes<NoteRef>, economic: ReceivedNotes<NoteRef>) -> Self {
+        Self { free, economic }
+    }
+
+    /// The smallest eligible notes of any positive value, ascending.
+    pub fn free(&self) -> &ReceivedNotes<NoteRef> {
+        &self.free
+    }
+
+    /// The smallest eligible notes worth more than the budget's floor, ascending.
+    pub fn economic(&self) -> &ReceivedNotes<NoteRef> {
+        &self.economic
+    }
+
+    /// Consumes this set and returns its free-slot and economic-slot lists.
+    pub fn into_parts(self) -> (ReceivedNotes<NoteRef>, ReceivedNotes<NoteRef>) {
+        (self.free, self.economic)
+    }
+}
+
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1896,6 +1937,34 @@ pub trait InputSource {
             exclude,
             lock_filter,
         )
+    }
+
+    /// Returns consolidation candidates from `source` within `budget`.
+    ///
+    /// Candidates are drawn only from the lock tier `lock_filter` prefers and never from
+    /// `exclude`, which must contain every note already selected to fund the transaction.
+    /// The free list holds at most `budget.free_slots()` notes of any positive value; the
+    /// economic list holds at most `budget.economic_capacity()` notes worth more than
+    /// `budget.economic_floor()`. Every candidate's value is strictly below
+    /// `budget.candidate_ceiling()` when one is set. Both ascend by value. A note appearing in
+    /// both lists is permitted; the input selector spends from one list only.
+    ///
+    /// Only a [`LockFilter::Policy`] is supported: this selection is specified in terms of the
+    /// lock tier a policy prefers, which [`LockFilter::Unfiltered`] does not define.
+    ///
+    /// The default implementation returns no candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn select_consolidation_candidates(
+        &self,
+        _account: Self::AccountId,
+        _source: ShieldedPool,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+        _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+        _budget: ConsolidationBudget,
+    ) -> Result<ConsolidationCandidates<Self::NoteRef>, Self::Error> {
+        Ok(ConsolidationCandidates::empty())
     }
 
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified

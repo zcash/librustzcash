@@ -35,8 +35,8 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, TargetValue, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletTest, WalletWrite,
+        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, ReceivedNotes, TargetValue,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
@@ -56,7 +56,9 @@ use crate::{
         self, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
-    note_management::{LadderPolicy, NoteHistogram, TargetDistribution, ValueLadder},
+    note_management::{
+        ConsolidationBudget, LadderPolicy, NoteHistogram, TargetDistribution, ValueLadder,
+    },
     scanning::ScanError,
     wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
@@ -10297,9 +10299,13 @@ pub fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTest
             LockFilter::Policy(&Default::default()),
         )
         .unwrap();
+    // The 2,000,000 note is unconfirmed, so funding falls to the two largest confirmed notes.
     assert_eq!(
-        funding.total_value().unwrap(),
-        Zatoshis::const_from_u64(1_100_000)
+        values_in_pool(&funding, T::SHIELDED_PROTOCOL),
+        [
+            Zatoshis::const_from_u64(600_000),
+            Zatoshis::const_from_u64(500_000)
+        ],
     );
 
     let excluded = st
@@ -10322,8 +10328,123 @@ pub fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTest
             LockFilter::Policy(&Default::default()),
         )
         .unwrap();
+    // With the 2,000,000 note excluded rather than unconfirmed, the same two notes fund it.
     assert_eq!(
-        funding.total_value().unwrap(),
-        Zatoshis::const_from_u64(1_100_000)
+        values_in_pool(&funding, T::SHIELDED_PROTOCOL),
+        [
+            Zatoshis::const_from_u64(600_000),
+            Zatoshis::const_from_u64(500_000)
+        ],
+    );
+}
+
+/// Returns the values of the notes in `pool`, in the order the store returned them.
+fn values_in_pool<NoteRef>(notes: &ReceivedNotes<NoteRef>, pool: ShieldedPool) -> Vec<Zatoshis> {
+    const VALID: &str = "a received note's value is a valid amount";
+    match pool {
+        ShieldedPool::Sapling => notes
+            .sapling()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => notes
+            .orchard()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => notes
+            .ironwood()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => {
+            unreachable!("the Orchard-family pools are unreachable without the `orchard` feature")
+        }
+    }
+}
+
+/// Candidates are grouped by the slot cost they can bear: the free list takes the smallest
+/// notes of any positive value, the economic list the smallest notes above the floor, the
+/// candidate ceiling bounds both, and the excluded funding note appears in neither.
+pub fn consolidation_candidates_are_grouped_by_slot_cost<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let funding = Zatoshis::const_from_u64(1_000_000);
+    let dust_low = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    let economic = [8_000, 7_000, 6_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance([
+        [funding],
+        [MARGINAL_FEE],
+        [dust_low],
+        [economic[0]],
+        [economic[1]],
+        [economic[2]],
+    ]);
+
+    let account_id = st.test_account().unwrap().id();
+    let funding_ref = st.note_id_by_value(funding);
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |budget| {
+        st.wallet()
+            .select_consolidation_candidates(
+                account_id,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[funding_ref],
+                LockFilter::Policy(&Default::default()),
+                budget,
+            )
+            .unwrap()
+            .into_parts()
+    };
+
+    let (free, economic_notes) = select(ConsolidationBudget::new(2, 2, MARGINAL_FEE, None));
+    assert_eq!(
+        values_in_pool(&free, T::SHIELDED_PROTOCOL),
+        [dust_low, MARGINAL_FEE]
+    );
+    // Capacity is four but only three economic small notes exist; the excluded funding note
+    // must not be drafted to fill the fourth place.
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2], economic[1], economic[0]],
+    );
+
+    let (free, economic_notes) = select(ConsolidationBudget::new(0, 1, MARGINAL_FEE, None));
+    assert!(
+        free.is_empty(),
+        "a zero free budget yields no free candidates"
+    );
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2]]
+    );
+
+    // A candidate ceiling bounds both lists strictly from above.
+    let (free, economic_notes) = select(ConsolidationBudget::new(
+        2,
+        2,
+        MARGINAL_FEE,
+        Some(Zatoshis::const_from_u64(7_000)),
+    ));
+    assert_eq!(
+        values_in_pool(&free, T::SHIELDED_PROTOCOL),
+        [dust_low, MARGINAL_FEE]
+    );
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2]]
     );
 }
