@@ -11,9 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
 
 ### Changed
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a block at
+  an already-scanned height whose hash differs from the hash the wallet recorded
+  there as `Error::Scan(ScanError::BlockHashMismatch)`, a continuity error at that
+  height, and writes nothing. Previously the block was passed to
+  `WalletWrite::put_blocks`, and any conflict surfaced as `Error::Wallet`.
 - `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
   implementation to also return the transparent receiver that the wallet tracks
   at the diversifier index of an exposed unified address that omits it, as an

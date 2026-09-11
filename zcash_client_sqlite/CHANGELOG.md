@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- `zcash_client_backend::data_api::chain::scan_cached_blocks`, run against a
+  `WalletDb`, reports a block at an already-scanned height whose hash differs
+  from the stored hash as `Error::Scan(ScanError::BlockHashMismatch)` rather
+  than as `Error::Wallet(SqliteClientError::BlockConflict)`.
 - `WalletRead::list_addresses` now also returns the transparent receiver that
   the wallet tracks at the index of an exposed unified address that omits it,
   as an `Address::Transparent` entry with that diversifier index.

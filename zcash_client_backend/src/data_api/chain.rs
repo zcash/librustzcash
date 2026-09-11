@@ -162,7 +162,7 @@ use crate::{
     data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
-        ScanBlockError, ScanningKeys, SpendIdentifiers,
+        ScanBlockError, ScanError, ScanningKeys, SpendIdentifiers,
         compact::{BatchRunners, scan_block_with_runners},
     },
 };
@@ -674,6 +674,20 @@ where
         Some(limit),
         |block: CompactBlock| {
             scan_summary.scanned_range.end = block.height() + 1;
+            // A block at a height the wallet has already scanned must carry the hash the wallet
+            // recorded there; any other hash is a reorg below the scanned range, reported as a
+            // continuity error so that the caller rewinds before any state is written.
+            if let Some(stored) = data_db
+                .block_metadata(block.height())
+                .map_err(Error::Wallet)?
+                && stored.block_hash() != block.hash()
+            {
+                return Err(Error::Scan(ScanError::BlockHashMismatch {
+                    at_height: block.height(),
+                    stored: stored.block_hash(),
+                    scanned: block.hash(),
+                }));
+            }
             let scanned_block = scan_block_with_runners::<_, _, _, (), (), (), _>(
                 params,
                 block,
