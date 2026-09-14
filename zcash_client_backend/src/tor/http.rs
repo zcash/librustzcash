@@ -90,6 +90,28 @@ pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
     Ok((is_https, host, port))
 }
 
+/// Applies the caller's `request` closure, then defaults `Accept` to `application/json`
+/// if the closure did not already set it.
+///
+/// The default is applied *after* the closure (rather than before) because
+/// [`Builder::header`] appends rather than replaces: setting `Accept` before running the
+/// closure would leave the default value in place (as the first of two `Accept` values)
+/// even if the closure also set `Accept`, silently defeating any attempt by the caller to
+/// override it.
+fn with_default_json_accept(request: impl Fn(Builder) -> Builder) -> impl Fn(Builder) -> Builder {
+    move |builder| {
+        let builder = request(builder);
+        if builder
+            .headers_ref()
+            .is_some_and(|headers| headers.contains_key(hyper::header::ACCEPT))
+        {
+            builder
+        } else {
+            builder.header(hyper::header::ACCEPT, "application/json")
+        }
+    }
+}
+
 impl Client {
     /// Makes an HTTP GET request over Tor.
     ///
@@ -268,8 +290,14 @@ impl Client {
 
     /// Makes an HTTP GET request over Tor, parsing the response as JSON.
     ///
-    /// This is a simple wapper around [`Self::http_get`]. Use that method if you need
-    /// more control over the request headers or response parsing.
+    /// This is a simple wrapper around [`Self::http_get`]. Use that method if you need
+    /// more control over the response parsing.
+    ///
+    /// The `request` closure runs first; this method then defaults `Accept` to
+    /// `application/json` only if the closure did not already set it, so a caller can
+    /// override the default `Accept` (or add other headers, such as `User-Agent`) by
+    /// setting them in the closure. See [`Self::http_get`] for the [`Builder`] methods you
+    /// must not call within it.
     ///
     /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
     /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
@@ -291,12 +319,13 @@ impl Client {
     pub async fn http_get_json<T: DeserializeOwned>(
         &self,
         url: Uri,
+        request: impl Fn(Builder) -> Builder,
         retry_limit: u8,
         retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_get(
             url,
-            |builder| builder.header(hyper::header::ACCEPT, "application/json"),
+            with_default_json_accept(request),
             |body| async {
                 Ok(serde_json::from_reader(
                     body.collect()
@@ -377,6 +406,20 @@ where
     }
 }
 
+/// Overwrites `headers`'s `Host` value with `host`.
+///
+/// Uses [`HeaderMap::insert`], which replaces any existing values, rather than
+/// [`Builder::header`] (used for every other header on the request), which only appends.
+/// This is what lets [`make_http_request`] enforce that `Host` matches the circuit and TLS
+/// connection even if a caller's request-construction closure also set it.
+fn set_host_header(headers: &mut hyper::HeaderMap, host: &str) {
+    headers.insert(
+        hyper::header::HOST,
+        hyper::header::HeaderValue::from_str(host)
+            .expect("a URI authority is always a valid header value"),
+    );
+}
+
 async fn make_http_request<B>(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     url: Uri,
@@ -403,16 +446,20 @@ where
         .map_err(HttpError::from)?;
 
     // Build the request. We let the caller make whatever request modifications they need,
-    // and then set the Host and URI afterwards so that they are guaranteed to match the
-    // circuit and TLS connection.
-    let req = request(Request::builder())
-        .header(
-            hyper::header::HOST,
-            url.authority().expect("Already checked").as_str(),
-        )
+    // then set the URI and forcibly overwrite the Host header (see `set_host_header`) so
+    // that they are guaranteed to match the circuit and TLS connection, regardless of
+    // whether the caller's closure also set Host. Host is `host[":"port]` per RFC 9110:
+    // never userinfo, even if `url` carries any, and the port only when it's set.
+    let authority = url.authority().expect("Already checked");
+    let host = match authority.port() {
+        Some(port) => format!("{}:{}", authority.host(), port),
+        None => authority.host().to_string(),
+    };
+    let mut req = request(Request::builder())
         .uri(url)
         .body(body)
         .map_err(HttpError::from)?;
+    set_host_header(req.headers_mut(), &host);
     let response = sender.send_request(req).await.map_err(HttpError::from)?;
     debug!("Response status code: {}", response.status());
 
@@ -508,9 +555,11 @@ mod tests {
 
     use http_body_util::Empty;
     use hyper::{Uri, body::Bytes};
+    use tokio::io::AsyncReadExt;
 
     use super::{
-        HttpError, TimeoutPhase, make_http_request, parse_url, url_is_https, with_timeout,
+        HttpError, TimeoutPhase, make_http_request, parse_url, set_host_header, url_is_https,
+        with_default_json_accept, with_timeout,
     };
     use crate::tor::Error;
 
@@ -596,6 +645,143 @@ mod tests {
         let uri = "//example.com/".parse::<Uri>().unwrap();
         assert!(matches!(url_is_https(&uri), Err(HttpError::NonHttpUrl)));
     }
+
+    /// A caller that doesn't set `Accept` itself gets the default `application/json`.
+    #[test]
+    fn with_default_json_accept_sets_accept_by_default() {
+        let builder = with_default_json_accept(|b| b)(hyper::Request::builder());
+        assert_eq!(
+            builder
+                .headers_ref()
+                .and_then(|h| h.get(hyper::header::ACCEPT))
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+        );
+    }
+
+    /// The caller's closure runs before the default is applied, so a caller that sets
+    /// `Accept` itself gets that value instead of the default. (`Builder::header` appends
+    /// rather than replaces, so applying the default first would not achieve this: the
+    /// caller's value would just become a second, effectively-ignored `Accept` header.)
+    #[test]
+    fn with_default_json_accept_lets_caller_override_accept() {
+        let builder = with_default_json_accept(|b| b.header(hyper::header::ACCEPT, "text/plain"))(
+            hyper::Request::builder(),
+        );
+        assert_eq!(
+            builder
+                .headers_ref()
+                .and_then(|h| h.get(hyper::header::ACCEPT))
+                .and_then(|v| v.to_str().ok()),
+            Some("text/plain"),
+        );
+    }
+
+    /// The caller's closure can also set additional headers, such as `User-Agent`, that
+    /// `http_get_json` does not set itself.
+    #[test]
+    fn with_default_json_accept_allows_additional_headers() {
+        let builder =
+            with_default_json_accept(|b| b.header(hyper::header::USER_AGENT, "test-agent"))(
+                hyper::Request::builder(),
+            );
+        let headers = builder.headers_ref().unwrap();
+        assert_eq!(
+            headers
+                .get(hyper::header::ACCEPT)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+        );
+        assert_eq!(
+            headers
+                .get(hyper::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok()),
+            Some("test-agent"),
+        );
+    }
+
+    /// With no prior `Host` value, `set_host_header` simply sets it.
+    #[test]
+    fn set_host_header_sets_host() {
+        let mut headers = hyper::HeaderMap::new();
+        set_host_header(&mut headers, "example.com");
+        assert_eq!(
+            headers
+                .get(hyper::header::HOST)
+                .and_then(|v| v.to_str().ok()),
+            Some("example.com"),
+        );
+    }
+
+    /// A bogus `Host` set by a request-construction closure must not survive into the
+    /// final request: `set_host_header` replaces it (via `HeaderMap::insert`) rather than
+    /// appending a second, easily-overlooked value alongside it (as `Builder::header`
+    /// would), so that `Host` cannot end up disagreeing with the circuit and TLS
+    /// connection that were established using the real host.
+    #[test]
+    fn set_host_header_overwrites_a_prior_value() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(hyper::header::HOST, "evil.example".parse().unwrap());
+        set_host_header(&mut headers, "example.com");
+
+        let values: Vec<&str> = headers
+            .get_all(hyper::header::HOST)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        assert_eq!(values, vec!["example.com"]);
+    }
+
+    /// `make_http_request` must send exactly the `Host` header derived from the
+    /// connection's URL, discarding any `Host` a request-construction closure tries to
+    /// set. This pins the actual wiring end-to-end (through `Builder::header`'s append and
+    /// `set_host_header`'s insert) rather than just `set_host_header` in isolation:
+    /// deleting the `set_host_header` call in `make_http_request` turns this test red. The
+    /// URL's userinfo (`user:pass@`) must not appear in `Host` either.
+    #[tokio::test]
+    async fn make_http_request_forces_host_to_match_the_connection() {
+        let (stream, mut peer) = tokio::io::duplex(4096);
+
+        // Nothing ever responds, so `make_http_request` itself would hang forever
+        // awaiting a response; drive it in the background and inspect only what it wrote
+        // to the wire before that point.
+        let _handle = tokio::spawn(make_http_request(
+            stream,
+            "http://user:pass@example.com:1234/path".parse().unwrap(),
+            |builder| builder.header(hyper::header::HOST, "evil.example"),
+            Empty::<Bytes>::new(),
+        ));
+
+        // Read until the full request head has arrived.
+        let mut received = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = peer.read(&mut buf).await.unwrap();
+            assert!(
+                n > 0,
+                "connection closed before a full request head arrived"
+            );
+            received.extend_from_slice(&buf[..n]);
+            if received.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = String::from_utf8(received).unwrap();
+
+        let host_values: Vec<&str> = head
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("host").then(|| value.trim())
+            })
+            .collect();
+        assert_eq!(
+            host_values,
+            vec!["example.com:1234"],
+            "expected exactly one Host header, carrying the connection's own \
+             userinfo-stripped host:port, in request head:\n{head}",
+        );
+    }
 }
 
 #[cfg(all(test, live_network_tests))]
@@ -620,6 +806,7 @@ mod live_network_tests {
             let get_response = client
                 .http_get_json::<serde_json::Value>(
                     "https://httpbin.org/get".parse().unwrap(),
+                    |b| b,
                     3,
                     |res| res.is_err().then_some(Retry::Same),
                 )

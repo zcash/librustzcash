@@ -54,6 +54,7 @@ impl Exchange for KuCoin {
                 "https://api.kucoin.com/api/v1/market/stats?symbol=ZEC-USDT"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

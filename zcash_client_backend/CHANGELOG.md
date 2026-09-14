@@ -15,6 +15,19 @@ workspace.
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
   implementation that applies blocks one at a time must be updated.
+- `zcash_client_backend::tor::http`:
+  - `Client::http_get_json` takes an additional `request: impl Fn(Builder) ->
+    Builder` argument, positioned after `url` as in `Client::http_get`, for
+    setting request headers such as `User-Agent`. `Accept: application/json`
+    is applied only if the closure did not set `Accept`, so a closure that
+    sets it overrides the default. Pass `|b| b` to preserve the previous
+    behaviour.
+- `zcash_client_backend::tor::http`:
+  - `Client::{http_get, http_post}`, and therefore `Client::http_get_json`,
+    now always send the `Host` header derived from the request URL. A `Host`
+    set by the request-construction closure was previously serialized onto
+    the wire alongside it and took precedence for `HeaderMap::get`; it is now
+    discarded.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
 
