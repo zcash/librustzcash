@@ -517,8 +517,24 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Size
         &self,
         address_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, bip32::Error> {
-        let child_key = self.extended_pubkey().derive_child(address_index.into())?;
-        Ok(TransparentAddress::from_pubkey(child_key.public_key()))
+        Ok(TransparentAddress::from_pubkey(
+            &self.derive_pubkey(address_index)?,
+        ))
+    }
+
+    /// Derives the public key at the provided child index.
+    ///
+    /// This is the key material [`derive_address`](Self::derive_address) hashes, which a
+    /// caller needs directly when the address is determined by a script over several keys
+    /// rather than by a single key hash.
+    fn derive_pubkey(
+        &self,
+        address_index: NonHardenedChildIndex,
+    ) -> Result<PublicKey, bip32::Error> {
+        Ok(*self
+            .extended_pubkey()
+            .derive_child(address_index.into())?
+            .public_key())
     }
 
     /// Searches the space of child indexes for an index that will

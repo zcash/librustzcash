@@ -703,7 +703,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
             let ufvk_parsed = row
                 .get::<_, Option<String>>(1)?
                 .map(|ufvk_str| {
-                    let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
+                    let (network, _, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
                         WalletMigrationError::CorruptedData(format!(
                             "Unable to parse UFVK for account {account_id}: {e}"
                         ))
@@ -715,7 +715,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
             let uivk_parsed = row
                 .get::<_, Option<String>>(2)?
                 .map(|uivk_str| {
-                    let (network, _) = Uivk::decode(&uivk_str).map_err(|e| {
+                    let (network, _, _) = Uivk::decode(&uivk_str).map_err(|e| {
                         WalletMigrationError::CorruptedData(format!(
                             "Unable to parse UIVK for account {account_id}: {e}"
                         ))
@@ -741,7 +741,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
         while let Some(row) = rows.next()? {
             let account_id: i64 = row.get(0)?;
             let ufvk_str = row.get::<_, String>(1)?;
-            let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
+            let (network, _, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
                     "Unable to parse UFVK for account {account_id}: {e}"
                 ))

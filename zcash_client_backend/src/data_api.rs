@@ -4948,7 +4948,7 @@ mod tests {
 
     fn sapling_address_for_tag(tag: u8) -> sapling::PaymentAddress {
         match SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&[tag; 32])) {
-            Address::Sapling(pa) => pa,
+            Address::Sapling(pa) => *pa,
             other => panic!("expected Sapling address, got {other:?}"),
         }
     }
@@ -4963,6 +4963,8 @@ mod tests {
             Some(orchard).flatten(),
             Some(sapling).flatten(),
             transparent,
+            None,
+            None,
         )
         .expect("test UA must be valid")
         .into()
@@ -5079,7 +5081,7 @@ mod tests {
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &Address::Unified(ua),
+            &Address::Unified(Box::new(ua)),
         );
 
         assert_eq!(result.unwrap(), Some(1));
@@ -5100,7 +5102,7 @@ mod tests {
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &Address::Unified(ua_from_other_seed),
+            &Address::Unified(Box::new(ua_from_other_seed)),
         );
 
         assert_eq!(result.unwrap(), None);
@@ -5126,7 +5128,7 @@ mod tests {
         // resolve it.
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &Address::Sapling(sapling_pa),
+            &Address::Sapling(Box::new(sapling_pa)),
         );
 
         assert_eq!(result.unwrap(), Some(1));
@@ -5147,7 +5149,7 @@ mod tests {
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &Address::Sapling(sapling_address_for_tag(1)),
+            &Address::Sapling(Box::new(sapling_address_for_tag(1))),
         );
         assert_eq!(result.unwrap(), None);
     }
@@ -5175,12 +5177,14 @@ mod tests {
             Some(ua2.orchard().copied().expect("orchard receiver")),
             Some(ua1.sapling().copied().expect("sapling receiver")),
             None,
+            None,
+            None,
         )
         .expect("sapling+orchard UA must be valid");
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &Address::Unified(frankenstein),
+            &Address::Unified(Box::new(frankenstein)),
         );
 
         assert!(matches!(

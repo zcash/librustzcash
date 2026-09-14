@@ -145,7 +145,7 @@ fn candidate_ovks(ufvk: &UnifiedFullViewingKey) -> Vec<OutgoingViewingKey> {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    if let Some(pubkey) = ufvk.transparent() {
+    if let Some(pubkey) = ufvk.p2pkh() {
         let shielding_ovks = pubkey.ovks_for_shielding();
         ovks.push(shielding_ovks.external().as_bytes().into());
         ovks.push(shielding_ovks.internal().as_bytes().into());
@@ -440,7 +440,7 @@ mod tests {
 
         #[cfg(feature = "transparent-inputs")]
         {
-            let tfvk = ufvk.transparent().expect("UFVK has a transparent item");
+            let tfvk = ufvk.p2pkh().expect("UFVK has a transparent item");
             let shielding_ovks = tfvk.ovks_for_shielding();
             // Both halves of the pair become raw bytes as soon as they are used, so pin each half
             // against the accessor that names its scope: a key bound to the wrong scope here

@@ -60,7 +60,7 @@ fn init_accounts<P: consensus::Parameters>(
         if let Some(ufvk_str) = ufvk_str
             && let Some(tfvk) = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?
-                .transparent()
+                .p2pkh()
         {
             let ephemeral_ivk = tfvk.derive_ephemeral_ivk().map_err(|_| {
                 SqliteClientError::CorruptedData(

@@ -447,7 +447,7 @@ mod tests {
             ))
             .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
-            .transparent()
+            .p2pkh()
             .and_then(|k| {
                 k.derive_external_ivk()
                     .ok()
@@ -457,7 +457,11 @@ mod tests {
 
         db_data.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address) VALUES (0, ?, ?, ?)",
-            params![ufvk.encode(&network), ua.encode(&network), &taddr]
+            params![
+                ufvk.encode(&network),
+                ua.encode_receiver_preserving(&network),
+                &taddr
+            ]
         ).unwrap();
         db_data
             .conn
