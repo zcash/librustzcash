@@ -24,6 +24,7 @@ use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
+        scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
@@ -38,7 +39,7 @@ use zcash_keys::{
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey,
-        transparent::gap_limits::{GapLimits, generate_address_list},
+        transparent::gap_limits::{GapLimits, ReconcileOutcome, generate_address_list},
     },
 };
 #[cfg(not(feature = "spend-index"))]
@@ -50,7 +51,7 @@ use zcash_primitives::transaction::fees::{
 };
 use zcash_protocol::{
     TxId,
-    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
+    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS, NetworkUpgrade},
     value::{ZatBalance, Zatoshis},
 };
 use zcash_script::script;
@@ -80,6 +81,7 @@ use crate::{
             is_locked_at, output_eligible_condition, overridable_owners_rarray, push_lock_params,
         },
         mempool_height,
+        scanning::{priority_code, replace_queue_entries},
     },
 };
 #[cfg(feature = "transparent-inputs")]
@@ -91,6 +93,8 @@ use {
 };
 
 pub(crate) mod ephemeral;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod observations;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -912,8 +916,16 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
 /// pool: i.e., a recevier for each data item in the account's UFVK or UIVK where the transparent
 /// child index is valid.
 ///
+/// Each window of addresses is checked against previously observed transaction involvement, and a
+/// window in which that check finds an address used moves the gap, so a further window is derived
+/// and checked in turn. This mirrors [`generate_gap_addresses`], which imposes the same obligation
+/// on every storage backend; the gap start is read afresh each round and must strictly increase
+/// for the next round to run, so the number of rounds is bounded by the finite non-hardened child
+/// index space.
+///
 /// [`WalletWrite::get_next_available_address`]: zcash_client_backend::data_api::WalletWrite::get_next_available_address
 /// [`WalletWrite::get_address_for_index`]: zcash_client_backend::data_api::WalletWrite::get_address_for_index
+/// [`generate_gap_addresses`]: zcash_keys::keys::transparent::gap_limits::generate_gap_addresses
 pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -927,30 +939,104 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
     )?;
 
-    if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
-        generate_address_range(
-            conn,
-            params,
-            account_id,
+    let account =
+        get_account_internal(conn, params, account_id)?.ok_or(SqliteClientError::AccountUnknown)?;
+
+    let mut prev_gap_start: Option<NonHardenedChildIndex> = None;
+    while let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
+        // Reconciliation reported that the gap moved, but the stored addresses disagree.
+        // Deriving the same window again would repeat this round forever, so stop here; the
+        // window has already been stored and checked.
+        if prev_gap_start.is_some_and(|prev| gap_start <= prev) {
+            break;
+        }
+        prev_gap_start = Some(gap_start);
+
+        let address_list = generate_address_list(
+            &account.uivk(),
+            account.ufvk(),
             key_scope,
             request,
             gap_start..gap_start.saturating_add(gap_limit),
             require_key,
         )?;
+        store_address_range(conn, params, account_id, key_scope, address_list.clone())?;
+
+        let addresses = address_list
+            .iter()
+            .map(|(_, taddr, _)| *taddr)
+            .collect::<Vec<_>>();
+        match observations::reconcile_observations(
+            conn,
+            params,
+            gap_limits,
+            observations::ReconcileScope::Addresses(&addresses),
+        )? {
+            ReconcileOutcome::Unchanged => break,
+            ReconcileOutcome::AddressesUsed => continue,
+        }
     }
 
     Ok(())
 }
 
-/// Finds the wallet addresses that are involved with the given transaction, and regenerates the gap
-/// limit worth of addresses as appropriate for each key scope.
-pub(crate) fn update_gap_limits<P: consensus::Parameters>(
+/// Checks the involvement index against the wallet's address book over the given scope, and
+/// extends each account's transparent address gap if that check found an address used.
+///
+/// This is the entry point for the paths that add addresses outside the gap machinery — account
+/// creation, standalone receiver import, and the index's own backfill — for which no window of
+/// derived addresses drives the walk. [`generate_gap_addresses`] reconciles the windows it
+/// derives itself, and reaches a fixpoint, so extending every account's gap here is enough to
+/// let a discovery cascade as far as it should.
+pub(crate) fn reconcile_and_extend_gaps<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     gap_limits: &GapLimits,
+    scope: observations::ReconcileScope<'_>,
+) -> Result<(), SqliteClientError> {
+    if observations::reconcile_observations(conn, params, gap_limits, scope)?
+        == ReconcileOutcome::Unchanged
+    {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare("SELECT id FROM accounts")?;
+    let account_ids = stmt
+        .query_map([], |row| row.get::<_, i64>(0).map(AccountRef))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    for account_id in account_ids {
+        for key_scope in [
+            TransparentKeyScope::EXTERNAL,
+            TransparentKeyScope::INTERNAL,
+            TransparentKeyScope::EPHEMERAL,
+        ] {
+            generate_gap_addresses(
+                conn,
+                params,
+                gap_limits,
+                account_id,
+                key_scope,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                false,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Records that each wallet address involved with the given transaction was exposed no later than
+/// `observation_height`, returning the account and key scope of each.
+///
+/// The exposure height is lowered, never raised, so that a transaction re-mined at a lower height
+/// by a reorg moves it back.
+fn mark_addresses_involved(
+    conn: &rusqlite::Transaction,
     txid: TxId,
     observation_height: BlockHeight,
-) -> Result<(), SqliteClientError> {
+) -> Result<Vec<(AccountRef, KeyScope)>, SqliteClientError> {
     let mut scopes_query = conn.prepare_cached(
         "SELECT tro.address_id, a.account_id, a.key_scope
          FROM transparent_received_outputs tro
@@ -966,14 +1052,13 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
          WHERE t.txid = :txid",
     )?;
 
+    let mut involved = vec![];
     let mut rows = scopes_query.query(named_params! {":txid": txid.as_ref() })?;
     while let Some(row) = rows.next()? {
         let addr_id: i64 = row.get("address_id")?;
         let account_id = AccountRef(row.get("account_id")?);
         let key_scope = KeyScope::decode(row.get("key_scope")?)?;
 
-        // Update the exposure height for the address, in case the transaction was mined at a lower
-        // height than the existing exposure height due to a reorg.
         conn.execute(
             "UPDATE addresses
              SET exposed_at_height = MIN(
@@ -987,6 +1072,22 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
             ],
         )?;
 
+        involved.push((account_id, key_scope));
+    }
+
+    Ok(involved)
+}
+
+/// Finds the wallet addresses that are involved with the given transaction, and regenerates the gap
+/// limit worth of addresses as appropriate for each key scope.
+pub(crate) fn update_gap_limits<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    gap_limits: &GapLimits,
+    txid: TxId,
+    observation_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    for (account_id, key_scope) in mark_addresses_involved(conn, txid, observation_height)? {
         if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
             generate_gap_addresses(
                 conn,
@@ -1093,82 +1194,6 @@ pub(crate) fn utxo_query_height(
     }
 }
 
-/// Returns the wallet accounts that contributed inputs to the transaction with the
-/// given internal id, paired with the total value each account contributed. Results
-/// are ordered by total contributed value descending; ties are broken in favor of
-/// the account whose oldest contributed input has the lowest mined height (with
-/// unmined inputs sorting last), then by `accounts.id`.
-///
-/// The inner `UNION ALL` must carry one branch per pool in which the wallet can record a
-/// received output: transparent, Sapling, Orchard, and Ironwood. A missing branch does not
-/// produce an error, it silently under-counts the accounts that funded the transaction, so
-/// a pool added to the schema without a branch here changes which account this reports.
-///
-/// The pools are enumerated here rather than read from the cross-pool `v_received_outputs`
-/// view because that view has to be materialized in full to be joined by output id, which
-/// scans every received-note table. This query is run once per candidate output, so it is
-/// written to be satisfied from the spend tables' `transaction_id` indexes instead.
-fn list_funding_accounts(
-    conn: &rusqlite::Connection,
-    creating_tx_id: i64,
-) -> Result<Vec<(AccountUuid, Zatoshis)>, SqliteClientError> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT a.uuid, contribs.total_value
-         FROM accounts a
-         JOIN (
-             SELECT account_id,
-                    SUM(value) AS total_value,
-                    MIN(IFNULL(mined_height, 0x7FFFFFFF)) AS oldest_mined
-             FROM (
-                 SELECT tro.account_id, tro.value_zat AS value, t.mined_height AS mined_height
-                 FROM transparent_received_outputs tro
-                 JOIN transparent_received_output_spends tros
-                   ON tros.transparent_received_output_id = tro.id
-                 JOIN transactions t ON t.id_tx = tro.transaction_id
-                 WHERE tros.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT srn.account_id, srn.value, t.mined_height
-                 FROM sapling_received_notes srn
-                 JOIN sapling_received_note_spends srns
-                   ON srns.sapling_received_note_id = srn.id
-                 JOIN transactions t ON t.id_tx = srn.transaction_id
-                 WHERE srns.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT orn.account_id, orn.value, t.mined_height
-                 FROM orchard_received_notes orn
-                 JOIN orchard_received_note_spends orns
-                   ON orns.orchard_received_note_id = orn.id
-                 JOIN transactions t ON t.id_tx = orn.transaction_id
-                 WHERE orns.transaction_id = :creating_tx_id
-                 UNION ALL
-                 SELECT irn.account_id, irn.value, t.mined_height
-                 FROM ironwood_received_notes irn
-                 JOIN ironwood_received_note_spends irns
-                   ON irns.ironwood_received_note_id = irn.id
-                 JOIN transactions t ON t.id_tx = irn.transaction_id
-                 WHERE irns.transaction_id = :creating_tx_id
-             )
-             GROUP BY account_id
-         ) contribs ON contribs.account_id = a.id
-         ORDER BY contribs.total_value DESC, contribs.oldest_mined ASC, a.id ASC",
-    )?;
-
-    stmt.query_and_then(
-        named_params![":creating_tx_id": creating_tx_id],
-        |row| -> Result<(AccountUuid, Zatoshis), SqliteClientError> {
-            let account = AccountUuid(row.get(0)?);
-            let raw_value: i64 = row.get(1)?;
-            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-                SqliteClientError::CorruptedData(format!(
-                    "Invalid funding contribution value: {raw_value}"
-                ))
-            })?;
-            Ok((account, value))
-        },
-    )?
-    .collect()
-}
-
 fn to_unspent_transparent_output(
     conn: &rusqlite::Connection,
     row: &Row,
@@ -1191,7 +1216,7 @@ fn to_unspent_transparent_output(
     // `WalletTransparentOutput` records at most a single funding account; when
     // multiple wallet accounts contributed inputs to the creating transaction we
     // pick the largest contributor.
-    let funding_account = list_funding_accounts(conn, creating_tx_id)?
+    let funding_account = crate::wallet::attribution::list_funding_accounts(conn, creating_tx_id)?
         .into_iter()
         .next()
         .map(|(account, _)| account);
@@ -2043,6 +2068,14 @@ pub(crate) fn mark_transparent_utxo_spent(
 
     // Since we know that the output is spent, we no longer need to search for
     // it to find out if it has been spent.
+    //
+    // Both paths that record a received output — `observations::reconcile_output` and
+    // `zcash_client_backend`'s `put_received_transparent_output` — queue the outpoint for spend
+    // detection AFTER `put_transparent_output` returns, so an entry this deletes on their behalf
+    // is put back. That ordering is load-bearing. A spend known only by locator gives the
+    // spending transaction a row carrying no transaction data, and this queue is the only thing
+    // that goes on to ask for it; the data is what supplies the transaction's own outputs their
+    // funding account. Queueing before the output is stored would drop the request silently.
     let mut stmt_remove_spend_detection = conn.prepare_cached(
         "DELETE FROM transparent_spend_search_queue
          WHERE output_index = :prevout_idx
@@ -2164,7 +2197,15 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     output: &WalletTransparentOutput<AccountUuid>,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-    put_transparent_output(conn, params, gap_limits, output, observed_height, true)
+    put_transparent_output(
+        conn,
+        params,
+        gap_limits,
+        output,
+        observed_height,
+        true,
+        GapAdvance::Immediate,
+    )
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -2705,6 +2746,137 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     Ok(None)
 }
 
+/// Lowers the birthday of the given account to `height`, and queues the range this widens for
+/// scanning. Does nothing if the account's birthday is already at or below `height`.
+///
+/// Involvement mined below an account's birthday means the birthday is wrong: the account was
+/// active earlier than the wallet was told, and every height floor derived from the birthday —
+/// including the range over which the wallet requests transparent address history — sits too
+/// high. Lowering the birthday moves all of them at once, so the birthday is set to `height`
+/// itself.
+///
+/// The range queued for scanning is clamped to Sapling activation, because activity earlier than
+/// the recorded birthday implies the account may have history in every pool over the widened
+/// range, but no shielded pool exists below activation for it to have history in. Every other
+/// writer to the scan queue anchors there for the same reason. Within that range the work is
+/// queued at [`ScanPriority::Historic`], and a range already recorded as scanned is queued again,
+/// because it was scanned without this account among the keys in use. The same reasoning covers a
+/// range recorded as [`ScanPriority::Ignored`], which is why the queued range runs up through
+/// [`widened_range_end`] rather than stopping at the previous birthday: lowering leaves no
+/// `Ignored` range between the new birthday and the previous one.
+///
+/// The note commitment tree sizes stored alongside the birthday are the sizes as of the birthday
+/// height, and cannot be determined offline for a height the wallet has not scanned, so they are
+/// cleared. They inform the reporting of scan progress, which falls back to estimating from
+/// scanned block data when they are absent, and it is that data the queued rescan restores.
+pub(crate) fn lower_account_birthday<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    account_uuid: AccountUuid,
+    height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let current = conn
+        .query_row(
+            "SELECT birthday_height FROM accounts WHERE uuid = :uuid",
+            named_params! { ":uuid": account_uuid.expose_uuid() },
+            |row| row.get::<_, u32>(0).map(BlockHeight::from),
+        )
+        .optional()?;
+
+    let Some(current) = current.filter(|current| height < *current) else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "UPDATE accounts
+         SET birthday_height = :height,
+             birthday_sapling_tree_size = NULL,
+             birthday_orchard_tree_size = NULL
+         WHERE uuid = :uuid AND birthday_height > :height",
+        named_params! {
+            ":height": u32::from(height),
+            ":uuid": account_uuid.expose_uuid(),
+        },
+    )?;
+
+    // In regtest the Sapling activation height may be unset; the genesis block is then the floor.
+    let activation = params
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap_or_else(|| BlockHeight::from(0));
+    let queue_from = std::cmp::max(height, activation);
+
+    if queue_from < current {
+        let widened = queue_from..widened_range_end(conn, queue_from, current)?;
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &widened,
+            std::iter::once(ScanRange::from_parts(
+                widened.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// The exclusive upper bound of the range that lowering a birthday to `queue_from` must queue,
+/// given that the birthday previously sat at `previous`.
+///
+/// The bound is `previous`, extended over the [`ScanPriority::Ignored`] coverage that the range
+/// reaches, including an entry that begins at `previous` itself. An `Ignored` entry records blocks
+/// that the wallet skips because no account's keys reach them. Evidence that puts an account's
+/// birthday inside such an entry refutes that for the entry as a whole, so the entry is queued in
+/// full: were it queued only up to `previous`, the remainder would survive as `Ignored` coverage
+/// above the previous birthday, which [`suggest_scan_ranges`] never offers and which nothing
+/// afterwards revisits, because the birthday no longer sits above it.
+///
+/// [`suggest_scan_ranges`]: crate::wallet::scanning::suggest_scan_ranges
+fn widened_range_end(
+    conn: &rusqlite::Transaction<'_>,
+    queue_from: BlockHeight,
+    previous: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    let mut end = previous;
+
+    // Each round takes in the `Ignored` entries that the range now reaches; the bound rises
+    // strictly, and the queue is finite, so the loop terminates. A second round is reached only
+    // where `Ignored` entries lie adjacent to one another, which records one skipped region in
+    // more than one row.
+    while let Some(extended) = conn
+        .query_row(
+            "SELECT MAX(block_range_end) FROM scan_queue
+             WHERE priority = :ignored
+             AND block_range_start <= :end
+             AND block_range_end > :start",
+            named_params! {
+                ":ignored": priority_code(&ScanPriority::Ignored),
+                ":start": u32::from(queue_from),
+                ":end": u32::from(end),
+            },
+            |row| row.get::<_, Option<u32>>(0),
+        )?
+        .map(BlockHeight::from)
+        .filter(|extended| *extended > end)
+    {
+        end = extended;
+    }
+
+    Ok(end)
+}
+
+/// Whether recording a transparent output should also extend the gap of preallocated addresses
+/// for each key scope the containing transaction involves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GapAdvance {
+    /// Extend the gap as part of recording the output.
+    Immediate,
+    /// Leave the gap to the caller, which is already deriving successive gap windows and would
+    /// otherwise re-enter that process once per recognized output.
+    Deferred,
+}
+
 /// Add a transparent output relevant to this wallet to the database.
 ///
 /// `output_height` may be None if this is an ephemeral output from a
@@ -2717,6 +2889,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     output: &WalletTransparentOutput<AccountUuid>,
     observation_height: BlockHeight,
     known_unspent: bool,
+    gap_advance: GapAdvance,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let addr_str = output.recipient_address().encode(params);
 
@@ -2884,16 +3057,43 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
+
+        // Linking the spend establishes that a wallet account funded the spending transaction,
+        // which is what makes that transaction's own outputs the wallet's sends. It was stored
+        // before this output was recognized, so nothing could record them then, and nothing
+        // revisits a stored transaction on its own.
+        #[cfg(feature = "transparent-inputs")]
+        crate::wallet::attribution::attribute_funded_outputs(
+            conn,
+            params,
+            spending_transaction_id,
+        )?;
+    }
+
+    // The wallet was paid at this address when the transaction was mined, so it was active then.
+    // This covers recognition from either direction: a transaction stored or scanned against an
+    // address the wallet already held, and an address added afterwards that reconciliation
+    // matched against a transaction already stored.
+    if let Some(height) = output_height.map(BlockHeight::from) {
+        lower_account_birthday(conn, params, account_uuid, height)?;
     }
 
     #[cfg(feature = "transparent-inputs")]
-    update_gap_limits(
-        conn,
-        params,
-        gap_limits,
-        *output.outpoint().txid(),
-        output_height.map_or(observation_height, BlockHeight::from),
-    )?;
+    {
+        let involvement_height = output_height.map_or(observation_height, BlockHeight::from);
+        match gap_advance {
+            GapAdvance::Immediate => update_gap_limits(
+                conn,
+                params,
+                gap_limits,
+                *output.outpoint().txid(),
+                involvement_height,
+            )?,
+            GapAdvance::Deferred => {
+                mark_addresses_involved(conn, *output.outpoint().txid(), involvement_height)?;
+            }
+        }
+    }
 
     Ok((account_id, account_uuid, key_scope, utxo_id))
 }
@@ -3935,6 +4135,7 @@ mod tests {
                 let inserted = crate::wallet::import_standalone_transparent_pubkey(
                     &tx,
                     &network,
+                    &GapLimits::default(),
                     account_uuid,
                     pubkey,
                 )
@@ -3983,6 +4184,7 @@ mod tests {
                 let inserted = crate::wallet::import_standalone_transparent_pubkey(
                     &tx,
                     &network,
+                    &GapLimits::default(),
                     account_uuid,
                     pubkey,
                 )
@@ -3993,6 +4195,7 @@ mod tests {
                 let reinserted = crate::wallet::import_standalone_transparent_pubkey(
                     &tx,
                     &network,
+                    &GapLimits::default(),
                     account_uuid,
                     pubkey,
                 )
@@ -4033,8 +4236,13 @@ mod tests {
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
-        let result =
-            crate::wallet::import_standalone_transparent_pubkey(&tx, &network, unknown, pubkey);
+        let result = crate::wallet::import_standalone_transparent_pubkey(
+            &tx,
+            &network,
+            &GapLimits::default(),
+            unknown,
+            pubkey,
+        );
         assert!(matches!(
             result,
             Err(crate::error::SqliteClientError::AccountUnknown)
@@ -4076,6 +4284,7 @@ mod tests {
                 let inserted = crate::wallet::import_standalone_transparent_pubkeys(
                     &tx,
                     &network,
+                    &GapLimits::default(),
                     account_uuid,
                     &pubkeys,
                 )
@@ -4099,6 +4308,7 @@ mod tests {
                 let again = crate::wallet::import_standalone_transparent_pubkeys(
                     &tx,
                     &network,
+                    &GapLimits::default(),
                     account_uuid,
                     &pubkeys,
                 )
@@ -4126,8 +4336,13 @@ mod tests {
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xfe; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
-        let result =
-            crate::wallet::import_standalone_transparent_pubkeys(&tx, &network, unknown, &[pubkey]);
+        let result = crate::wallet::import_standalone_transparent_pubkeys(
+            &tx,
+            &network,
+            &GapLimits::default(),
+            unknown,
+            &[pubkey],
+        );
         assert!(matches!(
             result,
             Err(crate::error::SqliteClientError::AccountUnknown)
