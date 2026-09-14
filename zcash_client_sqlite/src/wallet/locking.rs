@@ -1183,6 +1183,14 @@ mod tests {
             )
         }
 
+        #[test]
+        fn consolidation_selection_honors_lock_tier_preference() {
+            pool::consolidation_selection_honors_lock_tier_preference::<SaplingPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
         proptest::proptest! {
             // Each case builds a fresh wallet and replays an operation sequence, so keep the
             // case count moderate; the sequences themselves explore the expiry boundaries.
@@ -1280,6 +1288,14 @@ mod tests {
         #[test]
         fn single_note_selection_honors_lock_tier_preference() {
             pool::single_note_selection_honors_lock_tier_preference::<OrchardPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
+        #[test]
+        fn consolidation_selection_honors_lock_tier_preference() {
+            pool::consolidation_selection_honors_lock_tier_preference::<OrchardPoolTester>(
                 TestDbFactory::default(),
                 BlockCache::new(),
             )

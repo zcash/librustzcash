@@ -62,6 +62,9 @@ pub enum ProposalError {
     /// * There provided transaction request is empty; i.e. the only output values specified
     ///   are change and fee amounts.
     ShieldingInvalid,
+    /// A shielded note appears more than once among the inputs of a step. Each note may be spent
+    /// at most once.
+    DuplicateShieldedInput,
     /// No anchor information could be obtained for the specified block height.
     AnchorNotFound(BlockHeight),
     /// A proposal step produces a shielded bundle — it spends shielded notes, pays to a shielded
@@ -198,6 +201,10 @@ impl Display for ProposalError {
             ProposalError::ShieldingInvalid => write!(
                 f,
                 "The proposal violates the rules for a shielding transaction."
+            ),
+            ProposalError::DuplicateShieldedInput => write!(
+                f,
+                "The proposal spends the same shielded note more than once."
             ),
             ProposalError::AnchorNotFound(h) => {
                 write!(f, "Unable to compute anchor for block height {h:?}")
@@ -443,8 +450,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
     /// Constructs a validated [`Proposal`] having only a single step from its constituent parts.
     ///
-    /// This operation validates the proposal for balance consistency and agreement between
-    /// the `is_shielding` flag and the structure of the proposal.
+    /// This operation validates the proposal for balance consistency, for agreement between
+    /// the `is_shielding` flag and the structure of the proposal, and for each shielded note
+    /// appearing at most once among the inputs.
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments to be
@@ -472,7 +480,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         confirmations_policy: ConfirmationsPolicy,
         is_shielding: bool,
         #[cfg(feature = "orchard")] ironwood_active: bool,
-    ) -> Result<Self, ProposalError> {
+    ) -> Result<Self, ProposalError>
+    where
+        NoteRef: Ord,
+    {
         Ok(Self {
             fee_rule,
             min_target_height,
@@ -735,8 +746,9 @@ pub(crate) fn produces_shielded_bundle(
 impl<NoteRef> Step<NoteRef> {
     /// Constructs a validated [`Step`] from its constituent parts.
     ///
-    /// This operation validates the proposal for balance consistency and agreement between
-    /// the `is_shielding` flag and the structure of the proposal.
+    /// This operation validates the proposal for balance consistency, for agreement between
+    /// the `is_shielding` flag and the structure of the proposal, and for each shielded note
+    /// appearing at most once among the inputs.
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments
@@ -773,7 +785,10 @@ impl<NoteRef> Step<NoteRef> {
         balance: TransactionBalance,
         is_shielding: bool,
         #[cfg(feature = "orchard")] ironwood_active: bool,
-    ) -> Result<Self, ProposalError> {
+    ) -> Result<Self, ProposalError>
+    where
+        NoteRef: Ord,
+    {
         // Verify that the set of payment pools matches exactly a set of valid payment recipients
         if transaction_request.payments().len() != payment_pools.len() {
             return Err(ProposalError::PaymentPoolsMismatch);
@@ -796,6 +811,15 @@ impl<NoteRef> Step<NoteRef> {
                 }
             } else {
                 return Err(ProposalError::PaymentPoolsMismatch);
+            }
+        }
+
+        // Each shielded note may be spent at most once. A repeated input would produce a
+        // transaction that consensus rejects for its repeated nullifier.
+        let mut seen_notes = BTreeSet::new();
+        for note in shielded_inputs.iter().flat_map(|s_in| s_in.notes().iter()) {
+            if !seen_notes.insert(note.internal_note_id()) {
+                return Err(ProposalError::DuplicateShieldedInput);
             }
         }
 
@@ -1819,6 +1843,54 @@ mod tests {
             ),
             Ok(step) if step.anchor_height().is_none()
         );
+    }
+
+    /// A step may spend each shielded note at most once: inputs that repeat a note reference are
+    /// rejected even when the step balances.
+    #[test]
+    fn proposal_construction_rejects_duplicate_shielded_inputs() {
+        let received = crate::wallet::ReceivedNote::from_parts(
+            7u32,
+            TxId::from_bytes([0; 32]),
+            0,
+            Note::Orchard {
+                note: orchard_note(10_000, NoteVersion::V2).unwrap(),
+                pool: ValuePool::Orchard,
+            },
+            zip32::Scope::External,
+            Position::from(0),
+            Some(BlockHeight::from_u32(100)),
+            None,
+        );
+        let step_spending = |notes: Vec<crate::wallet::ReceivedNote<u32, Note>>, change: u64| {
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                Some(ShieldedInputs::from_parts(
+                    NonEmpty::from_vec(notes).unwrap(),
+                )),
+                Some(BlockHeight::from_u32(100)),
+                vec![],
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, change)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+                false,
+            )
+        };
+
+        // Two spends of the 10_000 note against 16_000 change + 4_000 fee balance exactly, so the
+        // repeated note reference is the only ground for rejection.
+        assert_matches!(
+            step_spending(vec![received.clone(), received.clone()], 16_000),
+            Err(ProposalError::DuplicateShieldedInput)
+        );
+        // The same note spent once (6_000 change + 4_000 fee) is accepted.
+        assert_matches!(step_spending(vec![received], 6_000), Ok(_));
     }
 
     /// Proposal construction conserves value: the total output value of a step (payments +
