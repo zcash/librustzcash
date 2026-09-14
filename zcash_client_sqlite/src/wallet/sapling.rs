@@ -13,6 +13,7 @@ use zcash_client_backend::{
         ll::ReceivedSaplingOutput,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::ConsolidationBudget,
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
@@ -206,6 +207,58 @@ pub(crate) fn select_single_spendable_sapling_note<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         to_received_note,
         lock_filter,
+    )
+}
+
+/// Selects the fewest spendable Sapling notes covering `value`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_fewest_spendable_sapling_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
+    super::common::select_fewest_spendable_notes(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
+    )
+}
+
+/// Selects Sapling consolidation candidates within `budget`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_sapling_consolidation_candidates<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    budget: ConsolidationBudget,
+) -> Result<super::common::ConsolidationCandidateLists<sapling::Note>, SqliteClientError> {
+    super::common::select_consolidation_candidates(
+        conn,
+        params,
+        account,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
+        budget,
     )
 }
 
@@ -556,8 +609,53 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn send_with_multiple_change_outputs() {
-        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+    fn change_outside_the_most_recent_pool_is_not_split() {
+        testing::pool::change_outside_the_most_recent_pool_is_not_split::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn note_histogram_buckets_unspent_notes() {
+        testing::pool::note_histogram_buckets_unspent_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn note_histogram_counts_pending_until_expiry() {
+        testing::pool::note_histogram_counts_pending_until_expiry::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_uses_fewest_funding_notes() {
+        testing::pool::prefer_fewest_uses_fewest_funding_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_funding_is_uncapped() {
+        testing::pool::prefer_fewest_funding_is_uncapped::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_proposes_whenever_accumulate_would() {
+        testing::pool::prefer_fewest_proposes_whenever_accumulate_would::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_refreshes_funding_after_fee_growth() {
+        testing::pool::prefer_fewest_refreshes_funding_after_fee_growth::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fewest_selection_skips_unconfirmed_and_excluded_notes() {
+        testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn consolidation_candidates_are_grouped_by_slot_cost() {
+        testing::pool::consolidation_candidates_are_grouped_by_slot_cost::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn prefer_fewest_does_not_grow_sapling_spends() {
+        testing::pool::prefer_fewest_does_not_grow_sapling_spends()
     }
 
     #[test]

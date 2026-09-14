@@ -10,7 +10,58 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::note_management`: `ValueLadder`, `NoteHistogram`,
+  `TargetDistribution`, `SplitPlan`, `SplitPieces`, `BundleShape`,
+  `ConsolidationBudget`, `BucketCaps`, `SweepCaps`, `ConsolidationPlan`,
+  `NoteManagementPolicy`, `Unmanaged`, `SingleOutputPolicy`, `LadderPolicy`,
+  `NoteManagementError`, and `most_recent_shielded_pool`.
+- `zcash_client_backend::note_management::testing` (under the `test-dependencies`
+  feature): `arb_value_ladder`, `arb_target_distribution`, `arb_note_histogram`,
+  and `max_arb_value`.
+- `zcash_client_backend::data_api::InputSource::get_note_histogram`, with a
+  default implementation.
+- `zcash_client_backend::data_api::InputSource::select_fewest_spendable_notes`,
+  with a default implementation.
+- `zcash_client_backend::data_api::ConsolidationCandidates` and
+  `InputSource::select_consolidation_candidates`, with a default implementation
+  returning no candidates.
+
 ### Changed
+- `zcash_client_backend::data_api::wallet::input_selection::NoteSelection` has a
+  new `PreferFewest` variant. Exhaustive matches must add an arm for it.
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` now splits
+  change only when the change is returned to the most recent shielded pool at
+  the target height (Ironwood once NU6.3 is active, Orchard before that).
+  Change returned to any other pool is a single output.
+- `zcash_client_backend::fees::ChangeStrategy` no longer has the `MetaSource` and
+  `AccountMetaT` associated types or the `fetch_wallet_meta` method.
+  `compute_balance` takes a `&note_management::SplitPlan` in place of the
+  wallet metadata argument.
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`,
+  `fees::standard::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}` and
+  `fees::fixed::SingleOutputChangeStrategy` no longer take a metadata-source
+  type parameter. `MultiOutputChangeStrategy::new` no longer takes a
+  `SplitPolicy`; the split is supplied per transaction by the note-management
+  policy.
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy` splits change
+  into the pieces the policy asks for, with the residual added to the largest
+  piece, rather than into equal pieces.
+- `zcash_client_backend::data_api::wallet::{propose_transfer, propose_shielding,
+  shield_transparent_funds}`, `input_selection::InputSelector::propose_transaction`
+  and `input_selection::ShieldingSelector::propose_shielding` take a
+  `&impl note_management::NoteManagementPolicy` after the change strategy. Pass
+  `note_management::SingleOutputPolicy` to keep single-output change; callers
+  that used a `SplitPolicy` construct `note_management::LadderPolicy::new(
+  TargetDistribution::single_bucket(min_value, target_count), max_actions)`.
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `input_selection::GreedyInputSelector` may now spend additional small notes
+  under any `NoteSelection` when the note-management policy admits a sweep:
+  `SingleOutputPolicy` sweeps, `Unmanaged` does not.
+- `zcash_client_backend::proposal::Step::from_parts` (and therefore
+  `Proposal::single_step`) now returns `ProposalError::ChainDoubleSpend` when a
+  step spends the same transparent output or shielded note more than once;
+  previously only `Proposal::multi_step` performed this check.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
@@ -30,6 +81,9 @@ workspace.
     discarded.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
+
+### Removed
+- `zcash_client_backend::fees::{MetaSource, SplitPolicy}`.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the

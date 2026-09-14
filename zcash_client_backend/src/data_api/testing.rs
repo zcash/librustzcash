@@ -117,6 +117,7 @@ use crate::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
+    note_management::{NoteManagementPolicy, Unmanaged},
     proposal::Proposal,
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
@@ -1132,7 +1133,7 @@ where
         super::wallet::TransferErrT<
             DbT,
             GreedyInputSelector<DbT>,
-            standard::MultiOutputChangeStrategy<DbT>,
+            standard::MultiOutputChangeStrategy,
         >,
     > {
         let input_selector = GreedyInputSelector::new();
@@ -1171,7 +1172,7 @@ where
     ) -> Result<NonEmpty<TxId>, super::wallet::TransferErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: InputSelector<InputSource = DbT>,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
         let network = self.network().clone();
 
@@ -1187,6 +1188,7 @@ where
             account.id(),
             input_selector,
             change_strategy,
+            &Unmanaged,
             request,
             confirmations_policy,
             &SpendPolicy::default(),
@@ -1206,7 +1208,8 @@ where
         )
     }
 
-    /// Invokes [`propose_transfer`] with the given arguments.
+    /// Invokes [`propose_transfer`] with the given arguments, under the
+    /// [`Unmanaged`] note-management policy.
     #[allow(clippy::type_complexity)]
     pub fn propose_transfer<InputsT, ChangeT>(
         &mut self,
@@ -1221,25 +1224,52 @@ where
     >
     where
         InputsT: InputSelector<InputSource = DbT>,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
-        let network = self.network().clone();
-        propose_transfer::<_, _, _, _, Infallible>(
-            self.wallet_mut(),
-            &network,
+        self.propose_transfer_with_note_management(
             spend_from_account,
             input_selector,
             change_strategy,
+            &Unmanaged,
             request,
             confirmations_policy,
-            &SpendPolicy::default(),
-            None,
-            None,
         )
     }
 
     /// Invokes [`propose_transfer`] with the given arguments and an explicit
-    /// [`SpendPolicy`].
+    /// note-management policy.
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_transfer_with_note_management<InputsT, ChangeT, NoteT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        input_selector: &InputsT,
+        change_strategy: &ChangeT,
+        note_management: &NoteT,
+        request: zip321::TransactionRequest,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<
+        Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
+    >
+    where
+        InputsT: InputSelector<InputSource = DbT>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
+    {
+        self.propose_transfer_with_policy_and_note_management(
+            spend_from_account,
+            input_selector,
+            change_strategy,
+            note_management,
+            request,
+            confirmations_policy,
+            &SpendPolicy::default(),
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments and an explicit
+    /// [`SpendPolicy`], under the [`Unmanaged`] note-management policy.
     ///
     /// Unlike [`Self::propose_transfer`], which always uses the default spend
     /// policy (every shielded pool, no transparent), this allows tests to opt in
@@ -1260,15 +1290,49 @@ where
     >
     where
         InputsT: InputSelector<InputSource = DbT>,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
+    {
+        self.propose_transfer_with_policy_and_note_management(
+            spend_from_account,
+            input_selector,
+            change_strategy,
+            &Unmanaged,
+            request,
+            confirmations_policy,
+            spend_policy,
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments, an explicit
+    /// [`SpendPolicy`] and an explicit note-management policy.
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_transfer_with_policy_and_note_management<InputsT, ChangeT, NoteT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        input_selector: &InputsT,
+        change_strategy: &ChangeT,
+        note_management: &NoteT,
+        request: zip321::TransactionRequest,
+        confirmations_policy: ConfirmationsPolicy,
+        spend_policy: &SpendPolicy,
+    ) -> Result<
+        Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
+    >
+    where
+        InputsT: InputSelector<InputSource = DbT>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
     {
         let network = self.network().clone();
-        propose_transfer::<_, _, _, _, Infallible>(
+        propose_transfer::<_, _, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
             spend_from_account,
             input_selector,
             change_strategy,
+            note_management,
             request,
             confirmations_policy,
             spend_policy,
@@ -1329,7 +1393,7 @@ where
             DbT,
             CommitmentTreeErrT,
             GreedyInputSelector<DbT>,
-            SingleOutputChangeStrategy<DbT>,
+            SingleOutputChangeStrategy,
         >,
     > {
         let network = self.network().clone();
@@ -1377,14 +1441,15 @@ where
     >
     where
         InputsT: ShieldingSelector<InputSource = DbT>,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
         let network = self.network().clone();
-        propose_shielding::<_, _, _, _, Infallible>(
+        propose_shielding::<_, _, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
             input_selector,
             change_strategy,
+            &Unmanaged,
             shielding_threshold,
             from_addrs,
             to_account,
@@ -1530,7 +1595,7 @@ where
     ) -> Result<NonEmpty<TxId>, super::wallet::ShieldErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: ShieldingSelector<InputSource = DbT>,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
         let network = self.network().clone();
         shield_transparent_funds(
@@ -1540,6 +1605,7 @@ where
             &MockOutputProver,
             input_selector,
             change_strategy,
+            &Unmanaged,
             shielding_threshold,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             from_addrs,
@@ -1678,11 +1744,11 @@ impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
     //    }
 }
 
-pub fn single_output_change_strategy<DbT: InputSource>(
+pub fn single_output_change_strategy(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
     fallback_change_pool: ShieldedPool,
-) -> standard::SingleOutputChangeStrategy<DbT> {
+) -> standard::SingleOutputChangeStrategy {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
     standard::SingleOutputChangeStrategy::new(
         fee_rule,

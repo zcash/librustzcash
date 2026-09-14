@@ -177,8 +177,155 @@ pub(crate) fn spend_everything_multi_step_single_note_proposed_transfer<T: Shiel
     )
 }
 
+#[cfg(feature = "orchard")]
 pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::change_outside_the_most_recent_pool_is_not_split::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn note_histogram_buckets_unspent_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_histogram_buckets_unspent_notes::<T, _, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn note_histogram_counts_pending_until_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_histogram_counts_pending_until_expiry::<
+        T,
+        _,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn prefer_fewest_uses_fewest_funding_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_uses_fewest_funding_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_proposes_whenever_accumulate_would<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_proposes_whenever_accumulate_would::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn prefer_fewest_funding_is_uncapped<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_funding_is_uncapped::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_refreshes_funding_after_fee_growth<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_refreshes_funding_after_fee_growth::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn consolidation_candidates_are_grouped_by_slot_cost<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::consolidation_candidates_are_grouped_by_slot_cost::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fewest_selection_skips_unconfirmed_and_excluded_notes::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_fills_existing_orchard_actions() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_fills_existing_orchard_actions(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_never_enlarges_under_a_single_output_strategy() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_never_enlarges_under_a_single_output_strategy(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_fewest_prefers_the_free_regime_on_a_tie() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_prefers_the_free_regime_on_a_tie(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_target_excludes_notes_at_the_rung() {
+    zcash_client_backend::data_api::testing::pool::ladder_target_excludes_notes_at_the_rung(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn accumulate_funding_also_sweeps_free_slots() {
+    zcash_client_backend::data_api::testing::pool::accumulate_funding_also_sweeps_free_slots(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn unmanaged_policy_never_sweeps() {
+    zcash_client_backend::data_api::testing::pool::unmanaged_policy_never_sweeps(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_policy_splits_change_into_deficit_rungs() {
+    zcash_client_backend::data_api::testing::pool::ladder_policy_splits_change_into_deficit_rungs(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn single_bucket_target_matches_split_policy_counts() {
+    zcash_client_backend::data_api::testing::pool::single_bucket_target_matches_split_policy_counts(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn ladder_policy_sweeps_only_surplus() {
+    zcash_client_backend::data_api::testing::pool::ladder_policy_sweeps_only_surplus(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn pending_change_counts_toward_the_target() {
+    zcash_client_backend::data_api::testing::pool::pending_change_counts_toward_the_target(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_fewest_does_not_grow_sapling_spends() {
+    zcash_client_backend::data_api::testing::pool::prefer_fewest_does_not_grow_sapling_spends(
         TestDbFactory::default(),
         BlockCache::new(),
     )

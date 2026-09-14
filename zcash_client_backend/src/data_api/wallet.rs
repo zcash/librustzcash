@@ -55,6 +55,7 @@ use crate::{
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
+    note_management::{NoteManagementPolicy, SingleOutputPolicy},
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
@@ -740,6 +741,15 @@ impl ConfirmationsPolicy {
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
 ///
+/// `note_management` governs the distribution of note values the account maintains: it decides
+/// how each transaction's change is split, and which small notes the transaction sweeps in
+/// beside the inputs that fund it. Pass [`SingleOutputPolicy`] for a single change output and a
+/// sweep confined to spend sides the transaction already pays for, or [`Unmanaged`] to leave the
+/// account's note distribution alone. A splitting policy takes effect only under a change
+/// strategy that splits, and only for change returned to the most recent shielded pool.
+///
+/// [`Unmanaged`]: crate::note_management::Unmanaged
+///
 /// When `lock_inputs` is `Some(request)`, every input selected by the returned proposal is
 /// locked via [`OutputLockStore::lock_outputs`] on behalf of the request's [`LockOwner`], with an
 /// expiry height of `target_height + request.for_blocks()`, so that the inputs are excluded from
@@ -775,12 +785,13 @@ impl ConfirmationsPolicy {
 /// [zcash/librustzcash#2161]: https://github.com/zcash/librustzcash/issues/2161
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
+pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, NoteT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_from_account: <DbT as InputSource>::AccountId,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
+    note_management: &NoteT,
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
     spend_policy: &input_selection::SpendPolicy,
@@ -795,7 +806,8 @@ where
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
+    NoteT: NoteManagementPolicy,
 {
     // Using the trusted confirmations results in an anchor_height that will
     // include the maximum number of notes being selected, and we can filter
@@ -896,6 +908,7 @@ where
             spend_from_account,
             request.clone(),
             change_strategy,
+            note_management,
             &orchard_only,
             proposed_version,
         )
@@ -939,6 +952,7 @@ where
             spend_from_account,
             request,
             change_strategy,
+            note_management,
             spend_policy,
             proposed_version,
         )?,
@@ -1050,7 +1064,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
         DbT,
         CommitmentTreeErrT,
         GreedyInputSelector<DbT>,
-        SingleOutputChangeStrategy<DbT>,
+        SingleOutputChangeStrategy,
     >,
 >
 where
@@ -1076,7 +1090,7 @@ where
     );
 
     let input_selector = GreedyInputSelector::<DbT>::new();
-    let change_strategy = SingleOutputChangeStrategy::<DbT>::new(
+    let change_strategy = SingleOutputChangeStrategy::new(
         fee_rule,
         change_memo,
         fallback_change_pool,
@@ -1089,6 +1103,8 @@ where
         spend_from_account,
         &input_selector,
         &change_strategy,
+        // Change is a single output.
+        &SingleOutputPolicy,
         request,
         confirmations_policy,
         &input_selection::SpendPolicy::default(),
@@ -1206,6 +1222,8 @@ where
 /// The `output_filter` parameter controls which transparent outputs are eligible for
 /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
 ///
+/// `note_management` governs how the shielded output value is split; see [`propose_transfer`].
+///
 /// When `lock_inputs` is `Some(request)`, the inputs selected by the proposal are locked on
 /// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
 /// concurrent proposals from selecting them; when `None`, no locking is performed. See
@@ -1213,11 +1231,12 @@ where
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
+pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, NoteT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
+    note_management: &NoteT,
     shielding_threshold: Zatoshis,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
@@ -1232,7 +1251,8 @@ where
     ParamsT: consensus::Parameters,
     DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
+    NoteT: NoteManagementPolicy,
 {
     let (target_height, anchor_height) = wallet_db
         .get_target_and_anchor_heights(confirmations_policy.trusted)
@@ -1244,6 +1264,7 @@ where
             params,
             wallet_db,
             change_strategy,
+            note_management,
             shielding_threshold,
             from_addrs,
             to_account,
@@ -3999,6 +4020,8 @@ where
 ///   transaction.
 /// * `input_selector`: The [`InputSelector`] to for note selection and change and fee
 ///   determination
+/// * `note_management`: The note-management policy governing how the shielded output value
+///   is split; see [`propose_transfer`].
 /// * `usk`: The unified spending key that will be used to detect and spend transparent UTXOs,
 ///   and that will provide the shielded address to which funds will be sent. Funds will be
 ///   shielded to the internal (change) address associated with the most preferred shielded
@@ -4018,13 +4041,14 @@ where
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
+pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT, NoteT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
+    note_management: &NoteT,
     shielding_threshold: Zatoshis,
     spending_keys: &SpendingKeys,
     from_addrs: &[TransparentAddress],
@@ -4035,13 +4059,15 @@ where
     ParamsT: consensus::Parameters,
     DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
+    NoteT: NoteManagementPolicy,
 {
     let proposal = propose_shielding(
         wallet_db,
         params,
         input_selector,
         change_strategy,
+        note_management,
         shielding_threshold,
         from_addrs,
         to_account,

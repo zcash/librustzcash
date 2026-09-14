@@ -13,6 +13,14 @@ workspace.
 ### Added
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::get_note_histogram`.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::select_fewest_spendable_notes`,
+  selecting notes largest first within the preferred lock tier.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::select_consolidation_candidates`,
+  drawing the smallest notes from the preferred lock tier.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
@@ -22,6 +30,10 @@ workspace.
   [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+
+### Changed
+- `WalletDb::from_connection` (and therefore `for_path`) now sets the
+  connection's prepared-statement cache capacity to 256.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration

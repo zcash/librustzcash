@@ -1,5 +1,4 @@
 use core::cmp::{Ordering, max, min};
-use std::num::{NonZeroU64, NonZeroUsize};
 
 #[cfg(feature = "orchard")]
 use zcash_primitives::transaction::builder::BundlePadding;
@@ -17,11 +16,14 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::{AccountMeta, wallet::TargetHeight};
+use crate::{
+    data_api::wallet::TargetHeight,
+    note_management::{SINGLE_CHANGE_OUTPUT, SplitPieces, SplitPlan, most_recent_shielded_pool},
+};
 
 use super::{
     ChangeError, ChangeValue, DummyOutputCounts, DustAction, DustOutputPolicy, EphemeralBalance,
-    SplitPolicy, TransactionBalance, sapling as sapling_fees,
+    TransactionBalance, sapling as sapling_fees,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -275,7 +277,6 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     fee_rule: &'a F,
     dust_output_policy: &'a DustOutputPolicy,
     default_dust_threshold: Zatoshis,
-    split_policy: &'a SplitPolicy,
     fallback_change_pool: ShieldedPool,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
@@ -290,7 +291,6 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
         fee_rule: &'a F,
         dust_output_policy: &'a DustOutputPolicy,
         default_dust_threshold: Zatoshis,
-        split_policy: &'a SplitPolicy,
         fallback_change_pool: ShieldedPool,
         #[cfg(feature = "transparent-inputs")] transparent_change_policy: TransparentChangePolicy,
         marginal_fee: Zatoshis,
@@ -301,7 +301,6 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
             fee_rule,
             dust_output_policy,
             default_dust_threshold,
-            split_policy,
             fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy,
@@ -311,10 +310,30 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
     }
 }
 
+/// The longest prefix of `pieces` whose total does not exceed `budget`.
+///
+/// A prefix drops the smallest pieces first. Each such piece frees the least budget, so more
+/// pieces are dropped than a best-subset search would drop: the choice errs toward the wallet
+/// holding fewer notes.
+fn affordable_prefix(pieces: &SplitPieces, budget: Zatoshis) -> Vec<Zatoshis> {
+    let mut remaining = budget;
+    let mut prefix = Vec::new();
+    for piece in pieces.iter() {
+        match remaining - piece {
+            Some(rest) => {
+                remaining = rest;
+                prefix.push(piece);
+            }
+            None => break,
+        }
+    }
+    prefix
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
-    wallet_meta: Option<&AccountMeta>,
+    split_plan: &SplitPlan,
     target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
@@ -551,26 +570,32 @@ where
         (total_in - total_out_with_min_fee).unwrap_or(Zatoshis::ZERO),
     );
 
+    // Change is split only in the most recent shielded pool; a distribution is maintained
+    // nowhere else, and an older pool is drained by migration rather than refilled by splits.
+    // This NU6.3 lookup is deliberately distinct from the turnstile flag given to
+    // `select_change_pool`: when a pool newer than Ironwood arrives, the most recent pool
+    // advances while the turnstile stays anchored to NU6.3.
+    let splitting_permitted = change_pool == most_recent_shielded_pool(cfg.params, target_height);
+
     let (target_change_count, target_change_counts) = if wants_transparent_change {
         // Transparent change is always emitted as a single output; the note-splitting policy
         // exists to improve the spendability of shielded notes and does not apply to
         // transparent outputs.
         (
-            1,
+            SINGLE_CHANGE_OUTPUT,
             OutputManifest {
-                transparent: 1,
+                transparent: SINGLE_CHANGE_OUTPUT,
                 sapling: 0,
                 orchard: 0,
                 ironwood: 0,
             },
         )
     } else {
-        let target_change_count = wallet_meta.map_or(1, |m| {
-            usize::from(cfg.split_policy.target_output_count)
-                // If we cannot determine a total note count, fall back to a single output
-                .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
-                .max(1)
-        });
+        let target_change_count = if splitting_permitted {
+            split_plan.max_outputs().get()
+        } else {
+            SINGLE_CHANGE_OUTPUT
+        };
         let target_change_counts = OutputManifest {
             transparent: 0,
             sapling: if change_pool == ShieldedPool::Sapling {
@@ -671,24 +696,25 @@ where
 
             let total_out_with_max_fee = (subtotal_out + max_fee).ok_or_else(overflow)?;
 
-            // We obtain a split count based on the total number of notes of sufficient size
-            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
-            // available, we fall back to generating a single change output. Transparent change is
-            // always emitted as a single output.
-            let split_count = if wants_transparent_change {
-                1
-            } else {
-                usize::from(wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
-                    cfg.split_policy.split_count(
-                        wm.total_note_count(),
-                        wm.total_value(),
-                        // We use a saturating subtraction here because there may be insufficient funds to pay
-                        // the fee, *if* the requested number of split outputs are created. If there is no
-                        // proposed change, the split policy should recommend only a single change output.
+            // The longest prefix of the plan the change can afford at the maximum fee. This
+            // assumes `FeeRule::fee_required` is monotone in the number of outputs, as every fee
+            // rule in this workspace is: dropping pieces cannot raise the fee, so the prefix stays
+            // affordable once the fee is recomputed below. A non-monotone rule cannot yield an
+            // unbalanced transaction; the recomputed fee exceeds `max_fee`, so the residual below
+            // underflows and the strategy returns `BalanceError::Underflow`.
+            let affordable: Vec<Zatoshis> = match split_plan {
+                SplitPlan::SingleOutput => Vec::new(),
+                SplitPlan::Pieces(pieces) if !wants_transparent_change && splitting_permitted => {
+                    affordable_prefix(
+                        pieces,
+                        // Saturating: there may be insufficient funds to pay the fee if every
+                        // requested piece is created, in which case no piece is affordable.
                         (total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
                     )
-                }))
+                }
+                SplitPlan::Pieces(_) => Vec::new(),
             };
+            let split_count = affordable.len().max(SINGLE_CHANGE_OUTPUT);
 
             // If we don't have as many change outputs as we expected, recompute the fee.
             let total_fee = if split_count < target_change_count {
@@ -723,9 +749,22 @@ where
                     required: total_out,
                 })?;
 
-            let per_output_change = total_change.div_with_remainder(
-                NonZeroU64::new(u64::try_from(split_count).expect("usize fits into u64")).unwrap(),
-            );
+            // The value of each change output. A plan of at most one affordable piece is a single
+            // output carrying the whole change; otherwise each piece takes its own value and the
+            // largest piece takes the residual.
+            let change_values: Vec<Zatoshis> = if affordable.len() <= 1 {
+                vec![total_change]
+            } else {
+                let pieces_total = affordable
+                    .iter()
+                    .try_fold(Zatoshis::ZERO, |acc, piece| acc + *piece)
+                    .ok_or_else(overflow)?;
+                let residual = (total_change - pieces_total).ok_or_else(underflow)?;
+                let mut values = affordable;
+                values[0] = (values[0] + residual).ok_or_else(overflow)?;
+                values
+            };
+
             let simple_case = || {
                 #[cfg(feature = "transparent-inputs")]
                 if wants_transparent_change {
@@ -744,21 +783,10 @@ where
                 }
 
                 (
-                    (0usize..split_count)
-                        .map(|i| {
-                            ChangeValue::shielded(
-                                change_pool,
-                                if i == 0 {
-                                    // Add any remainder to the first output only
-                                    (*per_output_change.quotient() + *per_output_change.remainder())
-                                        .unwrap()
-                                } else {
-                                    // For any other output, the change value will just be the
-                                    // quotient.
-                                    *per_output_change.quotient()
-                                },
-                                change_memo.cloned(),
-                            )
+                    change_values
+                        .iter()
+                        .map(|value| {
+                            ChangeValue::shielded(change_pool, *value, change_memo.cloned())
                         })
                         .collect(),
                     total_fee,

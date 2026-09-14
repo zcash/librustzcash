@@ -62,6 +62,7 @@
 pub mod data_api;
 mod decrypt;
 pub mod fees;
+pub mod note_management;
 pub mod proposal;
 pub mod proto;
 pub mod scan;

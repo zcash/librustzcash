@@ -368,7 +368,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// This operation validates the proposal for agreement between outputs and inputs
     /// in the case of multi-step proposals, and ensures that no double-spends are being
-    /// proposed.
+    /// proposed: it returns [`ProposalError::StepDoubleSpend`] when two steps spend the same
+    /// prior-step output, and [`ProposalError::ChainDoubleSpend`] when two steps spend the same
+    /// on-chain output.
     ///
     /// Parameters:
     /// * `fee_rule`: The fee rule observed by the proposed transaction.
@@ -409,23 +411,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                 }
             }
 
-            for t_out in step.transparent_inputs() {
-                let output_ref = OutputRef::new(
-                    TxId::from_bytes(*t_out.outpoint().hash()),
-                    PoolType::TRANSPARENT,
-                    t_out.outpoint().n(),
-                );
-                if !consumed_chain_inputs.insert(output_ref) {
-                    return Err(ProposalError::ChainDoubleSpend(output_ref));
-                }
-            }
-
-            for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
-                let output_ref = OutputRef::new(
-                    *s_out.txid(),
-                    PoolType::Shielded(s_out.note().pool()),
-                    s_out.output_index().into(),
-                );
+            for output_ref in step.chain_inputs() {
                 if !consumed_chain_inputs.insert(output_ref) {
                     return Err(ProposalError::ChainDoubleSpend(output_ref));
                 }
@@ -443,8 +429,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
     /// Constructs a validated [`Proposal`] having only a single step from its constituent parts.
     ///
-    /// This operation validates the proposal for balance consistency and agreement between
-    /// the `is_shielding` flag and the structure of the proposal.
+    /// This operation validates the proposal for balance consistency and for agreement between
+    /// the `is_shielding` flag and the structure of the proposal, and rejects with
+    /// [`ProposalError::ChainDoubleSpend`] a step that spends any transparent output or shielded
+    /// note more than once.
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments to be
@@ -732,11 +720,41 @@ pub(crate) fn produces_shielded_bundle(
             .any(|change| matches!(change.output_pool(), PoolType::Shielded(_)))
 }
 
+/// Returns an [`OutputRef`] for each on-chain output that the given step inputs spend: first the
+/// transparent outputs, then the shielded notes, each in input order.
+fn chain_input_refs<'a, NoteRef: 'a>(
+    transparent_inputs: &'a [WalletTransparentOutput<()>],
+    shielded_inputs: Option<&'a ShieldedInputs<NoteRef>>,
+) -> impl Iterator<Item = OutputRef> + 'a {
+    let transparent = transparent_inputs.iter().map(|t_out| {
+        OutputRef::new(
+            TxId::from_bytes(*t_out.outpoint().hash()),
+            PoolType::TRANSPARENT,
+            t_out.outpoint().n(),
+        )
+    });
+
+    let shielded = shielded_inputs
+        .into_iter()
+        .flat_map(|s_in| s_in.notes().iter())
+        .map(|s_out| {
+            OutputRef::new(
+                *s_out.txid(),
+                PoolType::Shielded(s_out.note().pool()),
+                s_out.output_index().into(),
+            )
+        });
+
+    transparent.chain(shielded)
+}
+
 impl<NoteRef> Step<NoteRef> {
     /// Constructs a validated [`Step`] from its constituent parts.
     ///
-    /// This operation validates the proposal for balance consistency and agreement between
-    /// the `is_shielding` flag and the structure of the proposal.
+    /// This operation validates the step for balance consistency and for agreement between
+    /// the `is_shielding` flag and its structure, and rejects with
+    /// [`ProposalError::ChainDoubleSpend`] a step that spends any transparent output or shielded
+    /// note more than once.
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments
@@ -796,6 +814,16 @@ impl<NoteRef> Step<NoteRef> {
                 }
             } else {
                 return Err(ProposalError::PaymentPoolsMismatch);
+            }
+        }
+
+        // A step may spend each chain output at most once. A repeated transparent input makes a
+        // transaction that consensus rejects, and a repeated shielded note makes one that
+        // consensus rejects for its repeated nullifier.
+        let mut consumed_chain_inputs = BTreeSet::new();
+        for output_ref in chain_input_refs(&transparent_inputs, shielded_inputs.as_ref()) {
+            if !consumed_chain_inputs.insert(output_ref) {
+                return Err(ProposalError::ChainDoubleSpend(output_ref));
             }
         }
 
@@ -948,6 +976,10 @@ impl<NoteRef> Step<NoteRef> {
     /// Returns the shielded inputs that have been selected to fund the transaction.
     pub fn shielded_inputs(&self) -> Option<&ShieldedInputs<NoteRef>> {
         self.shielded_inputs.as_ref()
+    }
+    /// Returns this step's chain inputs; see [`chain_input_refs`].
+    fn chain_inputs(&self) -> impl Iterator<Item = OutputRef> + '_ {
+        chain_input_refs(&self.transparent_inputs, self.shielded_inputs.as_ref())
     }
     /// Returns the anchor height that binds every shielded-tree lookup performed while building
     /// this step's transaction, or `None` for a purely transparent step that performs no such
@@ -1485,6 +1517,10 @@ mod tests {
 
     use incrementalmerkletree::Position;
     use nonempty::NonEmpty;
+    use transparent::{
+        address::TransparentAddress,
+        bundle::{OutPoint, TxOut},
+    };
     use zcash_address::ZcashAddress;
     use zcash_primitives::transaction::{
         TxId,
@@ -1498,7 +1534,7 @@ mod tests {
             wallet::{ConfirmationsPolicy, TargetHeight},
         },
         fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
-        wallet::Note,
+        wallet::{Note, OutputRef, ReceivedNote, WalletTransparentOutput},
     };
     use zcash_protocol::{
         PoolType, ShieldedPool,
@@ -1536,16 +1572,19 @@ mod tests {
         ))
     }
 
-    // Wraps a list of notes as the shielded inputs of a step.
-    fn shielded_inputs_for(notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
+    // Wraps a list of notes as the shielded inputs of a step, spending each note at the given
+    // output index of a single fixed transaction. The txid, the output index, and the note's pool
+    // are what identify the chain output a note spends, so two notes given the same index and pool
+    // spend the same output.
+    fn shielded_inputs_at_indices(notes: Vec<(u16, Note)>) -> Option<ShieldedInputs<u32>> {
         let received = notes
             .into_iter()
             .enumerate()
-            .map(|(i, note)| {
-                crate::wallet::ReceivedNote::from_parts(
+            .map(|(i, (output_index, note))| {
+                ReceivedNote::from_parts(
                     i as u32,
                     TxId::from_bytes([0; 32]),
-                    i as u16,
+                    output_index,
                     note,
                     zip32::Scope::External,
                     Position::from(i as u64),
@@ -1555,6 +1594,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
         NonEmpty::from_vec(received).map(ShieldedInputs::from_parts)
+    }
+
+    // Wraps a list of notes as the shielded inputs of a step, each note spending a distinct chain
+    // output.
+    fn shielded_inputs_for(notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
+        shielded_inputs_at_indices(
+            notes
+                .into_iter()
+                .enumerate()
+                .map(|(i, note)| (i as u16, note))
+                .collect(),
+        )
     }
 
     // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
@@ -1579,9 +1630,10 @@ mod tests {
         }
     }
 
-    // Constructs a validated step spending the given notes, with no payments.
-    fn validated_step(
-        notes: Vec<Note>,
+    // Constructs a validated step spending the given inputs, with no payments.
+    fn validated_step_spending(
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
+        shielded_inputs: Option<ShieldedInputs<u32>>,
         balance: TransactionBalance,
         ironwood_active: bool,
     ) -> Result<Step<u32>, ProposalError> {
@@ -1589,14 +1641,23 @@ mod tests {
             &[],
             TransactionRequest::empty(),
             BTreeMap::new(),
-            vec![],
-            shielded_inputs_for(notes),
+            transparent_inputs,
+            shielded_inputs,
             Some(BlockHeight::from_u32(100)),
             vec![],
             balance,
             false,
             ironwood_active,
         )
+    }
+
+    // Constructs a validated step spending the given notes, with no payments.
+    fn validated_step(
+        notes: Vec<Note>,
+        balance: TransactionBalance,
+        ironwood_active: bool,
+    ) -> Result<Step<u32>, ProposalError> {
+        validated_step_spending(vec![], shielded_inputs_for(notes), balance, ironwood_active)
     }
 
     /// The canonical crossing fee under the mainnet parameters these tests use.
@@ -1818,6 +1879,93 @@ mod tests {
                 false,
             ),
             Ok(step) if step.anchor_height().is_none()
+        );
+    }
+
+    /// A step may spend each chain output at most once, whether transparent or shielded. Inputs
+    /// that name the same output twice are rejected even when the step balances. Two notes of
+    /// identical content at distinct output indices are distinct outputs, and are accepted.
+    #[test]
+    fn step_construction_rejects_a_repeated_chain_input() {
+        // Each input is worth 10_000, so a step spending two of them balances exactly against
+        // 16_000 of change and a 4_000 fee. The repeated input is then the only ground for
+        // rejection.
+        const INPUT_VALUE: u64 = 10_000;
+        const CHANGE_VALUE: u64 = 16_000;
+        const FEE: Zatoshis = Zatoshis::const_from_u64(4_000);
+        let balance = || {
+            TransactionBalance::new(
+                vec![shielded_change(ShieldedPool::Orchard, CHANGE_VALUE)],
+                FEE,
+            )
+            .expect("the change and fee are well within MAX_MONEY")
+        };
+
+        // `shielded_inputs_at_indices` places every note in one fixed transaction, so two notes
+        // given the same output index spend the same chain output.
+        const REPEATED_NOTE_INDEX: u16 = 0;
+        let note = || Note::Orchard {
+            note: orchard_note(INPUT_VALUE, NoteVersion::V2).expect("a valid Orchard note"),
+            pool: ValuePool::Orchard,
+        };
+        let repeated_note = OutputRef::new(
+            TxId::from_bytes([0; 32]),
+            PoolType::Shielded(ShieldedPool::Orchard),
+            REPEATED_NOTE_INDEX.into(),
+        );
+        assert_matches!(
+            validated_step_spending(
+                vec![],
+                shielded_inputs_at_indices(vec![
+                    (REPEATED_NOTE_INDEX, note()),
+                    (REPEATED_NOTE_INDEX, note()),
+                ]),
+                balance(),
+                false,
+            ),
+            Err(ProposalError::ChainDoubleSpend(r)) if r == repeated_note
+        );
+
+        // Two notes of identical content at distinct output indices are two outputs, not one, so
+        // the same balanced step is accepted when the notes are not the same output.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((2, INPUT_VALUE), (0, 0)),
+                balance(),
+                false
+            ),
+            Ok(_)
+        );
+
+        // A transparent output named twice is likewise one output spent twice. Only that the
+        // script has a recipient address this wallet recognizes matters, so any P2PKH will do.
+        const RECIPIENT_KEY_HASH: [u8; 20] = [0x2a; 20];
+        let outpoint = OutPoint::fake();
+        let txout = TxOut::new(
+            Zatoshis::const_from_u64(INPUT_VALUE),
+            TransparentAddress::PublicKeyHash(RECIPIENT_KEY_HASH)
+                .script()
+                .into(),
+        );
+        let utxo = || {
+            WalletTransparentOutput::<()>::from_parts(
+                outpoint.clone(),
+                txout.clone(),
+                Some(BlockHeight::from_u32(100)),
+                None,
+                None,
+                None,
+            )
+            .expect("a P2PKH script has a recognized recipient address")
+        };
+        let repeated_utxo = OutputRef::new(
+            TxId::from_bytes(*outpoint.hash()),
+            PoolType::TRANSPARENT,
+            outpoint.n(),
+        );
+        assert_matches!(
+            validated_step_spending(vec![utxo(), utxo()], None, balance(), false),
+            Err(ProposalError::ChainDoubleSpend(r)) if r == repeated_utxo
         );
     }
 

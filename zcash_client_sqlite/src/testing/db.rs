@@ -31,6 +31,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
     },
+    note_management::{ConsolidationBudget, NoteHistogram, ValueLadder},
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{

@@ -57,10 +57,11 @@ use zcash_client_backend::{
     TransferType,
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        BlockMetadata, ConsolidationCandidates, DecryptedTransaction, InputSource, NoteFilter,
+        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -71,6 +72,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
+    note_management::{ConsolidationBudget, NoteHistogram, ValueLadder},
     proto::compact_formats::CompactBlock,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
@@ -575,18 +577,32 @@ impl<P, CL, R> WalletDb<rusqlite::Connection, P, CL, R> {
     ) -> Result<Self, rusqlite::Error> {
         rusqlite::Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
-            Ok(WalletDb {
-                conn,
-                params,
-                clock,
-                rng,
-                anchor_retention_interval: AnchorRetentionInterval::default(),
-                #[cfg(feature = "transparent-inputs")]
-                gap_limits: GapLimits::default(),
-            })
+            Ok(Self::from_connection(conn, params, clock, rng))
         })
     }
 }
+
+/// The number of prepared statements a wallet connection keeps compiled.
+///
+/// This crate calls `prepare_cached` at 86 sites, 31 of which build their text with `format!`.
+/// The distinct texts those sites produce fall into these families:
+///
+/// - 55 fixed texts: the sites that do not use `format!`.
+/// - 39 in the commitment-tree store: 13 statements × 3 tree prefixes.
+/// - 48 in the shared spendable-note query: 3 pools × 4 value-selection modes × 4 lock-filter
+///   shapes (unfiltered, exclude, and the two tier preferences).
+/// - 21 in `wallet.rs`: 7 statements × 3 pools.
+/// - 18 in the remaining note queries of `wallet/common.rs`: 3 statements × 3 pools × 2
+///   lock-filter fragments.
+/// - 8 in the Orchard-shaped note statements: 4 statements × the Orchard and Ironwood pools.
+/// - 4 in the locked-output listing: 1 statement × 3 shielded pools plus the transparent pool.
+/// - 3 in the shard-end lookup of `scanning.rs`: 1 statement × 3 pools.
+/// - 1 in the transparent output lookup.
+///
+/// That is 197 texts, and this capacity is the next power of two above it. `rusqlite`'s own
+/// default holds sixteen, so statements in the scanning and selection hot loops were evicted and
+/// recompiled on every call.
+const STATEMENT_CACHE_CAPACITY: usize = 256;
 
 impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Sets the interval on which this wallet retains note commitment tree checkpoints as durable
@@ -635,6 +651,10 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
     /// on the connection.
     ///
+    /// This sets `conn`'s prepared-statement cache capacity to a size that covers the statement
+    /// texts this crate prepares. The capacity belongs to the connection, so when `conn` is
+    /// borrowed the setting outlives the returned `WalletDb`.
+    ///
     /// ## Parameters
     /// - `conn`: A connection to the wallet database.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
@@ -642,6 +662,8 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
     ///   instance.
     pub fn from_connection(conn: C, params: P, clock: CL, rng: R) -> Self {
+        conn.borrow()
+            .set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
         WalletDb {
             conn,
             params,
@@ -1041,6 +1063,150 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         Ok(ReceivedNotes::empty())
     }
 
+    fn select_fewest_spendable_notes(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        match source {
+            ShieldedPool::Sapling => Ok(ReceivedNotes::new(
+                wallet::sapling::select_fewest_spendable_sapling_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+                #[cfg(feature = "orchard")]
+                vec![],
+                #[cfg(feature = "orchard")]
+                vec![],
+            )),
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => Ok(ReceivedNotes::new(
+                vec![],
+                wallet::orchard::select_fewest_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+                vec![],
+            )),
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => Ok(ReceivedNotes::new(
+                vec![],
+                vec![],
+                wallet::orchard::select_fewest_spendable_ironwood_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                )?,
+            )),
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => Err(
+                SqliteClientError::UnsupportedPoolType(PoolType::Shielded(source)),
+            ),
+        }
+    }
+
+    fn select_consolidation_candidates(
+        &self,
+        account: Self::AccountId,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+        budget: ConsolidationBudget,
+    ) -> Result<ConsolidationCandidates<Self::NoteRef>, Self::Error> {
+        match source {
+            ShieldedPool::Sapling => {
+                let (free, economic) = wallet::sapling::select_sapling_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(
+                        free,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                    ReceivedNotes::new(
+                        economic,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                ))
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => {
+                let (free, economic) = wallet::orchard::select_orchard_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(vec![], free, vec![]),
+                    ReceivedNotes::new(vec![], economic, vec![]),
+                ))
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => {
+                let (free, economic) = wallet::orchard::select_ironwood_consolidation_candidates(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    lock_filter,
+                    budget,
+                )?;
+                Ok(ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(vec![], vec![], free),
+                    ReceivedNotes::new(vec![], vec![], economic),
+                ))
+            }
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => Err(
+                SqliteClientError::UnsupportedPoolType(PoolType::Shielded(source)),
+            ),
+        }
+    }
+
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
@@ -1234,6 +1400,38 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             orchard_pool_meta,
             ironwood_pool_meta,
         ))
+    }
+
+    fn get_note_histogram(
+        &self,
+        account: Self::AccountId,
+        pool: ShieldedPool,
+        ladder: &ValueLadder,
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<Option<NoteHistogram>, Self::Error> {
+        // Without the `orchard` feature, `table_constants` has no arm for the Orchard or
+        // Ironwood pools, so the query that answers for them cannot be built.
+        #[cfg(not(feature = "orchard"))]
+        if pool != ShieldedPool::Sapling {
+            return Ok(None);
+        }
+
+        let values = wallet::common::unspent_note_values(
+            self.conn.borrow(),
+            pool,
+            target_height,
+            account,
+            exclude,
+            lock_filter,
+        )?;
+
+        Ok(Some(NoteHistogram::from_values(
+            ladder.clone(),
+            values.spendable,
+            values.pending,
+        )))
     }
 }
 

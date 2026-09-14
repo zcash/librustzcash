@@ -101,6 +101,7 @@ use crate::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     decrypt::DecryptedOutput,
+    note_management::{ConsolidationBudget, NoteHistogram, ValueLadder},
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
@@ -1182,6 +1183,16 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         return self.sapling.is_empty() && self.orchard.is_empty() && self.ironwood.is_empty();
     }
 
+    /// Appends each pool's notes from `other` to this collection.
+    pub(crate) fn append(&mut self, mut other: Self) {
+        self.sapling.append(&mut other.sapling);
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard.append(&mut other.orchard);
+            self.ironwood.append(&mut other.ironwood);
+        }
+    }
+
     /// Consumes this collection, returning one holding only the OLDEST single note whose value
     /// alone is at least `value`, drawn from the first pool in `sources` that holds one; the
     /// result is empty when no single note qualifies. Age is the note's commitment tree
@@ -1277,6 +1288,47 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         }));
 
         iter.collect()
+    }
+}
+
+/// Consolidation candidates from one pool, grouped by the slot cost they can bear.
+///
+/// `free` holds the smallest eligible notes of any positive value; `economic` holds the smallest
+/// eligible notes worth more than the budget's floor. Both ascend by value. The lists may
+/// overlap: a selector spends notes from exactly one of them.
+#[derive(Debug)]
+pub struct ConsolidationCandidates<NoteRef> {
+    free: ReceivedNotes<NoteRef>,
+    economic: ReceivedNotes<NoteRef>,
+}
+
+impl<NoteRef> ConsolidationCandidates<NoteRef> {
+    /// Constructs an empty candidate set.
+    pub fn empty() -> Self {
+        Self {
+            free: ReceivedNotes::empty(),
+            economic: ReceivedNotes::empty(),
+        }
+    }
+
+    /// Constructs a candidate set from its free-slot and economic-slot lists.
+    pub fn from_parts(free: ReceivedNotes<NoteRef>, economic: ReceivedNotes<NoteRef>) -> Self {
+        Self { free, economic }
+    }
+
+    /// The smallest eligible notes of any positive value, ascending.
+    pub fn free(&self) -> &ReceivedNotes<NoteRef> {
+        &self.free
+    }
+
+    /// The smallest eligible notes worth more than the budget's floor, ascending.
+    pub fn economic(&self) -> &ReceivedNotes<NoteRef> {
+        &self.economic
+    }
+
+    /// Consumes this set and returns its free-slot and economic-slot lists.
+    pub fn into_parts(self) -> (ReceivedNotes<NoteRef>, ReceivedNotes<NoteRef>) {
+        (self.free, self.economic)
     }
 }
 
@@ -1853,6 +1905,78 @@ pub trait InputSource {
         .map(|notes| notes.into_single_covering(value, sources))
     }
 
+    /// Returns the fewest spendable notes from `source` whose total value covers `value`.
+    ///
+    /// Notes are drawn from the lock tier `lock_filter` prefers; the other admitted tier is
+    /// drawn upon only when the preferred tier cannot cover `value` alone. When the pool cannot
+    /// cover `value` at all, every eligible note is returned so that the caller can detect the
+    /// shortfall. A `value` of zero selects no notes. Notes worth no more than the ZIP 317
+    /// marginal fee are never returned.
+    ///
+    /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
+    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only a
+    /// [`LockFilter::Policy`] is supported: this selection is specified in terms of the lock
+    /// tier a policy prefers, which [`LockFilter::Unfiltered`] does not define.
+    ///
+    /// The default implementation is BEST-EFFORT: it delegates to
+    /// [`Self::select_spendable_notes`], so it returns the oldest covering prefix rather than the
+    /// smallest one, prefers neither lock tier, may return fewer than every eligible note when
+    /// the pool falls short, and may return notes worth no more than the marginal fee. An
+    /// implementation backed by a queryable store should override it with a direct query, so that
+    /// the properties above hold.
+    #[allow(clippy::too_many_arguments)]
+    fn select_fewest_spendable_notes(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        if value == Zatoshis::ZERO {
+            return Ok(ReceivedNotes::empty());
+        }
+        self.select_spendable_notes(
+            account,
+            TargetValue::AtLeast(value),
+            &[source],
+            target_height,
+            confirmations_policy,
+            exclude,
+            lock_filter,
+        )
+    }
+
+    /// Returns consolidation candidates from `source` within `budget`.
+    ///
+    /// Candidates are drawn only from the lock tier `lock_filter` prefers and never from
+    /// `exclude`, which must contain every note already selected to fund the transaction.
+    /// The free list holds at most `budget.free_slots()` notes of any positive value; the
+    /// economic list holds at most `budget.economic_capacity()` notes worth more than
+    /// `budget.economic_floor()`. Every candidate's value is strictly below
+    /// `budget.candidate_ceiling()` when one is set. Both ascend by value. A note appearing in
+    /// both lists is permitted; the input selector spends from one list only.
+    ///
+    /// Only a [`LockFilter::Policy`] is supported: this selection is specified in terms of the
+    /// lock tier a policy prefers, which [`LockFilter::Unfiltered`] does not define.
+    ///
+    /// The default implementation returns no candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn select_consolidation_candidates(
+        &self,
+        _account: Self::AccountId,
+        _source: ShieldedPool,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+        _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+        _budget: ConsolidationBudget,
+    ) -> Result<ConsolidationCandidates<Self::NoteRef>, Self::Error> {
+        Ok(ConsolidationCandidates::empty())
+    }
+
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
     /// target height. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
     /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
@@ -1884,6 +2008,36 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error>;
+
+    /// Returns a histogram of the account's unspent notes in `pool` over `ladder`, or `None`
+    /// when the store cannot provide one.
+    ///
+    /// The counts cover the unspent notes of `account` in `pool` that are eligible under
+    /// `lock_filter` and whose transaction has not expired as of `target_height`; `target_height`
+    /// decides spend expiry, lock expiry, and receipt expiry, and notes listed in `exclude` are
+    /// omitted. Each such note is counted once, under `spendable` if its transaction is mined and
+    /// under `pending` if it is not, so `spendable` also counts notes that could not be spent at
+    /// `target_height`: notes that lack the required confirmations, notes whose shard is not yet
+    /// scanned, notes of undetermined key scope, and notes for which no nullifier can be derived.
+    /// Counting those notes as present errs toward fewer split pieces, and may let a sweep take a
+    /// bucket below its target when the bucket is measured in notes that are spendable now.
+    ///
+    /// Bucket 0 holds notes below the ladder's first rung; a consolidation sweep may still take
+    /// such a note into a free slot.
+    ///
+    /// The default implementation returns `None`. A note-management policy given `None` does not
+    /// manage the distribution.
+    fn get_note_histogram(
+        &self,
+        _account: Self::AccountId,
+        _pool: ShieldedPool,
+        _ladder: &ValueLadder,
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<Option<NoteHistogram>, Self::Error> {
+        Ok(None)
+    }
 
     /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
     /// spendable as of the provided `target_height`.

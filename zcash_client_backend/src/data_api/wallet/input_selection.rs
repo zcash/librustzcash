@@ -4,6 +4,7 @@ use {
     crate::{
         data_api::CoinbaseFilter,
         fees::{ChangeValue, StandardFeeRule},
+        note_management::SplitPlan,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
     std::convert::Infallible,
@@ -28,7 +29,10 @@ use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::{
     TxVersion,
-    fees::{FeeRule, zip317::P2PKH_STANDARD_OUTPUT_SIZE},
+    fees::{
+        FeeRule,
+        zip317::{MARGINAL_FEE, P2PKH_STANDARD_OUTPUT_SIZE},
+    },
 };
 use zcash_protocol::{
     PoolType, ShieldedPool,
@@ -44,8 +48,12 @@ use crate::{
         anchor_retention::PoolMigrationParams, wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
+    note_management::{
+        BundleShape, ConsolidationBudget, NoteManagementPolicy, SweepCaps,
+        most_recent_shielded_pool,
+    },
     proposal::{Proposal, ProposalError, ShieldedInputs},
-    wallet::WalletTransparentOutput,
+    wallet::{ReceivedNote, WalletTransparentOutput},
 };
 
 pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
@@ -201,9 +209,13 @@ pub trait InputSelector {
     /// account's transparent UTXOs may additionally be spent. Spending transparent funds, or
     /// combining notes across shielded pools, reduces privacy, so the caller must opt in
     /// explicitly by naming the permitted sources.
+    ///
+    /// `note_management` supplies the change split handed to `change_strategy` on each fee
+    /// iteration, and the sweep of small notes the converged balance admits; see
+    /// [`NoteManagementPolicy`].
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn propose_transaction<ParamsT, ChangeT>(
+    fn propose_transaction<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -214,6 +226,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
     ) -> Result<
@@ -227,7 +240,8 @@ pub trait InputSelector {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy;
 }
 
 /// A strategy for selecting transaction inputs and proposing transaction outputs
@@ -255,13 +269,17 @@ pub trait ShieldingSelector {
     ///
     /// The `output_filter` parameter controls which transparent outputs are eligible for
     /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
+    ///
+    /// `note_management` supplies the split of the shielded output value; see
+    /// [`NoteManagementPolicy`].
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn propose_shielding<ParamsT, ChangeT>(
+    fn propose_shielding<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
@@ -281,7 +299,8 @@ pub trait ShieldingSelector {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy;
 
     /// Performs input selection and returns a proposal for the construction of a transaction
     /// that shields coinbase transparent outputs to an arbitrary shielded recipient.
@@ -497,6 +516,18 @@ pub struct SpendPolicy {
 }
 
 /// How an [`InputSelector`] chooses among eligible notes when funding a payment.
+///
+/// This governs funding alone. Under every mode, a proposal may additionally sweep small notes
+/// from the pool that funded it, as the note-management policy passed to the proposal admits; see
+/// [`crate::note_management`]. No sweep is attempted when:
+///
+/// - the funding notes span more than one shielded pool, so there is no single source bundle;
+/// - the funding pool is not the most recent shielded pool, which the policy alone manages —
+///   Sapling therefore never sweeps, and neither does a build without the `orchard` feature;
+/// - the request contains ZIP 320 (TEX) payments, whose second transaction is costed against the
+///   first transaction's ephemeral output;
+/// - the change strategy records no dummy output counts, leaving the bundle's shape unknown; or
+/// - the policy returns no consolidation plan, or one with no capacity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NoteSelection {
     /// Accumulate the oldest eligible notes until the target value is covered.
@@ -509,6 +540,12 @@ pub enum NoteSelection {
     /// achievable only under single-note funding; multi-note funding is not an error, but the
     /// resulting proposal does not have the canonical shape.
     PreferSingle,
+    /// Fund with the fewest notes.
+    ///
+    /// Funding is tried one pool at a time in preference order; the first pool that covers the
+    /// target alone funds the payment, otherwise selection falls back to ordinary multi-pool
+    /// accumulation.
+    PreferFewest,
 }
 
 impl Default for SpendPolicy {
@@ -788,7 +825,7 @@ impl<DbT> GreedyInputSelector<DbT> {
     >
     where
         DbT: InputSource,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
     {
         let max_money = Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY);
         let mut total_opt: Option<Zatoshis> = Some(Zatoshis::ZERO);
@@ -856,12 +893,30 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
+/// The value the shielded notes of one fee iteration must cover.
+///
+/// Under [`NoteSelection::PreferFewest`] the gathered transparent value has already been netted
+/// out of the requirement, so the shielded side owes only `consolidation_target`; under every
+/// other mode the shielded side is selected against the whole `amount_required` and the
+/// transparent value is applied by the change strategy.
+fn shielded_target(
+    note_selection: NoteSelection,
+    amount_required: Zatoshis,
+    consolidation_target: Zatoshis,
+) -> Zatoshis {
+    if note_selection == NoteSelection::PreferFewest {
+        consolidation_target
+    } else {
+        amount_required
+    }
+}
+
 impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
 
     #[allow(clippy::type_complexity)]
-    fn propose_transaction<ParamsT, ChangeT>(
+    fn propose_transaction<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -872,6 +927,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
     ) -> Result<
@@ -881,7 +937,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     where
         ParamsT: consensus::Parameters,
         Self::InputSource: InputSource,
-        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
     {
         let (sapling_supported, orchard_supported) =
             proposed_version.map_or(Ok((true, true)), |v| {
@@ -1051,6 +1108,34 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
+        // Under `PreferFewest`: the shielded value still needed after gathered transparent value.
+        let mut consolidation_target = Zatoshis::ZERO;
+        // Under `PreferFewest`: for each pool whose fewest-note selection fell short, the total
+        // it did reach. A store that overrides `select_fewest_spendable_notes` returns every
+        // eligible note when it falls short, and `exclude` only grows, so that total is an upper
+        // bound on everything the pool can ever offer, whatever the target becomes. The
+        // best-effort default provides no such bound, so the memo may under-estimate a pool's
+        // total; that only skips the pool sooner and falls back to multi-pool accumulation.
+        let mut pool_shortfalls: BTreeMap<ShieldedPool, Zatoshis> = BTreeMap::new();
+
+        // The note-management context is read once per proposal; every per-iteration decision is
+        // a pure function of it and of the notes selected so far. Notes excluded as dust later in
+        // the loop are counted as present here, which errs toward fewer change pieces.
+        let note_context = note_management
+            .fetch(
+                wallet_db,
+                params,
+                account,
+                target_height,
+                &[],
+                LockFilter::Policy(spend_policy.locked_input_policy()),
+            )
+            .map_err(InputSelectorError::DataSource)?;
+        let managed_pool = most_recent_shielded_pool(params, target_height);
+        let request_total = transaction_request
+            .total()
+            .map_err(|_| ProposalError::RequestTotalInvalid)?
+            .expect("all payments previously checked to have amount values");
 
         // The single pool-preference order that governs both which pools notes are
         // selected from and which of the selected notes are spent: the pool matching
@@ -1108,16 +1193,24 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("all shielded pools are present in pool_values")
                 };
 
+                // The notes being trimmed were selected at the end of the previous iteration,
+                // against the target as it stood then; the same target governs the trimming.
+                let shielded_amount_required = shielded_target(
+                    spend_policy.note_selection(),
+                    amount_required,
+                    consolidation_target,
+                );
+
                 let use_pools: Vec<ShieldedPool> = if let Some(single) = pool_preference
                     .iter()
-                    .find(|p| value_of(**p) >= amount_required)
+                    .find(|p| value_of(**p) >= shielded_amount_required)
                 {
                     vec![*single]
                 } else {
                     let mut running = Zatoshis::ZERO;
                     let mut used = vec![];
                     for pool in &pool_preference {
-                        if running >= amount_required {
+                        if running >= shielded_amount_required {
                             break;
                         }
                         running = (running + value_of(*pool))
@@ -1168,19 +1261,60 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 vec![]
             };
 
-            let selected_input_ids = sapling_inputs.iter().map(|(id, _)| id);
-            #[cfg(feature = "orchard")]
-            let selected_input_ids =
-                selected_input_ids.chain(orchard_inputs.iter().map(|(id, _)| id));
-            #[cfg(feature = "orchard")]
-            let selected_input_ids =
-                selected_input_ids.chain(ironwood_inputs.iter().map(|(id, _)| id));
+            // The notes this iteration would spend from the managed pool are no longer present
+            // for the purpose of planning the change split. Only the trimmed per-pool sets are
+            // spent; a pool whose bundle this iteration does not require contributes nothing.
+            let spent_in_managed_pool: Vec<Zatoshis> = match managed_pool {
+                ShieldedPool::Sapling => sapling_inputs
+                    .iter()
+                    .map(sapling::InputView::value)
+                    .collect(),
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard => orchard_inputs
+                    .iter()
+                    .map(orchard_fees::InputView::value)
+                    .collect(),
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Ironwood => ironwood_inputs
+                    .iter()
+                    .map(orchard_fees::InputView::value)
+                    .collect(),
+                #[cfg(not(feature = "orchard"))]
+                ShieldedPool::Orchard | ShieldedPool::Ironwood => vec![],
+            };
+            let iteration_context =
+                note_management.without_spent(&note_context, &spent_in_managed_pool);
 
-            let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
-
-            let wallet_meta = change_strategy
-                .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
-                .map_err(InputSelectorError::DataSource)?;
+            #[cfg(feature = "transparent-inputs")]
+            let transparent_total = transparent_inputs
+                .iter()
+                .map(WalletTransparentOutput::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(not(feature = "transparent-inputs"))]
+            let transparent_total = Zatoshis::ZERO;
+            let sapling_total = sapling_inputs
+                .iter()
+                .map(sapling::InputView::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(feature = "orchard")]
+            let orchard_family_total = orchard_inputs
+                .iter()
+                .chain(ironwood_inputs.iter())
+                .map(orchard_fees::InputView::value)
+                .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            #[cfg(not(feature = "orchard"))]
+            let orchard_family_total = Zatoshis::ZERO;
+            let inputs_total = (sapling_total + orchard_family_total + transparent_total)
+                .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+            // An upper bound on the change: the fee has not been computed yet, and can only
+            // reduce it.
+            let split_plan = note_management.split_plan(
+                &iteration_context,
+                (inputs_total - request_total).unwrap_or(Zatoshis::ZERO),
+            );
 
             #[cfg(not(feature = "transparent-inputs"))]
             let ephemeral_output_value = None;
@@ -1228,7 +1362,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             &empty_ironwood_view,
                             Some(EphemeralBalance::Input(Zatoshis::ZERO)),
-                            &wallet_meta,
+                            // Transaction 1 of a ZIP 320 pair is fully transparent and produces
+                            // no shielded change to split.
+                            &SplitPlan::SingleOutput,
                         ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
                         Err(ChangeError::DustInputs { .. }) => {
@@ -1253,39 +1389,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         #[cfg(feature = "orchard")]
                         &empty_ironwood_view,
                         Some(EphemeralBalance::Input(tr1_required_input_value)),
-                        &wallet_meta,
+                        &SplitPlan::SingleOutput,
                     )?;
                     assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
                     (Some(tr1_required_input_value), Some(tr1_balance))
                 }
             };
-
-            // The Orchard bundle keeps the Orchard (version 2) spends; its outputs move to the
-            // Ironwood bundle when routing is active. The Ironwood bundle takes the Ironwood
-            // (version 3) spends, and its outputs when routing is active. Attributing each pool's
-            // spends to its own bundle keeps the action counts (and hence the fee) matching the
-            // transaction the builder produces.
-            #[cfg(feature = "orchard")]
-            let orchard_view = (
-                orchard_bundle_version_for_height(params, target_height),
-                &orchard_inputs[..],
-                if ironwood_active_at(params, target_height) {
-                    &[]
-                } else {
-                    &orchard_outputs[..]
-                },
-            );
-            #[cfg(feature = "orchard")]
-            let ironwood_view = (
-                ironwood_bundle_version_for_height(params, target_height),
-                &ironwood_inputs[..],
-                if ironwood_active_at(params, target_height) {
-                    &orchard_outputs[..]
-                } else {
-                    &[]
-                },
-            );
 
             // Tracks whether this iteration's error handling changed the transparent input
             // set, either by re-gathering with a corrected value bound (`InsufficientFunds`)
@@ -1304,30 +1414,239 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "transparent-inputs")]
             let mut transparent_inputs_changed = false;
 
+            // The balance of this iteration's spends, plus `extra` notes swept in beside them.
+            //
+            // The Orchard bundle keeps the Orchard (version 2) spends; its outputs move to the
+            // Ironwood bundle when routing is active. The Ironwood bundle takes the Ironwood
+            // (version 3) spends, and its outputs when routing is active. Attributing each pool's
+            // spends to its own bundle keeps the action counts (and hence the fee) matching the
+            // transaction the builder produces.
+            let balance_with = |extra: &ReceivedNotes<DbT::NoteRef>| {
+                let mut sapling_spends = sapling_inputs.clone();
+                sapling_spends.extend(
+                    extra
+                        .sapling()
+                        .iter()
+                        .map(|note| (*note.internal_note_id(), note.note().value())),
+                );
+                #[cfg(feature = "orchard")]
+                let mut orchard_spends = orchard_inputs.clone();
+                #[cfg(feature = "orchard")]
+                orchard_spends.extend(
+                    extra
+                        .orchard()
+                        .iter()
+                        .map(|note| (*note.internal_note_id(), note.note().value())),
+                );
+                #[cfg(feature = "orchard")]
+                let mut ironwood_spends = ironwood_inputs.clone();
+                #[cfg(feature = "orchard")]
+                ironwood_spends.extend(
+                    extra
+                        .ironwood()
+                        .iter()
+                        .map(|note| (*note.internal_note_id(), note.note().value())),
+                );
+
+                #[cfg(feature = "orchard")]
+                let orchard_view = (
+                    orchard_bundle_version_for_height(params, target_height),
+                    &orchard_spends[..],
+                    if ironwood_active_at(params, target_height) {
+                        &[]
+                    } else {
+                        &orchard_outputs[..]
+                    },
+                );
+                #[cfg(feature = "orchard")]
+                let ironwood_view = (
+                    ironwood_bundle_version_for_height(params, target_height),
+                    &ironwood_spends[..],
+                    if ironwood_active_at(params, target_height) {
+                        &orchard_outputs[..]
+                    } else {
+                        &[]
+                    },
+                );
+
+                change_strategy.compute_balance(
+                    params,
+                    target_height,
+                    anchor_height,
+                    zip318,
+                    &transparent_inputs,
+                    &transparent_outputs,
+                    &(
+                        ::sapling::builder::BundleType::DEFAULT,
+                        &sapling_spends[..],
+                        &sapling_outputs[..],
+                    ),
+                    #[cfg(feature = "orchard")]
+                    &orchard_view,
+                    #[cfg(feature = "orchard")]
+                    &ironwood_view,
+                    ephemeral_output_value.map(EphemeralBalance::Output),
+                    &split_plan,
+                )
+            };
+
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
-            let tr0_balance = change_strategy.compute_balance(
-                params,
-                target_height,
-                anchor_height,
-                zip318,
-                &transparent_inputs,
-                &transparent_outputs,
-                &(
-                    ::sapling::builder::BundleType::DEFAULT,
-                    &sapling_inputs[..],
-                    &sapling_outputs[..],
-                ),
-                #[cfg(feature = "orchard")]
-                &orchard_view,
-                #[cfg(feature = "orchard")]
-                &ironwood_view,
-                ephemeral_output_value.map(EphemeralBalance::Output),
-                &wallet_meta,
-            );
+            let tr0_balance = balance_with(&ReceivedNotes::empty());
 
             match tr0_balance {
-                Ok(tr0_balance) => {
+                Ok(mut tr0_balance) => {
+                    // A ZIP 320 pair is left alone: its second transaction is costed against the
+                    // ephemeral output, which a sweep of the first would invalidate.
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    let not_a_zip320_pair = true;
+                    #[cfg(feature = "transparent-inputs")]
+                    let not_a_zip320_pair = tr1_balance_opt.is_none();
+
+                    // Payment outputs are accounted to the bundle that carries them: Orchard
+                    // receivers are paid from the Ironwood bundle once NU6.3 is active.
+                    let payment_outputs_in = |pool: ShieldedPool| -> usize {
+                        match pool {
+                            ShieldedPool::Sapling => sapling_outputs.len(),
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Orchard => {
+                                if ironwood_active_at(params, target_height) {
+                                    0
+                                } else {
+                                    orchard_outputs.len()
+                                }
+                            }
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Ironwood => {
+                                if ironwood_active_at(params, target_height) {
+                                    orchard_outputs.len()
+                                } else {
+                                    0
+                                }
+                            }
+                            #[cfg(not(feature = "orchard"))]
+                            ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+                        }
+                    };
+
+                    // The spends of each pool that this iteration's bundles actually carry: a pool
+                    // whose bundle is not required keeps none of its notes in the proposal, so
+                    // its notes are neither spends here nor sweepable.
+                    let spend_count = |pool: ShieldedPool| -> usize {
+                        match pool {
+                            ShieldedPool::Sapling => sapling_inputs.len(),
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Orchard => orchard_inputs.len(),
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Ironwood => ironwood_inputs.len(),
+                            #[cfg(not(feature = "orchard"))]
+                            ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+                        }
+                    };
+
+                    // The change this balance directs anywhere but the sweep's own bundle. A
+                    // sweep may not move change into another pool, or onto the transparent side.
+                    let foreign_change_count = |balance: &TransactionBalance, source| {
+                        balance
+                            .proposed_change()
+                            .iter()
+                            .filter(|change| change.output_pool() != PoolType::Shielded(source))
+                            .count()
+                    };
+
+                    // The sweep runs under every funding mode; only the note-management policy
+                    // decides whether small notes are swept, and how many. Funding that spans
+                    // pools has no single source bundle and so admits no sweep.
+                    if not_a_zip320_pair
+                        && let Some(source) = single_spend_pool(|pool| spend_count(pool) > 0)
+                        && source == managed_pool
+                        && let Some(dummy_outputs) = dummy_output_count(&tr0_balance, source)
+                        && let Some(plan) = note_management.consolidation_plan(
+                            &iteration_context,
+                            &BundleShape::new(
+                                spend_count(source),
+                                payment_outputs_in(source),
+                                change_output_count(&tr0_balance, source),
+                                dummy_outputs,
+                            ),
+                            MARGINAL_FEE,
+                        )
+                        && plan.budget().economic_capacity() > 0
+                    {
+                        // Only the most recent shielded pool is managed, and that pool is always
+                        // an Orchard-family one, whose ZIP 317 action count is the padded output
+                        // count the envelope below bounds.
+                        debug_assert!(source != ShieldedPool::Sapling);
+
+                        let mut candidate_exclude = exclude.clone();
+                        candidate_exclude.extend(sapling_inputs.iter().map(|(id, _)| *id));
+                        #[cfg(feature = "orchard")]
+                        candidate_exclude.extend(orchard_inputs.iter().map(|(id, _)| *id));
+                        #[cfg(feature = "orchard")]
+                        candidate_exclude.extend(ironwood_inputs.iter().map(|(id, _)| *id));
+
+                        let (free, economic) = wallet_db
+                            .select_consolidation_candidates(
+                                account,
+                                source,
+                                target_height,
+                                confirmations_policy,
+                                &candidate_exclude,
+                                LockFilter::Policy(spend_policy.locked_input_policy()),
+                                plan.budget(),
+                            )
+                            .map_err(InputSelectorError::DataSource)?
+                            .into_parts();
+
+                        let attempts = consolidation_attempts(
+                            admitted_by_caps(&free, source, plan.sweep_caps())?,
+                            admitted_by_caps(&economic, source, plan.sweep_caps())?,
+                            source,
+                            plan.budget(),
+                        );
+                        for candidate_notes in attempts {
+                            // The iteration's split plan governs the swept balance too: change
+                            // grown by the swept value may realize more of the plan's pieces,
+                            // which the acceptance rule below permits.
+                            let candidate_balance = balance_with(&candidate_notes);
+
+                            // Commit only a balance that leaves every other bundle at its
+                            // funding-only shape and keeps this bundle within the envelope. A
+                            // sweep's only on-chain observable is the action count: an
+                            // Orchard-family bundle's ZIP 317 action count is its padded output
+                            // count, so holding this bundle to the envelope while every other
+                            // bundle and the transparent side stay fixed bounds the fee by the
+                            // fee of a payment this wallet would have emitted anyway.
+                            if let Ok(candidate_balance) = candidate_balance
+                                && SHIELDED_POOLS.iter().filter(|pool| **pool != source).all(
+                                    |pool| {
+                                        padded_action_count(
+                                            &tr0_balance,
+                                            *pool,
+                                            payment_outputs_in(*pool),
+                                        ) == padded_action_count(
+                                            &candidate_balance,
+                                            *pool,
+                                            payment_outputs_in(*pool),
+                                        )
+                                    },
+                                )
+                                && foreign_change_count(&candidate_balance, source)
+                                    == foreign_change_count(&tr0_balance, source)
+                                && padded_action_count(
+                                    &candidate_balance,
+                                    source,
+                                    payment_outputs_in(source),
+                                )
+                                .is_some_and(|actions| actions <= plan.envelope())
+                            {
+                                shielded_inputs.append(candidate_notes);
+                                tr0_balance = candidate_balance;
+                                break;
+                            }
+                        }
+                    }
+
                     // At this point, we have enough input value to pay for everything, so we
                     // return here.
                     let shielded_inputs =
@@ -1430,6 +1749,34 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         amount_at_transparent_gather = required;
                         transparent_inputs_changed = true;
                     }
+
+                    // Fewest-note funding covers only what the transparent inputs do not, so that
+                    // a single shielded note can still fund the remainder of a mixed payment.
+                    if spend_policy.note_selection() == NoteSelection::PreferFewest {
+                        let previous_target = consolidation_target;
+                        #[cfg(feature = "transparent-inputs")]
+                        {
+                            let transparent_value = transparent_inputs
+                                .iter()
+                                .map(WalletTransparentOutput::value)
+                                .try_fold(Zatoshis::ZERO, |total, value| total + value)
+                                .ok_or(InputSelectorError::Selection(
+                                    GreedyInputSelectorError::Balance(BalanceError::Overflow),
+                                ))?;
+                            consolidation_target =
+                                (required - transparent_value).unwrap_or(Zatoshis::ZERO);
+                        }
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        {
+                            consolidation_target = required;
+                        }
+                        // The recorded totals remain valid bounds when a transparent re-gather
+                        // lowers the target, so discarding them here is conservative rather than
+                        // load-bearing: it re-queries the pools once the requirement has moved.
+                        if consolidation_target < previous_target {
+                            pool_shortfalls.clear();
+                        }
+                    }
                 }
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
@@ -1450,7 +1797,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // amount alone is tried first; when no pool holds one, selection falls back to
             // ordinary accumulation, which still funds the payment but cannot produce the
             // single-input shape the caller preferred.
-            let single_note = match spend_policy.note_selection() {
+            //
+            // Under `NoteSelection::PreferFewest`, fewest-note funding is tried from each pool in
+            // preference order and every partial result is discarded when no single pool covers
+            // the target, so the preference never breaks liveness or changes the pool-affinity
+            // fallback. Termination: `consolidation_target` only grows across iterations except
+            // on a transparent re-gather, which sets `transparent_inputs_changed`; largest-first
+            // prefixes are monotone in the target, and the fallback covers a larger target, so
+            // `new_available` is monotone.
+            let preferred_notes = match spend_policy.note_selection() {
                 NoteSelection::PreferSingle => Some(
                     wallet_db
                         .select_single_spendable_note(
@@ -1465,14 +1820,67 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .map_err(InputSelectorError::DataSource)?,
                 )
                 .filter(|notes| !notes.is_empty()),
+                NoteSelection::PreferFewest => {
+                    let mut covering = None;
+                    if consolidation_target > Zatoshis::ZERO {
+                        for source in pool_preference.iter().copied() {
+                            // This pool already fell short of a smaller target; see
+                            // `pool_shortfalls`.
+                            if pool_shortfalls
+                                .get(&source)
+                                .is_some_and(|reached| *reached < consolidation_target)
+                            {
+                                continue;
+                            }
+                            let funding = wallet_db
+                                .select_fewest_spendable_notes(
+                                    account,
+                                    consolidation_target,
+                                    source,
+                                    target_height,
+                                    confirmations_policy,
+                                    &exclude,
+                                    LockFilter::Policy(spend_policy.locked_input_policy()),
+                                )
+                                .map_err(InputSelectorError::DataSource)?;
+                            let reached = funding.total_value()?;
+                            if reached >= consolidation_target {
+                                covering = Some((source, funding));
+                                break;
+                            }
+                            pool_shortfalls.insert(source, reached);
+                        }
+                    }
+                    match covering {
+                        Some((_, funding)) => Some(funding),
+                        // Nothing is owed from shielded funds; select nothing. This cannot stall
+                        // the growth guard below: the target is zero only before the first
+                        // balance computation has set it, or after a transparent re-gather
+                        // covered the whole requirement, and both of those iterations end with
+                        // `transparent_inputs_changed` set (a first-iteration `DustInputs` can
+                        // only arise from the gathered transparent inputs, which it prunes).
+                        None if consolidation_target == Zatoshis::ZERO => {
+                            Some(ReceivedNotes::empty())
+                        }
+                        // No single pool covers: ordinary multi-pool accumulation below.
+                        None => None,
+                    }
+                }
                 NoteSelection::Accumulate => None,
             };
-            shielded_inputs = match single_note {
-                Some(single) => single,
+            // The balance computation above has refreshed both targets, so this is the value the
+            // notes selected for the NEXT iteration must cover.
+            let selection_target = shielded_target(
+                spend_policy.note_selection(),
+                amount_required,
+                consolidation_target,
+            );
+            shielded_inputs = match preferred_notes {
+                Some(notes) => notes,
                 None => wallet_db
                     .select_spendable_notes(
                         account,
-                        TargetValue::AtLeast(amount_required),
+                        TargetValue::AtLeast(selection_target),
                         &pool_preference,
                         target_height,
                         confirmations_policy,
@@ -1539,6 +1947,198 @@ fn selectable_pool_preference<ParamsT: consensus::Parameters>(
         }
     }
     preference
+}
+
+/// Every shielded pool. The Orchard-family entries are unconditional: the per-pool helpers
+/// return nothing for them without the feature.
+const SHIELDED_POOLS: [ShieldedPool; 3] = [
+    ShieldedPool::Sapling,
+    ShieldedPool::Orchard,
+    ShieldedPool::Ironwood,
+];
+
+/// Returns the one shielded pool that `spends_from` accepts, or `None` when none or several do.
+fn single_spend_pool(spends_from: impl Fn(ShieldedPool) -> bool) -> Option<ShieldedPool> {
+    let mut source = None;
+    for pool in SHIELDED_POOLS {
+        if spends_from(pool) {
+            if source.is_some() {
+                return None;
+            }
+            source = Some(pool);
+        }
+    }
+    source
+}
+
+/// Returns the number of notes in `pool` without exposing pool-specific vectors to the selector.
+fn note_count_for_pool<NoteRef>(notes: &ReceivedNotes<NoteRef>, pool: ShieldedPool) -> usize {
+    match pool {
+        ShieldedPool::Sapling => notes.sapling().len(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => notes.orchard().len(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => notes.ironwood().len(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+    }
+}
+
+/// Copies the first `count` notes from one pool into an otherwise-empty collection.
+fn note_prefix_for_pool<NoteRef: Clone>(
+    notes: &ReceivedNotes<NoteRef>,
+    pool: ShieldedPool,
+    count: usize,
+) -> ReceivedNotes<NoteRef> {
+    match pool {
+        ShieldedPool::Sapling => ReceivedNotes::new(
+            notes.sapling().iter().take(count).cloned().collect(),
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => ReceivedNotes::new(
+            vec![],
+            notes.orchard().iter().take(count).cloned().collect(),
+            vec![],
+        ),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => ReceivedNotes::new(
+            vec![],
+            vec![],
+            notes.ironwood().iter().take(count).cloned().collect(),
+        ),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => ReceivedNotes::empty(),
+    }
+}
+
+/// Returns the values of the notes of `pool` in `notes`, in the order they are held.
+fn note_values_for_pool<NoteRef>(
+    notes: &ReceivedNotes<NoteRef>,
+    pool: ShieldedPool,
+) -> Result<Vec<Zatoshis>, BalanceError> {
+    match pool {
+        ShieldedPool::Sapling => notes.sapling().iter().map(|n| n.note_value()).collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => notes.orchard().iter().map(|n| n.note_value()).collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => notes.ironwood().iter().map(|n| n.note_value()).collect(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => Ok(vec![]),
+    }
+}
+
+/// Returns the notes of `pool` in `notes`, in order, that the sweep caps admit.
+///
+/// The notes must ascend by value, so that the notes admitted from a bucket are its smallest.
+fn admitted_by_caps<NoteRef: Clone>(
+    notes: &ReceivedNotes<NoteRef>,
+    pool: ShieldedPool,
+    caps: &SweepCaps,
+) -> Result<ReceivedNotes<NoteRef>, BalanceError> {
+    fn retained<NoteRef: Clone, N: Clone>(
+        notes: &[ReceivedNote<NoteRef, N>],
+        admitted: &[bool],
+    ) -> Vec<ReceivedNote<NoteRef, N>> {
+        notes
+            .iter()
+            .zip(admitted)
+            .filter(|(_, admitted)| **admitted)
+            .map(|(note, _)| note.clone())
+            .collect()
+    }
+
+    let admitted = caps.admit_all(&note_values_for_pool(notes, pool)?);
+    Ok(match pool {
+        ShieldedPool::Sapling => ReceivedNotes::new(
+            retained(notes.sapling(), &admitted),
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => {
+            ReceivedNotes::new(vec![], retained(notes.orchard(), &admitted), vec![])
+        }
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => {
+            ReceivedNotes::new(vec![], vec![], retained(notes.ironwood(), &admitted))
+        }
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => ReceivedNotes::empty(),
+    })
+}
+
+/// Counts the change outputs a balance directs to `pool`.
+fn change_output_count(balance: &TransactionBalance, pool: ShieldedPool) -> usize {
+    balance
+        .proposed_change()
+        .iter()
+        .filter(|change| change.output_pool() == PoolType::Shielded(pool))
+        .count()
+}
+
+/// Returns the dummy outputs a balance recorded for `pool`, or `None` when none were recorded.
+fn dummy_output_count(balance: &TransactionBalance, pool: ShieldedPool) -> Option<usize> {
+    let dummy_outputs = balance.dummy_outputs()?;
+    Some(match pool {
+        ShieldedPool::Sapling => dummy_outputs.sapling(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => dummy_outputs.orchard(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => dummy_outputs.ironwood(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => return None,
+    })
+}
+
+/// Returns the count a balance was costed for in `pool`: its real outputs plus the recorded
+/// dummies. For an Orchard-family bundle this equals the bundle's action count, since each action
+/// carries one output side. `None` when no dummy counts were recorded.
+fn padded_action_count(
+    balance: &TransactionBalance,
+    pool: ShieldedPool,
+    payment_output_count: usize,
+) -> Option<usize> {
+    payment_output_count
+        .checked_add(change_output_count(balance, pool))?
+        .checked_add(dummy_output_count(balance, pool)?)
+}
+
+/// Orders the candidate sets to try: every prefix of the list that sweeps more notes, largest
+/// first, then every prefix of the other list. On a tie the free list goes first, since it leaves
+/// the fee unchanged and removes the smallest notes.
+///
+/// Both lists must ascend by value, and that order is load-bearing rather than cosmetic: the fee
+/// layer refuses a whole input set on account of one uneconomic note, so a candidate it refuses
+/// poisons every prefix containing it, and only prefixes of the ascending order retire the
+/// smallest notes first. The number of attempts is bounded by the budget, which the bundle's own
+/// output count sizes, so it does not grow with the number of notes the account holds.
+fn consolidation_attempts<NoteRef: Clone>(
+    free: ReceivedNotes<NoteRef>,
+    economic: ReceivedNotes<NoteRef>,
+    pool: ShieldedPool,
+    budget: ConsolidationBudget,
+) -> impl Iterator<Item = ReceivedNotes<NoteRef>> {
+    let free_len = note_count_for_pool(&free, pool).min(budget.free_slots());
+    let economic_len = note_count_for_pool(&economic, pool).min(budget.economic_capacity());
+    let ((first, first_len), (second, second_len)) = if economic_len > free_len {
+        ((economic, economic_len), (free, free_len))
+    } else {
+        ((free, free_len), (economic, economic_len))
+    };
+    (1..=first_len)
+        .rev()
+        .map(move |n| note_prefix_for_pool(&first, pool, n))
+        .chain(
+            (1..=second_len)
+                .rev()
+                .map(move |n| note_prefix_for_pool(&second, pool, n)),
+        )
 }
 
 /// Returns the Orchard bundle version whose action-count policy applies to
@@ -2029,11 +2629,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
     type InputSource = DbT;
 
     #[allow(clippy::type_complexity)]
-    fn propose_shielding<ParamsT, ChangeT>(
+    fn propose_shielding<ParamsT, ChangeT, NoteT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
+        note_management: &NoteT,
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
@@ -2048,7 +2649,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
     >
     where
         ParamsT: consensus::Parameters,
-        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>,
+        ChangeT: ChangeStrategy,
+        NoteT: NoteManagementPolicy,
     {
         let mut transparent_inputs = gather_shielding_inputs::<DbT, ChangeT::Error>(
             wallet_db,
@@ -2060,9 +2662,26 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             &self.locked_input_policy,
         )?;
 
-        let wallet_meta = change_strategy
-            .fetch_wallet_meta(wallet_db, to_account, target_height, &[])
+        let note_context = note_management
+            .fetch(
+                wallet_db,
+                params,
+                to_account,
+                target_height,
+                &[],
+                LockFilter::Policy(&self.locked_input_policy),
+            )
             .map_err(InputSelectorError::DataSource)?;
+        // A shielding transaction spends no shielded notes, so nothing leaves the managed pool.
+        let note_context = note_management.without_spent(&note_context, &[]);
+        // Every selected input's value becomes change, less the fee; dust pruning can only
+        // lower that, so this is an upper bound on the change.
+        let inputs_total = transparent_inputs
+            .iter()
+            .map(WalletTransparentOutput::value)
+            .try_fold(Zatoshis::ZERO, |acc, v| acc + v)
+            .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+        let split_plan = note_management.split_plan(&note_context, inputs_total);
 
         let balance = compute_shielding_balance_with_dust_retry::<DbT, ChangeT, ParamsT>(
             change_strategy,
@@ -2071,7 +2690,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             anchor_height,
             zip318,
             &mut transparent_inputs,
-            &wallet_meta,
+            &split_plan,
         )?;
 
         if balance.total() >= shielding_threshold {
@@ -2430,7 +3049,7 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
     anchor_height: BlockHeight,
     zip318: &PoolMigrationParams,
     transparent_inputs: &mut Vec<WalletTransparentOutput<()>>,
-    wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
+    split_plan: &SplitPlan,
 ) -> Result<
     TransactionBalance,
     InputSelectorError<
@@ -2442,17 +3061,17 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
 >
 where
     DbT: InputSource,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
     ParamsT: consensus::Parameters,
 {
-    let trial = compute_shielding_balance::<DbT, ChangeT, ParamsT>(
+    let trial = compute_shielding_balance::<ChangeT, ParamsT>(
         change_strategy,
         params,
         target_height,
         anchor_height,
         zip318,
         transparent_inputs,
-        wallet_meta,
+        split_plan,
     );
 
     match trial {
@@ -2461,14 +3080,14 @@ where
             let exclusions: BTreeSet<OutPoint> = transparent.into_iter().collect();
             transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
 
-            compute_shielding_balance::<DbT, ChangeT, ParamsT>(
+            compute_shielding_balance::<ChangeT, ParamsT>(
                 change_strategy,
                 params,
                 target_height,
                 anchor_height,
                 zip318,
                 transparent_inputs,
-                wallet_meta,
+                split_plan,
             )
             .map_err(InputSelectorError::Change)
         }
@@ -2487,18 +3106,17 @@ where
 /// version's action-count policy.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::type_complexity)]
-fn compute_shielding_balance<DbT, ChangeT, ParamsT>(
+fn compute_shielding_balance<ChangeT, ParamsT>(
     change_strategy: &ChangeT,
     params: &ParamsT,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     zip318: &PoolMigrationParams,
     transparent_inputs: &[WalletTransparentOutput<()>],
-    wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
+    split_plan: &SplitPlan,
 ) -> Result<TransactionBalance, ChangeError<ChangeT::Error, Infallible>>
 where
-    DbT: InputSource,
-    ChangeT: ChangeStrategy<MetaSource = DbT>,
+    ChangeT: ChangeStrategy,
     ParamsT: consensus::Parameters,
 {
     #[cfg(feature = "orchard")]
@@ -2527,7 +3145,7 @@ where
         #[cfg(feature = "orchard")]
         &empty_ironwood_view,
         None,
-        wallet_meta,
+        split_plan,
     )
 }
 
@@ -2617,6 +3235,360 @@ mod spend_policy_tests {
         assert_eq!(
             policy.locked_input_policy(),
             &LockedInputPolicy::PreferLocked(owners)
+        );
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod consolidation_tests {
+    use ::orchard::{
+        keys::{FullViewingKey, SpendingKey},
+        note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
+    use assert_matches::assert_matches;
+    use incrementalmerkletree::Position;
+    use zcash_keys::address::{Address, UnifiedAddress};
+    use zcash_primitives::transaction::{TxId, fees::zip317::FeeRule as Zip317FeeRule};
+    use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+    use zip32::Scope;
+    use zip321::{Payment, TransactionRequest};
+
+    use super::{
+        GreedyInputSelector, InputSelector, InputSelectorError, LockFilter, NoteSelection,
+        SpendPolicy, admitted_by_caps, consolidation_attempts, single_spend_pool,
+    };
+    use crate::{
+        data_api::{
+            AccountMeta, ConsolidationCandidates, InputSource, NoteFilter, ReceivedNotes,
+            TargetValue,
+            anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            testing::TestBuilder,
+            wallet::{ConfirmationsPolicy, TargetHeight},
+        },
+        fees::{DustOutputPolicy, zip317::SingleOutputChangeStrategy},
+        note_management::{
+            BucketCaps, ConsolidationBudget, SingleOutputPolicy, SweepCaps, ValueLadder,
+        },
+        proposal::ProposalError,
+        wallet::{Note, ReceivedNote},
+    };
+
+    /// An Orchard note of `value` zatoshis, identified by `id`.
+    fn orchard_note(id: u32, value: u64) -> ReceivedNote<u32, OrchardNote> {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
+        let rho: Rho = Option::from(Rho::from_bytes(&[0; 32])).unwrap();
+        let rseed: RandomSeed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho)).unwrap();
+        let note: OrchardNote = Option::from(OrchardNote::from_parts(
+            recipient,
+            NoteValue::from_raw(value),
+            rho,
+            rseed,
+            NoteVersion::V2,
+        ))
+        .unwrap();
+        ReceivedNote::from_parts(
+            id,
+            TxId::from_bytes([0; 32]),
+            id as u16,
+            note,
+            Scope::External,
+            Position::from(u64::from(id)),
+            Some(BlockHeight::from_u32(150_000)),
+            None,
+        )
+    }
+
+    /// Orchard notes of the given values, in the order given.
+    fn orchard_notes(values: impl IntoIterator<Item = u64>) -> ReceivedNotes<u32> {
+        ReceivedNotes::new(
+            vec![],
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(id, value)| orchard_note(id as u32, value))
+                .collect(),
+            vec![],
+        )
+    }
+
+    /// The values of the Orchard notes in `notes`, in the order they are held.
+    fn orchard_values(notes: &ReceivedNotes<u32>) -> Vec<u64> {
+        notes
+            .orchard()
+            .iter()
+            .map(|note| note.note_value().unwrap().into_u64())
+            .collect()
+    }
+
+    /// The values of each candidate set the selector would try, in order.
+    fn attempt_values(
+        free: ReceivedNotes<u32>,
+        economic: ReceivedNotes<u32>,
+        budget: ConsolidationBudget,
+    ) -> Vec<Vec<u64>> {
+        consolidation_attempts(free, economic, ShieldedPool::Orchard, budget)
+            .map(|notes| orchard_values(&notes))
+            .collect()
+    }
+
+    /// The longer list is tried first, largest prefix first, and the shorter one after it.
+    #[test]
+    fn consolidation_attempts_try_the_larger_sweep_first() {
+        let budget = ConsolidationBudget::new(2, 2, Zatoshis::const_from_u64(5_000), None);
+        assert_eq!(
+            attempt_values(
+                orchard_notes([100, 200]),
+                orchard_notes([6_000, 7_000, 8_000]),
+                budget,
+            ),
+            vec![
+                vec![6_000, 7_000, 8_000],
+                vec![6_000, 7_000],
+                vec![6_000],
+                vec![100, 200],
+                vec![100],
+            ],
+        );
+    }
+
+    /// Each list is truncated to the slots it may fill: the free list to the free slots, the
+    /// economic list to every slot.
+    #[test]
+    fn consolidation_attempts_are_bounded_by_the_budget() {
+        let budget = ConsolidationBudget::new(1, 2, Zatoshis::const_from_u64(5_000), None);
+        assert_eq!(
+            attempt_values(
+                orchard_notes([100, 200, 300, 400]),
+                orchard_notes([6_000, 7_000, 8_000, 9_000]),
+                budget,
+            ),
+            vec![
+                vec![6_000, 7_000, 8_000],
+                vec![6_000, 7_000],
+                vec![6_000],
+                vec![100],
+            ],
+        );
+    }
+
+    /// On a tie in count the free list goes first: it leaves the fee unchanged.
+    #[test]
+    fn consolidation_attempts_prefer_the_free_list_on_a_tie() {
+        let budget = ConsolidationBudget::new(2, 0, Zatoshis::const_from_u64(5_000), None);
+        assert_eq!(
+            attempt_values(
+                orchard_notes([100, 200]),
+                orchard_notes([6_000, 7_000]),
+                budget,
+            ),
+            vec![vec![100, 200], vec![100], vec![6_000, 7_000], vec![6_000],],
+        );
+    }
+
+    /// A sweep has a source only when exactly one pool is spent from.
+    #[test]
+    fn a_sweep_source_is_a_single_spent_pool() {
+        assert_eq!(
+            single_spend_pool(|pool| pool == ShieldedPool::Orchard),
+            Some(ShieldedPool::Orchard),
+        );
+        assert_eq!(
+            single_spend_pool(|pool| pool != ShieldedPool::Ironwood),
+            None,
+            "funding that spans pools has no single source bundle",
+        );
+        assert_eq!(single_spend_pool(|_| false), None);
+    }
+
+    /// The caps admit each bucket's smallest notes and deny the rest, in the order presented.
+    #[test]
+    fn admitted_by_caps_keeps_the_notes_each_bucket_admits() {
+        let ladder = ValueLadder::new([Zatoshis::const_from_u64(1_000)]).unwrap();
+        let caps = SweepCaps::PerBucket(BucketCaps::new(ladder, vec![2, 0]).unwrap());
+        let admitted = admitted_by_caps(
+            &orchard_notes([100, 200, 300, 1_000]),
+            ShieldedPool::Orchard,
+            &caps,
+        )
+        .unwrap();
+        assert_eq!(orchard_values(&admitted), [100, 200]);
+    }
+
+    /// An input source that offers its only funding note again as a consolidation candidate, in
+    /// violation of the contract that candidates exclude the notes already selected.
+    struct OverlappingCandidateSource {
+        note: ReceivedNote<u32, OrchardNote>,
+    }
+
+    impl InputSource for OverlappingCandidateSource {
+        type Error = ();
+        type NoteRef = u32;
+        type AccountId = u32;
+
+        fn anchor_computable(
+            &self,
+            _protocol: ShieldedPool,
+            _height: BlockHeight,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        fn get_spendable_note(
+            &self,
+            _txid: &TxId,
+            _protocol: ShieldedPool,
+            _index: u32,
+            _target_height: TargetHeight,
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            _target_value: TargetValue,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn select_unspent_notes(
+            &self,
+            _account: Self::AccountId,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn get_account_metadata(
+            &self,
+            _account: Self::AccountId,
+            _selector: &NoteFilter,
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<AccountMeta, Self::Error> {
+            Err(())
+        }
+
+        fn select_fewest_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            _value: Zatoshis,
+            source: ShieldedPool,
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(match source {
+                ShieldedPool::Orchard => {
+                    ReceivedNotes::new(vec![], vec![self.note.clone()], vec![])
+                }
+                _ => ReceivedNotes::empty(),
+            })
+        }
+
+        /// Ignores `exclude` and offers the funding note again as a free candidate.
+        fn select_consolidation_candidates(
+            &self,
+            _account: Self::AccountId,
+            source: ShieldedPool,
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+            _budget: ConsolidationBudget,
+        ) -> Result<ConsolidationCandidates<Self::NoteRef>, Self::Error> {
+            Ok(match source {
+                ShieldedPool::Orchard => ConsolidationCandidates::from_parts(
+                    ReceivedNotes::new(vec![], vec![self.note.clone()], vec![]),
+                    ReceivedNotes::empty(),
+                ),
+                _ => ConsolidationCandidates::empty(),
+            })
+        }
+    }
+
+    /// A sweep against a store that repeats its funding note as a candidate fails at proposal
+    /// construction instead of yielding a proposal that spends the note twice.
+    #[test]
+    fn sweep_rejects_store_result_repeating_a_note() {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
+        let rho: Rho = Option::from(Rho::from_bytes(&[0; 32])).unwrap();
+        let rseed: RandomSeed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho)).unwrap();
+        let note: OrchardNote = Option::from(OrchardNote::from_parts(
+            recipient,
+            NoteValue::from_raw(2_000_000),
+            rho,
+            rseed,
+            NoteVersion::V2,
+        ))
+        .unwrap();
+        let source = OverlappingCandidateSource {
+            note: ReceivedNote::from_parts(
+                1,
+                TxId::from_bytes([0; 32]),
+                0,
+                note,
+                Scope::External,
+                Position::from(0),
+                Some(BlockHeight::from_u32(150_000)),
+                None,
+            ),
+        };
+
+        // A height after NU5 and before NU6.3 in the default test network, so the payment and
+        // the spends are both accounted to the Orchard bundle.
+        let params = TestBuilder::<(), ()>::DEFAULT_NETWORK;
+        let target_height = TargetHeight::from(BlockHeight::from_u32(200_000));
+        let anchor_height = BlockHeight::from_u32(199_990);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            Address::Unified(UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap())
+                .to_zcash_address(&params),
+            Zatoshis::const_from_u64(100_000),
+        )])
+        .unwrap();
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let spend_policy = SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+            .with_note_selection(NoteSelection::PreferFewest);
+
+        let result = GreedyInputSelector::new().propose_transaction(
+            &params,
+            &source,
+            target_height,
+            anchor_height,
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            ConfirmationsPolicy::MIN,
+            0,
+            request,
+            &change_strategy,
+            &SingleOutputPolicy,
+            &spend_policy,
+            None,
+        );
+
+        assert_matches!(
+            result,
+            Err(InputSelectorError::Proposal(
+                ProposalError::ChainDoubleSpend(_)
+            ))
         );
     }
 }

@@ -10,6 +10,7 @@ use std::convert::Infallible;
 use assert_matches::assert_matches;
 use proptest::prelude::{Just, Strategy, prop_oneof};
 
+use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::Zatoshis};
 use zip321::Payment;
 
@@ -26,10 +27,11 @@ use crate::{
         },
     },
     fees::StandardFeeRule,
+    note_management::ConsolidationBudget,
     wallet::{LockOwner, OutputRef, OvkPolicy},
 };
 
-use super::{ShieldedPoolTester, dsl::TestDsl};
+use super::{ShieldedPoolTester, dsl::TestDsl, values_in_pool};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -1329,4 +1331,171 @@ pub fn single_note_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
         newer_unlocked_value,
         "Exclude must never surface a locked note"
     );
+}
+
+/// Fewest-note funding honors the caller's preferred lock tier, and crosses tiers only when the
+/// preferred tier alone cannot cover the target.
+pub fn fewest_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let locked_covering = Zatoshis::const_from_u64(1_200_000);
+    let locked_small = Zatoshis::const_from_u64(10_000);
+    let unlocked_large = Zatoshis::const_from_u64(600_000);
+    let unlocked_medium = Zatoshis::const_from_u64(500_000);
+    let unlocked_small = Zatoshis::const_from_u64(20_000);
+    st.add_notes_checking_balance([
+        [locked_covering],
+        [locked_small],
+        [unlocked_large],
+        [unlocked_medium],
+        [unlocked_small],
+    ]);
+
+    let account_id = st.test_account().unwrap().id();
+    let owner = LockOwner::new([0xA1; 32]);
+    for value in [locked_covering, locked_small] {
+        let note_ref = st.note_ref_by_value(value);
+        assert_eq!(
+            st.wallet_mut()
+                .lock_outputs(&[note_ref], owner, BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1,
+        );
+    }
+
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |policy: &LockedInputPolicy, target| {
+        st.wallet()
+            .select_fewest_spendable_notes(
+                account_id,
+                target,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(policy),
+            )
+            .unwrap()
+    };
+
+    let single_tier_target = Zatoshis::const_from_u64(1_000_000);
+    let unlocked_pref = LockedInputPolicy::PreferUnlocked(NonEmptyBTreeSet::singleton(owner));
+    assert_eq!(
+        select(&unlocked_pref, single_tier_target)
+            .total_value()
+            .unwrap(),
+        (unlocked_large + unlocked_medium).unwrap(),
+    );
+
+    let locked_pref = LockedInputPolicy::PreferLocked(NonEmptyBTreeSet::singleton(owner));
+    assert_eq!(
+        select(&locked_pref, single_tier_target)
+            .total_value()
+            .unwrap(),
+        locked_covering,
+    );
+
+    assert_eq!(
+        select(&LockedInputPolicy::Exclude, single_tier_target)
+            .total_value()
+            .unwrap(),
+        (unlocked_large + unlocked_medium).unwrap(),
+    );
+
+    // Neither tier covers this target alone, so both preferences exhaust the tier they prefer
+    // before drawing on the other: the small note of the preferred tier is taken ahead of the
+    // large note of the other one.
+    let cross_tier_target = Zatoshis::const_from_u64(2_000_000);
+    let sorted = |policy: &LockedInputPolicy| {
+        let mut values = values_in_pool(&select(policy, cross_tier_target), T::SHIELDED_PROTOCOL);
+        values.sort_unstable();
+        values
+    };
+    assert_eq!(
+        sorted(&unlocked_pref),
+        [
+            unlocked_small,
+            unlocked_medium,
+            unlocked_large,
+            locked_covering
+        ],
+    );
+    assert_eq!(
+        sorted(&locked_pref),
+        [
+            locked_small,
+            unlocked_medium,
+            unlocked_large,
+            locked_covering
+        ],
+    );
+}
+
+/// Candidates come only from the tier the policy prefers, never from the other admitted tier.
+pub fn consolidation_candidates_come_from_the_preferred_tier<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let locked = [10_000, 20_000].map(Zatoshis::const_from_u64);
+    let unlocked = [30_000, 40_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance([[locked[0]], [locked[1]], [unlocked[0]], [unlocked[1]]]);
+
+    let account_id = st.test_account().unwrap().id();
+    let owner = LockOwner::new([0xA1; 32]);
+    for value in locked {
+        let note_ref = st.note_ref_by_value(value);
+        assert_eq!(
+            st.wallet_mut()
+                .lock_outputs(&[note_ref], owner, BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1,
+        );
+    }
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |policy: &LockedInputPolicy| {
+        st.wallet()
+            .select_consolidation_candidates(
+                account_id,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(policy),
+                ConsolidationBudget::new(2, 2, MARGINAL_FEE, None),
+            )
+            .unwrap()
+            .into_parts()
+    };
+
+    let (free, economic) = select(&LockedInputPolicy::PreferUnlocked(
+        NonEmptyBTreeSet::singleton(owner),
+    ));
+    assert_eq!(values_in_pool(&free, T::SHIELDED_PROTOCOL), unlocked);
+    assert_eq!(values_in_pool(&economic, T::SHIELDED_PROTOCOL), unlocked);
+
+    let (free, economic) = select(&LockedInputPolicy::PreferLocked(
+        NonEmptyBTreeSet::singleton(owner),
+    ));
+    assert_eq!(values_in_pool(&free, T::SHIELDED_PROTOCOL), locked);
+    assert_eq!(values_in_pool(&economic, T::SHIELDED_PROTOCOL), locked);
+
+    let (free, economic) = select(&LockedInputPolicy::Exclude);
+    assert_eq!(values_in_pool(&free, T::SHIELDED_PROTOCOL), unlocked);
+    assert_eq!(values_in_pool(&economic, T::SHIELDED_PROTOCOL), unlocked);
 }

@@ -18,6 +18,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
+        builder::DEFAULT_TX_EXPIRY_DELTA,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -34,8 +35,8 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, ReceivedNotes, TargetValue,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
@@ -45,16 +46,22 @@ use crate::{
         },
         wallet::{
             ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            input_selection::{
+                GreedyInputSelector, LockFilter, LockedInputPolicy, NoteSelection, SpendPolicy,
+            },
         },
     },
     decrypt_transaction,
     fees::{
-        self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
+        self, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
+    note_management::{
+        ConsolidationBudget, LadderPolicy, NoteHistogram, NoteManagementPolicy, SingleOutputPolicy,
+        TargetDistribution, Unmanaged, ValueLadder,
+    },
     scanning::ScanError,
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
+    wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
@@ -78,7 +85,7 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    crate::data_api::wallet::propose_transfer,
     std::collections::BTreeMap,
     zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
@@ -110,10 +117,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
-    zcash_primitives::transaction::{
-        builder::DEFAULT_TX_EXPIRY_DELTA,
-        fees::{FeeRule, transparent::InputSize, zip317},
-    },
+    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
     zcash_protocol::{
         TxId,
         value::{BalanceError, MAX_MONEY, ZatBalance},
@@ -133,13 +137,10 @@ use {
 };
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use {
-    crate::data_api::wallet::input_selection::LockedInputPolicy,
-    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
-};
+use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
 pub mod dsl;
-use dsl::{TestDsl, TestNoteConfig};
+use dsl::{TestDsl, TestNoteConfig, TestScenario};
 
 pub mod locking;
 pub use locking::*;
@@ -258,6 +259,62 @@ pub trait ShieldedPoolTester {
         signer: &mut Signer,
         usk: &UnifiedSpendingKey,
     ) -> Result<(), pczt::roles::signer::Error>;
+}
+
+fn selected_notes_for_transfer<T, Cache, Dsf>(
+    st: &mut TestDsl<TestScenario<T, Cache, Dsf>>,
+    amount: Zatoshis,
+    note_selection: NoteSelection,
+) -> Vec<Zatoshis>
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    selected_notes_for_managed_transfer(st, amount, note_selection, &Unmanaged)
+}
+
+fn selected_notes_for_managed_transfer<T, Cache, Dsf, NoteT>(
+    st: &mut TestDsl<TestScenario<T, Cache, Dsf>>,
+    amount: Zatoshis,
+    note_selection: NoteSelection,
+    note_management: &NoteT,
+) -> Vec<Zatoshis>
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+    NoteT: NoteManagementPolicy,
+{
+    let account_id = st.test_account().unwrap().id();
+    let recipient_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let recipient = T::fvk_default_address(&recipient_fvk).to_zcash_address(st.network());
+    let request = TransactionRequest::new(vec![Payment::without_memo(recipient, amount)]).unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let spend_policy =
+        SpendPolicy::shielded_pools([T::SHIELDED_PROTOCOL]).with_note_selection(note_selection);
+    let proposal = st
+        .propose_transfer_with_policy_and_note_management(
+            account_id,
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            note_management,
+            request,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+        )
+        .expect("the selected notes cover the payment and fee");
+
+    proposal
+        .steps()
+        .first()
+        .shielded_inputs()
+        .expect("the proposal spends shielded notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect()
 }
 
 /// Tests sending funds within the given shielded pool in a single transaction.
@@ -2025,6 +2082,12 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
 }
 
+/// A note-management policy that asks for more notes than the account holds returns change as
+/// multiple outputs.
+///
+/// Valid only for a `T` whose pool is
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) at the target
+/// height; [`change_outside_the_most_recent_pool_is_not_split`] covers the converse.
 pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
@@ -2050,25 +2113,46 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::with_min_output_value(
-            NonZeroUsize::new(2).unwrap(),
+    );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
             Zatoshis::const_from_u64(100_0000),
+            NonZeroUsize::new(2).unwrap(),
         ),
+        NonZeroUsize::new(9).unwrap(),
     );
 
     let account = st.test_account().cloned().unwrap();
     let proposal = st
-        .propose_transfer(
+        .propose_transfer_with_note_management(
             account.id(),
             &input_selector,
             &change_strategy,
-            request.clone(),
+            &note_management,
+            request,
             ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
     let step = &proposal.steps().head;
     assert_eq!(step.balance().proposed_change().len(), 2);
+    // 6,500,000 less the 1,000,000 payment and a 15,000 fee leaves 5,485,000 of change. The
+    // target asks for two notes of at least 1,000,000, and the residual rides on the largest
+    // piece rather than being divided evenly.
+    let mut change_values = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|c| c.value())
+        .collect::<Vec<_>>();
+    change_values.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(
+        change_values,
+        vec![
+            Zatoshis::const_from_u64(448_5000),
+            Zatoshis::const_from_u64(100_0000)
+        ]
+    );
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
@@ -2159,31 +2243,99 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let (h, _) = st.generate_next_block_including(sent_tx_id);
     st.scan_cached_blocks(h, 1);
 
-    // Now, create another proposal with more outputs requested. We have two change notes;
-    // we'll spend one of them, and then we'll generate 7 splits.
+    // Now, create another proposal with more outputs requested. The account holds the two change
+    // notes of the first transaction, whose values differ because the residual rides on the
+    // largest piece; the payment below is small enough that either note covers it alone, so
+    // exactly one is spent whichever the selector reaches first, leaving the account seven notes
+    // short of this target.
     let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
         Zip317FeeRule::standard(),
         Some(change_memo.into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::with_min_output_value(
-            NonZeroUsize::new(8).unwrap(),
-            Zatoshis::const_from_u64(10_0000),
-        ),
     );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
+            Zatoshis::const_from_u64(10_0000),
+            NonZeroUsize::new(8).unwrap(),
+        ),
+        NonZeroUsize::new(9).unwrap(),
+    );
+    let small_request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_0000),
+    )])
+    .unwrap();
 
     let proposal = st
-        .propose_transfer(
+        .propose_transfer_with_note_management(
             account.id(),
             &input_selector,
             &change_strategy,
-            request,
+            &note_management,
+            small_request,
             ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
     let step = &proposal.steps().head;
+    assert_eq!(step.shielded_inputs().unwrap().notes().len(), 1);
     assert_eq!(step.balance().proposed_change().len(), 7);
+}
+
+/// A pool that is not the most recent shielded pool receives a single change output even under a
+/// policy that would split it.
+///
+/// Valid only for a `T` whose pool is not
+/// [`most_recent_shielded_pool`](crate::note_management::most_recent_shielded_pool) at the target
+/// height; [`send_with_multiple_change_outputs`] covers the converse.
+pub fn change_outside_the_most_recent_pool_is_not_split<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    // 6,500,000 paying 1,000,000 leaves about 5,490,000 of change, which easily affords the
+    // four 100,000-zatoshi pieces the target asks for, so the policy would split here were the
+    // pool eligible: the single output below is the pool gate, not a value shortfall.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(650_0000));
+
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(100_0000),
+    )])
+    .unwrap();
+    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+        Zip317FeeRule::standard(),
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(
+            Zatoshis::const_from_u64(100_000),
+            NonZeroUsize::new(4).unwrap(),
+        ),
+        NonZeroUsize::new(9).unwrap(),
+    );
+    let account = st.test_account().cloned().unwrap();
+    let proposal = st
+        .propose_transfer_with_note_management(
+            account.id(),
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            &note_management,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().proposed_change().len(), 1);
+    assert_eq!(
+        step.balance().proposed_change()[0].output_pool(),
+        PoolType::Shielded(T::SHIELDED_PROTOCOL)
+    );
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -3127,7 +3279,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
         TransferErrT<
             Dsf::DataStore,
             GreedyInputSelector<Dsf::DataStore>,
-            SingleOutputChangeStrategy<Dsf::DataStore>,
+            SingleOutputChangeStrategy,
         >,
     > {
         let proposal = st.propose_standard_transfer(
@@ -8103,12 +8255,13 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
 
     let account = st.get_account();
     let network = *st.network();
-    let result = propose_transfer::<_, _, _, _, Infallible>(
+    let result = propose_transfer::<_, _, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
         account.id(),
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),
@@ -8959,12 +9112,13 @@ where
     let account_id = st.get_account().id();
     let network = *st.network();
     // The test network's most recent upgrade is NU5, so version 5 is a valid explicit request.
-    let proposal = propose_transfer::<_, _, _, _, Infallible>(
+    let proposal = propose_transfer::<_, _, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
         account_id,
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),
@@ -9823,4 +9977,944 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
         step.is_canonical_crossing(&zip318, canonical_fee),
         "the second crossing must still be canonical"
     );
+}
+
+/// The store buckets an account's unspent notes over the caller's ladder, omitting excluded notes
+/// and notes locked on another owner's behalf.
+///
+/// Valid only for a store whose `get_note_histogram` returns `Some`.
+pub fn note_histogram_buckets_unspent_notes<T: ShieldedPoolTester, Dsf, TC>(dsf: Dsf, cache: TC)
+where
+    Dsf: DataStoreFactory,
+    TC: TestCache,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values = [5_000_000, 20_000_000, 200_000_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance(values.map(|v| [v]));
+
+    let account_id = st.test_account().unwrap().id();
+    let ladder = ValueLadder::new([
+        Zatoshis::const_from_u64(10_000_000),
+        Zatoshis::const_from_u64(100_000_000),
+    ])
+    .unwrap();
+    let target_height = TargetHeight::from(st.scanned_block_height() + 1);
+    let histogram = |db: &Dsf::DataStore, exclude: &[<Dsf::DataStore as InputSource>::NoteRef]| {
+        db.get_note_histogram(
+            account_id,
+            T::SHIELDED_PROTOCOL,
+            &ladder,
+            target_height,
+            exclude,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap()
+        .expect("the store under test provides histograms")
+    };
+
+    let all = histogram(st.wallet(), &[]);
+    assert_eq!(
+        (all.spendable(0), all.spendable(1), all.spendable(2)),
+        (1, 1, 1)
+    );
+    assert_eq!((all.pending(0), all.pending(1), all.pending(2)), (0, 0, 0));
+
+    // Excluding the bucket-1 note empties that bucket and leaves the others alone.
+    let without_middle = histogram(st.wallet(), &[st.note_id_by_value(values[1])]);
+    assert_eq!(without_middle.spendable(0), 1);
+    assert_eq!(without_middle.spendable(1), 0);
+    assert_eq!(without_middle.spendable(2), 1);
+
+    // A note locked on another owner's behalf is ineligible under `LockedInputPolicy::Exclude`.
+    let locked = st.note_ref_by_value(values[2]);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(
+                &[locked],
+                LockOwner::new([1; 32]),
+                BlockHeight::from(u32::MAX)
+            )
+            .unwrap(),
+        1
+    );
+    let with_lock = histogram(st.wallet(), &[]);
+    assert_eq!(with_lock.spendable(0), 1);
+    assert_eq!(with_lock.spendable(1), 1);
+    assert_eq!(with_lock.spendable(2), 0);
+
+    // The counts are scoped to the requested pool: the account's notes do not leak into another
+    // pool's histogram. A store that cannot answer for that pool at all returns `None`, which
+    // leaves nothing to check.
+    let other_pool = st
+        .wallet()
+        .get_note_histogram(
+            account_id,
+            if T::SHIELDED_PROTOCOL == ShieldedPool::Sapling {
+                ShieldedPool::Orchard
+            } else {
+                ShieldedPool::Sapling
+            },
+            &ladder,
+            target_height,
+            &[],
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap();
+    if let Some(other_pool) = other_pool {
+        assert_eq!(other_pool, NoteHistogram::empty(ladder.clone()));
+    }
+}
+
+/// A note whose transaction is not yet mined is counted as pending, and stops being counted once
+/// that transaction expires.
+///
+/// Valid only for a store whose `get_note_histogram` returns `Some`.
+pub fn note_histogram_counts_pending_until_expiry<T: ShieldedPoolTester, Dsf, TC>(
+    dsf: Dsf,
+    cache: TC,
+) where
+    Dsf: DataStoreFactory,
+    TC: TestCache,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // The funding note falls in bucket 2; paying most of it away leaves change in bucket 1.
+    let funding_value = Zatoshis::const_from_u64(200_000_000);
+    let payment_value = Zatoshis::const_from_u64(150_000_000);
+    st.add_a_single_note_checking_balance(funding_value);
+
+    let ladder = ValueLadder::new([
+        Zatoshis::const_from_u64(10_000_000),
+        Zatoshis::const_from_u64(100_000_000),
+    ])
+    .unwrap();
+    let account = st.test_account().cloned().unwrap();
+    let histogram = |db: &Dsf::DataStore, target_height: TargetHeight| {
+        db.get_note_histogram(
+            account.id(),
+            T::SHIELDED_PROTOCOL,
+            &ladder,
+            target_height,
+            &[],
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap()
+        .expect("the store under test provides histograms")
+    };
+
+    let before = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(before.spendable(2), 1);
+    assert_eq!(before.pending(1), 0);
+
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        payment_value,
+    )])
+    .unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    assert_eq!(proposal.steps().head.balance().proposed_change().len(), 1);
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap();
+    assert_eq!(txids.len(), 1);
+    let tx = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the created transaction was stored");
+
+    // Store the transaction without mining it, so that its change output is a pending receipt and
+    // its input is spent by an unmined transaction.
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None).unwrap();
+
+    let unmined = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(unmined.pending(1), 1);
+    assert_eq!(unmined.spendable(1), 0);
+    assert_eq!(unmined.spendable(2), 0);
+
+    // Advance the chain past the transaction's expiry height. Neither the change output nor the
+    // spend of the funding note can ever take effect now.
+    st.add_empty_blocks(usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap() + 1);
+
+    let expired = histogram(
+        st.wallet(),
+        TargetHeight::from(st.scanned_block_height() + 1),
+    );
+    assert_eq!(expired.pending(1), 0);
+    assert_eq!(expired.spendable(1), 0);
+    assert_eq!(expired.spendable(2), 1);
+}
+
+/// `PreferFewest` funds a payment with the fewest notes, not the oldest.
+pub fn prefer_fewest_uses_fewest_funding_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let small = Zatoshis::const_from_u64(180_000);
+    let large = Zatoshis::const_from_u64(600_000);
+    st.add_notes_checking_balance([
+        [small],
+        [small],
+        [small],
+        [small],
+        [small],
+        [small],
+        [large],
+        [large],
+        [large],
+    ]);
+
+    assert_eq!(
+        selected_notes_for_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(1_000_000),
+            NoteSelection::Accumulate,
+        )
+        .len(),
+        6,
+        "the default policy remains oldest-first accumulation",
+    );
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(1_000_000),
+        NoteSelection::PreferFewest,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [large, large]);
+}
+
+/// Law 6 (liveness): `PreferFewest` proposes a transaction whenever `Accumulate` would, using no
+/// more inputs.
+pub fn prefer_fewest_proposes_whenever_accumulate_would<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    // The small notes are the oldest, so oldest-first accumulation reaches for them first while
+    // fewest-note funding does not.
+    let values = [180_000, 180_000, 180_000, 600_000, 500_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance(values.map(|value| [value]));
+
+    // One note suffices; several are needed; every note is needed.
+    for amount in [100_000, 1_000_000, 1_500_000].map(Zatoshis::const_from_u64) {
+        // Each call panics unless the proposal succeeds, so reaching the assertion is itself the
+        // liveness check for both modes.
+        let accumulated = selected_notes_for_transfer(&mut st, amount, NoteSelection::Accumulate);
+        let fewest = selected_notes_for_transfer(&mut st, amount, NoteSelection::PreferFewest);
+        assert!(
+            fewest.len() <= accumulated.len(),
+            "PreferFewest used {} inputs for {amount:?} where Accumulate used {}",
+            fewest.len(),
+            accumulated.len(),
+        );
+    }
+}
+
+/// Fewest-note funding is uncapped: a payment that needs more than five notes gets them.
+pub fn prefer_fewest_funding_is_uncapped<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values =
+        [300_000, 250_000, 200_000, 150_000, 100_000, 90_000, 10_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance(values.map(|value| [value]));
+
+    let mut selected = selected_notes_for_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(1_050_000),
+        NoteSelection::PreferFewest,
+    );
+    selected.sort_unstable();
+    assert_eq!(
+        selected,
+        [90_000, 100_000, 150_000, 200_000, 250_000, 300_000].map(Zatoshis::const_from_u64),
+    );
+}
+
+/// Fee iteration refreshes fewest-note funding when a smaller estimate becomes insufficient.
+pub fn prefer_fewest_refreshes_funding_after_fee_growth<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    st.add_notes_checking_balance(
+        [220_000, 200_000, 200_000, 200_000, 200_000, 50_000, 10_000]
+            .map(Zatoshis::const_from_u64)
+            .map(|value| [value]),
+    );
+
+    assert_eq!(
+        selected_notes_for_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(1_000_000),
+            NoteSelection::PreferFewest,
+        )
+        .len(),
+        6,
+    );
+}
+
+/// Fewest-note funding filters unconfirmed and excluded notes before applying its value ordering.
+pub fn fewest_selection_skips_unconfirmed_and_excluded_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let values = [[600_000, 500_000], [20_000, 30_000], [2_000_000, 10_000]]
+        .map(|block| block.map(Zatoshis::const_from_u64));
+    st.add_notes_checking_balance(values);
+
+    let account_id = st.test_account().unwrap().id();
+    let target = Zatoshis::const_from_u64(1_000_000);
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+
+    // The largest and smallest notes are in the newest block and therefore do not satisfy the
+    // two-confirmation policy. Selection must continue through the ordered candidates instead of
+    // letting the ineligible largest note consume the funding budget.
+    let funding = st
+        .wallet()
+        .select_fewest_spendable_notes(
+            account_id,
+            target,
+            T::SHIELDED_PROTOCOL,
+            target_height,
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                true,
+            ),
+            &[],
+            LockFilter::Policy(&Default::default()),
+        )
+        .unwrap();
+    // The 2,000,000 note is unconfirmed, so funding falls to the two largest confirmed notes.
+    assert_eq!(
+        values_in_pool(&funding, T::SHIELDED_PROTOCOL),
+        [
+            Zatoshis::const_from_u64(600_000),
+            Zatoshis::const_from_u64(500_000)
+        ],
+    );
+
+    let excluded = st
+        .wallet()
+        .get_notes(T::SHIELDED_PROTOCOL)
+        .unwrap()
+        .into_iter()
+        .filter(|note| matches!(u64::from(note.note().value()), 2_000_000 | 10_000 | 20_000))
+        .map(|note| *note.internal_note_id())
+        .collect::<Vec<_>>();
+    let funding = st
+        .wallet()
+        .select_fewest_spendable_notes(
+            account_id,
+            target,
+            T::SHIELDED_PROTOCOL,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &excluded,
+            LockFilter::Policy(&Default::default()),
+        )
+        .unwrap();
+    // With the 2,000,000 note excluded rather than unconfirmed, the same two notes fund it.
+    assert_eq!(
+        values_in_pool(&funding, T::SHIELDED_PROTOCOL),
+        [
+            Zatoshis::const_from_u64(600_000),
+            Zatoshis::const_from_u64(500_000)
+        ],
+    );
+}
+
+/// Returns the values of the notes in `pool`, in the order the store returned them.
+fn values_in_pool<NoteRef>(notes: &ReceivedNotes<NoteRef>, pool: ShieldedPool) -> Vec<Zatoshis> {
+    const VALID: &str = "a received note's value is a valid amount";
+    match pool {
+        ShieldedPool::Sapling => notes
+            .sapling()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => notes
+            .orchard()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => notes
+            .ironwood()
+            .iter()
+            .map(|n| n.note_value().expect(VALID))
+            .collect(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => {
+            unreachable!("the Orchard-family pools are unreachable without the `orchard` feature")
+        }
+    }
+}
+
+/// Candidates are grouped by the slot cost they can bear: the free list takes the smallest
+/// notes of any positive value, the economic list the smallest notes above the floor, the
+/// candidate ceiling bounds both, and the excluded funding note appears in neither.
+pub fn consolidation_candidates_are_grouped_by_slot_cost<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let funding = Zatoshis::const_from_u64(1_000_000);
+    let dust_low = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    let economic = [8_000, 7_000, 6_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance([
+        [funding],
+        [MARGINAL_FEE],
+        [dust_low],
+        [economic[0]],
+        [economic[1]],
+        [economic[2]],
+    ]);
+
+    let account_id = st.test_account().unwrap().id();
+    let funding_ref = st.note_id_by_value(funding);
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    let select = |budget| {
+        st.wallet()
+            .select_consolidation_candidates(
+                account_id,
+                T::SHIELDED_PROTOCOL,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[funding_ref],
+                LockFilter::Policy(&Default::default()),
+                budget,
+            )
+            .unwrap()
+            .into_parts()
+    };
+
+    let (free, economic_notes) = select(ConsolidationBudget::new(2, 2, MARGINAL_FEE, None));
+    assert_eq!(
+        values_in_pool(&free, T::SHIELDED_PROTOCOL),
+        [dust_low, MARGINAL_FEE]
+    );
+    // Capacity is four but only three economic small notes exist; the excluded funding note
+    // must not be drafted to fill the fourth place.
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2], economic[1], economic[0]],
+    );
+
+    let (free, economic_notes) = select(ConsolidationBudget::new(0, 1, MARGINAL_FEE, None));
+    assert!(
+        free.is_empty(),
+        "a zero free budget yields no free candidates"
+    );
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2]]
+    );
+
+    // A candidate ceiling bounds both lists strictly from above.
+    let (free, economic_notes) = select(ConsolidationBudget::new(
+        2,
+        2,
+        MARGINAL_FEE,
+        Some(Zatoshis::const_from_u64(7_000)),
+    ));
+    assert_eq!(
+        values_in_pool(&free, T::SHIELDED_PROTOCOL),
+        [dust_low, MARGINAL_FEE]
+    );
+    assert_eq!(
+        values_in_pool(&economic_notes, T::SHIELDED_PROTOCOL),
+        [economic[2]]
+    );
+}
+
+/// The padded action count a sweep may grow a bundle to: the [`LadderPolicy::max_actions`] these
+/// tests give their policies, five being the width that suits hardware-signed wallets.
+pub const ACTION_CAP: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+
+/// A sweep fills the spend sides an Orchard bundle already pays for, taking the smallest note
+/// even though it cannot pay for an action of its own.
+#[cfg(feature = "orchard")]
+pub fn prefer_fewest_fills_existing_orchard_actions(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([
+        [funding],
+        [Zatoshis::const_from_u64(20_000)],
+        [MARGINAL_FEE],
+    ]);
+
+    // The payment and its change occupy two action output sides against one funding spend, so
+    // one spend side is free; a note at the marginal fee may fill it, but nothing more.
+    let mut selected = selected_notes_for_managed_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::PreferFewest,
+        &SingleOutputPolicy,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [MARGINAL_FEE, funding]);
+}
+
+/// With a single change output the transaction may not grow past two actions, however many
+/// economic small notes exist.
+#[cfg(feature = "orchard")]
+pub fn prefer_fewest_never_enlarges_under_a_single_output_strategy(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([
+        [funding],
+        [Zatoshis::const_from_u64(8_000)],
+        [Zatoshis::const_from_u64(7_000)],
+        [Zatoshis::const_from_u64(6_000)],
+    ]);
+
+    let mut selected = selected_notes_for_managed_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::PreferFewest,
+        &SingleOutputPolicy,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [Zatoshis::const_from_u64(6_000), funding]);
+}
+
+/// On a tie in count, the free regime wins: the dust note is swept rather than the economic one.
+#[cfg(feature = "orchard")]
+pub fn prefer_fewest_prefers_the_free_regime_on_a_tie(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    let dust = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    st.add_notes_checking_balance([[funding], [Zatoshis::const_from_u64(6_000)], [dust]]);
+
+    let mut selected = selected_notes_for_managed_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::PreferFewest,
+        &SingleOutputPolicy,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [dust, funding]);
+}
+
+/// A target the account already meets above the first rung puts every note at that rung out of
+/// reach of the sweep: the candidate ceiling admits only the notes below it, and of those only
+/// the economic ones, since filling the enlarging slots grows the bundle.
+#[cfg(feature = "orchard")]
+pub fn ladder_target_excludes_notes_at_the_rung(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    let at_target = Zatoshis::const_from_u64(500_000);
+    let small = [8_000, 7_000, 6_000].map(Zatoshis::const_from_u64);
+    let dust = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    st.add_notes_checking_balance([
+        [funding],
+        [at_target],
+        [at_target],
+        [at_target],
+        [at_target],
+        [small[0]],
+        [small[1]],
+        [small[2]],
+        [dust],
+    ]);
+
+    // The four notes at the rung leave bucket one at its target of four once the funding note is
+    // spent, so change is a single output and no note at or above 100,000 is a candidate.
+    let rung = Zatoshis::const_from_u64(100_000);
+    let payment = Zatoshis::const_from_u64(100_000);
+    let note_management = LadderPolicy::new(
+        TargetDistribution::single_bucket(rung, NonZeroUsize::new(4).unwrap()),
+        ACTION_CAP,
+    );
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        payment,
+        NoteSelection::PreferFewest,
+        &note_management,
+    );
+
+    let step = proposal.steps().first();
+    let mut selected = step
+        .shielded_inputs()
+        .expect("the proposal spends Orchard notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect::<Vec<_>>();
+    selected.sort_unstable();
+    assert_eq!(selected, [small[2], small[1], small[0], funding]);
+    assert_eq!(step.balance().proposed_change().len(), 1);
+    // Four spends against one payment output and one change output: the bundle is padded to four
+    // actions, within the five-action envelope of a four-way split.
+    assert_eq!(
+        step.balance().fee_required(),
+        (MARGINAL_FEE * 4u64).unwrap()
+    );
+}
+
+/// The sweep is a property of the note-management policy, not of the funding mode: ordinary
+/// accumulation fills the same free spend side.
+#[cfg(feature = "orchard")]
+pub fn accumulate_funding_also_sweeps_free_slots(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([
+        [funding],
+        [Zatoshis::const_from_u64(20_000)],
+        [MARGINAL_FEE],
+    ]);
+
+    let mut selected = selected_notes_for_managed_transfer(
+        &mut st,
+        Zatoshis::const_from_u64(100_000),
+        NoteSelection::Accumulate,
+        &SingleOutputPolicy,
+    );
+    selected.sort_unstable();
+    assert_eq!(selected, [MARGINAL_FEE, funding]);
+}
+
+/// A policy that manages nothing never sweeps, whatever the funding mode leaves unfilled.
+#[cfg(feature = "orchard")]
+pub fn unmanaged_policy_never_sweeps(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([
+        [funding],
+        [Zatoshis::const_from_u64(20_000)],
+        [MARGINAL_FEE],
+    ]);
+
+    assert_eq!(
+        selected_notes_for_managed_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(100_000),
+            NoteSelection::PreferFewest,
+            &Unmanaged,
+        ),
+        [funding],
+    );
+}
+
+/// Sapling inputs are not swept: a distribution is maintained only in the most recent shielded
+/// pool, and Sapling is never that pool.
+pub fn prefer_fewest_does_not_grow_sapling_spends(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache)
+        .build::<super::sapling::SaplingPoolTester>();
+    let funding = Zatoshis::const_from_u64(2_000_000);
+    st.add_notes_checking_balance([[funding], [Zatoshis::const_from_u64(10_000)]]);
+
+    assert_eq!(
+        selected_notes_for_managed_transfer(
+            &mut st,
+            Zatoshis::const_from_u64(100_000),
+            NoteSelection::PreferFewest,
+            &SingleOutputPolicy,
+        ),
+        [funding],
+    );
+}
+
+/// The payment the ladder-policy tests propose to an external Orchard address.
+#[cfg(feature = "orchard")]
+const MANAGED_PAYMENT: Zatoshis = Zatoshis::const_from_u64(1_000_000);
+
+/// A target over rungs of one, two and five million zatoshis, asking for two notes at the first
+/// rung and one at each of the others. Bucket zero, below the first rung, is asked for none, so
+/// the four counts cover the three rungs and that bucket.
+#[cfg(feature = "orchard")]
+fn million_ladder_target() -> TargetDistribution {
+    let ladder =
+        ValueLadder::new([1_000_000, 2_000_000, 5_000_000].map(Zatoshis::const_from_u64)).unwrap();
+    TargetDistribution::new(ladder, [0, 2, 1, 1]).unwrap()
+}
+
+/// Proposes `amount` to a fixed external Orchard address under the given funding mode and
+/// note-management policy, with a change strategy that realizes the policy's split plan.
+// `Proposal` reaches this module only through the `transparent-inputs` import group, so the
+// return type spells its path.
+#[cfg(feature = "orchard")]
+fn propose_managed_orchard_payment<Cache, Dsf, NoteT>(
+    st: &mut TestDsl<TestScenario<OrchardPoolTester, Cache, Dsf>>,
+    amount: Zatoshis,
+    note_selection: NoteSelection,
+    note_management: &NoteT,
+) -> crate::proposal::Proposal<Zip317FeeRule, <Dsf::DataStore as InputSource>::NoteRef>
+where
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+    NoteT: NoteManagementPolicy,
+{
+    let account_id = st.test_account().unwrap().id();
+    let recipient_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let recipient =
+        OrchardPoolTester::fvk_default_address(&recipient_fvk).to_zcash_address(st.network());
+    let request = TransactionRequest::new(vec![Payment::without_memo(recipient, amount)]).unwrap();
+    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+        Zip317FeeRule::standard(),
+        None,
+        ShieldedPool::Orchard,
+        DustOutputPolicy::default(),
+    );
+
+    st.propose_transfer_with_policy_and_note_management(
+        account_id,
+        &GreedyInputSelector::new(),
+        &change_strategy,
+        note_management,
+        request,
+        ConfirmationsPolicy::MIN,
+        &SpendPolicy::shielded_pools([ShieldedPool::Orchard]).with_note_selection(note_selection),
+    )
+    .expect("the wallet can fund the payment")
+}
+
+/// Change is split into the rungs the wallet lacks, largest first, with the residual on the
+/// largest piece and no piece below the ladder's first rung.
+#[cfg(feature = "orchard")]
+pub fn ladder_policy_splits_change_into_deficit_rungs(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    st.add_notes_checking_balance([[funding]]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    let step = proposal.steps().first();
+    let mut change = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|change| change.value())
+        .collect::<Vec<_>>();
+    change.sort_unstable();
+
+    // Spending the funding note empties every bucket, so the deficits are the whole target. One
+    // spend against one payment output and four change outputs is five Orchard actions.
+    let rungs = [1_000_000, 1_000_000, 2_000_000, 5_000_000].map(Zatoshis::const_from_u64);
+    let payment_outputs = 1;
+    let actions = u64::try_from(rungs.len() + payment_outputs).unwrap();
+    let fee = (MARGINAL_FEE * actions).unwrap();
+    let rung_total = rungs.iter().sum::<Option<Zatoshis>>().unwrap();
+    let residual = ((funding - MANAGED_PAYMENT).unwrap() - (rung_total + fee).unwrap()).unwrap();
+    assert_eq!(
+        change,
+        [rungs[0], rungs[1], rungs[2], (rungs[3] + residual).unwrap()]
+    );
+    assert_eq!(step.balance().fee_required(), fee);
+}
+
+/// A single-bucket target reproduces the retired split policy's output count: the target count
+/// less the notes the wallet already holds at or above the rung.
+#[cfg(feature = "orchard")]
+pub fn single_bucket_target_matches_split_policy_counts(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let rung = Zatoshis::const_from_u64(1_000_000);
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    let above_rung = [1_500_000, 1_500_000].map(Zatoshis::const_from_u64);
+    st.add_notes_checking_balance([[funding], [above_rung[0]], [above_rung[1]]]);
+
+    let target_count = NonZeroUsize::new(5).unwrap();
+    let policy = LadderPolicy::new(
+        TargetDistribution::single_bucket(rung, target_count),
+        ACTION_CAP,
+    );
+    // `PreferFewest` funds from the largest note, so which note pays does not depend on the order
+    // the blocks were added.
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::PreferFewest,
+        &policy,
+    );
+    let step = proposal.steps().first();
+
+    let values = step
+        .balance()
+        .proposed_change()
+        .iter()
+        .map(|change| change.value())
+        .collect::<Vec<_>>();
+    // The funding note leaves the wallet holding only the notes above the rung.
+    assert_eq!(
+        values.len(),
+        target_count.get() - above_rung.len(),
+        "the target count less the notes already at or above the rung: {values:?}",
+    );
+    assert!(
+        values.iter().all(|value| *value >= rung),
+        "every piece of a single-bucket split reaches the rung: {values:?}",
+    );
+}
+
+/// A sweep takes notes only from the buckets the wallet holds too many of, and never takes a
+/// bucket below its target; a note below the ladder's first rung is always in surplus.
+#[cfg(feature = "orchard")]
+pub fn ladder_policy_sweeps_only_surplus(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    // Bucket one holds three notes against a target of two; bucket two holds the one it is asked
+    // for; and one note falls below the ladder, which never asks for such a note. That note is
+    // also below the marginal fee, so it cannot pay for a spend side of its own and only the
+    // free list can carry it.
+    let bucket_one = [1_000_000, 1_100_000, 1_200_000].map(Zatoshis::const_from_u64);
+    let at_target = Zatoshis::const_from_u64(2_500_000);
+    let below_ladder = (MARGINAL_FEE - Zatoshis::const_from_u64(1_000)).unwrap();
+    st.add_notes_checking_balance([
+        [funding],
+        [bucket_one[0]],
+        [bucket_one[1]],
+        [bucket_one[2]],
+        [at_target],
+        [below_ladder],
+    ]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let proposal = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::PreferFewest,
+        &policy,
+    );
+    let step = proposal.steps().first();
+    let mut inputs = step
+        .shielded_inputs()
+        .expect("the proposal spends Orchard notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect::<Vec<_>>();
+    inputs.sort_unstable();
+
+    // The law: bucket one is in surplus by one note and bucket two is not in surplus at all.
+    assert!(
+        inputs
+            .iter()
+            .filter(|value| bucket_one.contains(*value))
+            .count()
+            <= 1,
+        "bucket one keeps the two notes its target asks for",
+    );
+    assert!(
+        !inputs.contains(&at_target),
+        "a bucket already at its target is not swept",
+    );
+    // The outcome the law leaves open: bucket one's cap of one bounds the economic regime to one
+    // note, so the two regimes tie at one note each, and a tie goes to the free regime. The note
+    // below the ladder takes the single free spend side.
+    assert_eq!(inputs, [below_ladder, funding]);
+}
+
+/// Change awaiting confirmation counts toward the target, so a second payment does not split for
+/// the notes the first has already created.
+#[cfg(feature = "orchard")]
+pub fn pending_change_counts_toward_the_target(dsf: impl DataStoreFactory, cache: impl TestCache) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<OrchardPoolTester>();
+    let funding = Zatoshis::const_from_u64(20_000_000);
+    st.add_notes_checking_balance([[funding], [funding]]);
+
+    let policy = LadderPolicy::new(million_ladder_target(), ACTION_CAP);
+    let account = st.test_account().cloned().unwrap();
+
+    // The unspent funding note meets the top bucket's target, so the first payment splits only
+    // for the three notes the two lower buckets lack.
+    let first = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    assert_eq!(first.steps().first().balance().proposed_change().len(), 3);
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &first,
+        )
+        .unwrap();
+    let tx = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the created transaction was stored");
+
+    // Store the transaction without mining it, so that its change outputs are pending receipts.
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None).unwrap();
+
+    // The two pending 1,000,000 pieces fill bucket one and the residual-carrying piece lands in
+    // the top bucket, so only bucket two is still short; a one-piece plan is realized as a single
+    // change output.
+    let second = propose_managed_orchard_payment(
+        &mut st,
+        MANAGED_PAYMENT,
+        NoteSelection::Accumulate,
+        &policy,
+    );
+    assert_eq!(second.steps().first().balance().proposed_change().len(), 1);
 }

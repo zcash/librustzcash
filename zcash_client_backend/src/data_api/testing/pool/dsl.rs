@@ -31,6 +31,7 @@ use crate::{
         },
     },
     fees::StandardFeeRule,
+    note_management::Unmanaged,
     proposal::Proposal,
     wallet::{LockOwner, OutputRef, OvkPolicy},
 };
@@ -264,7 +265,9 @@ where
         (res.block_height, res.insert_result, res.nullifiers[0])
     }
 
-    fn scanned_block_height(&self) -> BlockHeight {
+    /// Returns the height of the highest block the wallet has scanned, or height zero if it has
+    /// scanned none.
+    pub fn scanned_block_height(&self) -> BlockHeight {
         self.wallet()
             .block_max_scanned()
             .unwrap()
@@ -578,6 +581,21 @@ where
         )
     }
 
+    /// Returns the data store's identifier for the single received note whose value equals
+    /// `value`, panicking if no such note exists.
+    ///
+    /// This is the store-identifier counterpart of [`Self::note_ref_by_value`], which returns
+    /// the note reference: it returns the identifier that [`InputSource`] methods take in their
+    /// exclusion lists.
+    pub fn note_id_by_value(&self, value: Zatoshis) -> <Dsf::DataStore as InputSource>::NoteRef {
+        let notes = self.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+        let note = notes
+            .iter()
+            .find(|n| n.note().value() == value)
+            .expect("a note with the requested value exists");
+        *note.internal_note_id()
+    }
+
     /// Proposes a ZIP 317 transfer of `amount` zatoshis to `to` that locks its
     /// own selected inputs on behalf of `owner` for `lock_for_blocks` blocks,
     /// panicking if proposal construction fails.
@@ -605,12 +623,13 @@ where
         )])
         .unwrap();
         let network = *self.network();
-        propose_transfer::<_, _, _, _, Infallible>(
+        propose_transfer::<_, _, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
             account_id,
             &input_selector,
             &change_strategy,
+            &Unmanaged,
             request,
             ConfirmationsPolicy::MIN,
             &SpendPolicy::default(),

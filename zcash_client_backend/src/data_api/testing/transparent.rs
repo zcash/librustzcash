@@ -35,6 +35,7 @@ use {
             AccountBirthday,
             wallet::{self, SpendingKeys},
         },
+        note_management::Unmanaged,
         wallet::TransparentAddressSource,
     },
     secp256k1::{Secp256k1, SecretKey},
@@ -57,7 +58,7 @@ use crate::{
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
             input_selection::{
-                GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                GreedyInputSelector, LockFilter, LockedInputPolicy, NoteSelection, SpendPolicy,
                 TransparentSpendPolicy,
             },
         },
@@ -1769,6 +1770,7 @@ where
         &prover,
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         value,
         &spending_keys,
         &[taddr],
@@ -2099,6 +2101,7 @@ where
         &prover,
         &input_selector,
         &change_strategy,
+        &Unmanaged,
         value,
         &spending_keys,
         &[taddr],
@@ -3495,4 +3498,85 @@ where
         Zatoshis::const_from_u64(10_000),
     );
     assert_eq!(step.balance().proposed_change(), []);
+}
+
+/// Fewest-note funding subtracts already-selected transparent value from its shielded target.
+pub fn prefer_fewest_accounts_for_selected_transparent_value<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let ufvk = account.account().ufvk().unwrap();
+    let sapling_fvk = ufvk.sapling().unwrap();
+    let (start_height, _, _) = st.generate_next_block(
+        &sapling_fvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(600_000),
+    );
+    st.generate_next_block(
+        &sapling_fvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(500_000),
+    );
+    st.scan_cached_blocks(start_height, 2);
+
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(Zatoshis::const_from_u64(600_000), taddr.script().into()),
+        st.wallet().chain_height().unwrap(),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .to_diversifiable_full_viewing_key()
+        .default_address()
+        .1;
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::Sapling(recipient).to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(1_000_000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
+    let spend_policy = SpendPolicy::default()
+        .with_transparent(TransparentSpendPolicy::any_account_addr())
+        .with_note_selection(NoteSelection::PreferFewest);
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+        )
+        .expect("the mixed transparent and shielded inputs cover the payment and fee");
+    let step = &proposal.steps().head;
+    assert_eq!(step.transparent_inputs().len(), 1);
+    assert_eq!(
+        step.shielded_inputs()
+            .expect("the proposal spends a shielded note")
+            .notes()
+            .len(),
+        1,
+    );
 }
