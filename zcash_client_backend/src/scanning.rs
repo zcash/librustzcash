@@ -32,8 +32,14 @@ use crate::{
     wallet::WalletOutput,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::wallet::WalletTransparentSpend;
+
 #[cfg(feature = "orchard")]
 use orchard::note_encryption::OrchardDomain;
+
+#[cfg(feature = "transparent-inputs")]
+use transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope};
 
 pub(crate) mod compact;
 pub mod full;
@@ -441,17 +447,39 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
     }
 }
 
-/// The set of nullifiers being tracked by a wallet.
-pub struct Nullifiers<AccountId> {
+/// The set of identifiers whose appearance in a scanned block reveals a spend of wallet funds:
+/// the nullifiers of the wallet's unspent shielded notes, together with the outpoints of its
+/// unspent transparent outputs.
+///
+/// Nullifiers are held in flat vectors because [`find_spent`] compares them in constant time, so
+/// that a local side-channel observer does not learn which of a block's nullifiers are the
+/// wallet's. That mitigation is partial: the comparison runs once per tracked nullifier, so its
+/// duration still discloses how many notes the wallet holds.
+///
+/// Transparent outpoints are held in a hash map, and matching them is not constant-time. This is
+/// not because the data is public — an outpoint is public, but the wallet's association with it
+/// is exactly what a wallet rotating addresses and shielding promptly needs to keep private.
+/// It is because the transparent path cannot deliver the property at this point alone:
+/// recognizing a transparent output requires resolving its address against the wallet's address
+/// set, which a storage backend answers with an indexed query whose timing already depends on
+/// whether the address is the wallet's. Constant-time matching here would leave that larger
+/// channel open while costing a linear scan of what may be a large UTXO set. Closing it properly
+/// requires addressing both paths together.
+// TODO: Recognize transparent outputs and spends in constant time, across both the address
+// resolution and spend matching paths.
+// https://github.com/zcash/librustzcash/issues/2994
+pub struct SpendIdentifiers<AccountId> {
     sapling: Vec<(AccountId, sapling::Nullifier)>,
     #[cfg(feature = "orchard")]
     orchard: Vec<(AccountId, orchard::note::Nullifier)>,
     #[cfg(feature = "orchard")]
     ironwood: Vec<(AccountId, IronwoodNullifier)>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent: HashMap<OutPoint, AccountId>,
 }
 
-impl<AccountId> Nullifiers<AccountId> {
-    /// Constructs a new empty set of nullifiers
+impl<AccountId> SpendIdentifiers<AccountId> {
+    /// Constructs a new empty set of spend identifiers.
     pub fn empty() -> Self {
         Self {
             sapling: vec![],
@@ -459,10 +487,12 @@ impl<AccountId> Nullifiers<AccountId> {
             orchard: vec![],
             #[cfg(feature = "orchard")]
             ironwood: vec![],
+            #[cfg(feature = "transparent-inputs")]
+            transparent: HashMap::new(),
         }
     }
 
-    /// Fetches the nullifiers for the unspent notes being tracked by the given wallet.
+    /// Fetches the spend identifiers of the unspent outputs being tracked by the given wallet.
     pub fn unspent<DbT: WalletRead<AccountId = AccountId>>(
         db_data: &DbT,
     ) -> Result<Self, DbT::Error> {
@@ -472,14 +502,17 @@ impl<AccountId> Nullifiers<AccountId> {
             db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
             #[cfg(feature = "orchard")]
             db_data.get_ironwood_nullifiers(NullifierQuery::Unspent)?,
+            #[cfg(feature = "transparent-inputs")]
+            db_data.get_unspent_transparent_outpoints()?,
         ))
     }
 
-    /// Construct a nullifier set from its constituent parts.
+    /// Constructs a spend identifier set from its constituent parts.
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
         #[cfg(feature = "orchard")] orchard: Vec<(AccountId, orchard::note::Nullifier)>,
         #[cfg(feature = "orchard")] ironwood: Vec<(AccountId, IronwoodNullifier)>,
+        #[cfg(feature = "transparent-inputs")] transparent: HashMap<OutPoint, AccountId>,
     ) -> Self {
         Self {
             sapling,
@@ -487,6 +520,8 @@ impl<AccountId> Nullifiers<AccountId> {
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
         }
     }
 
@@ -505,6 +540,13 @@ impl<AccountId> Nullifiers<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn ironwood(&self) -> &[(AccountId, IronwoodNullifier)] {
         self.ironwood.as_ref()
+    }
+
+    /// Returns the outpoints of the unspent transparent outputs that the wallet is tracking,
+    /// each mapped to the account that received it.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(&self) -> &HashMap<OutPoint, AccountId> {
+        &self.transparent
     }
 
     /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
@@ -551,7 +593,7 @@ impl<AccountId> Nullifiers<AccountId> {
     }
 }
 
-impl<AccountId: Copy> Nullifiers<AccountId> {
+impl<AccountId: Copy> SpendIdentifiers<AccountId> {
     /// Updates this set of unspent nullifiers based on the results of scanning a block.
     ///
     /// This is intended for use when scanning multiple sequential blocks in memory, prior
@@ -603,6 +645,30 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
                     .iter()
                     .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
+        }
+
+        // Transparent outputs the wallet spent in this block are no longer spendable, and those
+        // it received become spendable; both must be reflected before the next block is scanned.
+        #[cfg(feature = "transparent-inputs")]
+        {
+            for spend in scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.transparent_spends())
+            {
+                self.transparent.remove(spend.outpoint());
+            }
+
+            self.transparent.extend(
+                scanned_block
+                    .transactions()
+                    .iter()
+                    .flat_map(|tx| tx.transparent_outputs())
+                    .filter_map(|out| {
+                        out.recipient_account()
+                            .map(|account_id| (out.outpoint().clone(), *account_id))
+                    }),
+            );
         }
     }
 }
@@ -661,6 +727,18 @@ pub enum ScanError {
         protocol: ShieldedPool,
         at_height: BlockHeight,
     },
+
+    /// The prevout reference of a compact transparent input could not be decoded.
+    ///
+    /// Scanning fails rather than skipping such an input: without its prevout the wallet cannot
+    /// determine whether the input spends one of its own outputs, and treating it as unrelated
+    /// would silently overstate the wallet's balance.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentPrevoutInvalid {
+        at_height: BlockHeight,
+        txid: TxId,
+        index: usize,
+    },
 }
 
 impl ScanError {
@@ -674,6 +752,8 @@ impl ScanError {
             TreeSizeUnknown { .. } => false,
             TreeSizeInvalid { .. } => false,
             TreeSizeOverflow { .. } => false,
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid { .. } => false,
         }
     }
 
@@ -687,6 +767,8 @@ impl ScanError {
             TreeSizeUnknown { at_height, .. } => *at_height,
             TreeSizeInvalid { at_height, .. } => *at_height,
             TreeSizeOverflow { at_height, .. } => *at_height,
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid { at_height, .. } => *at_height,
         }
     }
 }
@@ -754,11 +836,61 @@ impl fmt::Display for ScanError {
                     "The {protocol:?} note commitment tree size at height {at_height} would exceed the `u32` range."
                 )
             }
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid {
+                txid,
+                index,
+                at_height,
+            } => {
+                write!(
+                    f,
+                    "The prevout of transparent input {index} of transaction {txid} at height {at_height} was improperly encoded."
+                )
+            }
         }
     }
 }
 
 impl core::error::Error for ScanError {}
+
+/// Errors that can occur while scanning a block, including those arising from the wallet
+/// lookups that transparent output detection requires.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ScanBlockError<E> {
+    /// A structural or continuity error in the block being scanned.
+    Scan(ScanError),
+    /// An error occurred while looking up the wallet account associated with a
+    /// transparent address.
+    AddressLookup(E),
+}
+
+impl<E> From<ScanError> for ScanBlockError<E> {
+    fn from(e: ScanError) -> Self {
+        ScanBlockError::Scan(e)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for ScanBlockError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScanBlockError::Scan(e) => write!(f, "Error scanning block: {e}"),
+            ScanBlockError::AddressLookup(e) => write!(
+                f,
+                "Error looking up the wallet account for a transparent address: {e}"
+            ),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for ScanBlockError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ScanBlockError::Scan(e) => Some(e),
+            ScanBlockError::AddressLookup(e) => Some(e),
+        }
+    }
+}
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKeys`].
 ///
@@ -767,25 +899,33 @@ impl core::error::Error for ScanError {}
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P, AccountId, IvkTag>(
+pub fn scan_block<P, AccountId, IvkTag, E>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
-    nullifiers: &Nullifiers<AccountId>,
+    nullifiers: &SpendIdentifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<AccountId>, ScanError>
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<ScannedBlock<AccountId>, ScanBlockError<E>>
 where
     P: consensus::Parameters + Send + 'static,
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    compact::scan_block_with_runners::<_, _, _, (), (), ()>(
+    compact::scan_block_with_runners::<_, _, _, (), (), (), _>(
         params,
         block,
         scanning_keys,
         nullifiers,
         prior_block_metadata,
         None,
+        #[cfg(feature = "transparent-inputs")]
+        find_account_for_address,
     )
 }
 
@@ -873,6 +1013,39 @@ where
     }
 
     (found_spent, unlinked_nullifiers)
+}
+
+/// Partitions a transaction's transparent inputs into those that spend an output the wallet is
+/// tracking and those that do not, returning the wallet's spends alongside the prevouts of the
+/// remaining inputs.
+///
+/// The unmatched prevouts are not known to be unrelated to the wallet: an input spending an output
+/// created in a block range the wallet has not yet scanned cannot be recognized here, because the
+/// wallet does not yet know the output exists. They are returned so that the caller can record
+/// them against the spending transaction and resolve the spend if that output is discovered later.
+///
+/// Unlike [`find_spent`], the comparison is not constant-time; see [`SpendIdentifiers`] for why
+/// the transparent path does not attempt that property.
+#[cfg(feature = "transparent-inputs")]
+fn find_transparent_spends<AccountId: Copy>(
+    prevouts: impl IntoIterator<Item = OutPoint>,
+    tracked: &HashMap<OutPoint, AccountId>,
+) -> (Vec<WalletTransparentSpend<AccountId>>, Vec<OutPoint>) {
+    let mut found_spent = vec![];
+    let mut unlinked_prevouts = vec![];
+
+    for (index, prevout) in prevouts.into_iter().enumerate() {
+        match tracked.get(&prevout) {
+            Some(account_id) => found_spent.push(WalletTransparentSpend::from_parts(
+                index,
+                prevout,
+                *account_id,
+            )),
+            None => unlinked_prevouts.push(prevout),
+        }
+    }
+
+    (found_spent, unlinked_prevouts)
 }
 
 #[allow(clippy::too_many_arguments)]

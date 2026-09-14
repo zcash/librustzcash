@@ -64,7 +64,7 @@ use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
 use crate::{
     data_api::BlockMetadata,
     scanning::{
-        Nullifiers, ScanningKeys,
+        ScanningKeys, SpendIdentifiers,
         full::{decrypt_block, scan_block},
     },
 };
@@ -494,7 +494,7 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
         &header,
         vtx,
         &scanning_keys,
-        &Nullifiers::empty(),
+        &SpendIdentifiers::empty(),
         Some(&prior_block_metadata),
         |_addr| Ok::<_, Infallible>(None),
     )
@@ -506,7 +506,7 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
         &header,
         vtx,
         &scanning_keys,
-        &Nullifiers::empty(),
+        &SpendIdentifiers::empty(),
         Some(&prior_block_metadata),
     )
     .expect("scanning the block succeeds");
