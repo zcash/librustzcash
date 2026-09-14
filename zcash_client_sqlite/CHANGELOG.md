@@ -11,10 +11,17 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- `WalletSnapshot` and `WalletDb::get_wallet_snapshot`, which return wallet
+  balances, heights, and subtree indices without computing
+  [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
+  use this to avoid the `subtree_scan_progress` aggregates.
+  `WalletRead::get_wallet_summary` is unchanged and still computes progress.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration

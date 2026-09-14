@@ -28,6 +28,8 @@ workspace.
     set by the request-construction closure was previously serialized onto
     the wire alongside it and took precedence for `HeaderMap::get`; it is now
     discarded.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method,
+  `queue_rescan`, which queues a range of block heights to be scanned again.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
