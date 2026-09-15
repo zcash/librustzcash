@@ -314,6 +314,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type SaplingDigest = Option<Blake2bHash>;
     type OrchardDigest = Option<Blake2bHash>;
     type IronwoodDigest = Option<Blake2bHash>;
+    #[cfg(zcash_unstable = "nutachyon")]
+    type TachyonDigest = Option<[u8; 32]>;
 
     type Digest = TxDigests<Blake2bHash>;
 
@@ -375,6 +377,14 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         })
     }
 
+    #[cfg(zcash_unstable = "nutachyon")]
+    fn digest_tachyon(
+        &self,
+        tachyon_bundle: Option<&zcash_tachyon::TachyonBundle>,
+    ) -> Self::TachyonDigest {
+        tachyon_bundle.map(zcash_tachyon::TachyonBundle::commitment)
+    }
+
     fn combine(
         &self,
         header_digest: Self::HeaderDigest,
@@ -382,6 +392,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         ironwood_digest: Self::IronwoodDigest,
+        #[cfg(zcash_unstable = "nutachyon")] tachyon_digest: Self::TachyonDigest,
     ) -> Self::Digest {
         TxDigests {
             header_digest,
@@ -389,6 +400,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             sapling_digest,
             orchard_digest,
             ironwood_digest,
+            #[cfg(zcash_unstable = "nutachyon")]
+            tachyon_digest,
         }
     }
 }
@@ -477,16 +490,90 @@ pub(crate) fn to_hash_v6(
     h.finalize()
 }
 
+/// Combines transaction component digests for a version 7 (tachyon) transaction: the v6
+/// (Ironwood) digest tree with the tachyon bundle's effecting commitment appended.
+///
+/// The tachyon leaf is [`zcash_tachyon::TachyonBundle::commitment`]; the stamp is excluded
+/// because it is authorizing data and is malleable during aggregation. An absent bundle is
+/// combined as tachyon's "no bundle" commitment digest.
+#[cfg(zcash_unstable = "nutachyon")]
+pub(crate) fn to_hash_v7(
+    consensus_branch_id: BranchId,
+    header_digest: Blake2bHash,
+    transparent_digest: Blake2bHash,
+    sapling_digest: Option<Blake2bHash>,
+    orchard_digest: Option<Blake2bHash>,
+    ironwood_digest: Option<Blake2bHash>,
+    tachyon_digest: Option<[u8; 32]>,
+) -> Blake2bHash {
+    let mut personal = [0; 16];
+    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
+    (&mut personal[12..])
+        .write_u32_le(consensus_branch_id.into())
+        .unwrap();
+
+    let mut h = hasher(&personal);
+    h.write_all(header_digest.as_bytes()).unwrap();
+    h.write_all(transparent_digest.as_bytes()).unwrap();
+    h.write_all(
+        sapling_digest
+            .unwrap_or_else(hash_sapling_txid_empty)
+            .as_bytes(),
+    )
+    .unwrap();
+    h.write_all(
+        orchard_digest
+            .unwrap_or_else(|| {
+                let (value_pool, tx_version) = orchard_commitment_domain(TxVersion::V7);
+                orchard::commitments::hash_bundle_txid_empty(value_pool, tx_version)
+                    .expect("empty Orchard bundle txid commitment is valid for its tx format")
+            })
+            .as_bytes(),
+    )
+    .unwrap();
+    h.write_all(
+        ironwood_digest
+            .unwrap_or_else(|| {
+                let (value_pool, tx_version) = ironwood_v6_domain();
+                orchard::commitments::hash_bundle_txid_empty(value_pool, tx_version)
+                    .expect("empty Ironwood bundle txid commitment is valid")
+            })
+            .as_bytes(),
+    )
+    .unwrap();
+    h.write_all(
+        &tachyon_digest.unwrap_or_else(|| zcash_tachyon::TachyonBundle::NoBundle.commitment()),
+    )
+    .unwrap();
+
+    h.finalize()
+}
+
 /// Combines transaction component digests into a transaction ID.
 ///
-/// V6 and later transactions include the Ironwood bundle digest as a separate
-/// Orchard-shaped digest using Ironwood personalization. If any shielded bundle digest is
+/// Version 6 transactions include the Ironwood bundle digest as a separate
+/// Orchard-shaped digest using Ironwood personalization. Version 7 transactions additionally
+/// include the tachyon bundle's effecting commitment. If any shielded bundle digest is
 /// absent, this substitutes the protocol-defined empty bundle digest for that pool.
 pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
     digests: &TxDigests<Blake2bHash>,
 ) -> TxId {
+    #[cfg(zcash_unstable = "nutachyon")]
+    if txversion.has_tachyon() {
+        let txid_digest = to_hash_v7(
+            consensus_branch_id,
+            digests.header_digest,
+            hash_transparent_txid_data(digests.transparent_digests.as_ref()),
+            digests.sapling_digest,
+            digests.orchard_digest,
+            digests.ironwood_digest,
+            digests.tachyon_digest,
+        );
+        return TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap());
+    }
+
     let txid_digest = if txversion.has_ironwood() {
         to_hash_v6(
             consensus_branch_id,
@@ -525,6 +612,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type SaplingDigest = Blake2bHash;
     type OrchardDigest = Blake2bHash;
     type IronwoodDigest = Blake2bHash;
+    #[cfg(zcash_unstable = "nutachyon")]
+    type TachyonDigest = [u8; 32];
 
     type Digest = Blake2bHash;
 
@@ -620,6 +709,21 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         )
     }
 
+    /// Computes the authorizing digest for the tachyon bundle: the action signatures, the
+    /// binding signature, and the stamp digest
+    /// ([`zcash_tachyon::TachyonBundle::auth_digest`]). An absent bundle contributes tachyon's
+    /// "no bundle" authorizing digest.
+    #[cfg(zcash_unstable = "nutachyon")]
+    fn digest_tachyon(
+        &self,
+        tachyon_bundle: Option<&zcash_tachyon::TachyonBundle>,
+    ) -> Self::TachyonDigest {
+        tachyon_bundle.map_or_else(
+            || zcash_tachyon::TachyonBundle::NoBundle.auth_digest(),
+            zcash_tachyon::TachyonBundle::auth_digest,
+        )
+    }
+
     fn combine(
         &self,
         tx_context: Self::HeaderDigest,
@@ -627,6 +731,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         ironwood_digest: Self::IronwoodDigest,
+        #[cfg(zcash_unstable = "nutachyon")] tachyon_digest: Self::TachyonDigest,
     ) -> Self::Digest {
         let (_txversion, consensus_branch_id) = tx_context;
         let mut personal = [0; 16];
@@ -642,6 +747,11 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
         if _txversion.has_ironwood() {
             h.write_all(ironwood_digest.as_bytes()).unwrap();
+        }
+
+        #[cfg(zcash_unstable = "nutachyon")]
+        if _txversion.has_tachyon() {
+            h.write_all(&tachyon_digest).unwrap();
         }
 
         h.finalize()

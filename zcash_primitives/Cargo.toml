@@ -76,6 +76,13 @@ corez.workspace = true
 workspace = true
 features = ["pre-zip-212"]
 
+# Keep the Tachyon proving stack out of builds that do not opt into NuTachyon.
+[target.'cfg(zcash_unstable = "nutachyon")'.dependencies]
+zcash_tachyon.workspace = true
+
+[target.'cfg(zcash_unstable = "nutachyon")'.dev-dependencies]
+rand_0_10 = { package = "rand", version = "0.10", default-features = false, features = ["std_rng"] }
+
 [dev-dependencies]
 bls12_381.workspace = true
 chacha20poly1305 = "0.10"
@@ -101,6 +108,7 @@ std = [
     "sapling/std",
     "orchard/std",
     "transparent/std",
+    "zcash_tachyon/std",
 ]
 zip-233 = []
 

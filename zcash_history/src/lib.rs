@@ -18,8 +18,12 @@ mod version;
 mod test_vectors;
 
 pub use entry::{Entry, MAX_ENTRY_SIZE};
+#[cfg(zcash_unstable = "nutachyon")]
+pub use node_data::V4 as NodeDataV4;
 pub use node_data::{MAX_NODE_DATA_SIZE, NodeData, V2 as NodeDataV2, V3 as NodeDataV3};
 pub use tree::Tree;
+#[cfg(zcash_unstable = "nutachyon")]
+pub use version::V4;
 pub use version::{V1, V2, V3, Version};
 
 /// Crate-level error type

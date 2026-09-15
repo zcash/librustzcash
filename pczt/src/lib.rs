@@ -630,6 +630,7 @@ impl Pczt {
                 sapling_bundle,
                 orchard_bundle,
                 ironwood_bundle,
+                None,
             ),
             _ => TransactionData::from_parts(
                 version,
