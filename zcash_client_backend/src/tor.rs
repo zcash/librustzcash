@@ -1,109 +1,33 @@
 //! Tor support for Zcash wallets.
+//!
+//! This module provides the Tor (via `arti`) implementation of the crate's
+//! backend-agnostic [`crate::privacy`] network-privacy layer. [`Client`] implements
+//! [`PrivateNetwork`], and its gRPC, HTTP, and exchange-rate methods delegate to the
+//! generic helpers in [`crate::privacy`].
 
-use std::{fmt, io, path::Path, time::Duration};
+use std::{fmt, io, path::Path};
 
-use arti_client::{TorClient, config::TorClientConfigBuilder};
+use arti_client::{
+    DataStream, StreamPrefs, TorClient,
+    config::{BoolOrAuto, TorClientConfigBuilder},
+};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
-#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-mod grpc;
+use crate::privacy::{Error as PrivacyError, PrivateNetwork};
 
 pub mod http;
 
-// Re-exported as this is currently the only `arti_client` type users would need to use
-// our minimal client API.
-pub use arti_client::DormantMode;
-
-/// Deadlines applied to network operations performed by a [`Client`].
-///
-/// Without these, a server that accepts a connection and then goes silent would leave the
-/// corresponding future pending forever. Tor circuits make this more likely than it is on
-/// the clearnet: a half-open circuit can persist for a long time without the peer's TCP
-/// stack ever delivering a reset.
-///
-/// Use [`Timeouts::default`] for values suitable for typical Tor circuit latency, or the
-/// `with_*` methods to tune them.
-#[derive(Clone, Copy, Debug)]
-pub struct Timeouts {
-    connect: Duration,
-    request: Duration,
-    response_body: Duration,
-    grpc_keepalive_interval: Duration,
-    grpc_keepalive_timeout: Duration,
-}
-
-impl Default for Timeouts {
-    fn default() -> Self {
-        Self {
-            connect: Duration::from_secs(30),
-            request: Duration::from_secs(60),
-            response_body: Duration::from_secs(60),
-            grpc_keepalive_interval: Duration::from_secs(30),
-            grpc_keepalive_timeout: Duration::from_secs(20),
-        }
-    }
-}
-
-impl Timeouts {
-    /// Sets the maximum time allowed to establish a usable connection to a server.
-    ///
-    /// This covers opening the Tor stream and, for HTTPS or gRPC-over-TLS endpoints,
-    /// completing the TLS handshake.
-    ///
-    /// The default is 30 seconds.
-    #[must_use]
-    pub fn with_connect(mut self, timeout: Duration) -> Self {
-        self.connect = timeout;
-        self
-    }
-
-    /// Sets the maximum time allowed to send a request and receive its response headers.
-    ///
-    /// This does not bound the time taken to receive a response body; see
-    /// [`Self::with_response_body`] for HTTP, and [`Self::with_grpc_keepalive`] for gRPC.
-    ///
-    /// The default is 60 seconds.
-    #[must_use]
-    pub fn with_request(mut self, timeout: Duration) -> Self {
-        self.request = timeout;
-        self
-    }
-
-    /// Sets the maximum time allowed to receive a complete HTTP response body.
-    ///
-    /// This is not applied to gRPC responses, because a gRPC response may be a
-    /// long-running stream (such as `GetBlockRange`) for which no fixed deadline is
-    /// appropriate. Use [`Self::with_grpc_keepalive`] to bound those instead.
-    ///
-    /// The default is 60 seconds.
-    #[must_use]
-    pub fn with_response_body(mut self, timeout: Duration) -> Self {
-        self.response_body = timeout;
-        self
-    }
-
-    /// Sets the HTTP/2 keep-alive parameters used for gRPC connections.
-    ///
-    /// A ping is sent every `interval` while a request is in flight, and the connection is
-    /// closed if no acknowledgement is received within `timeout`. This is what detects a
-    /// gRPC peer that stalls partway through streaming a response, which no request
-    /// deadline can bound without also capping legitimately long streams.
-    ///
-    /// The defaults are a 30 second interval and a 20 second timeout.
-    #[must_use]
-    pub fn with_grpc_keepalive(mut self, interval: Duration, timeout: Duration) -> Self {
-        self.grpc_keepalive_interval = interval;
-        self.grpc_keepalive_timeout = timeout;
-        self
-    }
-}
+// Re-exported so that `tor::DormantMode` and `tor::Timeouts` continue to resolve for
+// downstream users; they are now the crate-owned types in [`crate::privacy`].
+pub use crate::privacy::{DormantMode, Timeouts};
 
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
 pub struct Client {
     inner: TorClient<PreferredRuntime>,
     timeouts: Timeouts,
+    stream_prefs: StreamPrefs,
 }
 
 impl Client {
@@ -159,7 +83,11 @@ impl Client {
         let inner = client_builder.create_bootstrapped().await?;
         debug!("Tor bootstrapped");
 
-        Ok(Self { inner, timeouts })
+        Ok(Self {
+            inner,
+            timeouts,
+            stream_prefs: StreamPrefs::new(),
+        })
     }
 
     /// Ensures the Tor client is bootstrapped.
@@ -202,6 +130,20 @@ impl Client {
         Self {
             inner: self.inner.isolated_client(),
             timeouts: self.timeouts,
+            stream_prefs: self.stream_prefs.clone(),
+        }
+    }
+
+    /// Returns a handle identical to this one, except that its streams are permitted to
+    /// connect to Tor hidden services (`.onion` addresses).
+    #[must_use]
+    pub fn with_onion_services(&self) -> Self {
+        let mut stream_prefs = self.stream_prefs.clone();
+        stream_prefs.connect_to_onion_services(BoolOrAuto::Explicit(true));
+        Self {
+            inner: self.inner.clone(),
+            timeouts: self.timeouts,
+            stream_prefs,
         }
     }
 
@@ -213,7 +155,73 @@ impl Client {
     ///
     /// See the [`DormantMode`] documentation for more details.
     pub fn set_dormant(&self, mode: DormantMode) {
-        self.inner.set_dormant(mode);
+        self.inner.set_dormant(mode.into());
+    }
+
+    /// Connects to the `lightwalletd` server at the given endpoint.
+    ///
+    /// If `allow_onion_services` is `true`, the connection will be permitted to reach
+    /// Tor hidden services (`.onion` addresses). The caller is responsible for deciding
+    /// whether onion connections are appropriate for the given endpoint; this crate
+    /// does not infer that from the endpoint host.
+    ///
+    /// The returned client applies this `Client`'s [`Timeouts`] to every request it makes.
+    /// Note that the request deadline bounds the wait for a response's headers, not the
+    /// duration of the response itself, so long-running streaming methods such as
+    /// `GetBlockRange` are not capped by it; a peer that stalls partway through a stream
+    /// is instead detected by the HTTP/2 keep-alive.
+    #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+    pub async fn connect_to_lightwalletd(
+        &self,
+        endpoint: tonic::transport::Uri,
+        allow_onion_services: bool,
+    ) -> Result<
+        crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient<
+            tonic::transport::Channel,
+        >,
+        Error,
+    > {
+        self.ensure_bootstrapped().await?;
+
+        let net = if allow_onion_services {
+            self.with_onion_services()
+        } else {
+            self.clone()
+        };
+
+        Ok(crate::privacy::grpc::connect_to_lightwalletd(&net, endpoint).await?)
+    }
+}
+
+impl PrivateNetwork for Client {
+    type Stream = DataStream;
+
+    async fn connect(&self, host: &str, port: u16) -> Result<Self::Stream, PrivacyError> {
+        // Ensure the Tor client is bootstrapped before attempting to connect.
+        if !self.inner.bootstrap_status().ready_for_traffic() {
+            debug!("Re-bootstrapping Tor");
+            self.inner
+                .bootstrap()
+                .await
+                .map_err(|e| PrivacyError::Backend(Box::new(e)))?;
+            debug!("Tor re-bootstrapped");
+        }
+        self.inner
+            .connect_with_prefs((host, port), &self.stream_prefs)
+            .await
+            .map_err(|e| PrivacyError::Backend(Box::new(e)))
+    }
+
+    fn isolated_handle(&self) -> Self {
+        self.isolated_client()
+    }
+
+    fn set_dormant(&self, mode: DormantMode) {
+        self.inner.set_dormant(mode.into());
+    }
+
+    fn timeouts(&self) -> Timeouts {
+        self.timeouts
     }
 }
 
@@ -225,13 +233,15 @@ pub enum Error {
     MissingTorDirectory,
     #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
     /// An error occurred while using gRPC-over-Tor.
-    Grpc(self::grpc::GrpcError),
+    Grpc(crate::privacy::grpc::GrpcError),
     /// An error occurred while using HTTP-over-Tor.
-    Http(self::http::HttpError),
+    Http(crate::privacy::http::HttpError),
     /// An IO error occurred while interacting with the filesystem.
     Io(io::Error),
     /// A Tor-specific error.
     Tor(arti_client::Error),
+    /// A network-privacy backend error not covered by the more specific variants.
+    Backend(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl fmt::Display for Error {
@@ -243,6 +253,7 @@ impl fmt::Display for Error {
             Error::Http(e) => write!(f, "HTTP-over-Tor error: {e}"),
             Error::Io(e) => write!(f, "IO error: {e}"),
             Error::Tor(e) => write!(f, "Tor error: {e}"),
+            Error::Backend(e) => write!(f, "Network backend error: {e}"),
         }
     }
 }
@@ -256,19 +267,20 @@ impl std::error::Error for Error {
             Error::Http(e) => Some(e),
             Error::Io(e) => Some(e),
             Error::Tor(e) => Some(e),
+            Error::Backend(e) => Some(e.as_ref()),
         }
     }
 }
 
 #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-impl From<self::grpc::GrpcError> for Error {
-    fn from(e: self::grpc::GrpcError) -> Self {
+impl From<crate::privacy::grpc::GrpcError> for Error {
+    fn from(e: crate::privacy::grpc::GrpcError) -> Self {
         Error::Grpc(e)
     }
 }
 
-impl From<self::http::HttpError> for Error {
-    fn from(e: self::http::HttpError) -> Self {
+impl From<crate::privacy::http::HttpError> for Error {
+    fn from(e: crate::privacy::http::HttpError) -> Self {
         Error::Http(e)
     }
 }
@@ -282,5 +294,24 @@ impl From<io::Error> for Error {
 impl From<arti_client::Error> for Error {
     fn from(e: arti_client::Error) -> Self {
         Error::Tor(e)
+    }
+}
+
+impl From<PrivacyError> for Error {
+    fn from(e: PrivacyError) -> Self {
+        match e {
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+            PrivacyError::Grpc(e) => Error::Grpc(e),
+            PrivacyError::Http(e) => Error::Http(e),
+            PrivacyError::NoRoute { host, port } => {
+                Error::Backend(Box::new(PrivacyError::NoRoute { host, port }))
+            }
+            // The Tor backend nests its native errors as `arti_client::Error`; recover
+            // that specific type where possible for a more precise error.
+            PrivacyError::Backend(b) => match b.downcast::<arti_client::Error>() {
+                Ok(e) => Error::Tor(*e),
+                Err(b) => Error::Backend(b),
+            },
+        }
     }
 }
