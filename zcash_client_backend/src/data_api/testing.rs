@@ -1799,7 +1799,6 @@ impl TestBuilder<(), ()> {
         nu6_1: None,
         nu6_2: None,
         nu6_3: None,
-        #[cfg(zcash_unstable = "nu7")]
         nu7: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,

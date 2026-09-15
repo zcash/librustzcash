@@ -10,6 +10,7 @@ workspace.
 
 ## [Unreleased]
 
+### Added
 - `zcash_protocol::address` module.
 - `zcash_protocol::address::Revision`
 - `zcash_protocol::consensus::NetworkConstants`:
@@ -23,6 +24,18 @@ workspace.
 - Experimental NuTachyon support behind `zcash_unstable="nutachyon"`, including
   its network upgrade, consensus branch ID, local-consensus activation parameter,
   and V7 transaction format constants.
+- `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
+  `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
+  without the `--cfg zcash_unstable="nu7"` configuration flag. Mainnet and
+  Testnet have no NU7 activation height, so `BranchId::for_height` returns
+  `BranchId::Nu7` only for a `LocalNetwork` or other `Parameters`
+  implementation that sets one.
+
+### Changed
+- `BranchId::height_bounds` and `height_range` now match `for_height` for local
+  schedules with skipped or out-of-order upgrades.
+- `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
+  (was the placeholder `0xFFFFFFFF`).
 
 ## [0.10.6] - 2026-09-04
 

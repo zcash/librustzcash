@@ -74,6 +74,9 @@ pub enum Error<FE> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
     InsufficientFunds(ZatBalance),
+    /// PCZT does not preserve a nonzero ZIP 233 amount.
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    Zip233UnsupportedByPczt,
     /// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
     ChangeRequired(ZatBalance),
@@ -133,6 +136,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "Insufficient funds for transaction construction; need an additional {amount:?} zatoshis"
             ),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Error::Zip233UnsupportedByPczt => {
+                write!(f, "PCZT does not support a nonzero ZIP 233 amount")
+            }
             Error::ChangeRequired(amount) => write!(
                 f,
                 "The transaction requires an additional change output of {amount:?} zatoshis"
@@ -877,6 +884,15 @@ impl<P, U> Builder<P, U> {
             ));
         }
 
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        if self.zip233_amount != Zatoshis::ZERO && !version.has_zip233(self.consensus_branch_id) {
+            return Err(Error::TargetIncompatible(
+                self.consensus_branch_id,
+                version,
+                None,
+            ));
+        }
+
         let sapling_available = version.has_sapling() && self.consensus_branch_id.has_sapling();
         if !sapling_available
             && (!self.sapling_inputs().is_empty() || !self.sapling_outputs().is_empty())
@@ -902,7 +918,6 @@ impl<P, U> Builder<P, U> {
             // and the consensus branch is one in which Ironwood is active.
             let ironwood_branch = match self.consensus_branch_id {
                 BranchId::Nu6_3 => true,
-                #[cfg(zcash_unstable = "nu7")]
                 BranchId::Nu7 => true,
                 #[cfg(zcash_unstable = "nutachyon")]
                 BranchId::NuTachyon => true,
@@ -1709,11 +1724,18 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     /// Upon success, returns a struct containing the PCZT components, and the
     /// [`SaplingMetadata`] and [`orchard::builder::BundleMetadata`] generated during the
     /// build process.
+    ///
+    /// Experimental ZIP 233 builds reject nonzero ZIP 233 amounts because PCZT cannot
+    /// preserve them through extraction.
     pub fn build_for_pczt<R: RngCore + CryptoRng, FR: FeeRule>(
         self,
         mut rng: R,
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        if self.zip233_amount != Zatoshis::ZERO {
+            return Err(Error::Zip233UnsupportedByPczt);
+        }
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
         self.check_version_compatibility::<FR::Error>(self.tx_version)?;
         self.check_coinbase_expiry_height::<FR::Error>()?;
@@ -1960,14 +1982,13 @@ mod tests {
             nu6_1: Some(BlockHeight::from_u32(8)),
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
-            #[cfg(zcash_unstable = "nu7")]
             nu7: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
     }
 
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+    #[cfg(feature = "circuits")]
     fn nu7_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         zcash_protocol::local_consensus::LocalNetwork {
             overwinter: Some(BlockHeight::from_u32(1)),
@@ -2046,7 +2067,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+    #[cfg(feature = "circuits")]
     fn nu7_coinbase_builder_does_not_expose_orchard() {
         let builder = Builder::new(
             nu7_test_network(),
@@ -2120,6 +2141,44 @@ mod tests {
             .unwrap(),
             1
         );
+    }
+
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu7", feature = "zip-233"))]
+    fn build_for_pczt_rejects_nonzero_zip233_amount() {
+        let mut builder = Builder::new(
+            nu6_3_test_network(),
+            10u32.into(),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
+        );
+        builder.set_zip233_amount(Zatoshis::const_from_u64(1));
+        assert!(matches!(
+            builder.check_version_compatibility::<Infallible>(TxVersion::V6),
+            Err(Error::TargetIncompatible(
+                BranchId::Nu6_3,
+                TxVersion::V6,
+                None
+            ))
+        ));
+        builder.consensus_branch_id = BranchId::Nu7;
+        assert!(
+            builder
+                .check_version_compatibility::<Infallible>(TxVersion::V6)
+                .is_ok()
+        );
+        assert!(matches!(
+            builder.build_for_pczt(
+                rand_core::OsRng,
+                &crate::transaction::fees::zip317::FeeRule::standard()
+            ),
+            Err(Error::Zip233UnsupportedByPczt)
+        ));
     }
 
     #[test]
@@ -2871,7 +2930,8 @@ mod tests {
                 orchard_padding: BundlePadding::DEFAULT,
                 ironwood_padding: BundlePadding::DEFAULT,
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder =
+                Builder::new(nu7_test_network(), BlockHeight::from_u32(11), build_config);
             builder.set_zip233_amount(Zatoshis::const_from_u64(50000));
 
             assert_matches!(
@@ -2939,7 +2999,8 @@ mod tests {
                 orchard_padding: BundlePadding::DEFAULT,
                 ironwood_padding: BundlePadding::DEFAULT,
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder =
+                Builder::new(nu7_test_network(), BlockHeight::from_u32(11), build_config);
             builder
                 .add_sapling_spend::<Infallible>(
                     dfvk.fvk().clone(),
@@ -3038,7 +3099,8 @@ mod tests {
                 orchard_padding: BundlePadding::DEFAULT,
                 ironwood_padding: BundlePadding::DEFAULT,
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder =
+                Builder::new(nu7_test_network(), BlockHeight::from_u32(11), build_config);
             builder
                 .add_sapling_spend::<Infallible>(
                     dfvk.fvk().clone(),

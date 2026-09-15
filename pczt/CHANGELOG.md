@@ -27,6 +27,10 @@ workspace.
 - `pczt::roles::spend_finalizer::SpendFinalizer::finalize_spends` now finalizes only
   `SighashType::ALL` signatures that match their input's `sighash_type`; use
   `SpendFinalizer::with_sighash_policy` to permit other sighash types.
+- `pczt::roles::creator::Creator::new` creates a v6 PCZT for the NU7
+  consensus branch ID `0x77190AD9`, and the `pczt::roles::updater::Updater`
+  anchor setters accept a PCZT with that branch ID. Neither needs the
+  `--cfg zcash_unstable="nu7"` configuration flag any more.
 
 ## [0.9.3] - 2026-08-07
 

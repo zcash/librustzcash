@@ -15,6 +15,18 @@ workspace.
   behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon and initially
   uses the V6 transaction body and digest structure.
 
+### Changed
+- Experimental `TxVersion::has_zip233` now takes a `BranchId` argument.
+- Experimental ZIP 233 builds preserve NU6.3 transaction encoding and transaction IDs.
+  Builders reject nonzero ZIP 233 amounts outside branches that support them.
+- `Builder::build_for_pczt` returns `Error::Zip233UnsupportedByPczt` for a nonzero
+  ZIP 233 amount instead of discarding the amount.
+- `TxVersion::suggested_for_branch`, `TxVersion::valid_in_branch`, and the
+  transaction builder handle `BranchId::Nu7` without the
+  `--cfg zcash_unstable="nu7"` configuration flag. NU7 uses the v6 transaction
+  format and does not accept v4 transactions (ZIP 2003). The ZIP 233 amount
+  still requires both that flag and the `zip-233` feature.
+
 ## [0.30.1] - 2026-08-18
 
 ### Added
