@@ -378,7 +378,7 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    let (network, uivk) = Uivk::decode(uivk_str)
+    let (network, _revision, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
 
     if params.network_type() != network {

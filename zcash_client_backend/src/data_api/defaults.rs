@@ -68,7 +68,9 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
             synthesized_ua = UnifiedAddress::from_receivers(
                 #[cfg(feature = "orchard")]
                 None,
-                Some(*pa),
+                Some(**pa),
+                None,
+                None,
                 None,
             );
             synthesized_ua.as_ref()

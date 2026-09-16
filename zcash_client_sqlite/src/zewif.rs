@@ -1620,7 +1620,7 @@ fn ufvk_components_consistent(
     derived: &UnifiedFullViewingKey,
     recorded: &UnifiedFullViewingKey,
 ) -> bool {
-    let transparent_ok = match (derived.transparent(), recorded.transparent()) {
+    let transparent_ok = match (derived.p2pkh(), recorded.p2pkh()) {
         (Some(a), Some(b)) => a.serialize() == b.serialize(),
         _ => true,
     };
@@ -2284,7 +2284,7 @@ mod tests {
 
         let external_ivk = ts
             .ufvk
-            .transparent()
+            .p2pkh()
             .expect("the test UFVK has a transparent component")
             .derive_external_ivk()
             .unwrap();

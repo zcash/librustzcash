@@ -85,7 +85,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             #[cfg(feature = "transparent-inputs")]
             let transparent_ivk_item: Option<Vec<u8>> =
-                uivk.transparent().as_ref().map(|k| k.serialize());
+                uivk.p2pkh().map(|k| k.serialize());
             #[cfg(not(feature = "transparent-inputs"))]
             let transparent_ivk_item: Option<Vec<u8>> = None;
 

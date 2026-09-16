@@ -242,8 +242,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     let transparent_external = diversifier_index
                         .and_then(|di| NonHardenedChildIndex::try_from(di).ok())
                         .and_then(|idx| {
-                            uivk.transparent()
-                                .as_ref()
+                            uivk.p2pkh()
                                 .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
                                 .map(|t_addr| (idx, t_addr.encode(&self.params)))
                         });
