@@ -969,7 +969,7 @@ pub(crate) mod tests {
     /// The transparent address derived for the given account UFVK at the given external child
     /// index.
     pub(crate) fn external_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
-        ufvk.transparent()
+        ufvk.p2pkh()
             .expect("the test account has a transparent key")
             .derive_external_ivk()
             .expect("the external scope is derivable")
@@ -980,7 +980,7 @@ pub(crate) mod tests {
     /// The transparent change address derived for the given account UFVK at the given internal
     /// child index.
     fn internal_address(ufvk: &UnifiedFullViewingKey, index: u32) -> TransparentAddress {
-        ufvk.transparent()
+        ufvk.p2pkh()
             .expect("the test account has a transparent key")
             .derive_internal_ivk()
             .expect("the internal scope is derivable")
