@@ -896,6 +896,13 @@ CREATE INDEX idx_transparent_received_output_spends_transaction_id ON transparen
 /// to the wallet is detected after the transaction that spends it has been processed,
 /// the spend can also be recorded as part of the process of adding the output to
 /// [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`].
+///
+/// It is one of three tables that carry transparent involvement the wallet cannot yet act on.
+/// This one and [`TABLE_TRANSPARENT_SPEND_LOCATOR_MAP`] are keyed by outpoint and answer "which
+/// transaction spent this output", differing only in how the spending transaction is named;
+/// [`TABLE_TRANSPARENT_TX_ADDRESS_OBSERVATIONS`] is keyed by address and answers "which stored
+/// transactions name this address", which is the question a key arriving later asks and neither
+/// of the other two can answer.
 pub(super) const TABLE_TRANSPARENT_SPEND_MAP: &str = r#"
 CREATE TABLE "transparent_spend_map" (
     spending_transaction_id INTEGER NOT NULL
@@ -1294,6 +1301,11 @@ pub(super) const INDEX_NF_MAP_LOCATOR_IDX: &str =
 /// no wallet involvement, for which no [`TABLE_TRANSACTIONS`] row exists or should be created,
 /// so the spending transaction is identified by its locator in [`TABLE_TX_LOCATOR_MAP`].
 ///
+/// Both it and [`TABLE_TRANSPARENT_SPEND_MAP`] are keyed by outpoint, and rows here do not
+/// survive below the fully scanned height; [`TABLE_TRANSPARENT_TX_ADDRESS_OBSERVATIONS`] completes
+/// the three by keying the wallet's stored transactions on the addresses they name, so that a key
+/// added later can be checked against them.
+///
 /// The `prevout_uniq` constraint holds because an outpoint can be spent at most once on a given
 /// chain; a competing spend belongs to a fork, and the entry for it is removed with the locator
 /// when the reorg is processed.
@@ -1313,6 +1325,61 @@ CREATE TABLE transparent_spend_locator_map (
 pub(super) const INDEX_TRANSPARENT_SPEND_LOCATOR_IDX: &str = r#"CREATE INDEX transparent_spend_locator_idx ON transparent_spend_locator_map (
     block_height,
     tx_index
+)"#;
+
+/// A map from each transparent address named by a wallet-involved transaction to that
+/// transaction, in both involvement directions.
+///
+/// Wallet recognition is the join of the wallet's stored transactions with its address book.
+/// Checking a transaction against the book at the moment the transaction is stored maintains
+/// only one side of that join; this table maintains the other, by recording involvement with
+/// addresses the wallet does not control at the time of observation, so that an address added
+/// later — by account import, by a standalone receiver import, or by gap-limit advancement —
+/// can be checked against everything already seen.
+///
+/// It is the durable, address-keyed complement to the two outpoint-keyed spend maps.
+/// [`TABLE_TRANSPARENT_SPEND_MAP`] and [`TABLE_TRANSPARENT_SPEND_LOCATOR_MAP`] resolve
+/// out-of-order discovery of a spend whose output the wallet learns of later, and the latter is
+/// pruned below the fully-scanned height; neither can answer "which stored transactions name
+/// this address", which is the question a newly added key asks.
+///
+/// Rows are written for a transaction only once the wallet has determined that the transaction
+/// involves it, so the table is bounded by the wallet's own transaction history. Every write is
+/// an idempotent upsert on the primary key, because the same transaction is observed at
+/// differing fidelity as it is discovered: compact block scanning supplies output rows only (a
+/// `CompactTxIn` carries no `scriptSig`, hence no address), while full block data and stored raw
+/// transactions supply both directions.
+///
+/// ### Columns
+/// - `transaction_id`: the transaction whose transparent data names the address.
+/// - `involvement`: `0` when the address is paid by an output, `1` when the address is revealed
+///   by an input's `scriptSig`.
+/// - `item_index`: the index of the output within `vout`, or of the input within `vin`.
+/// - `address`: the transparent address, encoded for the wallet's network.
+/// - `value_zat`: the value paid to the address, for output rows; `NULL` for input rows.
+/// - `prevout_txid`, `prevout_output_index`: the outpoint that the input spends, for input rows;
+///   `NULL` for output rows.
+pub(super) const TABLE_TRANSPARENT_TX_ADDRESS_OBSERVATIONS: &str = r#"
+CREATE TABLE transparent_tx_address_observations (
+    transaction_id INTEGER NOT NULL
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    involvement INTEGER NOT NULL,
+    item_index INTEGER NOT NULL,
+    address TEXT NOT NULL,
+    value_zat INTEGER,
+    prevout_txid BLOB,
+    prevout_output_index INTEGER,
+    PRIMARY KEY (transaction_id, involvement, item_index),
+    CONSTRAINT involvement_data_consistency CHECK (
+        (involvement = 0 AND value_zat IS NOT NULL
+            AND prevout_txid IS NULL AND prevout_output_index IS NULL)
+        OR (involvement = 1 AND value_zat IS NULL
+            AND prevout_txid IS NOT NULL AND prevout_output_index IS NOT NULL)
+    )
+) WITHOUT ROWID"#;
+pub(super) const INDEX_TRANSPARENT_TX_ADDRESS_OBSERVATIONS_ADDRESS: &str = r#"
+CREATE INDEX transparent_tx_address_observations_address ON transparent_tx_address_observations (
+    address
 )"#;
 
 //

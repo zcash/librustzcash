@@ -848,6 +848,7 @@ mod tests {
             db::TABLE_TRANSPARENT_SPEND_LOCATOR_MAP,
             db::TABLE_TRANSPARENT_SPEND_MAP,
             db::TABLE_TRANSPARENT_SPEND_SEARCH_QUEUE,
+            db::TABLE_TRANSPARENT_TX_ADDRESS_OBSERVATIONS,
             db::TABLE_TX_LOCATOR_MAP,
             db::TABLE_TX_RETRIEVAL_QUEUE,
         ];
@@ -905,6 +906,7 @@ mod tests {
             db::INDEX_TRANSPARENT_SPEND_LOCATOR_IDX,
             db::INDEX_TRANSPARENT_SPEND_MAP_TX,
             db::INDEX_TRANSPARENT_SPEND_SEARCH_TX,
+            db::INDEX_TRANSPARENT_TX_ADDRESS_OBSERVATIONS_ADDRESS,
             db::INDEX_TX_RETIREVAL_QUEUE_DEPENDENT_TX,
         ];
         let mut indices_query = st

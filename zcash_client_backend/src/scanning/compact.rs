@@ -26,7 +26,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::find_transparent_spends,
-    crate::wallet::WalletTransparentOutput,
+    crate::wallet::{TransparentAddressObservation, WalletTransparentOutput},
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
 
@@ -564,10 +564,20 @@ where
         // amount, cannot be one the wallet controls, so it is skipped rather than treated as a
         // scan failure; a malformed prevout above is not, because there the wallet would be
         // unable to tell whether its own funds were being spent.
+        //
+        // Every output that names an address is also recorded as an involvement observation,
+        // whether or not the wallet controls the address: a transaction that pays the wallet
+        // may pay a second address the wallet learns to control only later, and the record is
+        // what makes that recognizable then. The observations are attached to the transaction
+        // only if it turns out to involve the wallet, below.
         #[cfg(feature = "transparent-inputs")]
-        let transparent_outputs = {
+        let (transparent_outputs, transparent_address_observations) = {
             let mut detected = vec![];
+            let mut observations = vec![];
             for (output_index, vout) in tx.vout.iter().enumerate() {
+                let output_index =
+                    u32::try_from(output_index).expect("a transaction has fewer than 2^32 outputs");
+
                 let Ok(txout) = vout.to_txout() else {
                     warn!(
                         "Ignoring transparent output {output_index} of transaction {txid}: value is not a valid amount of zatoshis"
@@ -583,16 +593,18 @@ where
                     continue;
                 };
 
+                observations.push(TransparentAddressObservation::output(
+                    output_index,
+                    address,
+                    txout.value(),
+                ));
+
                 if let Some((account_id, key_scope)) =
                     find_account_for_address(&address).map_err(ScanBlockError::AddressLookup)?
                 {
                     detected.push(
                         WalletTransparentOutput::from_parts(
-                            OutPoint::new(
-                                txid.into(),
-                                u32::try_from(output_index)
-                                    .expect("a transaction has fewer than 2^32 outputs"),
-                            ),
+                            OutPoint::new(txid.into(), output_index),
                             txout,
                             Some(cur_height),
                             Some(account_id),
@@ -603,7 +615,7 @@ where
                     );
                 }
             }
-            detected
+            (detected, observations)
         };
 
         #[cfg(feature = "transparent-inputs")]
@@ -633,6 +645,8 @@ where
                 transparent_outputs,
                 #[cfg(not(feature = "transparent-inputs"))]
                 vec![],
+                #[cfg(feature = "transparent-inputs")]
+                transparent_address_observations,
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
