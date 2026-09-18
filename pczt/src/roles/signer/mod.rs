@@ -52,7 +52,7 @@
 //! For v5 the sighash commits to the anchor, so it must be present before signing.
 //!
 //! [ZIP 326]: https://zips.z.cash/zip-0326#fabricatedsame-addressoutputsandrandomizednoteciphertexts
-//! [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+//! [ZIP 374]: https://zips.z.cash/zip-0374#anchorsandpre-authorization
 //! [`Updater`]: crate::roles::updater::Updater
 
 use alloc::vec::Vec;
@@ -677,7 +677,7 @@ mod tests {
     /// Ironwood tests, whose transaction builder requires the anchor to be set at the
     /// point the spend is added.
     ///
-    /// [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+    /// [ZIP 374]: https://zips.z.cash/zip-0374#anchorsandpre-authorization
     #[test]
     fn io_finalizer_and_signer_succeed_with_absent_ironwood_anchor() {
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
