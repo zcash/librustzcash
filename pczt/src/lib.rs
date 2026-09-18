@@ -420,6 +420,15 @@ pub enum EncodingError {
     RequiresV2,
 }
 
+/// A version of the PCZT serialization format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EncodingVersion {
+    /// The version 1 encoding, produced by [`v1::Pczt::serialize`].
+    V1,
+    /// The version 2 encoding, produced by [`v2::Pczt::serialize`].
+    V2,
+}
+
 impl Pczt {
     /// Whether this PCZT carries any inputs or outputs in the given pool.
     ///
@@ -461,8 +470,23 @@ impl Pczt {
     /// predate the v2 encoding), and the v2 encoding otherwise.
     ///
     /// To force a specific PCZT version, use [`v1::Pczt`] or [`v2::Pczt`]
-    /// directly.
+    /// directly. To learn the encoding version that was used, use
+    /// [`Pczt::serialize_with_version`].
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
+        self.serialize_with_version().map(|(_, bytes)| bytes)
+    }
+
+    /// Serializes this PCZT, reporting the encoding version it was serialized
+    /// in alongside the encoded bytes.
+    ///
+    /// The encoding version is selected as documented for [`Pczt::serialize`],
+    /// which returns the same bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`EncodingError`] if this PCZT's content cannot be
+    /// represented in any encoding version.
+    pub fn serialize_with_version(self) -> Result<(EncodingVersion, Vec<u8>), EncodingError> {
         // Fast pre-checks for the conditions that most commonly rule out the
         // v1 encoding, avoiding the speculative clone below.
         let requires_v2 = match self.global.tx_version {
@@ -476,10 +500,10 @@ impl Pczt {
             // conversions; attempting the conversion is the single source of
             // truth for them.
             if let Ok(v1) = v1::Pczt::try_from(self.clone()) {
-                return Ok(v1.serialize());
+                return Ok((EncodingVersion::V1, v1.serialize()));
             }
         }
-        Ok(v2::Pczt::try_from(self)?.serialize())
+        Ok((EncodingVersion::V2, v2::Pczt::try_from(self)?.serialize()))
     }
 
     /// Resolves derived or compact field representations carried by this PCZT.
@@ -909,7 +933,7 @@ mod extraction_tests {
 mod serialize_tests {
     use zcash_protocol::consensus::BranchId;
 
-    use crate::roles::creator::Creator;
+    use crate::{EncodingVersion, roles::creator::Creator};
 
     fn encoding_version(bytes: &[u8]) -> u32 {
         assert_eq!(&bytes[..4], crate::MAGIC_BYTES);
@@ -966,5 +990,46 @@ mod serialize_tests {
             encoding_version(&v6.serialize().unwrap()),
             crate::PCZT_VERSION_2,
         );
+    }
+
+    #[test]
+    fn serialize_with_version_reports_the_encoding_used() {
+        // A v1-representable (v5, canonical-empty Ironwood) PCZT.
+        let v5 = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+        // A v6 transaction, which the v1 encoding cannot represent.
+        let v6 = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+        for (pczt, expected, expected_header) in [
+            (v5, EncodingVersion::V1, crate::PCZT_VERSION_1),
+            (v6, EncodingVersion::V2, crate::PCZT_VERSION_2),
+        ] {
+            let (version, bytes) = pczt.clone().serialize_with_version().unwrap();
+
+            // The reported version is the one the encoding's header carries.
+            assert_eq!(version, expected);
+            assert_eq!(encoding_version(&bytes), expected_header);
+
+            // `serialize` produces exactly these bytes.
+            assert_eq!(pczt.serialize().unwrap(), bytes);
+        }
     }
 }
