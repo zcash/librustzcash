@@ -38,6 +38,9 @@ workspace.
   `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
   default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
   Address.
+- Block scanning records transparent outputs paying the wallet and spends of the
+  wallet's transparent outputs. A spend observed before the block that created
+  the spent output has been scanned is resolved when that output is discovered.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
