@@ -1376,6 +1376,121 @@ pub(crate) mod v2 {
             }
         }
 
+        /// A fabricated same-address output, of the shape [ZIP 326] requires: a
+        /// zero-valued note addressed to the spent note's own receiver, whose
+        /// `enc_ciphertext` is bytes that do not decrypt to it rather than an
+        /// encryption of the note plaintext. `recipient`, `value`, and `rseed` stay
+        /// explicit, `user_address` is absent, and the note commitment is unchanged.
+        ///
+        /// [ZIP 326]: https://zips.z.cash/zip-0326#fabricatedsame-addressoutputsandrandomizednoteciphertexts
+        #[cfg(feature = "orchard")]
+        fn fabricated_same_address_action() -> LogicalAction {
+            let mut nullifier = [0; 32];
+            nullifier[0] = 1;
+            let rho = Option::from(Rho::from_bytes(&nullifier)).unwrap();
+            let (_, rseed) = (0u8..)
+                .find_map(|i| {
+                    let mut rseed = [0; 32];
+                    rseed[0] = i;
+                    Option::from(RandomSeed::from_bytes(rseed, &rho)).map(|parsed| (rseed, parsed))
+                })
+                .unwrap();
+            let recipient = FullViewingKey::from(&SpendingKey::from_bytes([0; 32]).unwrap())
+                .address_at(0u32, Scope::External);
+            let value = NoteValue::from_raw(0);
+            let note = Option::from(Note::from_parts(
+                recipient,
+                value,
+                rho,
+                rseed,
+                NoteVersion::V2,
+            ))
+            .unwrap();
+
+            // Only the ephemeral key is taken from the encryptor; the ciphertext itself
+            // is replaced with bytes that trial-decryption cannot recover a note from.
+            let encryptor = OrchardNoteEncryption::new(None, note, [0; MEMO_SIZE]);
+            let mut enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
+            enc_ciphertext.fill(0xab);
+
+            LogicalAction {
+                cv_net: Some([0; 32]),
+                spend: Spend {
+                    nullifier,
+                    rk: [2; 32],
+                    spend_auth_sig: None,
+                    recipient: None,
+                    value: None,
+                    rho: None,
+                    rseed: None,
+                    fvk: None,
+                    witness: None,
+                    alpha: None,
+                    zip32_derivation: None,
+                    dummy_sk: None,
+                    proprietary: BTreeMap::new(),
+                },
+                output: Output {
+                    cmx: Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes()),
+                    ephemeral_key: OrchardDomain::epk_bytes(encryptor.epk()).0,
+                    enc_ciphertext: EncCiphertext::Encrypted(enc_ciphertext),
+                    out_ciphertext: Vec::new(),
+                    recipient: Some(recipient.to_raw_address_bytes()),
+                    value: Some(value.inner()),
+                    rseed: Some(*note.rseed().as_bytes()),
+                    ock: None,
+                    zip32_derivation: None,
+                    user_address: None,
+                    proprietary: BTreeMap::new(),
+                },
+                rcv: None,
+            }
+        }
+
+        /// Compaction leaves a fabricated same-address output's randomized ciphertext
+        /// byte-identical: it cannot be decrypted, so there is no memo plaintext to
+        /// stand in for it, and re-encrypting the note would not reproduce it. The
+        /// derivable `cmx` is still compacted, since the note itself is ordinary.
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn resolvable_field_compaction_retains_randomized_ciphertext() {
+            let mut action = fabricated_same_address_action();
+            let original_enc_ciphertext = action.output.enc_ciphertext.clone();
+
+            action.compact_resolvable_fields(NoteVersion::V2);
+
+            assert_eq!(action.output.enc_ciphertext, original_enc_ciphertext);
+            assert_eq!(action.output.cmx, None);
+        }
+
+        /// Resolving a bundle carrying a fabricated same-address output succeeds and
+        /// leaves the randomized ciphertext untouched, so a round trip through the
+        /// compact signer view does not corrupt it.
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn resolve_fields_preserves_randomized_ciphertext() {
+            let action = fabricated_same_address_action();
+            let original_enc_ciphertext = action.output.enc_ciphertext.clone();
+            let mut bundle = LogicalBundle {
+                actions: vec![action],
+                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                value_sum: (0, false),
+                anchor: None,
+                note_version: NoteVersion::V2,
+                zkproof: None,
+                bsk: None,
+            };
+            bundle.actions[0].output.cmx = None;
+
+            bundle.resolve_fields().unwrap();
+
+            assert_eq!(
+                bundle.actions[0].output.enc_ciphertext,
+                original_enc_ciphertext
+            );
+            assert!(bundle.actions[0].output.cmx.is_some());
+        }
+
         #[cfg(feature = "orchard")]
         #[test]
         fn v2_round_trips_memo_plaintext_ciphertext_data() {
