@@ -721,7 +721,7 @@ pub enum ParseError {
     /// The operation requires the bundle's `anchor` to be set, but it was absent.
     ///
     /// For a v6 transaction, an Updater can resolve this by setting the anchor; see
-    /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization).
+    /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchorsandpre-authorization).
     MissingAnchor,
     /// The bundle's remaining fields were structurally invalid.
     Bundle(sapling::pczt::ParseError),
@@ -753,7 +753,7 @@ pub enum AnchorConsistencyError {
 /// Zero-valued spends are skipped, as their Merkle paths are not checked by the Sapling
 /// circuit.
 ///
-/// [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+/// [ZIP 374]: https://zips.z.cash/zip-0374#anchorsandpre-authorization
 #[cfg(all(feature = "sapling", feature = "prover"))]
 pub(crate) fn verify_witnesses_root_to_anchor(
     bundle: &sapling::pczt::Bundle,
@@ -792,7 +792,7 @@ pub(crate) fn verify_witnesses_root_to_anchor(
 /// Carries the bundle's original wire `anchor` alongside the parsed form, so that
 /// [`Parsed::reserialize`] can restore it after an operation that does not itself
 /// change the anchor, even though parsing may have substituted a placeholder for it
-/// (see [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization)).
+/// (see [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchorsandpre-authorization)).
 #[cfg(feature = "sapling")]
 pub(crate) struct Parsed {
     pub(crate) bundle: sapling::pczt::Bundle,
