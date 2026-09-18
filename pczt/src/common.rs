@@ -121,6 +121,10 @@ pub struct Global {
     ///
     /// - This is set by the Creator.
     /// - If omitted, the fallback locktime is assumed to be 0.
+    ///
+    /// The transaction's actual lock time is given by [`determine_lock_time`], which
+    /// takes the inputs' required lock times into account.
+    #[getset(get = "pub")]
     pub(crate) fallback_lock_time: Option<u32>,
 
     #[getset(get = "pub")]
@@ -139,6 +143,7 @@ pub struct Global {
     ///   for key identification) should check against this field for correctness.
     ///
     /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    #[getset(get = "pub")]
     pub(crate) coin_type: u32,
 
     /// A bitfield for various transaction modification flags.
@@ -184,6 +189,11 @@ pub struct Global {
     ///   - This is set to `false` by every Signer (as all signatures commit to all
     ///     shielded spends and outputs).
     ///   - The Combiner merges this bit towards `false`.
+    ///
+    /// Individual flags are also available via [`Global::inputs_modifiable`],
+    /// [`Global::outputs_modifiable`], [`Global::has_sighash_single`], and
+    /// [`Global::shielded_modifiable`].
+    #[getset(get = "pub")]
     pub(crate) tx_modifiable: u8,
 
     /// Proprietary fields related to the overall transaction.
@@ -379,7 +389,41 @@ impl LockTimeInput for ::transparent::pczt::Input {
 mod tests {
     use alloc::collections::BTreeMap;
 
-    use super::Global;
+    use zcash_protocol::{
+        consensus::BranchId,
+        constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, mainnet},
+    };
+
+    use super::{FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE, Global};
+
+    #[test]
+    fn global_getters() {
+        // Distinct values, so that a getter reading the wrong field is caught.
+        const FALLBACK_LOCK_TIME: u32 = 1;
+        const EXPIRY_HEIGHT: u32 = 2;
+        const TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE | FLAG_SHIELDED_MODIFIABLE;
+
+        let global = Global {
+            tx_version: V5_TX_VERSION,
+            version_group_id: V5_VERSION_GROUP_ID,
+            consensus_branch_id: BranchId::Nu6.into(),
+            fallback_lock_time: Some(FALLBACK_LOCK_TIME),
+            expiry_height: EXPIRY_HEIGHT,
+            coin_type: mainnet::COIN_TYPE,
+            tx_modifiable: TX_MODIFIABLE,
+            proprietary: BTreeMap::new(),
+        };
+
+        assert_eq!(global.coin_type(), &mainnet::COIN_TYPE);
+        assert_eq!(global.fallback_lock_time(), &Some(FALLBACK_LOCK_TIME));
+        assert_eq!(global.tx_modifiable(), &TX_MODIFIABLE);
+
+        // The raw bitfield agrees with the semantic flag accessors.
+        assert!(global.inputs_modifiable());
+        assert!(!global.outputs_modifiable());
+        assert!(!global.has_sighash_single());
+        assert!(global.shielded_modifiable());
+    }
 
     #[test]
     fn tx_modifiable() {
