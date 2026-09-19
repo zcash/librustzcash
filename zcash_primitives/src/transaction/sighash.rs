@@ -51,5 +51,8 @@ pub fn signature_hash<
         TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
 
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
+        // V7 uses the V6 sighash for now, but this will change.
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => v6_signature_hash(tx, signable_input, txid_parts),
     })
 }

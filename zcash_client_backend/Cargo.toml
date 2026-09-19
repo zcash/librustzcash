@@ -154,6 +154,7 @@ jubjub.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
+redjubjub.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 tempfile = "3.5.0"
 tokio = { version = "1.21.0", features = ["macros", "rt-multi-thread"] }

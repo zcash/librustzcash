@@ -13,7 +13,7 @@ use super::{Bip32Derivation, Bundle, Input, Output};
 /// Maximum size of a script push-value (`LargeValue::MAX_SIZE`, 520 bytes).
 /// `partial_signatures` entries are pushed as single script elements during
 /// spend finalization, so they cannot exceed this.
-const MAX_SCRIPT_PUSH_VALUE_LEN: usize = 520;
+pub(super) const MAX_SCRIPT_PUSH_VALUE_LEN: usize = 520;
 
 impl Bundle {
     /// Parses a PCZT bundle from its component parts.

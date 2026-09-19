@@ -10,11 +10,44 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::util` module, providing the `Clock` capability trait,
+  `SystemClock`, and (behind the `test-dependencies` feature)
+  `testing::FixedClock`. These were previously defined in
+  `zcash_client_sqlite::util`, which now re-exports them.
+- `zcash_client_backend::data_api::error::AddressExpiryError`
+- `zcash_client_backend::data_api::error::Error::RecipientAddressExpiry`
+- `zcash_client_backend::data_api::testing::TestState::clock`
+
 ### Changed
+- `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
+  `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
+  `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
+  transaction-creation timestamps and to enforce recipient address expiry.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}` now enforce the ZIP 316 Revision 2 address
+  expiration rules for every payment recipient: a payment to an address that is
+  known to have expired, or whose expiry height the transaction's expiry height
+  would exceed, fails with `Error::RecipientAddressExpiry`.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
   atomic: an implementation must apply the whole batch of blocks or none of it,
   and a caller may assume after an error that nothing was persisted. An
   implementation that applies blocks one at a time must be updated.
+- `zcash_client_backend::tor::http`:
+  - `Client::http_get_json` takes an additional `request: impl Fn(Builder) ->
+    Builder` argument, positioned after `url` as in `Client::http_get`, for
+    setting request headers such as `User-Agent`. `Accept: application/json`
+    is applied only if the closure did not set `Accept`, so a closure that
+    sets it overrides the default. Pass `|b| b` to preserve the previous
+    behaviour.
+- `zcash_client_backend::tor::http`:
+  - `Client::{http_get, http_post}`, and therefore `Client::http_get_json`,
+    now always send the `Host` header derived from the request URL. A `Host`
+    set by the request-construction closure was previously serialized onto
+    the wire alongside it and took precedence for `HeaderMap::get`; it is now
+    discarded.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method,
+  `queue_rescan`, which queues a range of block heights to be scanned again.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
@@ -25,6 +58,14 @@ workspace.
   complete transaction data reached
   `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
   Transparent spends are still not detected during block scanning.
+- `zcash_client_backend::decrypt::decrypt_transaction` now attempts outgoing
+  ciphertext recovery with every outgoing viewing key an account's UFVK can
+  produce — Orchard, Sapling and transparent-derived, in both the external and
+  internal scopes — instead of only the same-pool external-scope key, and tries
+  each pool's outputs against every account instead of only those whose UFVK
+  holds that pool's key. Cross-pool sends, shielding transactions, and outputs
+  encrypted under an internal-scope OVK now recover their recipient, value and
+  memo as `zcash_client_backend::TransferType::Outgoing`.
 
 ## [0.24.0] - 2026-08-18
 

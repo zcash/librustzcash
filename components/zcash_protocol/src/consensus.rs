@@ -293,6 +293,34 @@ pub trait NetworkConstants: private::Sealed + Clone {
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
     fn hrp_unified_ivk(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded shielded-only Revision 2 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address_r2(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded transparent-including Revision 2 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address_r2_ti(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded Revision 2 Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_fvk_r2(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded Revision 2 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_ivk_r2(&self) -> &'static str;
 }
 
 impl private::Sealed for NetworkType {}
@@ -393,6 +421,38 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
         }
     }
+
+    fn hrp_unified_address_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2,
+        }
+    }
+
+    fn hrp_unified_address_r2_ti(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2_TI,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2_TI,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2_TI,
+        }
+    }
+
+    fn hrp_unified_fvk_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_FVK_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_FVK_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK_R2,
+        }
+    }
+
+    fn hrp_unified_ivk_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_IVK_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_IVK_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK_R2,
+        }
+    }
 }
 
 /// Zcash consensus parameters.
@@ -471,6 +531,22 @@ impl<P: Parameters> NetworkConstants for P {
     fn hrp_unified_ivk(&self) -> &'static str {
         self.network_type().hrp_unified_ivk()
     }
+
+    fn hrp_unified_address_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_address_r2()
+    }
+
+    fn hrp_unified_address_r2_ti(&self) -> &'static str {
+        self.network_type().hrp_unified_address_r2_ti()
+    }
+
+    fn hrp_unified_fvk_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_fvk_r2()
+    }
+
+    fn hrp_unified_ivk_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_ivk_r2()
+    }
 }
 
 /// Marker struct for the production network.
@@ -502,6 +578,8 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu6_3 => Some(BlockHeight(3_428_143)),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
+            #[cfg(zcash_unstable = "nutachyon")]
+            NetworkUpgrade::NuTachyon => None,
         }
     }
 }
@@ -535,6 +613,8 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu6_3 => Some(BlockHeight(4_134_000)),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
+            #[cfg(zcash_unstable = "nutachyon")]
+            NetworkUpgrade::NuTachyon => None,
         }
     }
 }
@@ -616,6 +696,9 @@ pub enum NetworkUpgrade {
     /// [Nu7 (proposed)]: https://z.cash/upgrade/nu7/
     #[cfg(zcash_unstable = "nu7")]
     Nu7,
+    /// The NuTachyon network upgrade.
+    #[cfg(zcash_unstable = "nutachyon")]
+    NuTachyon,
 }
 
 #[cfg(feature = "std")]
@@ -636,6 +719,8 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Nu6_3 => write!(f, "Nu6.3"),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => write!(f, "Nu7"),
+            #[cfg(zcash_unstable = "nutachyon")]
+            NetworkUpgrade::NuTachyon => write!(f, "NuTachyon"),
         }
     }
 }
@@ -658,6 +743,8 @@ impl NetworkUpgrade {
             NetworkUpgrade::Nu6_3 => BranchId::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => BranchId::Nu7,
+            #[cfg(zcash_unstable = "nutachyon")]
+            NetworkUpgrade::NuTachyon => BranchId::NuTachyon,
         }
     }
 }
@@ -679,6 +766,8 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Nu6_3,
     #[cfg(zcash_unstable = "nu7")]
     NetworkUpgrade::Nu7,
+    #[cfg(zcash_unstable = "nutachyon")]
+    NetworkUpgrade::NuTachyon,
 ];
 
 /// The "grace period" defined in [ZIP 212].
@@ -735,6 +824,9 @@ pub enum BranchId {
     /// The consensus rules to be deployed by [`NetworkUpgrade::Nu7`].
     #[cfg(zcash_unstable = "nu7")]
     Nu7,
+    /// The consensus rules deployed by [`NetworkUpgrade::NuTachyon`].
+    #[cfg(zcash_unstable = "nutachyon")]
+    NuTachyon,
 }
 
 #[cfg(feature = "std")]
@@ -758,6 +850,8 @@ impl TryFrom<u32> for BranchId {
             0x37a5_165b => Ok(BranchId::Nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             0xffff_ffff => Ok(BranchId::Nu7),
+            #[cfg(zcash_unstable = "nutachyon")]
+            0xffff_fffc => Ok(BranchId::NuTachyon),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -779,6 +873,8 @@ impl From<BranchId> for u32 {
             BranchId::Nu6_3 => 0x37a5_165b,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => 0xffff_ffff,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => 0xffff_fffc,
         }
     }
 }
@@ -818,6 +914,8 @@ impl BranchId {
             BranchId::Nu6_3 => NetworkUpgrade::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => NetworkUpgrade::Nu7,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => NetworkUpgrade::NuTachyon,
         })
     }
 
@@ -879,15 +977,27 @@ impl BranchId {
             BranchId::Nu6_3 => params
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .map(|lower| {
+                    #[cfg(zcash_unstable = "nutachyon")]
+                    let nu_tachyon = params.activation_height(NetworkUpgrade::NuTachyon);
+                    #[cfg(not(zcash_unstable = "nutachyon"))]
+                    let nu_tachyon = None;
                     #[cfg(zcash_unstable = "nu7")]
-                    let upper = params.activation_height(NetworkUpgrade::Nu7);
+                    let upper = params.activation_height(NetworkUpgrade::Nu7).or(nu_tachyon);
                     #[cfg(not(zcash_unstable = "nu7"))]
-                    let upper = None;
+                    let upper = nu_tachyon;
                     (lower, upper)
                 }),
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => params
-                .activation_height(NetworkUpgrade::Nu7)
+            BranchId::Nu7 => params.activation_height(NetworkUpgrade::Nu7).map(|lower| {
+                #[cfg(zcash_unstable = "nutachyon")]
+                let upper = params.activation_height(NetworkUpgrade::NuTachyon);
+                #[cfg(not(zcash_unstable = "nutachyon"))]
+                let upper = None;
+                (lower, upper)
+            }),
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => params
+                .activation_height(NetworkUpgrade::NuTachyon)
                 .map(|lower| (lower, None)),
         }
     }
@@ -905,6 +1015,8 @@ impl BranchId {
             BranchId::Nu6_3 => true,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => false,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => false,
         }
     }
 
@@ -917,6 +1029,8 @@ impl BranchId {
             BranchId::Nu6_3 => true,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => true,
         }
     }
 
@@ -929,6 +1043,8 @@ impl BranchId {
             BranchId::Nu6_3 => true,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon => true,
         }
     }
 
@@ -944,6 +1060,8 @@ impl BranchId {
             Nu6_3 => Some(OrchardProtocolRevision::V3),
             #[cfg(zcash_unstable = "nu7")]
             Nu7 => Some(OrchardProtocolRevision::V3),
+            #[cfg(zcash_unstable = "nutachyon")]
+            NuTachyon => Some(OrchardProtocolRevision::V3),
         }
     }
 }
@@ -993,6 +1111,8 @@ pub mod testing {
             BranchId::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon,
         ])
     }
 
@@ -1070,6 +1190,11 @@ mod tests {
     #[test]
     fn branch_id_from_u32() {
         assert_eq!(BranchId::try_from(0), Ok(BranchId::Sprout));
+        #[cfg(zcash_unstable = "nutachyon")]
+        {
+            assert_eq!(BranchId::try_from(0xffff_fffc), Ok(BranchId::NuTachyon));
+            assert_eq!(u32::from(BranchId::NuTachyon), 0xffff_fffc);
+        }
         assert!(BranchId::try_from(1).is_err());
     }
 
@@ -1097,6 +1222,11 @@ mod tests {
         #[cfg(zcash_unstable = "nu7")]
         assert_eq!(
             BranchId::Nu7.orchard_protocol_revision(),
+            Some(OrchardProtocolRevision::V3)
+        );
+        #[cfg(zcash_unstable = "nutachyon")]
+        assert_eq!(
+            BranchId::NuTachyon.orchard_protocol_revision(),
             Some(OrchardProtocolRevision::V3)
         );
     }

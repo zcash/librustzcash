@@ -11,14 +11,45 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `SqliteClientError::DivergedCheckpoints`, which exposes the divergent shielded pool and the
-  requested truncation height missing from its note commitment tree checkpoints.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- `WalletSnapshot` and `WalletDb::get_wallet_snapshot`, which return wallet
+  balances, heights, and subtree indices without computing
+  [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
+  use this to avoid the `subtree_scan_progress` aggregates.
+  `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+- The `v_tx_outputs` view now emits the `diversifier_index_be` column that its
+  documentation has described since the receiving-address columns were added:
+  the big-endian diversifier index of the receiving address, `NULL` for outputs
+  not received at one of the wallet's diversified addresses. The column was
+  previously computed internally but omitted from the view's output, so any
+  query naming it failed with "no such column".
+
+### Changed
+- `SqliteClientError` now reports diverged note commitment tree checkpoints using
+  `DivergedCheckpoints`, exposing the affected shielded pool and requested truncation height.
+- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
+  `util::testing::FixedClock`) are now re-exports of the same-named types in
+  `zcash_client_backend::util`.
+- `WalletWrite::import_account_ufvk` accepts a transparent-only unified full
+  viewing key; it previously failed with
+  `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
+  default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
+  Address.
 
 ### Fixed
+- Upgrading a wallet database whose `support_zcashd_wallet_import` migration
+  ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
+  accounts_new.zcashd_legacy_address_index`. In such a database every account
+  that existed at that time has a NULL `accounts.zcashd_legacy_address_index`;
+  the migration that rebuilds the `accounts` table now maps those to the
+  sentinel value that column has carried since, and gives the database the
+  `hd_account` uniqueness index over `(hd_seed_fingerprint, hd_account_index,
+  zcashd_legacy_address_index)`.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a
@@ -39,6 +70,16 @@ workspace.
   transparent spend detection. Transparent outputs detected by
   `zcash_client_backend::scanning::full::scan_block` were previously discarded
   when the scanned blocks were persisted.
+- The `v_transactions` and `v_transactions_with_pending_migrations` views no
+  longer multiply a sending account's row by the number of distinct groups the
+  transaction's outputs were received into, where a group is an account of the
+  wallet and the outputs no account of the wallet received form one further
+  group. `account_balance_delta`, `total_spent`, `total_received`,
+  `received_note_count`, `spent_note_count`, and the received-note contribution
+  to `memo_count` were each scaled by that count; `sent_note_count` reported
+  the notes of the largest single group instead of all of them.
+- `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
+  no longer fail on wallets containing accounts imported by UIVK.
 
 ## [0.22.0] - 2026-08-18
 

@@ -297,6 +297,113 @@ pub struct WalletDb<C, P, CL, R> {
     gap_limits: GapLimits,
 }
 
+/// Wallet balances, heights, and subtree indices without scan-progress accounting.
+///
+/// This is the portion of [`WalletSummary`] that applications need when they already
+/// track sync progress through their own scan loop. Computing
+/// [`WalletSummary::progress`] requires scanning every stored `blocks` row against
+/// `scan_queue`, which can dominate `get_wallet_summary` for deep or fragmented
+/// wallets. [`WalletDb::get_wallet_snapshot`] returns this type and skips that work.
+///
+/// All fields are read inside a single SQLite transaction so the snapshot is
+/// internally consistent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalletSnapshot<AccountId: Eq + std::hash::Hash> {
+    account_balances: HashMap<AccountId, zcash_client_backend::data_api::AccountBalance>,
+    chain_tip_height: BlockHeight,
+    fully_scanned_height: BlockHeight,
+    next_sapling_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_orchard_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_ironwood_subtree_index: u64,
+}
+
+impl<AccountId: Eq + std::hash::Hash> WalletSnapshot<AccountId> {
+    /// Constructs a new [`WalletSnapshot`] from its constituent parts.
+    pub fn new(
+        account_balances: HashMap<AccountId, zcash_client_backend::data_api::AccountBalance>,
+        chain_tip_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        next_sapling_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_ironwood_subtree_index: u64,
+    ) -> Self {
+        Self {
+            account_balances,
+            chain_tip_height,
+            fully_scanned_height,
+            next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_orchard_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_ironwood_subtree_index,
+        }
+    }
+
+    /// Returns the balances of accounts in the wallet, keyed by account ID.
+    pub fn account_balances(
+        &self,
+    ) -> &HashMap<AccountId, zcash_client_backend::data_api::AccountBalance> {
+        &self.account_balances
+    }
+
+    /// Returns the height of the current chain tip.
+    pub fn chain_tip_height(&self) -> BlockHeight {
+        self.chain_tip_height
+    }
+
+    /// Returns the height below which all blocks have been scanned by the wallet, ignoring blocks
+    /// below the wallet birthday.
+    pub fn fully_scanned_height(&self) -> BlockHeight {
+        self.fully_scanned_height
+    }
+
+    /// Returns the Sapling subtree index that should start the next range of subtree roots.
+    pub fn next_sapling_subtree_index(&self) -> u64 {
+        self.next_sapling_subtree_index
+    }
+
+    /// Returns the Orchard subtree index that should start the next range of subtree roots.
+    #[cfg(feature = "orchard")]
+    pub fn next_orchard_subtree_index(&self) -> u64 {
+        self.next_orchard_subtree_index
+    }
+
+    /// Returns the Ironwood subtree index that should start the next range of subtree roots.
+    #[cfg(feature = "orchard")]
+    pub fn next_ironwood_subtree_index(&self) -> u64 {
+        self.next_ironwood_subtree_index
+    }
+
+    /// Returns whether or not wallet scanning is complete.
+    pub fn is_synced(&self) -> bool {
+        self.chain_tip_height == self.fully_scanned_height
+    }
+
+    /// Combines this snapshot with a precomputed
+    /// [`Progress`](zcash_client_backend::data_api::Progress) value.
+    ///
+    /// Used by [`WalletRead::get_wallet_summary`] so that balance work is not
+    /// duplicated between the snapshot and full-summary paths.
+    pub fn into_wallet_summary(
+        self,
+        progress: zcash_client_backend::data_api::Progress,
+    ) -> WalletSummary<AccountId> {
+        WalletSummary::new(
+            self.account_balances,
+            self.chain_tip_height,
+            self.fully_scanned_height,
+            progress,
+            self.next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            self.next_orchard_subtree_index,
+            #[cfg(feature = "orchard")]
+            self.next_ironwood_subtree_index,
+        )
+    }
+}
+
 /// A wrapper for a SQLite transaction affecting the wallet database.
 pub struct SqlTransaction<'conn>(&'conn rusqlite::Transaction<'conn>);
 
@@ -544,6 +651,30 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
+    /// Returns wallet balances, heights, and subtree indices without computing scan progress.
+    ///
+    /// Callers that track sync progress outside of [`WalletSummary::progress`] can
+    /// use this method to obtain the same balance and metadata information as
+    /// [`WalletRead::get_wallet_summary`] without computing the
+    /// `subtree_scan_progress` aggregates.
+    ///
+    /// Returns `Ok(None)` when the wallet has no chain tip or birthday, matching
+    /// the early-exit conditions of [`WalletRead::get_wallet_summary`]. Unlike
+    /// that method, a missing progress estimate does not force `None` — progress
+    /// is simply not computed.
+    pub fn get_wallet_snapshot(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<Option<WalletSnapshot<AccountUuid>>, SqliteClientError> {
+        wallet::get_wallet_snapshot(
+            &self.conn.borrow().unchecked_transaction()?,
+            &self.params,
+            confirmations_policy,
+        )
     }
 }
 
@@ -1829,6 +1960,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.prune_scan_queue_below(height, retain_with_priority))
     }
 
+    fn queue_rescan(
+        &mut self,
+        range: Range<BlockHeight>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.queue_rescan(range))
+    }
+
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
@@ -2247,6 +2385,13 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         retain_with_priority: Option<ScanPriority>,
     ) -> Result<u64, <Self as WalletRead>::Error> {
         wallet::scanning::prune_scan_queue_below(self.conn.0, height, retain_with_priority)
+    }
+
+    fn queue_rescan(
+        &mut self,
+        range: Range<BlockHeight>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::scanning::queue_rescan(self.conn.0, range)
     }
 
     #[allow(clippy::type_complexity)]
@@ -3939,11 +4084,11 @@ mod tests {
     use {
         crate::{AccountRef, wallet::transparent},
         ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-        rusqlite::named_params,
     };
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests},
+        rusqlite::named_params,
         std::collections::BTreeSet,
         zcash_client_backend::data_api::TransactionDataRequest,
     };
@@ -4356,7 +4501,7 @@ mod tests {
         // the existing IVK items are not a subset of the new (smaller) FVK's items.
         #[cfg(feature = "transparent-inputs")]
         {
-            assert!(ufvk.transparent().is_some());
+            assert!(ufvk.p2pkh().is_some());
             let subset_ufvk = UnifiedFullViewingKey::new(
                 None,
                 ufvk.sapling().cloned(),
@@ -4382,7 +4527,7 @@ mod tests {
             assert!(ufvk.orchard().is_some());
             let subset_ufvk = UnifiedFullViewingKey::new(
                 #[cfg(feature = "transparent-inputs")]
-                ufvk.transparent().cloned(),
+                ufvk.p2pkh().cloned(),
                 ufvk.sapling().cloned(),
                 None,
             )
@@ -4485,6 +4630,152 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn import_transparent_only_account_ufvk() {
+        use crate::wallet::encoding::KeyScope;
+        use ::transparent::keys::AccountPrivKey;
+        use zcash_protocol::consensus::{NetworkConstants, Parameters};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let network = *st.network();
+        let account_pubkey =
+            AccountPrivKey::from_seed(&network, &[7u8; 32], zip32::AccountId::ZERO)
+                .unwrap()
+                .to_account_pubkey();
+        let ufvk = UnifiedFullViewingKey::new(
+            Some(account_pubkey),
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "transparent-only",
+                &ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .expect("a transparent-only UFVK can be imported");
+
+        // The account was persisted with its (Revision 2-encoded) UFVK.
+        let stored = st
+            .wallet()
+            .get_account(account.id())
+            .unwrap()
+            .expect("the account was persisted");
+        assert_eq!(
+            stored
+                .ufvk()
+                .expect("the account has a UFVK")
+                .encode(&network),
+            ufvk.encode(&network),
+        );
+
+        // The account's default address was stored, and is a transparent-only Revision 2
+        // Unified Address. Matching on `AllAvailableKeys` also pins the stored row's
+        // `receiver_flags` to exactly P2PKH: a row with any shielded flag would not match.
+        let ua = st
+            .wallet()
+            .get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .expect("the default address was stored");
+        // The default address is derived at the smallest valid diversifier index.
+        assert_eq!(
+            ua.transparent(),
+            ufvk.default_transparent_address()
+                .map(|(addr, _)| addr)
+                .as_ref(),
+        );
+        assert!(ua.has_transparent());
+        assert!(!ua.has_sapling());
+        assert!(!ua.has_orchard());
+
+        // It round-trips through the `tu` encoding.
+        let encoded = ua.encode_receiver_preserving(&network);
+        assert!(
+            encoded.starts_with(network.network_type().hrp_unified_address_r2_ti()),
+            "{encoded} is not a transparent-including Revision 2 Unified Address",
+        );
+        assert_eq!(
+            Address::decode(&network, &encoded).expect("the stored address is decodable"),
+            Address::from(ua.clone()),
+        );
+
+        // The transparent gap-limit machinery ran for the external key scope: a gap limit's
+        // worth of external addresses are present, including the default address.
+        let gap_limits = st.wallet().db().gap_limits;
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(account.id(), false, false)
+            .unwrap();
+        assert_eq!(
+            receivers.len(),
+            usize::try_from(gap_limits.external()).unwrap()
+        );
+        assert!(receivers.contains_key(ua.transparent().unwrap()));
+
+        // Every external-scope address row is stored in the transparent-including Revision 2
+        // encoding, not as a bare transparent address.
+        let expected_hrp = network.network_type().hrp_unified_address_r2_ti();
+        let stored_addresses = st
+            .wallet()
+            .conn()
+            .prepare(
+                "SELECT a.address
+                 FROM addresses a
+                 JOIN accounts acc ON acc.id = a.account_id
+                 WHERE acc.uuid = :uuid AND a.key_scope = :key_scope",
+            )
+            .unwrap()
+            .query_map(
+                named_params![
+                    ":uuid": account.id().expose_uuid(),
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            stored_addresses.len(),
+            usize::try_from(gap_limits.external()).unwrap()
+        );
+        for address in &stored_addresses {
+            assert!(
+                address.starts_with(expected_hrp),
+                "stored address {address} is not a transparent-including Revision 2 Unified Address",
+            );
+        }
+
+        // Further addresses can be allocated for the account.
+        st.wallet_mut().update_chain_tip(birthday.height()).unwrap();
+        let next = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("a further address can be allocated")
+            .0;
+        assert!(next.has_transparent());
+        assert_ne!(next.transparent(), ua.transparent());
+    }
+
+    #[test]
     pub(crate) fn create_account_then_conflicts() {
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
@@ -4540,6 +4831,10 @@ mod tests {
             full_uivk.sapling().clone(),
             #[cfg(feature = "orchard")]
             None,
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK as an IVK-only account.
@@ -4652,6 +4947,10 @@ mod tests {
             None,
             full_uivk.sapling().clone(),
             None, // no Orchard
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK.
@@ -4853,9 +5152,77 @@ mod tests {
         // Asserts that looking up the exact same UA returns the owning account
         let result = state
             .wallet()
-            .find_account_for_address(state.network(), &Address::Unified(ua));
+            .find_account_for_address(state.network(), &Address::Unified(Box::new(ua)));
 
         assert_eq!(result.unwrap(), Some(account.id()));
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_address_matches_revision_0_stored_address() {
+        // A wallet created before Revision 2 support stores its addresses in the
+        // Revision 0 encoding, and no migration re-encodes them. Address lookup must
+        // still resolve such a row, even though the query encodes the address it is
+        // given as Revision 2.
+        use zcash_address::unified::{Address as UnifiedEncoding, Encoding, Receiver, Uitem};
+        use zcash_protocol::{address::Revision, consensus::Parameters};
+
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+
+        // Rebuild the address in the Revision 0 encoding a pre-migration wallet held.
+        let mut items = vec![];
+        #[cfg(feature = "orchard")]
+        if let Some(orchard) = ua.orchard() {
+            items.push(Uitem::Data(Receiver::Orchard(
+                orchard.to_raw_address_bytes(),
+            )));
+        }
+        if let Some(sapling) = ua.sapling() {
+            items.push(Uitem::Data(Receiver::Sapling(sapling.to_bytes())));
+        }
+        if let Some(taddr) = ua.transparent() {
+            items.push(Uitem::Data(match taddr {
+                ::transparent::address::TransparentAddress::PublicKeyHash(data) => {
+                    Receiver::P2pkh(*data)
+                }
+                ::transparent::address::TransparentAddress::ScriptHash(data) => {
+                    Receiver::P2sh(*data)
+                }
+            }));
+        }
+        let revision_0 = UnifiedEncoding::try_from_items(Revision::R0, items)
+            .expect("the generated address is a valid Revision 0 address")
+            .encode(&state.network().network_type());
+
+        let address = Address::Unified(Box::new(ua));
+        let revision_2 = address.encode_receiver_preserving(state.network());
+        assert_ne!(revision_0, revision_2);
+
+        let updated = state
+            .wallet_mut()
+            .conn_mut()
+            .execute(
+                "UPDATE addresses SET address = :revision_0 WHERE address = :revision_2",
+                named_params![":revision_0": revision_0, ":revision_2": revision_2],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+
+        // Both encodings of the same address must resolve to the same account.
+        assert_eq!(
+            state
+                .wallet()
+                .find_account_for_address(state.network(), &address)
+                .unwrap(),
+            Some(account.id())
+        );
     }
 
     #[test]
@@ -4898,7 +5265,7 @@ mod tests {
         if let Some(pa) = ua.sapling() {
             let result = state
                 .wallet()
-                .find_account_for_address(state.network(), &Address::Sapling(*pa));
+                .find_account_for_address(state.network(), &Address::Sapling(Box::new(*pa)));
             assert_eq!(result.unwrap(), Some(account.id()));
         }
     }
@@ -4971,10 +5338,16 @@ mod tests {
             .orchard()
             .cloned()
             .expect("orchard receiver must be present");
-        let address = Address::Unified(
-            UnifiedAddress::from_receivers(Some(o_external), None, Some(transparent_address))
-                .expect("orchard+transparent UA must be valid"),
-        );
+        let address = Address::Unified(Box::new(
+            UnifiedAddress::from_receivers(
+                Some(o_external),
+                None,
+                Some(transparent_address),
+                None,
+                None,
+            )
+            .expect("orchard+transparent UA must be valid"),
+        ));
 
         // Asserts that the unique possible account is found anyways, based on the transparent address,
         // since there are no UA conflicts.
@@ -5013,20 +5386,20 @@ mod tests {
             .cloned()
             .expect("UA must have sapling receiver");
 
-        let address = Address::Unified(
+        let address = Address::Unified(Box::new(
             {
                 #[cfg(feature = "orchard")]
                 {
-                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None, None, None)
                 }
 
                 #[cfg(not(feature = "orchard"))]
                 {
-                    UnifiedAddress::from_receivers(Some(sapling_receiver), None)
+                    UnifiedAddress::from_receivers(Some(sapling_receiver), None, None, None)
                 }
             }
             .expect("sapling-only UA must be valid"),
-        );
+        ));
 
         // Asserts that the account is still found via the shielded receiver flags path
         let result = state
@@ -5066,10 +5439,10 @@ mod tests {
             .cloned()
             .expect("UA must have orchard receiver");
 
-        let address = Address::Unified(
-            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None)
+        let address = Address::Unified(Box::new(
+            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None, None, None)
                 .expect("orchard-only UA must be valid"),
-        );
+        ));
 
         // Asserts that the account is still found via the shielded receiver flags path
         let result = state
@@ -5117,14 +5490,16 @@ mod tests {
         let sapling_receiver_1 = ua1.sapling().cloned().unwrap();
         let orchard_receiver_2 = ua2.orchard().cloned().unwrap();
 
-        let invalid_address = Address::Unified(
+        let invalid_address = Address::Unified(Box::new(
             UnifiedAddress::from_receivers(
                 Some(orchard_receiver_2),
                 Some(sapling_receiver_1),
                 None,
+                None,
+                None,
             )
             .expect("sapling+orchard UA must be valid"),
-        );
+        ));
 
         // Asserts that the lookup reports a conflict instead of arbitrarily choosing one account
         let result = state

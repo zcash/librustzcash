@@ -298,7 +298,7 @@ impl From<&Address> for ReceiverFlags {
                 PublicKeyHash(_) => ReceiverFlags::P2PKH,
                 ScriptHash(_) => ReceiverFlags::P2SH,
             },
-            Address::Unified(ua) => ReceiverFlags::from(ua),
+            Address::Unified(ua) => ReceiverFlags::from(ua.as_ref()),
             Address::Tex(_) => ReceiverFlags::P2PKH,
         }
     }

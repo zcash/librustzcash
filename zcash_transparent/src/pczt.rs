@@ -322,3 +322,78 @@ impl Bip32Derivation {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod testing {
+    //! Helpers shared between the tests of this module's submodules.
+
+    use alloc::collections::BTreeMap;
+    use alloc::vec::Vec;
+
+    use zcash_protocol::{TxId, value::Zatoshis};
+    use zcash_script::{
+        pattern,
+        script::{self, Evaluable},
+    };
+
+    use crate::{address::TransparentAddress, sighash::SighashType, util::hash160};
+
+    use super::Input;
+
+    /// The P2PKH `script_pubkey` paying to `pubkey`.
+    pub(crate) fn p2pkh(pubkey: &[u8; 33]) -> script::FromChain {
+        TransparentAddress::PublicKeyHash(hash160::hash(pubkey))
+            .script()
+            .weaken()
+    }
+
+    /// The P2SH `script_pubkey` committing to `redeem_script`.
+    pub(crate) fn p2sh(redeem_script: &script::FromChain) -> script::FromChain {
+        TransparentAddress::ScriptHash(hash160::hash(&redeem_script.to_bytes()))
+            .script()
+            .weaken()
+    }
+
+    /// A bare `required`-of-`pubkeys.len()` P2MS script.
+    pub(crate) fn p2ms(required: u8, pubkeys: &[&[u8; 33]]) -> script::FromChain {
+        let pubkeys = pubkeys.iter().map(|pubkey| &pubkey[..]).collect::<Vec<_>>();
+        script::Component(pattern::check_multisig(required, &pubkeys, false).expect("valid"))
+            .weaken()
+    }
+
+    /// A bare P2PK script.
+    ///
+    /// Only the Signer supports these, and it is compiled only with
+    /// `transparent-inputs`.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn p2pk(pubkey: &[u8; 33]) -> script::FromChain {
+        script::Component(pattern::pay_to_pubkey(pubkey).expect("valid").to_vec()).weaken()
+    }
+
+    /// An input spending a coin with the given script, carrying no signatures.
+    pub(crate) fn input(
+        script_pubkey: script::FromChain,
+        redeem_script: Option<script::FromChain>,
+        sighash_type: SighashType,
+    ) -> Input {
+        Input {
+            prevout_txid: TxId::from_bytes([0; 32]),
+            prevout_index: 0,
+            sequence: None,
+            required_time_lock_time: None,
+            required_height_lock_time: None,
+            script_sig: None,
+            value: Zatoshis::const_from_u64(1_000_000),
+            script_pubkey,
+            redeem_script,
+            partial_signatures: BTreeMap::new(),
+            sighash_type,
+            bip32_derivation: BTreeMap::new(),
+            ripemd160_preimages: BTreeMap::new(),
+            sha256_preimages: BTreeMap::new(),
+            hash160_preimages: BTreeMap::new(),
+            hash256_preimages: BTreeMap::new(),
+            proprietary: BTreeMap::new(),
+        }
+    }
+}
