@@ -4,6 +4,8 @@ use core::fmt;
 use blake2b_simd::Params as Blake2Params;
 use corez::io;
 
+#[cfg(zcash_unstable = "nutachyon")]
+use crate::NodeDataV4;
 use crate::{MAX_NODE_DATA_SIZE, NodeData, NodeDataV2, NodeDataV3};
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
@@ -212,6 +214,47 @@ impl Version for V3 {
 
     fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
         NodeDataV3::read(consensus_branch_id, r)
+    }
+
+    fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
+        data.write(w)
+    }
+}
+
+/// Version 4 of the Zcash chain history tree.
+///
+/// This version is used from the NuTachyon epoch for history nodes that include
+/// Tachyon shielded pool metadata. Earlier epochs continue to use the
+/// corresponding earlier history tree versions.
+#[cfg(zcash_unstable = "nutachyon")]
+pub enum V4 {}
+
+#[cfg(zcash_unstable = "nutachyon")]
+impl Version for V4 {
+    type NodeData = NodeDataV4;
+
+    fn consensus_branch_id(data: &Self::NodeData) -> u32 {
+        data.v3.v2.v1.consensus_branch_id
+    }
+
+    fn start_height(data: &Self::NodeData) -> u64 {
+        data.v3.v2.v1.start_height
+    }
+
+    fn end_height(data: &Self::NodeData) -> u64 {
+        data.v3.v2.v1.end_height
+    }
+
+    fn combine_inner(
+        subtree_commitment: [u8; 32],
+        left: &Self::NodeData,
+        right: &Self::NodeData,
+    ) -> Self::NodeData {
+        NodeDataV4::combine_inner(subtree_commitment, left, right)
+    }
+
+    fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
+        NodeDataV4::read(consensus_branch_id, r)
     }
 
     fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
