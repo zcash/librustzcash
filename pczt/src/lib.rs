@@ -69,6 +69,9 @@ pub mod orchard;
 pub mod sapling;
 pub mod transparent;
 
+#[cfg(any(test, feature = "size-assertions"))]
+mod size_regression;
+
 pub(crate) const MAGIC_BYTES: &[u8; 4] = b"PCZT";
 pub(crate) const PCZT_VERSION_1: u32 = 1;
 pub(crate) const PCZT_VERSION_2: u32 = 2;
