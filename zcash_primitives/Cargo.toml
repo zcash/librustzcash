@@ -102,6 +102,8 @@ std = [
     "orchard/std",
     "transparent/std",
 ]
+
+## Enables the experimental ZIP 233 transaction amount.
 zip-233 = []
 
 ## Enables creating proofs

@@ -36,12 +36,6 @@ use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
     zcash_unstable = "nutachyon"
 ))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
-#[cfg(all(
-    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
-    zcash_unstable = "nu7",
-    feature = "zip-233",
-))]
-use zcash_protocol::value::Zatoshis;
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
@@ -636,8 +630,6 @@ impl Pczt {
                 consensus_branch_id,
                 lock_time,
                 global.expiry_height.into(),
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-                Zatoshis::ZERO,
                 transparent_bundle,
                 sapling_bundle,
                 orchard_bundle,
@@ -648,8 +640,6 @@ impl Pczt {
                 consensus_branch_id,
                 lock_time,
                 global.expiry_height.into(),
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-                Zatoshis::ZERO,
                 transparent_bundle,
                 sapling_bundle,
                 orchard_bundle,
@@ -660,8 +650,6 @@ impl Pczt {
                 consensus_branch_id,
                 lock_time,
                 global.expiry_height.into(),
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-                Zatoshis::ZERO,
                 transparent_bundle,
                 None,
                 sapling_bundle,
@@ -865,11 +853,44 @@ impl core::error::Error for ParseError {}
 
 #[cfg(all(test, any(feature = "io-finalizer", feature = "signer")))]
 mod extraction_tests {
-    #[cfg(zcash_unstable = "nutachyon")]
-    use zcash_primitives::transaction::TxVersion;
+    use zcash_primitives::transaction::{
+        TxVersion,
+        sighash::SignableInput,
+        sighash_v6::v6_signature_hash,
+        txid::{TxIdDigester, to_txid},
+    };
     use zcash_protocol::consensus::BranchId;
 
     use crate::{ExtractError, roles::creator::Creator};
+
+    #[test]
+    fn nu7_pczt_preserves_canonical_v6_digests() {
+        /// Match the independent empty NU7 v6 fixture in the transaction codec tests.
+        const EXPIRY_HEIGHT: u32 = 1;
+        /// Mainnet's registered coin type; no keys or addresses are present in this fixture.
+        const COIN_TYPE: u32 = 133;
+        /// Independently calculated with Python hashlib.blake2b using ZIP 244/229 domains.
+        const EXPECTED_DIGEST: &str =
+            "78296c68a370c2e1f058d997c81c7b011c4562c52fc5ca2994ad59cd179fbe9e";
+        let pczt = Creator::new(BranchId::Nu7.into(), EXPIRY_HEIGHT, COIN_TYPE, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let data = pczt.into_effects().unwrap();
+        assert_eq!(data.version(), TxVersion::V6);
+        let digests = data.digest(TxIdDigester);
+        let expected = hex::decode(EXPECTED_DIGEST).unwrap();
+        assert_eq!(
+            to_txid(data.version(), data.consensus_branch_id(), &digests)
+                .as_ref()
+                .as_slice(),
+            expected
+        );
+        assert_eq!(
+            v6_signature_hash(&data, &SignableInput::Shielded, &digests).as_bytes(),
+            expected
+        );
+    }
 
     #[test]
     fn v5_pczt_with_ironwood_data_does_not_extract() {

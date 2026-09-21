@@ -841,8 +841,6 @@ fn fake_transparent_coinbase_tx(
         // Coinbase transactions do not expire.
         BlockHeight::from(0),
         // Coinbase transactions burn nothing.
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-        Zatoshis::ZERO,
         Some(coinbase_bundle),
         None,
         None,
@@ -2357,8 +2355,6 @@ fn fake_transparent_payment_tx(
         BranchId::Nu5,
         lock_time,
         BlockHeight::from(0),
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-        Zatoshis::ZERO,
         Some(bundle),
         None,
         None,

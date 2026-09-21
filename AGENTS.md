@@ -288,9 +288,6 @@ cargo test --profile=dev -p <crate_name> <test_name>
 # Expensive/slow tests (CI runs these separately)
 cargo test --workspace --all-features --features expensive-tests
 
-# NU7 ZIP 233 tests (NU7 itself needs no cfg)
-RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --workspace --all-features
-
 # NuTachyon unstable network upgrade tests
 RUSTFLAGS='--cfg zcash_unstable="nutachyon"' cargo test --workspace --all-features
 ```
@@ -355,8 +352,6 @@ These feature flags are used consistently across crates in the repository:
 These are `cfg` flags (not Cargo feature flags) that enable unstable or
 in-development functionality:
 
-- `zcash_unstable="nu7"`: with the `zip-233` feature, enables ZIP 233 under NU7.
-  NU7 itself is available in every build.
 - `zcash_unstable="nutachyon"`
 
 ## Code Style

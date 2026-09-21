@@ -519,8 +519,6 @@ mod tests {
             BranchId::Nu5,
             0,
             BlockHeight::from_u32(MINED_HEIGHT + 100),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             None,
             None,
             Some(bundle),
@@ -683,8 +681,6 @@ mod tests {
             BranchId::Nu5,
             0,
             BlockHeight::from_u32(MINED_HEIGHT + 100),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             None,
             None,
             None,
