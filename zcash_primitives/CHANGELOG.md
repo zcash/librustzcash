@@ -16,26 +16,8 @@ workspace.
   uses the V6 transaction body and digest structure.
 
 ### Changed
-- The experimental `zip-233` feature no longer requires the
-  `--cfg zcash_unstable="nu7"` configuration flag.
-- Experimental `TxVersion::has_zip233` now takes a `BranchId` argument.
-- Implementations and callers of `TransactionDigest::digest_header` must remove
-  the ZIP 233 amount argument previously enabled by the combination of
-  `--cfg zcash_unstable="nu7"` and the `zip-233` feature.
-- `TransactionData::{from_parts, from_parts_v6, from_parts_v7}` retain stable
-  signatures when `zip-233` is enabled. The corresponding `*_with_zip233`
-  constructors accept an explicit ZIP 233 amount.
-- The `zip-233` feature does not alter v5/v6 encoding or digests, including under NU7.
-  No implemented transaction format supports ZIP 233; builders and
-  `TransactionData::freeze` reject nonzero amounts. The experimental V7 scaffold
-  does not yet implement the ZIP 248 value-pool deltas required by ZIP 233.
-- `Builder::build_for_pczt` returns `Error::Zip233UnsupportedByPczt` for a nonzero
-  ZIP 233 amount instead of discarding the amount.
-- `TxVersion::suggested_for_branch`, `TxVersion::valid_in_branch`, and the
-  transaction builder handle `BranchId::Nu7` without the
-  `--cfg zcash_unstable="nu7"` configuration flag. NU7 uses consensus branch ID
-  `0x77190AD9`, accepts v5/v6 transactions, and does not accept v4 transactions
-  (ZIP 2003). NU7 does not enable ZIP 233.
+- `BranchId::Nu7` is available without a custom compiler configuration, with
+  consensus branch ID `0x77190AD9`.
 
 ## [0.30.1] - 2026-08-18
 

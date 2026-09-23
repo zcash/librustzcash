@@ -3163,7 +3163,7 @@ fn parse_tx<P: consensus::Parameters>(
 
         let expiry_height = tx_data.expiry_height();
         if expiry_height > BlockHeight::from(0) {
-            #[cfg(not(feature = "zip-233"))]
+            #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
             let tx_data = TransactionData::from_parts(
                 tx_data.version(),
                 BranchId::for_height(params, expiry_height),
@@ -3174,7 +3174,7 @@ fn parse_tx<P: consensus::Parameters>(
                 tx_data.sapling_bundle().cloned(),
                 tx_data.orchard_bundle().cloned(),
             );
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             let tx_data = TransactionData::from_parts_with_zip233(
                 tx_data.version(),
                 BranchId::for_height(params, expiry_height),

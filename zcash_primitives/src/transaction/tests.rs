@@ -39,7 +39,7 @@ pub mod data;
 /// with Python hashlib.blake2b (32-byte output), using the ZIP 244/229 digest tree:
 /// header || empty transparent || empty Sapling || empty v6 Orchard || empty Ironwood.
 /// With no transparent bundle, the shielded signature digest equals this transaction digest.
-/// Keep these expectations identical in builds with and without the ZIP 233 feature.
+/// Keep these expectations identical in builds with and without the ZIP 233 opt-in.
 #[test]
 fn nu7_v6_encoding_and_digests_are_feature_independent() {
     const ENCODED: &str = "0600008098b684d8d90a19770000000001000000000000000000";
@@ -96,7 +96,7 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
         assert!(Transaction::read(&encoded[..end], BranchId::Nu7).is_err());
     }
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     {
         let explicit_zero = TransactionData::from_parts_v6_with_zip233(
             BranchId::Nu7,
@@ -159,7 +159,7 @@ fn nu7_v5_encoding_and_digests_are_feature_independent() {
         tx.txid()
     );
     assert!(reader.is_empty());
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     {
         let zero = TransactionData::from_parts_with_zip233(
             TxVersion::V5,
@@ -180,7 +180,7 @@ fn nu7_v5_encoding_and_digests_are_feature_independent() {
 }
 
 #[test]
-#[cfg(feature = "zip-233")]
+#[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
 fn freeze_rejects_nonzero_zip233_in_v5_and_v6() {
     /// The smallest unsupported nonzero amount exercises the rejection boundary.
     const NONZERO_AMOUNT: Zatoshis = Zatoshis::const_from_u64(1);
@@ -991,7 +991,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.ironwood_bundle.as_ref().map(|v| *v.value_balance()),
         txo.ironwood_bundle.as_ref().map(|v| *v.value_balance())
     );
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     if tx.version.has_zip233(tx.consensus_branch_id) {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
@@ -1215,7 +1215,7 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(feature = "zip-233"))]
+        #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -1226,7 +1226,7 @@ fn zip_0244() {
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
         );
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         let tdata = TransactionData::from_parts_with_zip233(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -1327,7 +1327,7 @@ fn zip_0244() {
     }
 }
 
-#[cfg(feature = "zip-233")]
+#[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
 #[test]
 #[ignore = "Historical vectors for the withdrawn ZIP 233 v6-header experiment; \
             current ZIP 233 requires ZIP 248 value-pool deltas, which are not implemented."]

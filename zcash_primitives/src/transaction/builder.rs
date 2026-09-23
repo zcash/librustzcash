@@ -75,7 +75,7 @@ pub enum Error<FE> {
     /// additional amount is required in order to construct the transaction.
     InsufficientFunds(ZatBalance),
     /// PCZT does not preserve a nonzero ZIP 233 amount.
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     Zip233UnsupportedByPczt,
     /// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
@@ -136,7 +136,7 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "Insufficient funds for transaction construction; need an additional {amount:?} zatoshis"
             ),
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             Error::Zip233UnsupportedByPczt => {
                 write!(f, "PCZT does not support a nonzero ZIP 233 amount")
             }
@@ -807,7 +807,7 @@ pub struct Builder<P, U> {
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
@@ -884,7 +884,7 @@ impl<P, U> Builder<P, U> {
             ));
         }
 
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         if self.zip233_amount != Zatoshis::ZERO && !version.has_zip233(self.consensus_branch_id) {
             return Err(Error::TargetIncompatible(
                 self.consensus_branch_id,
@@ -1012,7 +1012,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             build_config,
             target_height,
             expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
@@ -1041,7 +1041,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
@@ -1282,7 +1282,8 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(Error::TransparentBuild)
     }
 
-    /// Returns the sum of the transparent, Sapling, Orchard, and zip233_amount value balances.
+    /// Returns the sum of the transparent, Sapling, Orchard, Ironwood, and any
+    /// experimental ZIP 233 value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
@@ -1307,7 +1308,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             -ZatBalance::from(self.zip233_amount),
         ];
 
@@ -1379,7 +1380,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(FeeError::FeeRule)
     }
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     /// Sets the experimental ZIP 233 amount. No implemented transaction format supports
     /// a nonzero amount; transaction construction rejects it.
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
@@ -1582,7 +1583,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             consensus_branch_id: self.consensus_branch_id,
             lock_time: 0,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_bundle,
             // We don't support constructing Sprout bundles.
@@ -1700,7 +1701,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: unauthed_tx.zip233_amount,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
@@ -1734,7 +1735,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         mut rng: R,
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         if self.zip233_amount != Zatoshis::ZERO {
             return Err(Error::Zip233UnsupportedByPczt);
         }
@@ -2146,7 +2147,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", feature = "zip-233"))]
+    #[cfg(all(feature = "circuits", feature = "zip-233", zcash_unstable = "zip233"))]
     fn build_for_pczt_rejects_nonzero_zip233_amount() {
         let mut builder = Builder::new(
             nu6_3_test_network(),
@@ -2669,7 +2670,7 @@ mod tests {
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
@@ -2924,7 +2925,7 @@ mod tests {
 
         // Fail if there is only a burn
         // 0.0005 burned, 0.0001 t-ZEC fee
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
@@ -2992,7 +2993,7 @@ mod tests {
 
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.00015 t-ZEC fee, 0.00059999 z-ZEC in
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -3091,7 +3092,7 @@ mod tests {
         }
 
         // NU7 rejects voluntary removal even when the inputs cover the requested amount.
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),

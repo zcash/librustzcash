@@ -202,7 +202,7 @@ impl TxVersion {
         }
     }
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     /// Returns whether this implementation supports ZIP 233 for this version and branch.
     ///
     /// No implemented format supports ZIP 233. In particular, NU7 preserves the v5/v6
@@ -341,7 +341,7 @@ pub struct TransactionData<A: Authorization> {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     sprout_bundle: Option<sprout::Bundle>,
@@ -357,7 +357,7 @@ impl Clone for TransactionData<Authorized> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: self.transparent_bundle.clone(),
             sprout_bundle: self.sprout_bundle.clone(),
@@ -398,7 +398,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_bundle,
             sprout_bundle,
@@ -412,7 +412,7 @@ impl<A: Authorization> TransactionData<A> {
     ///
     /// No implemented format supports a nonzero amount; [`Self::freeze`] rejects it
     /// when this data is authorized. Zero preserves the ordinary transaction format.
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_with_zip233(
         version: TxVersion,
@@ -477,7 +477,7 @@ impl<A: Authorization> TransactionData<A> {
     ///
     /// V6 does not support ZIP 233. [`Self::freeze`] rejects nonzero amounts when
     /// this data is authorized; zero is equivalent to [`Self::from_parts_v6`].
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v6_with_zip233(
         consensus_branch_id: BranchId,
@@ -530,7 +530,11 @@ impl<A: Authorization> TransactionData<A> {
     ///
     /// The V7 scaffold does not implement ZIP 248 value-pool deltas. Nonzero amounts
     /// are rejected by [`Self::freeze`] when this data is authorized.
-    #[cfg(all(zcash_unstable = "nutachyon", feature = "zip-233"))]
+    #[cfg(all(
+        zcash_unstable = "nutachyon",
+        feature = "zip-233",
+        zcash_unstable = "zip233"
+    ))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v7_with_zip233(
         consensus_branch_id: BranchId,
@@ -577,7 +581,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_bundle,
             sprout_bundle: None,
@@ -587,7 +591,7 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     #[allow(clippy::too_many_arguments)]
     fn from_parts_v6_or_v7_with_zip233(
         version: TxVersion,
@@ -662,7 +666,7 @@ impl<A: Authorization> TransactionData<A> {
     ///
     /// No implemented transaction format supports a nonzero amount; [`Self::freeze`]
     /// rejects it when this data is authorized.
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     pub fn zip233_amount(&self) -> Zatoshis {
         self.zip233_amount
     }
@@ -697,7 +701,7 @@ impl<A: Authorization> TransactionData<A> {
                     self.ironwood_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(feature = "zip-233")]
+                    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
                     -ZatBalance::from(self.zip233_amount),
                 ];
 
@@ -775,7 +779,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle),
             sprout_bundle: self.sprout_bundle,
@@ -814,7 +818,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle)?,
             sprout_bundle: self.sprout_bundle,
@@ -835,7 +839,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: self
                 .transparent_bundle
@@ -885,7 +889,7 @@ impl TransactionData<Authorized> {
     /// nonzero ZIP 233 amount under a transaction version and consensus branch that do
     /// not support ZIP 233.
     pub fn freeze(self) -> io::Result<Transaction> {
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         if self.zip233_amount != Zatoshis::ZERO
             && !self.version.has_zip233(self.consensus_branch_id)
         {
@@ -903,7 +907,7 @@ struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
 }
 
@@ -1032,7 +1036,7 @@ impl Transaction {
                 consensus_branch_id,
                 lock_time,
                 expiry_height,
-                #[cfg(feature = "zip-233")]
+                #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
                 zip233_amount: Zatoshis::ZERO,
                 transparent_bundle,
                 sprout_bundle,
@@ -1077,7 +1081,7 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(feature = "zip-233")]
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         let zip233_amount = Zatoshis::ZERO;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
@@ -1090,7 +1094,7 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
@@ -1123,7 +1127,7 @@ impl Transaction {
             consensus_branch_id: header_fragment.consensus_branch_id,
             lock_time: header_fragment.lock_time,
             expiry_height: header_fragment.expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: header_fragment.zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
@@ -1164,7 +1168,7 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
         })
     }
@@ -1406,7 +1410,7 @@ pub mod testing {
         },
     };
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
@@ -1431,7 +1435,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(not(feature = "zip-233"))]
+    #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id)
@@ -1458,7 +1462,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(feature = "zip-233")]
+    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id)
