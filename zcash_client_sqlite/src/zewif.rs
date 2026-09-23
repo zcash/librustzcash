@@ -1778,7 +1778,6 @@ mod tests {
             nu6_1: one,
             nu6_2: one,
             nu6_3: one,
-            #[cfg(zcash_unstable = "nu7")]
             nu7: one,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
@@ -2501,8 +2500,6 @@ mod tests {
             BranchId::for_height(&TEST_NETWORK, height),
             0,
             height + 100,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(
@@ -2535,8 +2532,6 @@ mod tests {
             BranchId::for_height(&TEST_NETWORK, height),
             0,
             height + 100,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: outputs
@@ -2775,8 +2770,6 @@ mod tests {
             BranchId::for_height(params, height),
             0,
             consensus::BlockHeight::from(0),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(

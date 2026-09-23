@@ -392,8 +392,6 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(

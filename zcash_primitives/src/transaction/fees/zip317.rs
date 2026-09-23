@@ -45,7 +45,7 @@ pub const TRANSPARENT_BUNDLE_OVERHEAD: usize = 18;
 
 /// The fixed size of a Zcash transaction header: version (4) +
 /// `consensus_branch_id` (4) + `lock_time` (4) + `expiry_height` (4). The constant
-/// leaves room for future header fields (e.g. the `zip233_amount` under NU7).
+/// leaves room for future header fields.
 pub const TX_HEADER_SIZE: usize = 32;
 
 /// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to

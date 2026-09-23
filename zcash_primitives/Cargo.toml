@@ -102,6 +102,9 @@ std = [
     "orchard/std",
     "transparent/std",
 ]
+
+## Enables the experimental ZIP 233 transaction amount when combined with
+## `--cfg zcash_unstable="zip233"`.
 zip-233 = []
 
 ## Enables creating proofs

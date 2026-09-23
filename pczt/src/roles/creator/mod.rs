@@ -121,7 +121,6 @@ impl Creator {
             | BranchId::Nu6_1
             | BranchId::Nu6_2 => (V5_TX_VERSION, V5_VERSION_GROUP_ID),
             BranchId::Nu6_3 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
-            #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
             #[cfg(zcash_unstable = "nutachyon")]
             BranchId::NuTachyon => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
