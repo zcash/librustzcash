@@ -4879,6 +4879,58 @@ mod tests {
             Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
         );
 
+        let scanned_height = u32::from(birthday.height()) + 20;
+        st.wallet_mut()
+            .conn_mut()
+            .execute("DELETE FROM scan_queue", [])
+            .unwrap();
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    u32::from(birthday.height()),
+                    scanned_height + 1,
+                    crate::wallet::scanning::priority_code(
+                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
+                    ),
+                ],
+            )
+            .unwrap();
+
+        // If requeuing fails after the account row has been upgraded, the whole
+        // import must roll back; otherwise a retry would see a duplicate UFVK
+        // and could never schedule the missing rescan.
+        st.wallet_mut()
+            .conn_mut()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_upgrade_rescan BEFORE INSERT ON main.scan_queue
+                 BEGIN SELECT RAISE(ABORT, 'injected rescan failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            st.wallet_mut()
+                .import_account_ufvk(
+                    "",
+                    &ufvk,
+                    &birthday,
+                    AccountPurpose::Spending { derivation: None },
+                    None,
+                )
+                .is_err()
+        );
+        let after_failed_upgrade = st.wallet().get_account(ivk_account.id()).unwrap().unwrap();
+        assert!(after_failed_upgrade.ufvk().is_none());
+        assert_eq!(
+            after_failed_upgrade.uivk().encode(&network),
+            ivk_account.uivk().encode(&network)
+        );
+        st.wallet_mut()
+            .conn_mut()
+            .execute_batch("DROP TRIGGER fail_upgrade_rescan")
+            .unwrap();
+
         // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
         let ufvk_upgraded = st
             .wallet_mut()
@@ -4896,6 +4948,22 @@ mod tests {
         assert_eq!(
             ufvk_upgraded.ufvk().unwrap().encode(&network),
             ufvk.encode(&network),
+        );
+        let rescan_priority: i64 = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT priority FROM scan_queue
+                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
+                [scanned_height],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rescan_priority,
+            crate::wallet::scanning::priority_code(
+                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
+            )
         );
 
         // (c) IVK import over an account that now has a UFVK should fail.
@@ -4974,6 +5042,29 @@ mod tests {
             })
             .unwrap();
 
+        // Model a wallet that has already scanned beyond this account's birthday
+        // using only its Sapling IVK. Adding Orchard capability must requeue these
+        // blocks so any earlier Orchard notes can be discovered.
+        let scanned_height = u32::from(birthday.height()) + 20;
+        st.wallet_mut()
+            .conn_mut()
+            .execute("DELETE FROM scan_queue", [])
+            .unwrap();
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    u32::from(birthday.height()),
+                    scanned_height + 1,
+                    crate::wallet::scanning::priority_code(
+                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
+                    ),
+                ],
+            )
+            .unwrap();
+
         // Import the full UIVK (sapling + orchard) — should upgrade.
         let upgraded = st
             .wallet_mut()
@@ -4998,6 +5089,22 @@ mod tests {
         assert_eq!(upgraded.id(), ivk_account.id());
         assert!(upgraded.ufvk().is_none());
         assert!(upgraded.uivk().encode(&network) != ivk_account.uivk().encode(&network));
+        let rescan_priority: i64 = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT priority FROM scan_queue
+                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
+                [scanned_height],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rescan_priority,
+            crate::wallet::scanning::priority_code(
+                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
+            )
+        );
     }
 
     #[cfg(feature = "transparent-inputs")]
