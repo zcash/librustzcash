@@ -1175,6 +1175,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority(),
             )
             .as_deref(),
         Ok(&[])
@@ -1187,6 +1188,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Unfiltered,
+                &st.full_spend_authority(),
             )
             .as_deref(),
         Ok([_])
@@ -1300,6 +1302,7 @@ pub fn single_note_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
                 ConfirmationsPolicy::MIN,
                 &[],
                 LockFilter::Policy(policy),
+                &st.full_spend_authority(),
             )
             .unwrap()
     };

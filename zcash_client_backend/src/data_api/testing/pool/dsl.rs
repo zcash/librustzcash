@@ -613,6 +613,7 @@ where
             amount,
         )])
         .unwrap();
+        let spend_authority = self.full_spend_authority();
         let network = *self.network();
         propose_transfer::<_, _, _, _, Infallible>(
             self.wallet_mut(),
@@ -625,6 +626,7 @@ where
             &SpendPolicy::default(),
             Some(LockRequest::new(owner, lock_for_blocks)),
             None,
+            &spend_authority,
         )
         .unwrap()
     }
