@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+
+- `accounts.zip48_seed_fingerprint`, `accounts.zip48_account_index` and
+  `accounts.zip48_cosigner_index` store which cosigner key of a ZIP 48 multisig
+  account this wallet holds. `Account::zip48_derivation` reports them. Nothing
+  writes them yet.
+
 ## [0.23.0-pre.1] - 2026-10-06
 
 ### Added
