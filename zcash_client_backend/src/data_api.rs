@@ -94,6 +94,7 @@ use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
     scanning::{ScanPriority, ScanRange},
+    spend_capability::SpendCapability,
 };
 use crate::{
     data_api::{
@@ -1874,7 +1875,8 @@ pub trait InputSource {
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
     /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
-    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only notes in
+    /// pools of `account` that `capability` authorizes are selected.
     #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
@@ -1885,6 +1887,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the OLDEST single spendable note whose value alone is at least `value`, drawn
@@ -1911,6 +1914,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         self.select_spendable_notes(
             account,
@@ -1920,6 +1924,7 @@ pub trait InputSource {
             confirmations_policy,
             exclude,
             lock_filter,
+            capability,
         )
         .map(|notes| notes.into_single_covering(value, sources))
     }
@@ -1986,7 +1991,8 @@ pub trait InputSource {
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
     /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
-    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only outputs that
+    /// `capability` authorizes are returned.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
@@ -1995,6 +2001,7 @@ pub trait InputSource {
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: CoinbaseFilter,
         _lock_filter: LockFilter<'_>,
+        _capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -2022,6 +2029,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
@@ -2031,6 +2039,7 @@ pub trait InputSource {
                 confirmations_policy,
                 output_filter,
                 lock_filter,
+                capability,
             )?);
         }
         Ok(outputs)
@@ -2071,7 +2080,8 @@ pub trait InputSource {
     /// transparent addresses are eligible; when `None`, outputs received at any of the
     /// account's transparent addresses are eligible. The restriction must be applied
     /// *within* the gather (not to its results), so that outputs excluded by the allow list
-    /// do not consume the value bound.
+    /// do not consume the value bound. The same holds for outputs that `capability` does not
+    /// authorize.
     ///
     /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
     /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
@@ -2091,6 +2101,7 @@ pub trait InputSource {
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
@@ -2102,6 +2113,7 @@ pub trait InputSource {
             max_inputs,
             fee_rule,
             lock_filter,
+            capability,
         );
         unimplemented!(
             "InputSource::select_spendable_transparent_outputs must be overridden for \

@@ -33,14 +33,20 @@ use {
     crate::{
         data_api::{
             AccountBirthday,
+            spend_capability::{
+                AccountAuthority, SpendCapability, StandaloneAuthority, StandaloneKeys,
+            },
             wallet::{self, SpendingKeys},
         },
         wallet::TransparentAddressSource,
     },
     secp256k1::{Secp256k1, SecretKey},
     secrecy::Secret,
-    std::collections::HashMap,
-    zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+    std::collections::{BTreeSet, HashMap},
+    zcash_protocol::{
+        PoolType,
+        consensus::{NetworkUpgrade, Parameters},
+    },
     zcash_script::{descriptor::sh, pattern::check_multisig, script},
 };
 
@@ -117,6 +123,7 @@ fn check_balance<DSF>(
                 confirmations_policy,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_capability(),
             )
             .unwrap()
             .into_iter()
@@ -184,7 +191,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_capability(),
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -220,7 +227,8 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                LockFilter::Policy(&LockedInputPolicy::Exclude)
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_capability()
             )
             .as_deref(),
         Ok(&[])
@@ -237,7 +245,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude))
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_capability())
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -553,6 +561,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -572,6 +581,7 @@ where
                     ConfirmationsPolicy::MIN,
                     CoinbaseFilter::AllTransparentOutputs,
                     LockFilter::Policy(&LockedInputPolicy::Exclude),
+                    &st.full_spend_capability(),
                 )
                 .unwrap(),
         );
@@ -590,6 +600,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -604,6 +615,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_capability(),
             )
             .unwrap()
             .is_empty()
@@ -1418,9 +1430,127 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(utxos, vec![]);
+}
+
+/// Tests that transparent selection returns only the outputs that the spend capability
+/// authorizes: a derived receiver needs transparent authority over its account, a standalone
+/// P2PKH receiver needs its public key, and a standalone multisig receiver needs its script
+/// to be named. Holding a member key of the script does not authorize it.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_capability_restricts_transparent_selection<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let standalone_pubkey = SecretKey::from_slice(&[2u8; 32])
+        .expect("valid secret key")
+        .public_key(&secp);
+    let p2pkh_addr = TransparentAddress::from_pubkey(&standalone_pubkey);
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, standalone_pubkey)
+        .unwrap();
+
+    let (redeem_script, member_key) = build_test_redeem_script();
+    let p2sh_addr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script)
+        .unwrap();
+
+    let derived_addr = *st
+        .wallet()
+        .get_transparent_receivers(account_id, false, false)
+        .unwrap()
+        .keys()
+        .next()
+        .expect("the account has a derived transparent receiver");
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    let value = Zatoshis::const_from_u64(50_000);
+    let addresses = [derived_addr, p2pkh_addr, p2sh_addr];
+    for (txid_byte, address) in (1u8..).zip(addresses) {
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([txid_byte; 32], 0),
+            TxOut::new(value, address.script().into()),
+            Some(height),
+            Some(account_id),
+            None,
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height + 1);
+    let spendable_under = |capability: &SpendCapability<_>| -> BTreeSet<TransparentAddress> {
+        st.wallet()
+            .get_spendable_transparent_outputs_for_addresses(
+                &addresses,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                capability,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|output| *output.recipient_address())
+            .collect()
+    };
+
+    assert_eq!(spendable_under(&SpendCapability::none()), BTreeSet::new());
+
+    let transparent_authority = AccountAuthority::Only(HashMap::from([(
+        account_id,
+        BTreeSet::from([PoolType::Transparent]),
+    )]));
+    assert_eq!(
+        spendable_under(&SpendCapability::for_accounts(transparent_authority)),
+        BTreeSet::from([derived_addr])
+    );
+
+    let held_keys = SpendCapability::new(
+        AccountAuthority::none(),
+        StandaloneAuthority::new(
+            StandaloneKeys::Only(BTreeSet::from([
+                standalone_pubkey,
+                member_key.public_key(&secp),
+            ])),
+            BTreeSet::new(),
+        ),
+    );
+    assert_eq!(spendable_under(&held_keys), BTreeSet::from([p2pkh_addr]));
+
+    let named_script = SpendCapability::new(
+        AccountAuthority::none(),
+        StandaloneAuthority::new(
+            StandaloneKeys::Only(BTreeSet::new()),
+            BTreeSet::from([p2sh_addr]),
+        ),
+    );
+    assert_eq!(spendable_under(&named_script), BTreeSet::from([p2sh_addr]));
+
+    assert_eq!(
+        spendable_under(&st.full_spend_capability()),
+        BTreeSet::from(addresses)
+    );
 }
 
 /// Tests that importing key material for a previously address-only import upgrades the
@@ -1687,6 +1817,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2021,6 +2152,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2531,7 +2663,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_capability(),
         ).as_deref(),
         Ok([ret]) if ret.outpoint() == &outpoint
     );
@@ -2871,6 +3003,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .expect("initial gather should succeed");
     let initial_gather_value: Zatoshis = initial_gather
@@ -3177,6 +3310,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .expect("value-bounded gather should succeed");
 
@@ -3226,6 +3360,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);

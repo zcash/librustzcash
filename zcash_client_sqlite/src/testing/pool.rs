@@ -316,6 +316,13 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn spend_capability_restricts_shielded_selection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_capability_restricts_shielded_selection::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::checkpoint_gaps::<T, _>(
         TestDbFactory::default(),

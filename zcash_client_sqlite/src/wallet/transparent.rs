@@ -24,6 +24,7 @@ use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
+        spend_capability::{AccountAuthority, SpendCapability, StandaloneKeys},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
@@ -49,7 +50,7 @@ use zcash_primitives::transaction::fees::{
     zip317,
 };
 use zcash_protocol::{
-    TxId,
+    PoolType, TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
     value::{ZatBalance, Zatoshis},
 };
@@ -1364,6 +1365,98 @@ pub(crate) fn get_wallet_transparent_output(
     result
 }
 
+/// Returns an SQL condition that is true when a [`SpendCapability`] authorizes outputs received
+/// at an address.
+///
+/// # Usage requirements
+/// - `addresses` must be the alias of the `addresses` table for the receiving address.
+/// - `accounts` must be the alias of the `accounts` table for the address's account.
+/// - The parent must bind the parameters of a [`CapabilityBindings`] with
+///   [`CapabilityBindings::push`].
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+pub(crate) fn capability_authorizes_condition(addresses: &str, accounts: &str) -> String {
+    format!(
+        r#"
+        CASE
+            -- an address derived from the account's keys
+            WHEN {addresses}.key_scope != {foreign_scope}
+                THEN :cap_all_accounts OR {accounts}.uuid IN rarray(:cap_transparent_accounts)
+            -- a standalone multisig script, which must be named
+            WHEN {addresses}.imported_transparent_receiver_script IS NOT NULL
+                THEN {addresses}.cached_transparent_receiver_address IN rarray(:cap_scripts)
+            -- a standalone public key
+            WHEN {addresses}.imported_transparent_receiver_pubkey IS NOT NULL
+                THEN :cap_all_standalone_keys
+                    OR {addresses}.imported_transparent_receiver_pubkey IN rarray(:cap_pubkeys)
+            -- a standalone address imported without key material
+            ELSE 0
+        END
+        "#,
+        foreign_scope = KeyScope::Foreign.encode(),
+    )
+}
+
+/// The values bound by the SQL condition from [`capability_authorizes_condition`].
+pub(crate) struct CapabilityBindings {
+    all_accounts: bool,
+    transparent_accounts: Rc<Vec<Value>>,
+    scripts: Rc<Vec<Value>>,
+    all_standalone_keys: bool,
+    pubkeys: Rc<Vec<Value>>,
+}
+
+impl CapabilityBindings {
+    /// Returns the bindings that express `capability`.
+    pub(crate) fn new<P: consensus::Parameters>(
+        params: &P,
+        capability: &SpendCapability<AccountUuid>,
+    ) -> Self {
+        let (all_accounts, transparent_accounts) = match capability.accounts() {
+            AccountAuthority::All => (true, vec![]),
+            AccountAuthority::Only(accounts) => (
+                false,
+                accounts
+                    .iter()
+                    .filter(|(_, pools)| pools.contains(&PoolType::Transparent))
+                    .map(|(account, _)| Value::Blob(account.expose_uuid().as_bytes().to_vec()))
+                    .collect(),
+            ),
+        };
+        let standalone = capability.standalone();
+        let scripts = standalone
+            .scripts()
+            .iter()
+            .filter(|address| matches!(address, TransparentAddress::ScriptHash(_)))
+            .map(|address| Value::Text(address.encode(params)))
+            .collect();
+        let (all_standalone_keys, pubkeys) = match standalone.keys() {
+            StandaloneKeys::AllImported => (true, vec![]),
+            StandaloneKeys::Only(keys) => (
+                false,
+                keys.iter()
+                    .map(|pubkey| Value::Blob(pubkey.serialize().to_vec()))
+                    .collect(),
+            ),
+        };
+        CapabilityBindings {
+            all_accounts,
+            transparent_accounts: Rc::new(transparent_accounts),
+            scripts: Rc::new(scripts),
+            all_standalone_keys,
+            pubkeys: Rc::new(pubkeys),
+        }
+    }
+
+    /// Appends these bindings to a query's parameter list.
+    pub(crate) fn push<'a>(&'a self, sql_params: &mut Vec<(&'a str, &'a dyn ToSql)>) {
+        sql_params.push((":cap_all_accounts", &self.all_accounts));
+        sql_params.push((":cap_transparent_accounts", &self.transparent_accounts));
+        sql_params.push((":cap_scripts", &self.scripts));
+        sql_params.push((":cap_all_standalone_keys", &self.all_standalone_keys));
+        sql_params.push((":cap_pubkeys", &self.pubkeys));
+    }
+}
+
 /// Builds the SQL query body shared by `get_spendable_transparent_outputs[_for_addresses]`
 /// and `select_spendable_transparent_outputs`.
 ///
@@ -1402,6 +1495,7 @@ fn spendable_transparent_outputs_query(
            -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
            -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
          AND ({lock_eligible_sql}) -- the output is eligible under the lock filter
+         AND ({authorized}) -- the spend capability authorizes the output
          AND NOT (
              addresses.key_scope = {foreign_scope}
              AND addresses.imported_transparent_receiver_pubkey IS NULL
@@ -1414,6 +1508,7 @@ fn spendable_transparent_outputs_query(
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         excluding_immature_coinbase_outputs("t"),
         foreign_scope = KeyScope::Foreign.encode(),
+        authorized = capability_authorizes_condition("addresses", "accounts"),
     )
 }
 
@@ -1441,6 +1536,7 @@ fn coinbase_filter_encoding(output_filter: CoinbaseFilter) -> i32 {
 /// spendable, if they are the outputs of deshielding transactions where the spend anchors have
 /// been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
 /// it should be vanishingly rare as the vast majority of rewinds are of a single block.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1449,6 +1545,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
     lock_filter: LockFilter<'_>,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // Defer to the batched query with a singleton address set, so that there is a single query
     // body to maintain. `transparent_received_outputs.address` is always equal to the
@@ -1464,6 +1561,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         confirmations_policy,
         output_filter,
         lock_filter,
+        capability,
     )
 }
 
@@ -1480,6 +1578,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
 ///
 /// The query body mirrors that of [`get_spendable_transparent_outputs`], differing only in that
 /// the receiving address is matched against a set via `rarray` rather than a single value.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1488,6 +1587,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
     lock_filter: LockFilter<'_>,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     if addresses.is_empty() {
         return Ok(vec![]);
@@ -1520,6 +1620,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     let target_height_arg = u32::from(target_height);
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let overridable_owners = overridable_owners_rarray(lock_filter);
+    let capability_bindings = CapabilityBindings::new(params, capability);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":addresses", &addresses_ptr),
         (":target_height", &target_height_arg),
@@ -1528,6 +1629,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         (":coinbase_filter", &coinbase_filter),
     ];
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+    capability_bindings.push(&mut sql_params);
 
     let mut rows = stmt_utxos.query(&sql_params[..])?;
 
@@ -1588,6 +1690,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     max_inputs: usize,
     fee_rule: &StandardFeeRule,
     lock_filter: LockFilter<'_>,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
     // return every eligible output in that case.
@@ -1643,6 +1746,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let has_address_allow_list = address_allow_list.is_some();
     let overridable_owners = overridable_owners_rarray(lock_filter);
+    let capability_bindings = CapabilityBindings::new(params, capability);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),
         (":target_height", &target_height_arg),
@@ -1653,6 +1757,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
         (":addresses", &addresses_ptr),
     ];
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+    capability_bindings.push(&mut sql_params);
 
     let mut rows = stmt_utxos.query(&sql_params[..])?;
 
@@ -4209,6 +4314,14 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     fn test_import_standalone_transparent_address_balance() {
         zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_address_balance(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn spend_capability_restricts_transparent_selection() {
+        zcash_client_backend::data_api::testing::transparent::spend_capability_restricts_transparent_selection(
             TestDbFactory::default(),
         );
     }

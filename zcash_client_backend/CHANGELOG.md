@@ -24,10 +24,28 @@ workspace.
   add_watch_only_value, into_watch_only}`
 - `zcash_client_backend::data_api::AccountBalance::{watch_only_value,
   multisig_balances, with_multisig_balance_mut}`
+- `zcash_client_backend::data_api::wallet::SpendingKeys::capability`
 
 ### Changed
 - `zcash_client_backend::data_api::Balance::total` now includes the
   watch-only value.
+- Input selection now takes the caller's spend authority as a
+  `capability: &SpendCapability<AccountId>` argument, and selects only the
+  inputs that it authorizes:
+  - `zcash_client_backend::data_api::InputSource::{select_spendable_notes,
+    select_single_spendable_note, get_spendable_transparent_outputs,
+    get_spendable_transparent_outputs_for_addresses,
+    select_spendable_transparent_outputs}` take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+    and `ShieldingSelector::{propose_shielding, propose_shielding_coinbase}`
+    take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::{propose_transfer,
+    propose_standard_transfer_to_address, propose_send_max_transfer,
+    propose_shielding, propose_shielding_coinbase}` take it as a final
+    argument.
+- `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
+  selects only the transparent outputs that its `spending_keys` can spend, as
+  given by `SpendingKeys::capability`.
 - `zcash_client_backend::data_api::AccountBalance` no longer implements `Copy`;
   use `Clone`. Its `total`, `locked_value` and `uneconomic_value` now include
   the multisig balances.

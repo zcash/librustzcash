@@ -21,6 +21,7 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
+        spend_capability::{AccountAuthority, SpendCapability},
         wallet::{
             ConfirmationsPolicy, TargetHeight,
             input_selection::{LockFilter, LockedInputPolicy},
@@ -125,6 +126,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 confirmations_policy,
                 exclude,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &SpendCapability::for_accounts(AccountAuthority::All),
             )
             .map(|n| n.take_sapling())
     }

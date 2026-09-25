@@ -41,7 +41,8 @@ use zip321::TransactionRequest;
 use crate::{
     data_api::{
         InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
-        anchor_retention::PoolMigrationParams, wallet::TargetHeight,
+        anchor_retention::PoolMigrationParams, spend_capability::SpendCapability,
+        wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
@@ -216,6 +217,7 @@ pub trait InputSelector {
         change_strategy: &ChangeT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -270,6 +272,7 @@ pub trait ShieldingSelector {
         zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -334,6 +337,7 @@ pub trait ShieldingSelector {
         limit: Option<usize>,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<FeeRuleT, Infallible>,
         InputSelectorError<
@@ -777,6 +781,7 @@ impl<DbT> GreedyInputSelector<DbT> {
         transaction_request: &TransactionRequest,
         amount_at_transparent_gather: &mut Zatoshis,
         locked_input_policy: &LockedInputPolicy,
+        capability: &SpendCapability<<DbT as InputSource>::AccountId>,
     ) -> Result<
         Vec<WalletTransparentOutput<()>>,
         InputSelectorError<
@@ -833,6 +838,7 @@ impl<DbT> GreedyInputSelector<DbT> {
                 shielding_max_inputs(self.shielding_block_space_percent),
                 &StandardFeeRule::Zip317,
                 LockFilter::Policy(locked_input_policy),
+                capability,
             )
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -874,6 +880,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         change_strategy: &ChangeT,
         spend_policy: &SpendPolicy,
         proposed_version: Option<TxVersion>,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -1037,6 +1044,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &transaction_request,
                     &mut amount_at_transparent_gather,
                     spend_policy.locked_input_policy(),
+                    capability,
                 )?
             }
         };
@@ -1417,6 +1425,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 shielding_max_inputs(self.shielding_block_space_percent),
                                 &StandardFeeRule::Zip317,
                                 LockFilter::Policy(spend_policy.locked_input_policy()),
+                                capability,
                             )
                             .map_err(InputSelectorError::DataSource)?
                             .into_iter()
@@ -1461,6 +1470,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             confirmations_policy,
                             &exclude,
                             LockFilter::Policy(spend_policy.locked_input_policy()),
+                            capability,
                         )
                         .map_err(InputSelectorError::DataSource)?,
                 )
@@ -1478,6 +1488,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         confirmations_policy,
                         &exclude,
                         LockFilter::Policy(spend_policy.locked_input_policy()),
+                        capability,
                     )
                     .map_err(InputSelectorError::DataSource)?,
             };
@@ -1589,6 +1600,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     recipient: ZcashAddress,
     memo: Option<MemoBytes>,
     locked_input_policy: &LockedInputPolicy,
+    capability: &SpendCapability<InputSourceT::AccountId>,
 ) -> Result<
     Proposal<FeeRuleT, InputSourceT::NoteRef>,
     InputSelectorError<
@@ -1617,6 +1629,7 @@ where
             confirmations_policy,
             &[],
             LockFilter::Policy(locked_input_policy),
+            capability,
         )
         .map_err(InputSelectorError::DataSource)?;
 
@@ -2042,6 +2055,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -2058,6 +2072,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             output_filter,
             shielding_max_inputs(self.shielding_block_space_percent),
             &self.locked_input_policy,
+            capability,
         )?;
 
         let wallet_meta = change_strategy
@@ -2111,6 +2126,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         limit: Option<usize>,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        capability: &SpendCapability<<Self::InputSource as InputSource>::AccountId>,
     ) -> Result<
         Proposal<FeeRuleT, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, FeeRuleT::Error, Infallible>,
@@ -2140,6 +2156,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 .unwrap_or(usize::MAX)
                 .min(shielding_max_inputs(self.shielding_block_space_percent)),
             &self.locked_input_policy,
+            capability,
         )?;
 
         let destination_pool = resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(
@@ -2278,6 +2295,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
 /// Shared between `propose_shielding` and `propose_shielding_coinbase`.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn gather_shielding_inputs<DbT, ChangeErrT>(
     wallet_db: &DbT,
     source_addrs: &[TransparentAddress],
@@ -2286,6 +2304,7 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
     output_filter: CoinbaseFilter,
     max_inputs: usize,
     locked_input_policy: &LockedInputPolicy,
+    capability: &SpendCapability<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Vec<WalletTransparentOutput<()>>,
     InputSelectorError<
@@ -2313,6 +2332,7 @@ where
             confirmations_policy,
             output_filter,
             LockFilter::Policy(locked_input_policy),
+            capability,
         )
         .map_err(InputSelectorError::DataSource)?;
 
