@@ -106,7 +106,7 @@ use zcash_client_backend::{
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
         AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
-        TransactionStatus, WalletSummary, Zip32Derivation,
+        TransactionStatus, WalletSummary, Zip32Derivation, Zip48Derivation,
         anchor_retention::AnchorRetentionInterval,
         chain::ChainState,
         defaults::address_receiver_matches_ua,
@@ -280,6 +280,7 @@ pub struct Account {
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: BlockHeight,
+    zip48_derivation: Option<Zip48Derivation>,
 }
 
 impl Account {
@@ -321,6 +322,10 @@ impl zcash_client_backend::data_api::Account for Account {
 
     fn source(&self) -> &AccountSource {
         &self.kind
+    }
+
+    fn zip48_derivation(&self) -> Option<&Zip48Derivation> {
+        self.zip48_derivation.as_ref()
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -596,6 +601,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         kind: kind.clone(),
         viewing_key,
         birthday: birthday.height(),
+        // Nothing supplies this at account creation yet; it is set separately.
+        zip48_derivation: None,
     };
 
     // Bring the wallet's note commitment tree, scan queue, and birthday metadata into a state
@@ -1829,6 +1836,44 @@ fn parse_account_row<P: consensus::Parameters>(
 
     let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
 
+    // The three columns are written together, so a partially-populated set is corruption
+    // rather than an account that merely lacks the metadata.
+    let zip48_derivation = match (
+        row.get::<_, Option<Vec<u8>>>("zip48_seed_fingerprint")?,
+        row.get::<_, Option<u32>>("zip48_account_index")?,
+        row.get::<_, Option<u8>>("zip48_cosigner_index")?,
+    ) {
+        (None, None, None) => None,
+        (Some(seed_fp), Some(account_index), Some(cosigner_index)) => {
+            let seed_fingerprint = <[u8; 32]>::try_from(&seed_fp[..])
+                .map(SeedFingerprint::from_bytes)
+                .map_err(|_| {
+                    SqliteClientError::CorruptedData(format!(
+                        "ZIP 48 seed fingerprint for account {} is not 32 bytes",
+                        account_uuid.0
+                    ))
+                })?;
+            let account_index = zip32::AccountId::try_from(account_index).map_err(|_| {
+                SqliteClientError::CorruptedData(format!(
+                    "ZIP 48 account index for account {} is out of range",
+                    account_uuid.0
+                ))
+            })?;
+
+            Some(Zip48Derivation::new(
+                seed_fingerprint,
+                account_index,
+                cosigner_index,
+            ))
+        }
+        _ => {
+            return Err(SqliteClientError::CorruptedData(format!(
+                "ZIP 48 derivation metadata for account {} is partially populated",
+                account_uuid.0
+            )));
+        }
+    };
+
     Ok(Account {
         id: account_id,
         name: account_name,
@@ -1836,6 +1881,7 @@ fn parse_account_row<P: consensus::Parameters>(
         kind,
         viewing_key,
         birthday,
+        zip48_derivation,
     })
 }
 
@@ -1848,7 +1894,8 @@ pub(crate) fn get_account<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, has_spend_key, birthday_height,
+               zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -1872,7 +1919,8 @@ pub(crate) fn get_account_internal<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, has_spend_key, birthday_height,
+               zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1909,7 +1957,8 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, has_spend_key, birthday_height,
+               zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index
          FROM accounts
          WHERE orchard_ivk_item_cache = :orchard_ivk_item_cache
             OR sapling_ivk_item_cache = :sapling_ivk_item_cache
@@ -1991,7 +2040,8 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, has_spend_key, birthday_height,
+               zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2049,7 +2099,8 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, has_spend_key, birthday_height,
+               zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2125,6 +2176,8 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
                 birthday,
+                // This path loads seed-derived accounts, which are not ZIP 48 accounts.
+                zip48_derivation: None,
             })
         },
     )?;
