@@ -138,6 +138,7 @@ pub use locking::OutputLockStore;
 #[cfg(feature = "test-dependencies")]
 pub use locking::ambassador_impl_OutputLockStore;
 pub mod scanning;
+pub mod spend_capability;
 pub mod wallet;
 #[cfg(feature = "orchard")]
 pub mod zip318;

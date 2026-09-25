@@ -18,6 +18,8 @@ workspace.
 - `zcash_client_backend::data_api::error::AddressExpiryError`
 - `zcash_client_backend::data_api::error::Error::RecipientAddressExpiry`
 - `zcash_client_backend::data_api::testing::TestState::clock`
+- `zcash_client_backend::data_api::spend_capability` module, describing the
+  spend authority held by an application's key store.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
