@@ -864,7 +864,11 @@ where
         .get_wallet_summary(confirmations_policy)
         .unwrap()
         .unwrap();
-    *summary.account_balances().get(&account.id()).unwrap()
+    summary
+        .account_balances()
+        .get(&account.id())
+        .unwrap()
+        .clone()
 }
 
 /// Verifies that transparent funds are reported in the correct `AccountBalance` bucket
