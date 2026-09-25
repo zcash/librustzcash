@@ -1040,6 +1040,33 @@ impl UnifiedFullViewingKey {
         )
     }
 
+    /// Constructs a unified full viewing key for a transparent-only account defined by a
+    /// [ZIP 316] Revision 2 P2SH viewing key item.
+    ///
+    /// This is the one unified full viewing key that cannot be derived. Every other kind
+    /// is reached through [`UnifiedSpendingKey::to_unified_full_viewing_key`], because a
+    /// seed determines it; a P2SH account is instead defined by a set of cosigners'
+    /// keys, so it has no spending key to derive from and must be assembled.
+    ///
+    /// The resulting key has no shielded components, so it encodes with the `tu` HRP and
+    /// derives transparent-only unified addresses.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    #[cfg(feature = "transparent-inputs")]
+    pub fn from_p2sh(p2sh: P2shFullViewingKey) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            Some(TransparentFvk::P2sh(p2sh)),
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            vec![],
+            None,
+            None,
+            vec![],
+        )
+    }
+
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     #[allow(clippy::too_many_arguments)]
@@ -3068,6 +3095,49 @@ mod tests {
 
     /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
     /// interpreted, so it is retained as an unknown item and recorded as unconverted in
+    /// A P2SH account has no seed to derive a unified key from, so the constructor is the
+    /// only way to reach one. What it builds has to survive the encoding, or an account
+    /// registered from a cosigner set is not the account read back from the wallet.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn ufvk_from_p2sh_round_trips_and_is_transparent_only() {
+        use ::transparent::zip48::{P2shFullViewingKey, P2shKey};
+        use core::num::NonZeroU8;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let secp = Secp256k1::new();
+        let key_info = [1u8, 2, 3]
+            .iter()
+            .map(|i| {
+                let sk = SecretKey::from_slice(&[*i; 32]).expect("valid secret key");
+                P2shKey::new([*i; 32], PublicKey::from_secret_key(&secp, &sk))
+            })
+            .collect::<Vec<_>>();
+        let item = P2shFullViewingKey::new(NonZeroU8::new(2).unwrap(), key_info)
+            .expect("valid cosigner set");
+
+        let ufvk = UnifiedFullViewingKey::from_p2sh(item.clone()).expect("constructible");
+
+        assert_eq!(ufvk.p2sh(), Some(&item));
+        assert_eq!(ufvk.p2pkh(), None);
+
+        let encoded = ufvk.encode(&MAIN_NETWORK);
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).expect("decodes");
+        assert_eq!(decoded.p2sh(), Some(&item));
+
+        // A key with no shielded items yields a transparent-only unified address, which
+        // is what makes the account portable between wallets at all.
+        let (address, _) = ufvk
+            .default_address(UnifiedAddressRequest::ALLOW_ALL)
+            .expect("derives an address");
+        assert!(address.has_transparent());
+        assert!(
+            address.encode(&MAIN_NETWORK).starts_with("tu"),
+            "expected a transparent-only UA, got {}",
+            address.encode(&MAIN_NETWORK),
+        );
+    }
+
     /// the derived incoming viewing key. Otherwise that derived key describes the account
     /// as having no transparent receiving capability at all.
     #[test]
