@@ -72,7 +72,7 @@ use super::{
     KeyScope, account_birthday_internal, chain_tip_height,
     encoding::{
         ReceiverFlags, decode_diversifier_index_be, decode_epoch_seconds,
-        encode_diversifier_index_be, epoch_seconds,
+        encode_diversifier_index_be, epoch_seconds, spending_key_custody_code,
     },
     get_account_ids, get_account_internal,
 };
@@ -849,7 +849,8 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                      transparent_child_index = :transparent_child_index,
                      receiver_flags = :receiver_flags,
                      imported_transparent_receiver_pubkey = NULL,
-                     imported_transparent_receiver_script = NULL
+                     imported_transparent_receiver_script = NULL,
+                     imported_transparent_receiver_pubkey_custody = NULL
                  WHERE id = :id",
                 named_params![
                     ":account_id": account_id.0,
@@ -1441,6 +1442,8 @@ pub(crate) fn spend_authority_condition(addresses: &str, accounts: &str) -> Stri
             -- a standalone public key
             WHEN {addresses}.imported_transparent_receiver_pubkey IS NOT NULL
                 THEN {accounts}.uuid IN rarray(:auth_all_pubkey_accounts)
+                    OR (hex({accounts}.uuid) || {addresses}.imported_transparent_receiver_pubkey_custody)
+                        IN rarray(:auth_account_pubkey_custodies)
                     OR (hex({accounts}.uuid) || hex({addresses}.imported_transparent_receiver_pubkey))
                         IN rarray(:auth_account_pubkeys)
             -- a standalone address imported without key material
@@ -1471,6 +1474,7 @@ pub(crate) struct SpendAuthorityBindings {
     transparent_accounts: Rc<Vec<Value>>,
     account_scripts: Rc<Vec<Value>>,
     all_pubkey_accounts: Rc<Vec<Value>>,
+    account_pubkey_custodies: Rc<Vec<Value>>,
     account_pubkeys: Rc<Vec<Value>>,
 }
 
@@ -1483,6 +1487,7 @@ impl SpendAuthorityBindings {
         let mut transparent_accounts = vec![];
         let mut account_scripts = vec![];
         let mut all_pubkey_accounts = vec![];
+        let mut account_pubkey_custodies = vec![];
         let mut account_pubkeys = vec![];
         for (account, authority) in spend_authority.accounts() {
             let account_uuid = account.expose_uuid();
@@ -1502,6 +1507,12 @@ impl SpendAuthorityBindings {
                 StandalonePubkeys::All => {
                     all_pubkey_accounts.push(Value::Blob(account_uuid.as_bytes().to_vec()));
                 }
+                StandalonePubkeys::ImportedAs(custody) => {
+                    account_pubkey_custodies.push(Value::Text(format!(
+                        "{account_hex}{}",
+                        spending_key_custody_code(*custody)
+                    )));
+                }
                 StandalonePubkeys::Only(pubkeys) => {
                     for pubkey in pubkeys {
                         account_pubkeys.push(Value::Text(format!(
@@ -1516,6 +1527,7 @@ impl SpendAuthorityBindings {
             transparent_accounts: Rc::new(transparent_accounts),
             account_scripts: Rc::new(account_scripts),
             all_pubkey_accounts: Rc::new(all_pubkey_accounts),
+            account_pubkey_custodies: Rc::new(account_pubkey_custodies),
             account_pubkeys: Rc::new(account_pubkeys),
         }
     }
@@ -1525,6 +1537,10 @@ impl SpendAuthorityBindings {
         sql_params.push((":auth_transparent_accounts", &self.transparent_accounts));
         sql_params.push((":auth_account_scripts", &self.account_scripts));
         sql_params.push((":auth_all_pubkey_accounts", &self.all_pubkey_accounts));
+        sql_params.push((
+            ":auth_account_pubkey_custodies",
+            &self.account_pubkey_custodies,
+        ));
         sql_params.push((":auth_account_pubkeys", &self.account_pubkeys));
     }
 }
@@ -3391,6 +3407,7 @@ mod tests {
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
     use {
+        crate::wallet::encoding::SPENDING_KEY_CUSTODY_HELD,
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::{BTreeSet, HashMap, HashSet},
@@ -4094,12 +4111,14 @@ mod tests {
         tx.execute(
             "INSERT INTO addresses
                  (account_id, key_scope, address, cached_transparent_receiver_address,
-                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height,
+                  imported_transparent_receiver_pubkey_custody)
              VALUES (:account_id, :foreign, :address, :taddr,
-                  X'020000000000000000000000000000000000000000000000000000000000000001', 1, 55)",
+                  X'020000000000000000000000000000000000000000000000000000000000000001', 1, 55, :custody)",
             named_params! {
                 ":account_id": account_id.0,
                 ":foreign": KeyScope::Foreign.encode(),
+                ":custody": SPENDING_KEY_CUSTODY_HELD,
                 ":address": &taddr_enc,
                 ":taddr": &taddr_enc,
             },
@@ -4213,12 +4232,14 @@ mod tests {
         tx.execute(
             "INSERT INTO addresses
                  (account_id, key_scope, address, cached_transparent_receiver_address,
-                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height,
+                  imported_transparent_receiver_pubkey_custody)
              VALUES (:account_id, :foreign, :address, :taddr,
-                  X'020000000000000000000000000000000000000000000000000000000000000004', 1, 55)",
+                  X'020000000000000000000000000000000000000000000000000000000000000004', 1, 55, :custody)",
             named_params! {
                 ":account_id": account_b.0,
                 ":foreign": KeyScope::Foreign.encode(),
+                ":custody": SPENDING_KEY_CUSTODY_HELD,
                 ":address": &taddr_enc,
                 ":taddr": &taddr_enc,
             },
@@ -4368,12 +4389,14 @@ mod tests {
         tx.execute(
             "INSERT INTO addresses
                  (account_id, key_scope, address, cached_transparent_receiver_address,
-                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height,
+                  imported_transparent_receiver_pubkey_custody)
              VALUES (:account_id, :foreign, :address, :taddr, :pubkey, :receiver_flags,
-                  :exposed_at_height)",
+                  :exposed_at_height, :custody)",
             named_params! {
                 ":account_id": account_b.0,
                 ":foreign": KeyScope::Foreign.encode(),
+                ":custody": SPENDING_KEY_CUSTODY_HELD,
                 ":address": &taddr_enc,
                 ":taddr": &taddr_enc,
                 ":pubkey": &IMPORTED_PUBKEY[..],
@@ -4639,6 +4662,7 @@ mod tests {
                     &GapLimits::default(),
                     account_uuid,
                     pubkey,
+                    SpendingKeyCustody::Held,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, 0);
@@ -4688,6 +4712,7 @@ mod tests {
                     &GapLimits::default(),
                     account_uuid,
                     pubkey,
+                    SpendingKeyCustody::Held,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, 1);
@@ -4699,6 +4724,7 @@ mod tests {
                     &GapLimits::default(),
                     account_uuid,
                     pubkey,
+                    SpendingKeyCustody::Held,
                 )
                 .unwrap();
                 prop_assert_eq!(reinserted, 0);
@@ -4740,6 +4766,7 @@ mod tests {
             &GapLimits::default(),
             unknown,
             pubkey,
+            SpendingKeyCustody::Held,
         );
         assert!(matches!(
             result,
@@ -4784,6 +4811,7 @@ mod tests {
                     &GapLimits::default(),
                     account_uuid,
                     &pubkeys,
+                    SpendingKeyCustody::Held,
                 )
                 .unwrap();
                 prop_assert_eq!(inserted, distinct.len());
@@ -4808,6 +4836,7 @@ mod tests {
                     &GapLimits::default(),
                     account_uuid,
                     &pubkeys,
+                    SpendingKeyCustody::Held,
                 )
                 .unwrap();
                 prop_assert_eq!(again, 0);
@@ -4836,6 +4865,7 @@ mod tests {
             &GapLimits::default(),
             unknown,
             &[pubkey],
+            SpendingKeyCustody::Held,
         );
         assert!(matches!(
             result,
@@ -4987,6 +5017,14 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::spend_authority_restricts_transparent_selection(
             TestDbFactory::default(),
             BlockCache::new(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn standalone_pubkey_custody_follows_imports() {
+        zcash_client_backend::data_api::testing::transparent::standalone_pubkey_custody_follows_imports(
+            TestDbFactory::default(),
         );
     }
 

@@ -67,8 +67,6 @@ use crate::wallet::scanning::priority_code;
 ///   methods (usually to the chain tip height at which account recovery was initiated), and may
 ///   in future be automatically updated by the backend if the wallet is offline for an extended
 ///   period (to keep the scan progress percentage accurate to what actually needs scanning).
-/// - `has_spend_key`: A boolean flag (0 or 1) indicating whether the application that embeds
-///   this wallet database has access to spending key(s) for the account.
 /// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported
 ///   from a `zcashd` `wallet.dat` file, for "standalone" Sapling addresses (each of which
 ///   corresponds to an independent account) derived after the introduction of mnemonic seed
@@ -97,7 +95,6 @@ CREATE TABLE "accounts" (
     birthday_sapling_tree_size INTEGER,
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
-    has_spend_key INTEGER NOT NULL DEFAULT 1,
     zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1,
     CHECK (
       (
@@ -184,6 +181,10 @@ pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
 /// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
 ///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
 ///   address derived from this script. This is only set for imported addresses (key_scope = -1).
+/// - `imported_transparent_receiver_pubkey_custody`: Whether the application holds the spending
+///   key for `imported_transparent_receiver_pubkey`: `0` when it holds the spending key, and `1`
+///   when it holds only the public key. This is set if and only if
+///   `imported_transparent_receiver_pubkey` is set.
 ///
 /// At most one of `imported_transparent_receiver_pubkey` and
 /// `imported_transparent_receiver_script` may be set. An imported row (key_scope = -1) with
@@ -207,6 +208,7 @@ CREATE TABLE "addresses" (
     transparent_receiver_next_check_time INTEGER,
     imported_transparent_receiver_pubkey BLOB,
     imported_transparent_receiver_script BLOB,
+    imported_transparent_receiver_pubkey_custody INTEGER,
     UNIQUE (account_id, key_scope, diversifier_index_be),
     UNIQUE (imported_transparent_receiver_pubkey),
     UNIQUE (imported_transparent_receiver_script),
@@ -241,6 +243,14 @@ CREATE TABLE "addresses" (
     ),
     CONSTRAINT ck_addr_foreign_or_diversified CHECK (
         (diversifier_index_be IS NULL) == (key_scope = -1)
+    ),
+    CONSTRAINT ck_addr_pubkey_custody CHECK (
+        (imported_transparent_receiver_pubkey_custody IS NULL)
+            == (imported_transparent_receiver_pubkey IS NULL)
+        AND (
+            imported_transparent_receiver_pubkey_custody IS NULL
+            OR imported_transparent_receiver_pubkey_custody IN (0, 1)
+        )
     )
 )"#;
 pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
