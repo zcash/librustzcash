@@ -20,8 +20,17 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestState::clock`
 - `zcash_client_backend::data_api::spend_capability` module, describing the
   spend authority held by an application's key store.
+- `zcash_client_backend::data_api::Balance::{watch_only_value,
+  add_watch_only_value, into_watch_only}`
+- `zcash_client_backend::data_api::AccountBalance::{watch_only_value,
+  multisig_balances, with_multisig_balance_mut}`
 
 ### Changed
+- `zcash_client_backend::data_api::Balance::total` now includes the
+  watch-only value.
+- `zcash_client_backend::data_api::AccountBalance` no longer implements `Copy`;
+  use `Clone`. Its `total`, `locked_value` and `uneconomic_value` now include
+  the multisig balances.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for

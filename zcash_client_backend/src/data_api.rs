@@ -109,7 +109,7 @@ use crate::{
 use {
     crate::{fees::StandardFeeRule, wallet::TransparentAddressMetadata},
     getset::{CopyGetters, Getters},
-    std::time::SystemTime,
+    std::{collections::BTreeMap, time::SystemTime},
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
 
@@ -225,6 +225,7 @@ pub struct Balance {
     locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    watch_only_value: Zatoshis,
     uneconomic_value: Zatoshis,
 }
 
@@ -235,6 +236,7 @@ impl Balance {
         locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        watch_only_value: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
     };
 
@@ -243,6 +245,7 @@ impl Balance {
             + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
+            + self.watch_only_value
             + value)
             .ok_or(BalanceError::Overflow)
     }
@@ -303,6 +306,29 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value that the spend capability of the query does not authorize. The
+    /// application cannot spend this value, whatever its confirmation state.
+    pub fn watch_only_value(&self) -> Zatoshis {
+        self.watch_only_value
+    }
+
+    /// Adds the specified value to the watch-only total, checking for overflow.
+    pub fn add_watch_only_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.watch_only_value = (self.watch_only_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns this balance with all of its value that counts toward [`Self::total`] moved
+    /// to the watch-only value. The uneconomic value is unchanged.
+    pub fn into_watch_only(self) -> Self {
+        Balance {
+            watch_only_value: self.total(),
+            uneconomic_value: self.uneconomic_value,
+            ..Balance::ZERO
+        }
+    }
+
     /// Returns the value in the account of notes that have value less than or equal to the marginal
     /// fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
@@ -320,7 +346,8 @@ impl Balance {
         (self.spendable_value
             + self.locked_value
             + self.change_pending_confirmation
-            + self.value_pending_spendability)
+            + self.value_pending_spendability
+            + self.watch_only_value)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -339,6 +366,8 @@ impl core::ops::Add<Balance> for Balance {
             value_pending_spendability: (self.value_pending_spendability
                 + rhs.value_pending_spendability)
                 .ok_or(BalanceError::Overflow)?,
+            watch_only_value: (self.watch_only_value + rhs.watch_only_value)
+                .ok_or(BalanceError::Overflow)?,
             uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
                 .ok_or(BalanceError::Overflow)?,
         };
@@ -351,13 +380,15 @@ impl core::ops::Add<Balance> for Balance {
 
 /// Balance information for a single account. The sum of this struct's fields is the total balance
 /// of the wallet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountBalance {
     sapling_balance: Balance,
     orchard_balance: Balance,
     ironwood_balance: Balance,
     unshielded_regular_balance: Balance,
     unshielded_coinbase_balance: Balance,
+    #[cfg(feature = "transparent-inputs")]
+    multisig_balances: BTreeMap<TransparentAddress, Balance>,
 }
 
 impl AccountBalance {
@@ -368,15 +399,34 @@ impl AccountBalance {
         ironwood_balance: Balance::ZERO,
         unshielded_regular_balance: Balance::ZERO,
         unshielded_coinbase_balance: Balance::ZERO,
+        #[cfg(feature = "transparent-inputs")]
+        multisig_balances: BTreeMap::new(),
     };
 
+    /// Returns the balances of every pool, and of every multisig script, in the account.
+    fn balances(&self) -> impl Iterator<Item = &Balance> {
+        let pools = [
+            &self.sapling_balance,
+            &self.orchard_balance,
+            &self.ironwood_balance,
+            &self.unshielded_regular_balance,
+            &self.unshielded_coinbase_balance,
+        ]
+        .into_iter();
+        #[cfg(feature = "transparent-inputs")]
+        let pools = pools.chain(self.multisig_balances.values());
+        pools
+    }
+
+    /// Sums `field` over every balance in the account.
+    fn sum(&self, field: impl Fn(&Balance) -> Zatoshis) -> Result<Zatoshis, BalanceError> {
+        self.balances()
+            .try_fold(Zatoshis::ZERO, |acc, b| acc + field(b))
+            .ok_or(BalanceError::Overflow)
+    }
+
     fn check_total(&self) -> Result<Zatoshis, BalanceError> {
-        (self.sapling_balance.total()
-            + self.orchard_balance.total()
-            + self.ironwood_balance.total()
-            + self.unshielded_regular_balance.total()
-            + self.unshielded_coinbase_balance.total())
-        .ok_or(BalanceError::Overflow)
+        self.sum(Balance::total)
     }
 
     /// Returns the [`Balance`] of Sapling funds in the account.
@@ -510,14 +560,42 @@ impl AccountBalance {
         Ok(result)
     }
 
+    /// Returns the [`Balance`] of the funds received at each standalone multisig P2SH address
+    /// of the account, keyed by that address. These funds are not included in the unshielded
+    /// balances.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn multisig_balances(&self) -> &BTreeMap<TransparentAddress, Balance> {
+        &self.multisig_balances
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of the funds received at the given
+    /// multisig P2SH address to the specified callback, checking invariants after the
+    /// callback's action has been evaluated.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_multisig_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        script_address: TransparentAddress,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(self
+            .multisig_balances
+            .entry(script_address)
+            .or_insert(Balance::ZERO))?;
+        self.check_total()?;
+        Ok(result)
+    }
+
     /// Returns the total value of economically relevant notes and UTXOs belonging to the account.
     pub fn total(&self) -> Zatoshis {
-        (self.sapling_balance.total()
-            + self.orchard_balance.total()
-            + self.ironwood_balance.total()
-            + self.unshielded_regular_balance.total()
-            + self.unshielded_coinbase_balance.total())
-        .expect("Account balance cannot overflow MAX_MONEY")
+        self.check_total()
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value in the account that the spend capability of the query does not
+    /// authorize.
+    pub fn watch_only_value(&self) -> Zatoshis {
+        self.sum(Balance::watch_only_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of shielded (Sapling, Orchard, and Ironwood) funds that may
@@ -532,12 +610,8 @@ impl AccountBalance {
     /// Returns the total value of notes and UTXOs that are locked, having been committed to
     /// an in-flight transaction proposal or PCZT.
     pub fn locked_value(&self) -> Zatoshis {
-        (self.sapling_balance.locked_value()
-            + self.orchard_balance.locked_value()
-            + self.ironwood_balance.locked_value()
-            + self.unshielded_regular_balance.locked_value()
-            + self.unshielded_coinbase_balance.locked_value())
-        .expect("Account balance cannot overflow MAX_MONEY")
+        self.sum(Balance::locked_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
@@ -561,11 +635,7 @@ impl AccountBalance {
     /// Returns the value in the account of notes and transparent UTXOs that have value less than
     /// the marginal fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
-        (self.sapling_balance.uneconomic_value
-            + self.orchard_balance.uneconomic_value
-            + self.ironwood_balance.uneconomic_value
-            + self.unshielded_regular_balance.uneconomic_value
-            + self.unshielded_coinbase_balance.uneconomic_value)
+        self.sum(Balance::uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -4542,19 +4612,27 @@ mod balance_tests {
         Locked = 1,
         PendingChange = 2,
         PendingSpendable = 3,
-        Uneconomic = 4,
+        WatchOnly = 4,
+        Uneconomic = 5,
     }
     use Bucket::*;
 
-    const ALL_BUCKETS: [Bucket; 5] = [
+    const ALL_BUCKETS: [Bucket; 6] = [
         Spendable,
         Locked,
         PendingChange,
         PendingSpendable,
+        WatchOnly,
         Uneconomic,
     ];
     /// The buckets that participate in `Balance::total` and its overflow guard.
-    const TOTAL_BUCKETS: [Bucket; 4] = [Spendable, Locked, PendingChange, PendingSpendable];
+    const TOTAL_BUCKETS: [Bucket; 5] = [
+        Spendable,
+        Locked,
+        PendingChange,
+        PendingSpendable,
+        WatchOnly,
+    ];
 
     fn apply(balance: &mut Balance, bucket: Bucket, value: Zatoshis) -> Result<(), BalanceError> {
         match bucket {
@@ -4562,6 +4640,7 @@ mod balance_tests {
             Locked => balance.add_locked_value(value),
             PendingChange => balance.add_pending_change_value(value),
             PendingSpendable => balance.add_pending_spendable_value(value),
+            WatchOnly => balance.add_watch_only_value(value),
             Uneconomic => balance.add_uneconomic_value(value),
         }
     }
@@ -4572,6 +4651,7 @@ mod balance_tests {
             Locked => balance.locked_value(),
             PendingChange => balance.change_pending_confirmation(),
             PendingSpendable => balance.value_pending_spendability(),
+            WatchOnly => balance.watch_only_value(),
             Uneconomic => balance.uneconomic_value(),
         }
     }
@@ -4582,6 +4662,7 @@ mod balance_tests {
             Just(Locked),
             Just(PendingChange),
             Just(PendingSpendable),
+            Just(WatchOnly),
             Just(Uneconomic),
         ]
     }
@@ -4601,13 +4682,13 @@ mod balance_tests {
     proptest! {
         /// Bucket adds succeed exactly while their overflow guard permits, mutate only the
         /// requested bucket, and leave the balance untouched on failure. `total()` is always
-        /// the sum of the four participating buckets. (In particular this establishes that
+        /// the sum of the five participating buckets. (In particular this establishes that
         /// the `unwrap` inside each guarded add is unreachable.)
         #[test]
         fn add_total_consistency(adds in proptest::collection::vec(arb_add(), 0..12)) {
             let mut balance = Balance::ZERO;
             // The model: per-bucket totals, indexed by bucket discriminant.
-            let mut model = [0u64; 5];
+            let mut model = [0u64; 6];
 
             for (bucket, v) in adds {
                 let value = Zatoshis::from_u64(v).unwrap();
@@ -4680,6 +4761,24 @@ mod balance_tests {
                         "balance addition failed although no component overflows"
                     );
                 }
+            }
+        }
+
+        /// `into_watch_only` preserves the total and the uneconomic value, and leaves no
+        /// value in any other bucket.
+        #[test]
+        fn into_watch_only_preserves_total(adds in proptest::collection::vec(arb_add(), 0..12)) {
+            let mut balance = Balance::ZERO;
+            for (bucket, v) in adds {
+                let _ = apply(&mut balance, bucket, Zatoshis::from_u64(v).unwrap());
+            }
+            let watched = balance.into_watch_only();
+
+            prop_assert_eq!(watched.total(), balance.total());
+            prop_assert_eq!(watched.watch_only_value(), balance.total());
+            prop_assert_eq!(watched.uneconomic_value(), balance.uneconomic_value());
+            for bucket in [Spendable, Locked, PendingChange, PendingSpendable] {
+                prop_assert_eq!(get(&watched, bucket), Zatoshis::ZERO);
             }
         }
     }
