@@ -28,8 +28,25 @@ workspace.
   not received at one of the wallet's diversified addresses. The column was
   previously computed internally but omitted from the view's output, so any
   query naming it failed with "no such column".
+- `zewif::ZewifImportReport::watch_only_receivers_imported` and
+  `zewif::ZewifImportReport::watch_only_conflicts` (with the supporting types
+  `zewif::WatchOnlyConflict` and `zewif::WatchOnlyForm`), reporting how the
+  watch-only transparent records in a document were handled.
 
 ### Changed
+- `zewif::import_wallet` imports the watch-only transparent records of a
+  document — bare addresses, public keys whose spending keys are absent from
+  the document's secret store, and the addresses of redeem scripts the wallet
+  cannot represent — as standalone receivers of the accounts that carry them.
+  They were previously dropped. A record that another account in the wallet
+  already holds is reported in `ZewifImportReport::watch_only_conflicts`.
+- `zewif::import_wallet` records the ZIP 32 derivation of every account
+  imported from a viewing key whose derivation the document records.
+  Previously it recorded the derivation only for accounts that it judged
+  spendable.
+- The `AccountBalance` values that `WalletDb` reports now carry the value
+  received at each standalone multisig P2SH address in
+  `AccountBalance::multisig_balances`, not in the unshielded balances.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
   `util::testing::FixedClock`) are now re-exports of the same-named types in
   `zcash_client_backend::util`.

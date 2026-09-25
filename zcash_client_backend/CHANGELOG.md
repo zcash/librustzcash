@@ -18,8 +18,48 @@ workspace.
 - `zcash_client_backend::data_api::error::AddressExpiryError`
 - `zcash_client_backend::data_api::error::Error::RecipientAddressExpiry`
 - `zcash_client_backend::data_api::testing::TestState::clock`
+- `zcash_client_backend::data_api::spend_capability` module, describing the
+  spend authority held by an application's key store.
+- `zcash_client_backend::data_api::Balance::{watch_only_value,
+  add_watch_only_value, into_watch_only}`
+- `zcash_client_backend::data_api::AccountBalance::{watch_only_value,
+  multisig_balances, with_multisig_balance_mut}`
+- `zcash_client_backend::data_api::wallet::SpendingKeys::capability`
 
 ### Changed
+- `zcash_client_backend::data_api::AccountSource::Imported` has a
+  `derivation: Option<Zip32Derivation>` field in place of its `purpose` field.
+- `zcash_client_backend::data_api::WalletWrite::import_account_ufvk` takes a
+  `derivation: Option<Zip32Derivation>` argument in place of its `purpose`
+  argument. The wallet no longer records whether the application holds
+  spending keys for an account; state spend authority per query with a
+  `SpendCapability` instead.
+- `zcash_client_backend::data_api::Balance::total` now includes the
+  watch-only value.
+- Input selection now takes the caller's spend authority as a
+  `capability: &SpendCapability<AccountId>` argument, and selects only the
+  inputs that it authorizes:
+  - `zcash_client_backend::data_api::InputSource::{select_spendable_notes,
+    select_single_spendable_note, get_spendable_transparent_outputs,
+    get_spendable_transparent_outputs_for_addresses,
+    select_spendable_transparent_outputs}` take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+    and `ShieldingSelector::{propose_shielding, propose_shielding_coinbase}`
+    take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::{propose_transfer,
+    propose_standard_transfer_to_address, propose_send_max_transfer,
+    propose_shielding, propose_shielding_coinbase}` take it as a final
+    argument.
+- `zcash_client_backend::data_api::WalletRead::{get_wallet_summary,
+  get_transparent_balances}` take a `capability: &SpendCapability<AccountId>`
+  argument, and report the value that it does not authorize as watch-only
+  value.
+- `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
+  selects only the transparent outputs that its `spending_keys` can spend, as
+  given by `SpendingKeys::capability`.
+- `zcash_client_backend::data_api::AccountBalance` no longer implements `Copy`;
+  use `Clone`. Its `total`, `locked_value` and `uneconomic_value` now include
+  the multisig balances.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
@@ -48,6 +88,10 @@ workspace.
     discarded.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
+
+### Removed
+- `zcash_client_backend::data_api::AccountPurpose`
+- `zcash_client_backend::data_api::Account::purpose`
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the

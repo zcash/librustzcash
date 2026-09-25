@@ -26,6 +26,7 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
+        spend_capability::{AccountAuthority, SpendCapability},
         testing::{TestState, pool::ShieldedPoolTester},
         wallet::{
             ConfirmationsPolicy, TargetHeight,
@@ -143,6 +144,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 confirmations_policy,
                 exclude,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &SpendCapability::for_accounts(AccountAuthority::All),
             )
             .map(|n| n.take_orchard())
     }

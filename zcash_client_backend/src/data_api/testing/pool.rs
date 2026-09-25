@@ -43,13 +43,14 @@ use crate::{
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
+        spend_capability::{AccountAuthority, SpendCapability},
         testing::{
             AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
             single_output_change_strategy,
         },
         wallet::{
             ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            input_selection::{GreedyInputSelector, LockFilter, LockedInputPolicy},
         },
     },
     decrypt_transaction,
@@ -75,7 +76,7 @@ use crate::{
 use incrementalmerkletree::Retention;
 use nonempty::NonEmpty;
 use shardtree::{ShardTree, store::ShardStore};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use zcash_primitives::block::{Block, BlockHeaderData};
 use zcash_protocol::PoolType;
 
@@ -134,10 +135,7 @@ use {
 };
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use {
-    crate::data_api::wallet::input_selection::LockedInputPolicy,
-    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
-};
+use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
 pub mod dsl;
 use dsl::{TestDsl, TestNoteConfig};
@@ -995,6 +993,72 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
             zip321::PaymentError::TransparentMemo
         ))
     );
+}
+
+/// Tests that shielded note selection draws only on the pools that the spend capability
+/// authorizes for the account, and that the wallet summary reports the value of any other
+/// pool as watch-only.
+pub fn spend_capability_restricts_shielded_selection<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let value = Zatoshis::const_from_u64(60000);
+    st.add_a_single_note_checking_balance(value);
+
+    let account_id = st.test_account().unwrap().id();
+    let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
+    let selected_under = |capability: &SpendCapability<_>| {
+        st.wallet()
+            .select_spendable_notes(
+                account_id,
+                TargetValue::AtLeast(value),
+                &[T::SHIELDED_PROTOCOL],
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                capability,
+            )
+            .unwrap()
+            .total_value()
+            .unwrap()
+    };
+    let authority_over = |pool: PoolType| {
+        SpendCapability::for_accounts(AccountAuthority::Only(HashMap::from([(
+            account_id,
+            BTreeSet::from([pool]),
+        )])))
+    };
+
+    assert_eq!(selected_under(&SpendCapability::none()), Zatoshis::ZERO);
+    assert_eq!(
+        selected_under(&authority_over(PoolType::Transparent)),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        selected_under(&authority_over(PoolType::Shielded(T::SHIELDED_PROTOCOL))),
+        value
+    );
+
+    // The wallet summary reports the value of an unauthorized pool as watch-only.
+    let summary_balance = |capability: &SpendCapability<_>| {
+        st.wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN, capability)
+            .unwrap()
+            .expect("the wallet has a summary")
+            .account_balances()
+            .get(&account_id)
+            .unwrap()
+            .clone()
+    };
+    let unauthorized = summary_balance(&SpendCapability::none());
+    assert_eq!(unauthorized.spendable_value(), Zatoshis::ZERO);
+    assert_eq!(unauthorized.watch_only_value(), value);
+    let authorized = summary_balance(&authority_over(PoolType::Shielded(T::SHIELDED_PROTOCOL)));
+    assert_eq!(authorized.spendable_value(), value);
+    assert_eq!(authorized.watch_only_value(), Zatoshis::ZERO);
 }
 
 /// Tests that sending all the spendable funds within the given shielded pool to a
@@ -3344,7 +3408,7 @@ where
 
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account1).is_none());
@@ -3411,7 +3475,7 @@ where
 
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::default())
+        .get_wallet_summary(ConfirmationsPolicy::default(), &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account3).is_none());
@@ -3514,7 +3578,7 @@ pub fn account_deletion_with_internal_transfer<T: ShieldedPoolTester, DSF>(
     // account 1 should still exist and retain its change balance.
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account2).is_none());
@@ -7206,6 +7270,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 ConfirmationsPolicy::default(),
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_capability(),
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -7230,6 +7295,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert!(
@@ -7318,6 +7384,7 @@ where
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(
@@ -7344,6 +7411,7 @@ where
             ConfirmationsPolicy::default(),
             CoinbaseFilter::CoinbaseOnly,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(
@@ -7365,6 +7433,7 @@ where
             ConfirmationsPolicy::default(),
             CoinbaseFilter::NonCoinbaseOnly,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_capability(),
         )
         .unwrap();
     assert_eq!(
@@ -8110,6 +8179,7 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
     let input_selector = GreedyInputSelector::new();
 
     let account = st.get_account();
+    let capability = st.full_spend_capability();
     let network = *st.network();
     let result = propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
@@ -8122,6 +8192,7 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
         &SpendPolicy::default(),
         None,
         Some(TxVersion::V5),
+        &capability,
     );
 
     assert_matches!(
@@ -8966,6 +9037,7 @@ where
 
     let account_id = st.get_account().id();
     let network = *st.network();
+    let capability = st.full_spend_capability();
     // The test network's most recent upgrade is NU5, so version 5 is a valid explicit request.
     let proposal = propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
@@ -8978,6 +9050,7 @@ where
         &SpendPolicy::default(),
         None,
         Some(TxVersion::V5),
+        &capability,
     )
     .expect("proposal construction succeeds");
 

@@ -103,15 +103,16 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
-        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
-        SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
-        TransactionStatus, WalletSummary, Zip32Derivation,
+        Account as _, AccountBalance, AccountBirthday, AccountSource, AddressInfo, AddressSource,
+        BlockMetadata, Progress, Ratio, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
+        SentTransaction, SentTransactionOutput, TransactionDataRequest, TransactionStatus,
+        WalletSummary, Zip32Derivation,
         anchor_retention::AnchorRetentionInterval,
         chain::ChainState,
         defaults::address_receiver_matches_ua,
         error::{FindAccountForAddressError, RewindError},
         scanning::{ScanPriority, ScanRange},
+        spend_capability::SpendCapability,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{Note, NoteId, Recipient, WalletTx},
@@ -209,7 +210,6 @@ fn parse_account_source(
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
     #[cfg(feature = "zcashd-compat")] legacy_account_index: i64,
-    spending_key_available: bool,
     key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
     let derivation = hd_seed_fingerprint
@@ -239,11 +239,7 @@ fn parse_account_source(
             key_source,
         }),
         (1, derivation) => Ok(AccountSource::Imported {
-            purpose: if spending_key_available {
-                AccountPurpose::Spending { derivation }
-            } else {
-                AccountPurpose::ViewOnly
-            },
+            derivation,
             key_source,
         }),
         (0, None) => Err(SqliteClientError::CorruptedData(
@@ -488,19 +484,15 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     let account_uuid = AccountUuid(Uuid::new_v4());
 
-    let (derivation, spending_key_available, key_source) = match kind {
+    let (derivation, key_source) = match kind {
         AccountSource::Derived {
             derivation,
             key_source,
-        } => (Some(derivation), true, key_source),
+        } => (Some(derivation), key_source),
         AccountSource::Imported {
-            purpose: AccountPurpose::Spending { derivation },
+            derivation,
             key_source,
-        } => (derivation.as_ref(), true, key_source),
-        AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
-            key_source,
-        } => (None, false, key_source),
+        } => (derivation.as_ref(), key_source),
     };
 
     let ivk_cache = IvkItemCache::from_uivk(&uivk);
@@ -530,8 +522,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ufvk, uivk,
                 orchard_ivk_item_cache, sapling_ivk_item_cache, p2pkh_ivk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-                recover_until_height,
-                has_spend_key
+                recover_until_height
             )
             VALUES (
                 :account_name,
@@ -542,8 +533,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :ufvk, :uivk,
                 :orchard_ivk_item_cache, :sapling_ivk_item_cache, :p2pkh_ivk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
-                :recover_until_height,
-                :has_spend_key
+                :recover_until_height
             )
             RETURNING id
             "#,
@@ -564,7 +554,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                 ":recover_until_height": birthday.recover_until().map(u32::from),
-                ":has_spend_key": i64::from(spending_key_available),
             ],
             |row| row.get(0).map(AccountRef),
         )
@@ -1801,7 +1790,6 @@ fn parse_account_row<P: consensus::Parameters>(
         row.get("hd_account_index")?,
         #[cfg(feature = "zcashd-compat")]
         row.get("zcashd_legacy_address_index")?,
-        row.get("has_spend_key")?,
         row.get("key_source")?,
     )?;
 
@@ -1848,7 +1836,7 @@ pub(crate) fn get_account<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, birthday_height
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -1872,7 +1860,7 @@ pub(crate) fn get_account_internal<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, birthday_height
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1909,7 +1897,7 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE orchard_ivk_item_cache = :orchard_ivk_item_cache
             OR sapling_ivk_item_cache = :sapling_ivk_item_cache
@@ -1991,7 +1979,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2049,7 +2037,7 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2667,6 +2655,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<Option<crate::WalletSnapshot<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
@@ -2975,11 +2964,41 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     )?;
     drop(sapling_trace);
 
+    // Shielded value in a pool that the capability does not authorize for its account is
+    // watch-only.
+    for (account, balance) in account_balances.iter_mut() {
+        let authorizes = |pool: ShieldedPool| {
+            capability.authorizes_account_pool(account, PoolType::Shielded(pool))
+        };
+        if !authorizes(ShieldedPool::Sapling) {
+            balance.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Orchard) {
+            balance.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Ironwood) {
+            balance.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+    }
+
     #[cfg(feature = "transparent-inputs")]
     transparent::add_transparent_account_balances(
         tx,
+        params,
         target_height,
         confirmations_policy,
+        capability,
         &mut account_balances,
     )?;
 
@@ -3027,6 +3046,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
     progress: &impl ProgressEstimator,
 ) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
@@ -3094,8 +3114,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         None => return Ok(None),
     };
 
-    Ok(get_wallet_snapshot(tx, params, confirmations_policy)?
-        .map(|snapshot| snapshot.into_wallet_summary(progress)))
+    Ok(
+        get_wallet_snapshot(tx, params, confirmations_policy, capability)?
+            .map(|snapshot| snapshot.into_wallet_summary(progress)),
+    )
 }
 
 /// Returns the memo for a received note, if the note is known to the wallet.
@@ -6316,7 +6338,7 @@ mod tests {
         assert_eq!(
             st.wallet()
                 .db()
-                .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+                .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_capability())
                 .unwrap(),
             None
         );
@@ -6346,14 +6368,14 @@ mod tests {
         let snapshot = st
             .wallet()
             .db()
-            .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+            .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_capability())
             .unwrap()
             .expect("scanned wallet must have a snapshot");
         assert_eq!(snapshot.account_balances().len(), 1);
 
         if let Some(summary) = st
             .wallet()
-            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
             .unwrap()
         {
             assert_eq!(snapshot.account_balances(), summary.account_balances());
@@ -6424,13 +6446,23 @@ mod tests {
         }
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
-        let forced =
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &FixedProgress)
-                .unwrap()
-                .expect("fixed progress plus snapshot must yield a summary");
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("scanned wallet has a snapshot");
+        let forced = super::get_wallet_summary(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+            &FixedProgress,
+        )
+        .unwrap()
+        .expect("fixed progress plus snapshot must yield a summary");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
+        .unwrap()
+        .expect("scanned wallet has a snapshot");
         assert_eq!(snapshot.account_balances().len(), 2);
         assert_eq!(snapshot.account_balances(), forced.account_balances());
         assert_eq!(
@@ -6486,14 +6518,25 @@ mod tests {
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
         assert_eq!(
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &NoProgress)
-                .unwrap(),
+            super::get_wallet_summary(
+                &tx,
+                st.network(),
+                ConfirmationsPolicy::MIN,
+                &st.full_spend_capability(),
+                &NoProgress
+            )
+            .unwrap(),
             None,
             "missing progress must keep get_wallet_summary returning None"
         );
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("snapshot must still return balances when progress is unavailable");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
+        .unwrap()
+        .expect("snapshot must still return balances when progress is unavailable");
         assert_eq!(snapshot.account_balances().len(), 1);
         assert_eq!(snapshot.chain_tip_height(), h);
     }

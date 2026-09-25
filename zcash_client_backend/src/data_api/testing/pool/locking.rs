@@ -1177,6 +1177,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_capability(),
             )
             .as_deref(),
         Ok(&[])
@@ -1189,6 +1190,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Unfiltered,
+                &st.full_spend_capability(),
             )
             .as_deref(),
         Ok([_])
@@ -1198,7 +1200,12 @@ where
     // unaffected by lock state.
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
@@ -1218,7 +1225,12 @@ where
     let expired_target = TargetHeight::from(height + 11);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            expired_target,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
@@ -1247,7 +1259,12 @@ where
     );
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            expired_target,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
@@ -1302,6 +1319,7 @@ pub fn single_note_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
                 ConfirmationsPolicy::MIN,
                 &[],
                 LockFilter::Policy(policy),
+                &st.full_spend_capability(),
             )
             .unwrap()
     };

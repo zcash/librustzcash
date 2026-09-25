@@ -94,6 +94,7 @@ use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
     scanning::{ScanPriority, ScanRange},
+    spend_capability::SpendCapability,
 };
 use crate::{
     data_api::{
@@ -109,7 +110,7 @@ use crate::{
 use {
     crate::{fees::StandardFeeRule, wallet::TransparentAddressMetadata},
     getset::{CopyGetters, Getters},
-    std::time::SystemTime,
+    std::{collections::BTreeMap, time::SystemTime},
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
 
@@ -138,6 +139,7 @@ pub use locking::OutputLockStore;
 #[cfg(feature = "test-dependencies")]
 pub use locking::ambassador_impl_OutputLockStore;
 pub mod scanning;
+pub mod spend_capability;
 pub mod wallet;
 #[cfg(feature = "orchard")]
 pub mod zip318;
@@ -224,6 +226,7 @@ pub struct Balance {
     locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    watch_only_value: Zatoshis,
     uneconomic_value: Zatoshis,
 }
 
@@ -234,6 +237,7 @@ impl Balance {
         locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        watch_only_value: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
     };
 
@@ -242,6 +246,7 @@ impl Balance {
             + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
+            + self.watch_only_value
             + value)
             .ok_or(BalanceError::Overflow)
     }
@@ -302,6 +307,29 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value that the spend capability of the query does not authorize. The
+    /// application cannot spend this value, whatever its confirmation state.
+    pub fn watch_only_value(&self) -> Zatoshis {
+        self.watch_only_value
+    }
+
+    /// Adds the specified value to the watch-only total, checking for overflow.
+    pub fn add_watch_only_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.watch_only_value = (self.watch_only_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns this balance with all of its value that counts toward [`Self::total`] moved
+    /// to the watch-only value. The uneconomic value is unchanged.
+    pub fn into_watch_only(self) -> Self {
+        Balance {
+            watch_only_value: self.total(),
+            uneconomic_value: self.uneconomic_value,
+            ..Balance::ZERO
+        }
+    }
+
     /// Returns the value in the account of notes that have value less than or equal to the marginal
     /// fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
@@ -319,7 +347,8 @@ impl Balance {
         (self.spendable_value
             + self.locked_value
             + self.change_pending_confirmation
-            + self.value_pending_spendability)
+            + self.value_pending_spendability
+            + self.watch_only_value)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -338,6 +367,8 @@ impl core::ops::Add<Balance> for Balance {
             value_pending_spendability: (self.value_pending_spendability
                 + rhs.value_pending_spendability)
                 .ok_or(BalanceError::Overflow)?,
+            watch_only_value: (self.watch_only_value + rhs.watch_only_value)
+                .ok_or(BalanceError::Overflow)?,
             uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
                 .ok_or(BalanceError::Overflow)?,
         };
@@ -350,13 +381,15 @@ impl core::ops::Add<Balance> for Balance {
 
 /// Balance information for a single account. The sum of this struct's fields is the total balance
 /// of the wallet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountBalance {
     sapling_balance: Balance,
     orchard_balance: Balance,
     ironwood_balance: Balance,
     unshielded_regular_balance: Balance,
     unshielded_coinbase_balance: Balance,
+    #[cfg(feature = "transparent-inputs")]
+    multisig_balances: BTreeMap<TransparentAddress, Balance>,
 }
 
 impl AccountBalance {
@@ -367,15 +400,34 @@ impl AccountBalance {
         ironwood_balance: Balance::ZERO,
         unshielded_regular_balance: Balance::ZERO,
         unshielded_coinbase_balance: Balance::ZERO,
+        #[cfg(feature = "transparent-inputs")]
+        multisig_balances: BTreeMap::new(),
     };
 
+    /// Returns the balances of every pool, and of every multisig script, in the account.
+    fn balances(&self) -> impl Iterator<Item = &Balance> {
+        let pools = [
+            &self.sapling_balance,
+            &self.orchard_balance,
+            &self.ironwood_balance,
+            &self.unshielded_regular_balance,
+            &self.unshielded_coinbase_balance,
+        ]
+        .into_iter();
+        #[cfg(feature = "transparent-inputs")]
+        let pools = pools.chain(self.multisig_balances.values());
+        pools
+    }
+
+    /// Sums `field` over every balance in the account.
+    fn sum(&self, field: impl Fn(&Balance) -> Zatoshis) -> Result<Zatoshis, BalanceError> {
+        self.balances()
+            .try_fold(Zatoshis::ZERO, |acc, b| acc + field(b))
+            .ok_or(BalanceError::Overflow)
+    }
+
     fn check_total(&self) -> Result<Zatoshis, BalanceError> {
-        (self.sapling_balance.total()
-            + self.orchard_balance.total()
-            + self.ironwood_balance.total()
-            + self.unshielded_regular_balance.total()
-            + self.unshielded_coinbase_balance.total())
-        .ok_or(BalanceError::Overflow)
+        self.sum(Balance::total)
     }
 
     /// Returns the [`Balance`] of Sapling funds in the account.
@@ -509,14 +561,42 @@ impl AccountBalance {
         Ok(result)
     }
 
+    /// Returns the [`Balance`] of the funds received at each standalone multisig P2SH address
+    /// of the account, keyed by that address. These funds are not included in the unshielded
+    /// balances.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn multisig_balances(&self) -> &BTreeMap<TransparentAddress, Balance> {
+        &self.multisig_balances
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of the funds received at the given
+    /// multisig P2SH address to the specified callback, checking invariants after the
+    /// callback's action has been evaluated.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_multisig_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        script_address: TransparentAddress,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(self
+            .multisig_balances
+            .entry(script_address)
+            .or_insert(Balance::ZERO))?;
+        self.check_total()?;
+        Ok(result)
+    }
+
     /// Returns the total value of economically relevant notes and UTXOs belonging to the account.
     pub fn total(&self) -> Zatoshis {
-        (self.sapling_balance.total()
-            + self.orchard_balance.total()
-            + self.ironwood_balance.total()
-            + self.unshielded_regular_balance.total()
-            + self.unshielded_coinbase_balance.total())
-        .expect("Account balance cannot overflow MAX_MONEY")
+        self.check_total()
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value in the account that the spend capability of the query does not
+    /// authorize.
+    pub fn watch_only_value(&self) -> Zatoshis {
+        self.sum(Balance::watch_only_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of shielded (Sapling, Orchard, and Ironwood) funds that may
@@ -531,12 +611,8 @@ impl AccountBalance {
     /// Returns the total value of notes and UTXOs that are locked, having been committed to
     /// an in-flight transaction proposal or PCZT.
     pub fn locked_value(&self) -> Zatoshis {
-        (self.sapling_balance.locked_value()
-            + self.orchard_balance.locked_value()
-            + self.ironwood_balance.locked_value()
-            + self.unshielded_regular_balance.locked_value()
-            + self.unshielded_coinbase_balance.locked_value())
-        .expect("Account balance cannot overflow MAX_MONEY")
+        self.sum(Balance::locked_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
@@ -560,11 +636,7 @@ impl AccountBalance {
     /// Returns the value in the account of notes and transparent UTXOs that have value less than
     /// the marginal fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
-        (self.sapling_balance.uneconomic_value
-            + self.orchard_balance.uneconomic_value
-            + self.ironwood_balance.uneconomic_value
-            + self.unshielded_regular_balance.uneconomic_value
-            + self.unshielded_coinbase_balance.uneconomic_value)
+        self.sum(Balance::uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -609,17 +681,6 @@ impl Zip32Derivation {
     }
 }
 
-/// An enumeration used to control what information is tracked by the wallet for
-/// notes received by a given account.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum AccountPurpose {
-    /// For spending accounts, the wallet will track information needed to spend
-    /// received notes.
-    Spending { derivation: Option<Zip32Derivation> },
-    /// For view-only accounts, the wallet will not track spend information.
-    ViewOnly,
-}
-
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AccountSource {
@@ -631,7 +692,8 @@ pub enum AccountSource {
 
     /// An account imported from a viewing key.
     Imported {
-        purpose: AccountPurpose,
+        /// The ZIP 32 derivation of the viewing key, if known.
+        derivation: Option<Zip32Derivation>,
         key_source: Option<String>,
     },
 }
@@ -641,11 +703,7 @@ impl AccountSource {
     pub fn key_derivation(&self) -> Option<&Zip32Derivation> {
         match self {
             AccountSource::Derived { derivation, .. } => Some(derivation),
-            AccountSource::Imported {
-                purpose: AccountPurpose::Spending { derivation },
-                ..
-            } => derivation.as_ref(),
-            _ => None,
+            AccountSource::Imported { derivation, .. } => derivation.as_ref(),
         }
     }
 
@@ -661,19 +719,14 @@ impl AccountSource {
 /// A set of capabilities that a client account must provide.
 ///
 /// An account represents a distinct set of viewing keys within the wallet; the keys for an account
-/// must not be shared with any other account in the wallet, and an application managing wallet
-/// accounts must ensure that it either maintains spending keys that can be used for spending _all_
-/// outputs detectable by the viewing keys of the account, or for none of them (i.e. the account is
-/// view-only.)
+/// must not be shared with any other account in the wallet. The wallet does not record which
+/// spending keys the application holds for an account; operations that depend on spend authority
+/// take a [`SpendCapability`] that states it.
 ///
 /// Balance information is available for any full-viewing-key based account; for an
 /// incoming-viewing-key only account balance cannot be determined because spends cannot be
 /// detected, and so balance-related APIs and APIs that rely upon spentness checks MUST be
 /// implemented to return errors if invoked for an IVK-only account.
-///
-/// For spending accounts in implementations that support the `transparent-key-import` feature,
-/// care must be taken to ensure that spending keys corresponding to every imported transparent
-/// address in an account are maintained by the application.
 pub trait Account {
     type AccountId: Copy;
 
@@ -689,16 +742,6 @@ pub trait Account {
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
     fn source(&self) -> &AccountSource;
-
-    /// Returns whether the account is a spending account or a view-only account.
-    fn purpose(&self) -> AccountPurpose {
-        match self.source() {
-            AccountSource::Derived { derivation, .. } => AccountPurpose::Spending {
-                derivation: Some(derivation.clone()),
-            },
-            AccountSource::Imported { purpose, .. } => purpose.clone(),
-        }
-    }
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
@@ -732,7 +775,7 @@ impl<A: Copy> Account for (A, UnifiedFullViewingKey, BlockHeight) {
 
     fn source(&self) -> &AccountSource {
         &AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         }
     }
@@ -764,7 +807,7 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey, BlockHeight) {
 
     fn source(&self) -> &AccountSource {
         &AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         }
     }
@@ -1803,7 +1846,8 @@ pub trait InputSource {
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
     /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
-    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only notes in
+    /// pools of `account` that `capability` authorizes are selected.
     #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
@@ -1814,6 +1858,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the OLDEST single spendable note whose value alone is at least `value`, drawn
@@ -1840,6 +1885,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         self.select_spendable_notes(
             account,
@@ -1849,6 +1895,7 @@ pub trait InputSource {
             confirmations_policy,
             exclude,
             lock_filter,
+            capability,
         )
         .map(|notes| notes.into_single_covering(value, sources))
     }
@@ -1915,7 +1962,8 @@ pub trait InputSource {
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
     /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
-    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none). Only outputs that
+    /// `capability` authorizes are returned.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
@@ -1924,6 +1972,7 @@ pub trait InputSource {
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: CoinbaseFilter,
         _lock_filter: LockFilter<'_>,
+        _capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1951,6 +2000,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
@@ -1960,6 +2010,7 @@ pub trait InputSource {
                 confirmations_policy,
                 output_filter,
                 lock_filter,
+                capability,
             )?);
         }
         Ok(outputs)
@@ -2000,7 +2051,8 @@ pub trait InputSource {
     /// transparent addresses are eligible; when `None`, outputs received at any of the
     /// account's transparent addresses are eligible. The restriction must be applied
     /// *within* the gather (not to its results), so that outputs excluded by the allow list
-    /// do not consume the value bound.
+    /// do not consume the value bound. The same holds for outputs that `capability` does not
+    /// authorize.
     ///
     /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
     /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
@@ -2020,6 +2072,7 @@ pub trait InputSource {
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
         lock_filter: LockFilter<'_>,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
@@ -2031,6 +2084,7 @@ pub trait InputSource {
             max_inputs,
             fee_rule,
             lock_filter,
+            capability,
         );
         unimplemented!(
             "InputSource::select_spendable_transparent_outputs must be overridden for \
@@ -2195,10 +2249,12 @@ pub trait WalletRead {
 
     /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
     /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
-    /// or `Ok(None)` if the wallet has no summary data available.
+    /// or `Ok(None)` if the wallet has no summary data available. Value that `capability` does
+    /// not authorize is reported as watch-only value.
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        capability: &SpendCapability<Self::AccountId>,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
@@ -2416,13 +2472,15 @@ pub trait WalletRead {
 
     /// Returns a mapping from each transparent receiver associated with the specified account
     /// to the key scope for that address and the balance of funds given the specified target
-    /// height and confirmations policy.
+    /// height and confirmations policy. Value that `capability` does not authorize is reported
+    /// as watch-only value.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
+        _capability: &SpendCapability<Self::AccountId>,
     ) -> Result<TransparentBalances, Self::Error> {
         unimplemented!(
             "WalletRead::get_transparent_balances must be overridden for wallets to use the `transparent-inputs` feature"
@@ -3479,15 +3537,12 @@ impl AccountBirthday {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
-/// An account is treated as having a single root of spending authority that spans the shielded and
-/// transparent rules for the purpose of balance, transaction listing, and so forth. However,
-/// transparent keys imported via `WalletWrite::import_standalone_transparent_pubkey` or
+/// The wallet does not record which spending keys the application holds. An account may carry
+/// key material that the application can sign for alongside key material that it cannot, such as
+/// transparent keys imported with `WalletWrite::import_standalone_transparent_pubkey` or
 /// `WalletWrite::import_standalone_transparent_script` (available with the
-/// `transparent-key-import` feature) break this abstraction slightly, so wallets using this API
-/// need to be cautious to enforce the invariant that the wallet either maintains access to the
-/// keys required to spend **ALL** outputs received by the account, or that it **DOES NOT** offer
-/// any spending capability for the account, i.e. the account is treated as view-only for all
-/// user-facing operations.
+/// `transparent-key-import` feature). Operations that select inputs or report spendable value take
+/// a [`SpendCapability`] that states what the application's key store holds.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3640,10 +3695,6 @@ pub trait WalletWrite:
     /// ([`Self::create_account`] and [`Self::import_account_hd`]), no spending key is returned
     /// because the wallet has no information about how the UFVK was derived.
     ///
-    /// Certain optimizations are possible for accounts which will never be used to spend funds. If
-    /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
-    /// which case any attempt to spend funds from the account will result in an error.
-    ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
     /// # Arguments
@@ -3651,8 +3702,7 @@ pub trait WalletWrite:
     /// - `unified_key`: The UFVK used to detect transactions involving the account.
     /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
     ///   for the account.
-    /// - `purpose`: Metadata describing whether or not data required for spending should be
-    ///   tracked by the wallet.
+    /// - `derivation`: The ZIP 32 derivation of the UFVK, if known.
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.
     ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
     ///   applications which need to track additional identifying information for an account.
@@ -3661,7 +3711,7 @@ pub trait WalletWrite:
         account_name: &str,
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        purpose: AccountPurpose,
+        derivation: Option<Zip32Derivation>,
         key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error>;
 
@@ -3692,16 +3742,14 @@ pub trait WalletWrite:
     ///
     /// The imported address will contribute to the balance of the account, but the wallet holds
     /// neither the public key (P2PKH) nor the redeem script (P2SH) from which the address was
-    /// derived, so funds received by it cannot be spent — its outputs are excluded from spendable
-    /// input selection, and it must not be included in the addresses passed to
-    /// [`propose_shielding`]. Subsequently importing the corresponding key material with
+    /// derived, so funds received by it cannot be spent: no [`SpendCapability`] authorizes its
+    /// outputs. Subsequently importing the corresponding key material with
     /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
     /// upgrades the address in place, after which the spending limitations of those methods
     /// apply instead.
     ///
     /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
     /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_address(
         &mut self,
@@ -3717,13 +3765,11 @@ pub trait WalletWrite:
     /// associated transparent p2pkh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). Its outputs are spendable only under a [`SpendCapability`] that holds the
+    /// pubkey, and spending them requires the associated spending key to be provided explicitly
+    /// when calling [`create_proposed_transactions`].
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
@@ -3761,13 +3807,12 @@ pub trait WalletWrite:
     /// adds the associated transparent p2sh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). Its outputs are spendable only under a [`SpendCapability`] that names the P2SH
+    /// address, and spending them requires the associated spending keys to be provided
+    /// explicitly when calling [`create_proposed_transactions`], or signatures to be added to a
+    /// PCZT.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     ///
     /// # Spending limitations
     ///
@@ -4541,19 +4586,27 @@ mod balance_tests {
         Locked = 1,
         PendingChange = 2,
         PendingSpendable = 3,
-        Uneconomic = 4,
+        WatchOnly = 4,
+        Uneconomic = 5,
     }
     use Bucket::*;
 
-    const ALL_BUCKETS: [Bucket; 5] = [
+    const ALL_BUCKETS: [Bucket; 6] = [
         Spendable,
         Locked,
         PendingChange,
         PendingSpendable,
+        WatchOnly,
         Uneconomic,
     ];
     /// The buckets that participate in `Balance::total` and its overflow guard.
-    const TOTAL_BUCKETS: [Bucket; 4] = [Spendable, Locked, PendingChange, PendingSpendable];
+    const TOTAL_BUCKETS: [Bucket; 5] = [
+        Spendable,
+        Locked,
+        PendingChange,
+        PendingSpendable,
+        WatchOnly,
+    ];
 
     fn apply(balance: &mut Balance, bucket: Bucket, value: Zatoshis) -> Result<(), BalanceError> {
         match bucket {
@@ -4561,6 +4614,7 @@ mod balance_tests {
             Locked => balance.add_locked_value(value),
             PendingChange => balance.add_pending_change_value(value),
             PendingSpendable => balance.add_pending_spendable_value(value),
+            WatchOnly => balance.add_watch_only_value(value),
             Uneconomic => balance.add_uneconomic_value(value),
         }
     }
@@ -4571,6 +4625,7 @@ mod balance_tests {
             Locked => balance.locked_value(),
             PendingChange => balance.change_pending_confirmation(),
             PendingSpendable => balance.value_pending_spendability(),
+            WatchOnly => balance.watch_only_value(),
             Uneconomic => balance.uneconomic_value(),
         }
     }
@@ -4581,6 +4636,7 @@ mod balance_tests {
             Just(Locked),
             Just(PendingChange),
             Just(PendingSpendable),
+            Just(WatchOnly),
             Just(Uneconomic),
         ]
     }
@@ -4600,13 +4656,13 @@ mod balance_tests {
     proptest! {
         /// Bucket adds succeed exactly while their overflow guard permits, mutate only the
         /// requested bucket, and leave the balance untouched on failure. `total()` is always
-        /// the sum of the four participating buckets. (In particular this establishes that
+        /// the sum of the five participating buckets. (In particular this establishes that
         /// the `unwrap` inside each guarded add is unreachable.)
         #[test]
         fn add_total_consistency(adds in proptest::collection::vec(arb_add(), 0..12)) {
             let mut balance = Balance::ZERO;
             // The model: per-bucket totals, indexed by bucket discriminant.
-            let mut model = [0u64; 5];
+            let mut model = [0u64; 6];
 
             for (bucket, v) in adds {
                 let value = Zatoshis::from_u64(v).unwrap();
@@ -4679,6 +4735,24 @@ mod balance_tests {
                         "balance addition failed although no component overflows"
                     );
                 }
+            }
+        }
+
+        /// `into_watch_only` preserves the total and the uneconomic value, and leaves no
+        /// value in any other bucket.
+        #[test]
+        fn into_watch_only_preserves_total(adds in proptest::collection::vec(arb_add(), 0..12)) {
+            let mut balance = Balance::ZERO;
+            for (bucket, v) in adds {
+                let _ = apply(&mut balance, bucket, Zatoshis::from_u64(v).unwrap());
+            }
+            let watched = balance.into_watch_only();
+
+            prop_assert_eq!(watched.total(), balance.total());
+            prop_assert_eq!(watched.watch_only_value(), balance.total());
+            prop_assert_eq!(watched.uneconomic_value(), balance.uneconomic_value());
+            for bucket in [Spendable, Locked, PendingChange, PendingSpendable] {
+                prop_assert_eq!(get(&watched, bucket), Zatoshis::ZERO);
             }
         }
     }
