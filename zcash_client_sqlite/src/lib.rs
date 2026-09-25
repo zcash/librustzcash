@@ -663,15 +663,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
     /// Returns `Ok(None)` when the wallet has no chain tip or birthday, matching
     /// the early-exit conditions of [`WalletRead::get_wallet_summary`]. Unlike
     /// that method, a missing progress estimate does not force `None` — progress
-    /// is simply not computed.
+    /// is simply not computed. Value that `spend_authority` does not authorize is reported as
+    /// watch-only value.
     pub fn get_wallet_snapshot(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<AccountUuid>,
     ) -> Result<Option<WalletSnapshot<AccountUuid>>, SqliteClientError> {
         wallet::get_wallet_snapshot(
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             confirmations_policy,
+            spend_authority,
         )
     }
 }
@@ -1402,6 +1405,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
@@ -1409,6 +1413,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             confirmations_policy,
+            spend_authority,
             &SubtreeProgressEstimator,
         )
     }
@@ -1550,6 +1555,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<TransparentBalances, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
@@ -1557,6 +1563,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             account,
             target_height,
             confirmations_policy,
+            spend_authority,
         )
     }
 

@@ -90,7 +90,7 @@ fn check_balance<DSF>(
     // Check the wallet summary returns the expected transparent balance.
     let summary = st
         .wallet()
-        .get_wallet_summary(confirmations_policy)
+        .get_wallet_summary(confirmations_policy, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let balance = summary.account_balances().get(&account.id()).unwrap();
@@ -106,7 +106,12 @@ fn check_balance<DSF>(
     let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
     assert_eq!(
         st.wallet()
-            .get_transparent_balances(account.id(), target_height, confirmations_policy)
+            .get_transparent_balances(
+                account.id(),
+                target_height,
+                confirmations_policy,
+                &st.full_spend_authority()
+            )
             .unwrap()
             .get(taddr)
             .cloned()
@@ -159,6 +164,7 @@ where
             account_id,
             TargetHeight::from(height_1 + 1),
             ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert!(bal_absent.is_empty());
@@ -252,7 +258,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             TargetHeight::from(height_2 + 1),
-            ConfirmationsPolicy::MIN
+            ConfirmationsPolicy::MIN, &st.full_spend_authority()
         ),
         Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
@@ -871,7 +877,7 @@ where
 {
     let summary = st
         .wallet()
-        .get_wallet_summary(confirmations_policy)
+        .get_wallet_summary(confirmations_policy, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     summary
@@ -1414,7 +1420,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(balances.get(&taddr).map(|(_, b)| b.total()), Some(value),);
 
@@ -1438,20 +1449,52 @@ where
 /// authorizes: a derived receiver needs transparent authority over its account, a standalone
 /// P2PKH receiver needs its public key, and a standalone P2SH receiver needs its script to be
 /// named. Holding a key that the script refers to does not authorize it, and authority stated
-/// for another account authorizes nothing.
+/// for another account authorizes nothing. Also tests that balances report unauthorized value
+/// as watch-only, and standalone script value by script address.
 #[cfg(feature = "transparent-key-import")]
-pub fn spend_authority_restricts_transparent_selection<DSF>(dsf: DSF)
+pub fn spend_authority_restricts_transparent_selection<DSF>(dsf: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
+        .with_block_cache(cache)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account_id = st.test_account().unwrap().id();
-    let birthday = st.test_account().unwrap().birthday().height();
+
+    // A second account, whose authority must not extend to the first account's outputs.
+    let other_account_birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let (other_account_id, _) = st
+        .wallet_mut()
+        .create_account(
+            "other",
+            &Secret::new(vec![42u8; 32]),
+            &other_account_birthday,
+            None,
+        )
+        .unwrap();
+
+    // Scan some chain data with no notes for the wallet, so that it has a summary.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
 
     let secp = Secp256k1::new();
     let standalone_pubkey = SecretKey::from_slice(&[2u8; 32])
@@ -1477,21 +1520,7 @@ where
         .next()
         .expect("the account has a derived transparent receiver");
 
-    // A second account, whose authority must not extend to the first account's outputs.
-    let other_account_birthday =
-        AccountBirthday::from_parts(ChainState::empty(birthday - 1, BlockHash([0; 32])), None);
-    let (other_account_id, _) = st
-        .wallet_mut()
-        .create_account(
-            "other",
-            &Secret::new(vec![42u8; 32]),
-            &other_account_birthday,
-            None,
-        )
-        .unwrap();
-
-    let height = birthday + 1000;
-    st.wallet_mut().update_chain_tip(height).unwrap();
+    let height = st.wallet().chain_height().unwrap().unwrap();
 
     let value = Zatoshis::const_from_u64(50_000);
     let addresses = [derived_addr, p2pkh_addr, p2sh_addr];
@@ -1575,6 +1604,64 @@ where
     assert_eq!(
         spendable_under(&st.full_spend_authority()),
         BTreeSet::from(addresses)
+    );
+
+    // Balances report the value that a spend authority does not authorize as watch-only, and
+    // report standalone script value under its script address.
+    let derived_only = for_account(
+        account_id,
+        AccountSpendAuthority::for_pools(BTreeSet::from([PoolType::Transparent])),
+    );
+    let per_address = st
+        .wallet()
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &derived_only,
+        )
+        .unwrap();
+    let balance_at = |address: &TransparentAddress| per_address.get(address).unwrap().1;
+    assert_eq!(balance_at(&derived_addr).spendable_value(), value);
+    assert_eq!(balance_at(&p2pkh_addr).watch_only_value(), value);
+    assert_eq!(balance_at(&p2sh_addr).watch_only_value(), value);
+
+    let summary_balance = |spend_authority: &SpendAuthority<_>| {
+        st.wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN, spend_authority)
+            .unwrap()
+            .expect("the wallet has a summary")
+            .account_balances()
+            .get(&account_id)
+            .unwrap()
+            .clone()
+    };
+    let restricted = summary_balance(&derived_only);
+    assert_eq!(
+        restricted.unshielded_regular_balance().spendable_value(),
+        value
+    );
+    assert_eq!(
+        restricted.unshielded_regular_balance().watch_only_value(),
+        value
+    );
+    assert_eq!(
+        restricted.script_balances()[&p2sh_addr].watch_only_value(),
+        value
+    );
+
+    let full = summary_balance(&st.full_spend_authority());
+    assert_eq!(
+        full.unshielded_regular_balance().spendable_value(),
+        (value + value).unwrap()
+    );
+    assert_eq!(full.script_balances()[&p2sh_addr].spendable_value(), value);
+    assert_eq!(full.watch_only_value(), Zatoshis::ZERO);
+    // The spend authority changes how value is classified, never how much there is.
+    assert_eq!(restricted.total(), full.total());
+    assert_eq!(
+        summary_balance(&SpendAuthority::none()).total(),
+        full.total()
     );
 }
 
@@ -1826,7 +1913,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(
         balances.get(&taddr).map(|(_, b)| b.spendable_value()),
@@ -1957,7 +2049,7 @@ where
         .expect("fee should be known for wallet-created transactions");
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let account_balance = summary.account_balances().get(&account_id).unwrap();
@@ -2161,7 +2253,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(
         balances.get(&taddr).map(|(_, b)| b.spendable_value()),
@@ -2290,7 +2387,7 @@ where
         .expect("fee should be known for wallet-created transactions");
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let account_balance = summary.account_balances().get(&account_id).unwrap();
@@ -2660,7 +2757,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             TargetHeight::from(h + 1),
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.is_empty()
     );
@@ -2696,7 +2793,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             target_height,
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.get(&taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
@@ -2754,7 +2851,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             target_height,
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.is_empty()
     );

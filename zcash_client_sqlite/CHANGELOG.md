@@ -30,6 +30,9 @@ workspace.
   query naming it failed with "no such column".
 
 ### Changed
+- The `AccountBalance` values that `WalletDb` reports now carry the value
+  received at each standalone P2SH address in
+  `AccountBalance::script_balances`, not in the unshielded balances.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
   `util::testing::FixedClock`) are now re-exports of the same-named types in
   `zcash_client_backend::util`.
