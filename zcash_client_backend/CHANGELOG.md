@@ -142,6 +142,8 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 - `zcash_client_backend::sync::decryptor::Handle::{closed, is_closed}` (behind
   `sync-decryptor`)
+- `zcash_client_backend::data_api::spend_authority` module, describing the
+  spend authority held by an application's key store.
 
 ### Changed
 - Migrated to `arti-client 0.43`, `bip32 0.6`, `bls12_381 0.9`,
