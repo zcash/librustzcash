@@ -1047,7 +1047,7 @@ pub(crate) mod tests {
         // shard is incomplete.
         assert_eq!(
             st.wallet()
-                .get_wallet_summary(ConfirmationsPolicy::MIN)
+                .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
                 .unwrap()
                 .map(|s| T::next_subtree_index(&s)),
             Some(2),

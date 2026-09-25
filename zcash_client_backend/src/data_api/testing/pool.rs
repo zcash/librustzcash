@@ -996,7 +996,8 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
 }
 
 /// Tests that shielded note selection draws only on the pools that the spend capability
-/// authorizes for the account.
+/// authorizes for the account, and that the wallet summary reports the value of any other
+/// pool as watch-only.
 pub fn spend_capability_restricts_shielded_selection<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
@@ -1040,6 +1041,24 @@ pub fn spend_capability_restricts_shielded_selection<T: ShieldedPoolTester>(
         selected_under(&authority_over(PoolType::Shielded(T::SHIELDED_PROTOCOL))),
         value
     );
+
+    // The wallet summary reports the value of an unauthorized pool as watch-only.
+    let summary_balance = |capability: &SpendCapability<_>| {
+        st.wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN, capability)
+            .unwrap()
+            .expect("the wallet has a summary")
+            .account_balances()
+            .get(&account_id)
+            .unwrap()
+            .clone()
+    };
+    let unauthorized = summary_balance(&SpendCapability::none());
+    assert_eq!(unauthorized.spendable_value(), Zatoshis::ZERO);
+    assert_eq!(unauthorized.watch_only_value(), value);
+    let authorized = summary_balance(&authority_over(PoolType::Shielded(T::SHIELDED_PROTOCOL)));
+    assert_eq!(authorized.spendable_value(), value);
+    assert_eq!(authorized.watch_only_value(), Zatoshis::ZERO);
 }
 
 /// Tests that sending all the spendable funds within the given shielded pool to a
@@ -3389,7 +3408,7 @@ where
 
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account1).is_none());
@@ -3456,7 +3475,7 @@ where
 
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::default())
+        .get_wallet_summary(ConfirmationsPolicy::default(), &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account3).is_none());
@@ -3559,7 +3578,7 @@ pub fn account_deletion_with_internal_transfer<T: ShieldedPoolTester, DSF>(
     // account 1 should still exist and retain its change balance.
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account2).is_none());

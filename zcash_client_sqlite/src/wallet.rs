@@ -112,6 +112,7 @@ use zcash_client_backend::{
         defaults::address_receiver_matches_ua,
         error::{FindAccountForAddressError, RewindError},
         scanning::{ScanPriority, ScanRange},
+        spend_capability::SpendCapability,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{Note, NoteId, Recipient, WalletTx},
@@ -2667,6 +2668,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<Option<crate::WalletSnapshot<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
@@ -2975,11 +2977,41 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     )?;
     drop(sapling_trace);
 
+    // Shielded value in a pool that the capability does not authorize for its account is
+    // watch-only.
+    for (account, balance) in account_balances.iter_mut() {
+        let authorizes = |pool: ShieldedPool| {
+            capability.authorizes_account_pool(account, PoolType::Shielded(pool))
+        };
+        if !authorizes(ShieldedPool::Sapling) {
+            balance.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Orchard) {
+            balance.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Ironwood) {
+            balance.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+    }
+
     #[cfg(feature = "transparent-inputs")]
     transparent::add_transparent_account_balances(
         tx,
+        params,
         target_height,
         confirmations_policy,
+        capability,
         &mut account_balances,
     )?;
 
@@ -3027,6 +3059,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
     progress: &impl ProgressEstimator,
 ) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
@@ -3094,8 +3127,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         None => return Ok(None),
     };
 
-    Ok(get_wallet_snapshot(tx, params, confirmations_policy)?
-        .map(|snapshot| snapshot.into_wallet_summary(progress)))
+    Ok(
+        get_wallet_snapshot(tx, params, confirmations_policy, capability)?
+            .map(|snapshot| snapshot.into_wallet_summary(progress)),
+    )
 }
 
 /// Returns the memo for a received note, if the note is known to the wallet.
@@ -6316,7 +6351,7 @@ mod tests {
         assert_eq!(
             st.wallet()
                 .db()
-                .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+                .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_capability())
                 .unwrap(),
             None
         );
@@ -6346,14 +6381,14 @@ mod tests {
         let snapshot = st
             .wallet()
             .db()
-            .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+            .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_capability())
             .unwrap()
             .expect("scanned wallet must have a snapshot");
         assert_eq!(snapshot.account_balances().len(), 1);
 
         if let Some(summary) = st
             .wallet()
-            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_capability())
             .unwrap()
         {
             assert_eq!(snapshot.account_balances(), summary.account_balances());
@@ -6424,13 +6459,23 @@ mod tests {
         }
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
-        let forced =
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &FixedProgress)
-                .unwrap()
-                .expect("fixed progress plus snapshot must yield a summary");
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("scanned wallet has a snapshot");
+        let forced = super::get_wallet_summary(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+            &FixedProgress,
+        )
+        .unwrap()
+        .expect("fixed progress plus snapshot must yield a summary");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
+        .unwrap()
+        .expect("scanned wallet has a snapshot");
         assert_eq!(snapshot.account_balances().len(), 2);
         assert_eq!(snapshot.account_balances(), forced.account_balances());
         assert_eq!(
@@ -6486,14 +6531,25 @@ mod tests {
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
         assert_eq!(
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &NoProgress)
-                .unwrap(),
+            super::get_wallet_summary(
+                &tx,
+                st.network(),
+                ConfirmationsPolicy::MIN,
+                &st.full_spend_capability(),
+                &NoProgress
+            )
+            .unwrap(),
             None,
             "missing progress must keep get_wallet_summary returning None"
         );
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("snapshot must still return balances when progress is unavailable");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_capability(),
+        )
+        .unwrap()
+        .expect("snapshot must still return balances when progress is unavailable");
         assert_eq!(snapshot.account_balances().len(), 1);
         assert_eq!(snapshot.chain_tip_height(), h);
     }

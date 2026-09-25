@@ -52,7 +52,7 @@ use zcash_primitives::transaction::fees::{
 use zcash_protocol::{
     PoolType, TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
-    value::{ZatBalance, Zatoshis},
+    value::{BalanceError, ZatBalance, Zatoshis},
 };
 use zcash_script::script;
 use zip32::Scope;
@@ -1396,6 +1396,18 @@ pub(crate) fn capability_authorizes_condition(addresses: &str, accounts: &str) -
     )
 }
 
+/// Returns an SQL expression that evaluates to the encoded address of a standalone multisig
+/// script receiver, and to `NULL` for every other receiver.
+///
+/// `addresses` must be the alias of the `addresses` table for the receiving address.
+fn multisig_address_column(addresses: &str) -> String {
+    format!(
+        "CASE WHEN {addresses}.imported_transparent_receiver_script IS NOT NULL
+             THEN {addresses}.cached_transparent_receiver_address
+         END"
+    )
+}
+
 /// The values bound by the SQL condition from [`capability_authorizes_condition`].
 pub(crate) struct CapabilityBindings {
     all_accounts: bool,
@@ -1826,6 +1838,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
 ) -> Result<TransparentBalances, SqliteClientError> {
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
@@ -1834,11 +1847,21 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     } else {
         u32::from(confirmations_policy.untrusted())
     };
+    let capability_bindings = CapabilityBindings::new(params, capability);
+    let account_uuid_arg = account_uuid.0;
+    let target_height_arg = u32::from(target_height);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":account_uuid", &account_uuid_arg),
+        (":target_height", &target_height_arg),
+        (":min_confirmations", &min_confirmations),
+    ];
+    capability_bindings.push(&mut sql_params);
 
     let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(&format!(
-        "SELECT u.address, u.value_zat, u.lock_expiry_height, addresses.key_scope
+        "SELECT u.address, u.value_zat, u.lock_expiry_height, addresses.key_scope,
+                ({authorized}) AS authorized
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1851,13 +1874,10 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        authorized = capability_authorizes_condition("addresses", "accounts"),
     ))?;
 
-    let mut rows = stmt_address_balances.query(named_params![
-        ":account_uuid": account_uuid.0,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-    ])?;
+    let mut rows = stmt_address_balances.query(&sql_params[..])?;
 
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get("address")?;
@@ -1866,10 +1886,13 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let lock_expiry_height: Option<u32> = row.get("lock_expiry_height")?;
         let key_scope_code: i64 = row.get("key_scope")?;
         let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
+        let authorized: bool = row.get("authorized")?;
 
         let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
         if value <= zip317::MARGINAL_FEE {
             entry.1.add_uneconomic_value(value)?;
+        } else if !authorized {
+            entry.1.add_watch_only_value(value)?;
         } else if is_locked_at(lock_expiry_height, target_height) {
             entry.1.add_locked_value(value)?;
         } else {
@@ -1887,7 +1910,8 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     // pending, so we don't check locking here.
     if min_confirmations > 0 {
         let mut stmt_address_balances = conn.prepare(&format!(
-            "SELECT u.address, u.value_zat, addresses.key_scope
+            "SELECT u.address, u.value_zat, addresses.key_scope,
+                    ({authorized}) AS authorized
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1910,14 +1934,11 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
              AND u.id NOT IN ({}) -- and the output is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
             spent_utxos_clause(),
-            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+            authorized = capability_authorizes_condition("addresses", "accounts"),
         ))?;
 
-        let mut rows = stmt_address_balances.query(named_params![
-            ":account_uuid": account_uuid.0,
-            ":target_height": u32::from(target_height),
-            ":min_confirmations": min_confirmations
-        ])?;
+        let mut rows = stmt_address_balances.query(&sql_params[..])?;
 
         while let Some(row) = rows.next()? {
             let taddr_str: String = row.get("address")?;
@@ -1925,10 +1946,13 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
             let key_scope_code: i64 = row.get("key_scope")?;
             let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
+            let authorized: bool = row.get("authorized")?;
 
             let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
             if value <= zip317::MARGINAL_FEE {
                 entry.1.add_uneconomic_value(value)?;
+            } else if !authorized {
+                entry.1.add_watch_only_value(value)?;
             } else {
                 entry.1.add_spendable_value(value)?;
             }
@@ -1938,11 +1962,40 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     Ok(result)
 }
 
-#[tracing::instrument(skip(conn, account_balances))]
-pub(crate) fn add_transparent_account_balances(
+/// Adds a transparent output's value to the balance that it belongs to: the balance of its
+/// multisig script when it was received at a standalone P2SH address, and otherwise the
+/// account's coinbase or regular unshielded balance.
+fn with_transparent_balance_mut(
+    balance: &mut AccountBalance,
+    multisig_address: Option<TransparentAddress>,
+    is_coinbase: bool,
+    f: impl FnOnce(&mut Balance) -> Result<(), BalanceError>,
+) -> Result<(), BalanceError> {
+    match multisig_address {
+        Some(address) => balance.with_multisig_balance_mut(address, f),
+        None if is_coinbase => balance.with_unshielded_coinbase_balance_mut(f),
+        None => balance.with_unshielded_regular_balance_mut(f),
+    }
+}
+
+/// Decodes the multisig script address column of a transparent balance query.
+fn decode_multisig_address<P: consensus::Parameters>(
+    params: &P,
+    row: &Row,
+) -> Result<Option<TransparentAddress>, SqliteClientError> {
+    row.get::<_, Option<String>>("multisig_address")?
+        .map(|address| TransparentAddress::decode(params, &address))
+        .transpose()
+        .map_err(SqliteClientError::from)
+}
+
+#[tracing::instrument(skip(conn, params, capability, account_balances))]
+pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
+    capability: &SpendCapability<AccountUuid>,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
@@ -1952,12 +2005,21 @@ pub(crate) fn add_transparent_account_balances(
     } else {
         u32::from(confirmations_policy.untrusted())
     };
+    let capability_bindings = CapabilityBindings::new(params, capability);
+    let target_height_arg = u32::from(target_height);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":target_height", &target_height_arg),
+        (":min_confirmations", &min_confirmations),
+    ];
+    capability_bindings.push(&mut sql_params);
 
     let mut stmt_account_spendable_balances = conn.prepare(&format!(
         "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
             (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
             (t.mined_height IS NOT NULL
-             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature
+             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature,
+            ({authorized}) AS authorized,
+            {multisig_address} AS multisig_address
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1965,16 +2027,16 @@ pub(crate) fn add_transparent_account_balances(
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature",
+         GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature, authorized,
+                  multisig_address",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        authorized = capability_authorizes_condition("addresses", "accounts"),
+        multisig_address = multisig_address_column("addresses"),
     ))?;
 
-    let mut rows = stmt_account_spendable_balances.query(named_params![
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-    ])?;
+    let mut rows = stmt_account_spendable_balances.query(&sql_params[..])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountUuid(row.get(0)?);
@@ -1985,38 +2047,30 @@ pub(crate) fn add_transparent_account_balances(
         })?;
         let is_coinbase: bool = row.get("is_coinbase")?;
         let is_mature: bool = row.get("is_mature")?;
+        let authorized: bool = row.get("authorized")?;
+        let multisig_address = decode_multisig_address(params, row)?;
 
         let balance = account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO);
-        if is_coinbase {
-            balance.with_unshielded_coinbase_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
-                    bal.add_uneconomic_value(value)
-                } else if is_locked_at(lock_expiry_height, target_height) {
-                    // A locked coinbase output (selected by an in-flight shielding
-                    // proposal) is excluded from the spendable balance, exactly like a
-                    // locked non-coinbase output.
-                    bal.add_locked_value(value)
-                } else if is_mature {
-                    bal.add_spendable_value(value)
-                } else {
-                    // Immature coinbase value may not yet be spent (by shielding); report it
-                    // as pending until the coinbase output reaches maturity.
-                    bal.add_pending_spendable_value(value)
-                }
-            })?;
-        } else {
-            balance.with_unshielded_regular_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
-                    bal.add_uneconomic_value(value)
-                } else if is_locked_at(lock_expiry_height, target_height) {
-                    bal.add_locked_value(value)
-                } else {
-                    bal.add_spendable_value(value)
-                }
-            })?;
-        }
+        with_transparent_balance_mut(balance, multisig_address, is_coinbase, |bal| {
+            if value <= zip317::MARGINAL_FEE {
+                bal.add_uneconomic_value(value)
+            } else if !authorized {
+                bal.add_watch_only_value(value)
+            } else if is_locked_at(lock_expiry_height, target_height) {
+                // A locked coinbase output (selected by an in-flight shielding proposal) is
+                // excluded from the spendable balance, exactly like a locked non-coinbase
+                // output.
+                bal.add_locked_value(value)
+            } else if is_coinbase && !is_mature {
+                // Immature coinbase value may not yet be spent (by shielding); report it as
+                // pending until the coinbase output reaches maturity.
+                bal.add_pending_spendable_value(value)
+            } else {
+                bal.add_spendable_value(value)
+            }
+        })?;
     }
 
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
@@ -2026,7 +2080,9 @@ pub(crate) fn add_transparent_account_balances(
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
             "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
-                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase
+                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
+                ({authorized}) AS authorized,
+                {multisig_address} AS multisig_address
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -2045,15 +2101,15 @@ pub(crate) fn add_transparent_account_balances(
              )
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-             GROUP BY accounts.uuid, lock_expiry_height, is_coinbase",
+             GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, authorized,
+                      multisig_address",
             spent_utxos_clause(),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+            authorized = capability_authorizes_condition("addresses", "accounts"),
+            multisig_address = multisig_address_column("addresses"),
         ))?;
 
-        let mut rows = stmt_account_unconfirmed_balances.query(named_params![
-            ":target_height": u32::from(target_height),
-            ":min_confirmations": min_confirmations,
-        ])?;
+        let mut rows = stmt_account_unconfirmed_balances.query(&sql_params[..])?;
 
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get(0)?);
@@ -2063,24 +2119,23 @@ pub(crate) fn add_transparent_account_balances(
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
             })?;
             let is_coinbase: bool = row.get("is_coinbase")?;
+            let authorized: bool = row.get("authorized")?;
+            let multisig_address = decode_multisig_address(params, row)?;
 
-            let add_pending = |bal: &mut Balance| {
+            let balance = account_balances
+                .entry(account)
+                .or_insert(AccountBalance::ZERO);
+            with_transparent_balance_mut(balance, multisig_address, is_coinbase, |bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else if !authorized {
+                    bal.add_watch_only_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
                 } else {
                     bal.add_pending_spendable_value(value)
                 }
-            };
-            let balance = account_balances
-                .entry(account)
-                .or_insert(AccountBalance::ZERO);
-            if is_coinbase {
-                balance.with_unshielded_coinbase_balance_mut(add_pending)?;
-            } else {
-                balance.with_unshielded_regular_balance_mut(add_pending)?;
-            }
+            })?;
         }
     }
     Ok(())
@@ -4323,6 +4378,7 @@ mod tests {
     fn spend_capability_restricts_transparent_selection() {
         zcash_client_backend::data_api::testing::transparent::spend_capability_restricts_transparent_selection(
             TestDbFactory::default(),
+            BlockCache::new(),
         );
     }
 

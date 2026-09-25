@@ -43,6 +43,10 @@ workspace.
     propose_standard_transfer_to_address, propose_send_max_transfer,
     propose_shielding, propose_shielding_coinbase}` take it as a final
     argument.
+- `zcash_client_backend::data_api::WalletRead::{get_wallet_summary,
+  get_transparent_balances}` take a `capability: &SpendCapability<AccountId>`
+  argument, and report the value that it does not authorize as watch-only
+  value.
 - `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
   selects only the transparent outputs that its `spending_keys` can spend, as
   given by `SpendingKeys::capability`.

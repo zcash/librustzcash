@@ -228,7 +228,7 @@ where
         let account = self.get_account();
         let binding = self
             .wallet()
-            .get_wallet_summary(confirmations_policy)
+            .get_wallet_summary(confirmations_policy, &self.full_spend_capability())
             .unwrap()?;
         let balance = binding.account_balances().get(&account.id())?;
         Some(balance.clone())
