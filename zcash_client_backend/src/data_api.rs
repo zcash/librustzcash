@@ -3745,6 +3745,16 @@ pub trait WalletWrite:
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.
     ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
     ///   applications which need to track additional identifying information for an account.
+    /// - `zip48_derivation`: For a [ZIP 48] multisig account in which the importing wallet holds
+    ///   a cosigner key, which key that is. `None` for every other account, and also for a ZIP 48
+    ///   account the wallet only watches.
+    ///
+    ///   This cannot be recovered from `unified_key` later. A ZIP 316 Revision 2 P2SH viewing key
+    ///   item carries a chain code and public key per cosigner and no key origin, so which entry
+    ///   belongs to this wallet is knowable only at import, while the caller still has the
+    ///   origin-bearing keys it assembled the account from.
+    ///
+    /// [ZIP 48]: https://zips.z.cash/zip-0048
     fn import_account_ufvk(
         &mut self,
         account_name: &str,
@@ -3752,6 +3762,7 @@ pub trait WalletWrite:
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
+        zip48_derivation: Option<&Zip48Derivation>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error>;
 
     /// Deletes the specified account, and all transactions that exclusively involve it, from the

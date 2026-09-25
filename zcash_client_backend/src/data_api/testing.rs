@@ -87,7 +87,7 @@ use super::{
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
     ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance,
     SentTransaction, TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
-    WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
+    WalletSummary, WalletTest, WalletWrite, Zip32Derivation, Zip48Derivation,
     anchor_retention::AnchorRetentionInterval,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
@@ -3525,6 +3525,7 @@ impl WalletWrite for MockWalletDb {
         _birthday: &AccountBirthday,
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
+        _zip48_derivation: Option<&Zip48Derivation>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         todo!()
     }
