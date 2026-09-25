@@ -19,7 +19,7 @@ use {
     super::transparent::SchedulingError,
     std::time::{Duration, SystemTime},
     transparent::keys::TransparentKeyScope,
-    zcash_client_backend::data_api::TransparentKeyOrigin,
+    zcash_client_backend::data_api::{TransparentKeyOrigin, spend_authority::SpendingKeyCustody},
     zcash_keys::keys::AddressGenerationError,
 };
 
@@ -30,6 +30,22 @@ use zcash_keys::keys::zcashd;
 
 /// The sentinel value representing an unset `zcashd_legacy_address_index` column.
 pub(crate) const LEGACY_ADDRESS_INDEX_NULL: i64 = -1;
+
+/// The stored code of a standalone public key whose spending key the application holds.
+pub(crate) const SPENDING_KEY_CUSTODY_HELD: i64 = 0;
+
+/// The stored code of a standalone public key for which the application holds only the public
+/// key.
+pub(crate) const SPENDING_KEY_CUSTODY_WATCH_ONLY: i64 = 1;
+
+/// Returns the stored code of a standalone public key's spending key custody.
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn spending_key_custody_code(custody: SpendingKeyCustody) -> i64 {
+    match custody {
+        SpendingKeyCustody::Held => SPENDING_KEY_CUSTODY_HELD,
+        SpendingKeyCustody::WatchOnly => SPENDING_KEY_CUSTODY_WATCH_ONLY,
+    }
+}
 
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes

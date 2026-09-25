@@ -166,6 +166,19 @@ workspace.
   standalone transparent spending keys it holds when it is dropped.
 - `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
   `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
+- `zcash_client_backend::data_api::AccountSource::Imported` has a
+  `derivation: Option<Zip32Derivation>` field in place of its `purpose` field.
+- `zcash_client_backend::data_api::WalletWrite::import_account_ufvk` takes a
+  `derivation: Option<Zip32Derivation>` argument in place of its `purpose`
+  argument. The wallet no longer records whether the application holds
+  spending keys for an account; state spend authority per query with a
+  `SpendAuthority` instead.
+- `zcash_client_backend::data_api::WalletWrite::{import_standalone_transparent_pubkey,
+  import_standalone_transparent_pubkeys}` take a
+  `custody: spend_authority::SpendingKeyCustody` argument, stating whether the
+  application holds each public key's spending key. Pass
+  `SpendingKeyCustody::Held` for a public key imported together with its
+  spending key.
 - `zcash_client_backend::data_api::Balance::total` now includes the
   watch-only value.
 - Input selection now takes the caller's spend authority as a
@@ -333,6 +346,10 @@ workspace.
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
   Use `PoolMigrationParams::new`.
+
+### Removed
+- `zcash_client_backend::data_api::AccountPurpose`
+- `zcash_client_backend::data_api::Account::purpose`
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` now records the

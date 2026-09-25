@@ -92,13 +92,15 @@ use {
     zcash_note_encryption::ShieldedOutput,
     zcash_protocol::consensus::NetworkConstants,
 };
+#[cfg(feature = "transparent-key-import")]
+use {super::spend_authority::SpendingKeyCustody, zcash_script::script};
 
 use super::{
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
-    NullifierQuery, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
-    SeedRelevance, SentTransaction, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountSource, AddressInfo,
+    BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance,
+    SentTransaction, TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
+    WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
     anchor_retention::AnchorRetentionInterval,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
@@ -3689,7 +3691,7 @@ impl WalletWrite for MockWalletDb {
         _account_name: &str,
         _unified_key: &UnifiedFullViewingKey,
         _birthday: &AccountBirthday,
-        _purpose: AccountPurpose,
+        _derivation: Option<Zip32Derivation>,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         todo!()
@@ -3715,6 +3717,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: <Self as WalletRead>::AccountId,
         _address: secp256k1::PublicKey,
+        _custody: SpendingKeyCustody,
     ) -> Result<(), <Self as WalletRead>::Error> {
         todo!()
     }

@@ -13,6 +13,10 @@
 //! | Standalone P2SH with redeem script address `s`  | the authority for `a` names `s`                   |
 //! | Standalone, imported by address only            | never                                             |
 //!
+//! An authority holds a standalone public key either by listing it, or by covering every
+//! standalone public key of the account that the wallet records with a given spending key
+//! custody. The wallet records that custody when the public key is imported.
+//!
 //! A P2SH output is authorized only by naming its script's address. Holding a key that the
 //! script refers to does not authorize it: the authority asserts that the application can
 //! satisfy that specific script, alone or as one party to a multi-party signing.
@@ -149,23 +153,45 @@ impl AccountSpendAuthority {
     }
 }
 
+/// Whether the application holds the spending key for a standalone public key, as recorded by
+/// the wallet when the public key was imported.
+///
+/// The wallet records this fact but never verifies it. A public key recorded as
+/// [`WatchOnly`] becomes [`Held`] when it is imported again with its spending key held; a
+/// public key recorded as [`Held`] never becomes [`WatchOnly`].
+///
+/// [`WatchOnly`]: SpendingKeyCustody::WatchOnly
+/// [`Held`]: SpendingKeyCustody::Held
+#[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SpendingKeyCustody {
+    /// The application holds the spending key.
+    Held,
+    /// The application holds only the public key.
+    WatchOnly,
+}
+
 /// The standalone P2PKH public keys of an account that the key store holds.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StandalonePubkeys {
     /// Every standalone public key of the account.
     All,
-    /// Only the listed public keys.
+    /// Every standalone public key of the account whose recorded [`SpendingKeyCustody`] is the
+    /// given one.
+    ImportedAs(SpendingKeyCustody),
+    /// Only the listed public keys, whatever their recorded [`SpendingKeyCustody`].
     Only(BTreeSet<secp256k1::PublicKey>),
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl StandalonePubkeys {
-    /// Returns whether an output received at the standalone P2PKH address of `pubkey` is
-    /// authorized.
-    pub fn authorizes(&self, pubkey: &secp256k1::PublicKey) -> bool {
+    /// Returns whether an output received at the standalone P2PKH address of `pubkey`, whose
+    /// recorded custody is `custody`, is authorized.
+    pub fn authorizes(&self, pubkey: &secp256k1::PublicKey, custody: SpendingKeyCustody) -> bool {
         match self {
             StandalonePubkeys::All => true,
+            StandalonePubkeys::ImportedAs(held) => *held == custody,
             StandalonePubkeys::Only(pubkeys) => pubkeys.contains(pubkey),
         }
     }
@@ -213,5 +239,24 @@ mod tests {
         assert!(authority.authorizes_script(&named));
         assert!(!authority.authorizes_script(&unnamed));
         assert!(!authority.authorizes_script(&TransparentAddress::PublicKeyHash([3; 20])));
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn pubkeys_imported_as_follow_recorded_custody() {
+        use super::{SpendingKeyCustody, StandalonePubkeys};
+
+        let pubkey = secp256k1::SecretKey::from_slice(&[1; 32])
+            .unwrap()
+            .public_key(&secp256k1::Secp256k1::signing_only());
+        let held = StandalonePubkeys::ImportedAs(SpendingKeyCustody::Held);
+
+        assert!(held.authorizes(&pubkey, SpendingKeyCustody::Held));
+        assert!(!held.authorizes(&pubkey, SpendingKeyCustody::WatchOnly));
+        assert!(StandalonePubkeys::All.authorizes(&pubkey, SpendingKeyCustody::WatchOnly));
+        assert!(
+            StandalonePubkeys::Only(BTreeSet::from([pubkey]))
+                .authorizes(&pubkey, SpendingKeyCustody::WatchOnly)
+        );
     }
 }
