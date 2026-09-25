@@ -13,14 +13,12 @@
 //! 1. Verifies that every wallet in the document was recorded for the network the
 //!    database's [`Parameters`] describe.
 //! 2. Delivers every entry of the document's secret store to the [`SecretSink`],
-//!    recording which seeds and spending keys are available so that account
-//!    spendability can be determined.
+//!    recording which seeds are available for HD derivation.
 //! 3. Imports each account: seed-derived accounts whose seed material is present are
 //!    imported via HD derivation (preserving the recorded ZIP 32 account index);
-//!    all others are imported from their viewing keys, as spending accounts when
-//!    corresponding spending material was delivered to the sink and as view-only
-//!    accounts otherwise. Account birthdays are constructed from the tree-state
-//!    frontiers carried by the document where present.
+//!    all others are imported from their viewing keys. Account birthdays are
+//!    constructed from the tree-state frontiers carried by the document where
+//!    present.
 //! 4. Registers standalone transparent keys: each transparent spending key in the
 //!    secret store whose pay-to-public-key-hash address appears under an imported
 //!    account is registered with that account (its secret half having already been
@@ -70,8 +68,8 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretVec};
 use zcash_client_backend::{
     data_api::{
-        Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite, Zip32Derivation,
-        chain::ChainState, wallet::decrypt_and_store_transaction,
+        Account as _, AccountBirthday, WalletRead, WalletWrite, Zip32Derivation, chain::ChainState,
+        wallet::decrypt_and_store_transaction,
     },
     wallet::{Exposure, TransparentAddressMetadata},
 };
@@ -572,20 +570,12 @@ struct AvailableSecrets {
     /// ZIP 32 seed fingerprint, so that textually-differing but equivalent
     /// fingerprint encodings resolve to the same seed.
     seeds: HashMap<[u8; 32], SecretVec<u8>>,
-    /// The canonical encodings of Sapling extended full viewing keys whose
-    /// spending keys were delivered to the sink.
-    sapling_fvks: Vec<String>,
-    /// The canonical encodings of unified full viewing keys whose spending keys
-    /// were delivered to the sink.
-    unified_fvks: Vec<String>,
 }
 
 impl AvailableSecrets {
     fn empty() -> Self {
         AvailableSecrets {
             seeds: HashMap::new(),
-            sapling_fvks: vec![],
-            unified_fvks: vec![],
         }
     }
 }
@@ -932,9 +922,6 @@ where
         for entry in store.sapling_keys() {
             sink.store_sapling_key(entry)
                 .map_err(ZewifImportError::Sink)?;
-            available
-                .sapling_fvks
-                .push(entry.fvk().encoding().to_owned());
         }
         for entry in store.sprout_keys() {
             sink.store_sprout_key(entry)
@@ -943,9 +930,6 @@ where
         for entry in store.unified_keys() {
             sink.store_unified_key(entry)
                 .map_err(ZewifImportError::Sink)?;
-            available
-                .unified_fvks
-                .push(entry.fvk().encoding().to_owned());
         }
     }
 
@@ -1497,13 +1481,15 @@ where
                             message,
                         }
                     })?;
-                let purpose = account_purpose(
-                    account,
-                    available.unified_fvks.iter().any(|s| s == ufvk.encoding()),
-                    derived_source,
-                )?;
+                let derivation = account_derivation(account, derived_source)?;
                 let imported = wdb
-                    .import_account_ufvk(account.name(), &decoded, &birthday, purpose, key_source)
+                    .import_account_ufvk(
+                        account.name(),
+                        &decoded,
+                        &birthday,
+                        derivation,
+                        key_source,
+                    )
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
             }
@@ -1522,13 +1508,9 @@ where
                     account_name: account.name().to_owned(),
                     message: e.to_string(),
                 })?;
-                let purpose = account_purpose(
-                    account,
-                    available.sapling_fvks.iter().any(|s| s == efvk.encoding()),
-                    derived_source,
-                )?;
+                let derivation = account_derivation(account, derived_source)?;
                 let imported = wdb
-                    .import_account_ufvk(account.name(), &ufvk, &birthday, purpose, key_source)
+                    .import_account_ufvk(account.name(), &ufvk, &birthday, derivation, key_source)
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
             }
@@ -1584,28 +1566,15 @@ where
     Ok(())
 }
 
-/// Determines the [`AccountPurpose`] with which to import a viewing key,
-/// honoring the purpose recorded in the document when present and otherwise
-/// inferring spendability from the secret material delivered to the sink.
-fn account_purpose<S>(
+/// Returns the ZIP 32 derivation that the document records for an account's
+/// viewing key, if any.
+fn account_derivation<S>(
     account: &::zewif::Account,
-    spending_key_available: bool,
     derived_source: Option<&::zewif::DerivedKeySource>,
-) -> Result<AccountPurpose, ZewifImportError<S>> {
-    let derivation = derived_source
+) -> Result<Option<Zip32Derivation>, ZewifImportError<S>> {
+    derived_source
         .map(|d| zip32_derivation(account.name(), d))
-        .transpose()?;
-    Ok(match account.purpose() {
-        Some(::zewif::AccountPurpose::ViewOnly) => AccountPurpose::ViewOnly,
-        Some(::zewif::AccountPurpose::Spending) => AccountPurpose::Spending { derivation },
-        None => {
-            if spending_key_available {
-                AccountPurpose::Spending { derivation }
-            } else {
-                AccountPurpose::ViewOnly
-            }
-        }
-    })
+        .transpose()
 }
 
 /// Returns `true` when every key component present in both unified full viewing
@@ -1678,7 +1647,7 @@ mod tests {
     use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use zcash_client_backend::{
-        data_api::{AccountPurpose, AccountSource, WalletRead},
+        data_api::{AccountSource, WalletRead},
         wallet::Exposure,
     };
     use zcash_keys::{
@@ -2007,7 +1976,7 @@ mod tests {
         assert!(matches!(
             imported.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::ViewOnly,
+                derivation: None,
                 ..
             }
         ));
@@ -2442,47 +2411,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(ZewifImportError::DerivedKeyMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn unified_account_is_spending_when_its_key_was_delivered() {
-        let (_file, mut wdb) = test_wallet_db();
-        let ts = test_seed(0);
-
-        // Deliver a unified spending key whose viewing key matches the account's;
-        // the account (a bare UFVK with no derivation record) must then be
-        // imported as spending rather than view-only.
-        let mut store = ::zewif::SecretStore::new();
-        store.add_unified_key(::zewif::UnifiedKeyEntry::new(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
-            ::zewif::UnifiedSpendingKey::new("usk1testspendingkey"),
-        ));
-
-        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
-        ));
-        account.set_name("spending");
-        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
-
-        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
-        wallet.add_account(account);
-        doc.add_wallet(wallet);
-        doc.set_secrets(::zewif::Secrets::Plain(store));
-
-        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
-
-        assert_eq!(report.imported_accounts.len(), 1);
-        let imported = wdb
-            .get_account(report.imported_accounts[0].account_uuid)
-            .unwrap()
-            .unwrap();
-        assert!(matches!(
-            imported.source(),
-            AccountSource::Imported {
-                purpose: AccountPurpose::Spending { .. },
-                ..
-            }
         ));
     }
 

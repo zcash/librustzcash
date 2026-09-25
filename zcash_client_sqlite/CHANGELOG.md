@@ -30,6 +30,10 @@ workspace.
   query naming it failed with "no such column".
 
 ### Changed
+- `zewif::import_wallet` records the ZIP 32 derivation of every account
+  imported from a viewing key whose derivation the document records.
+  Previously it recorded the derivation only for accounts that it judged
+  spendable.
 - The `AccountBalance` values that `WalletDb` reports now carry the value
   received at each standalone multisig P2SH address in
   `AccountBalance::multisig_balances`, not in the unshielded balances.

@@ -27,6 +27,13 @@ workspace.
 - `zcash_client_backend::data_api::wallet::SpendingKeys::capability`
 
 ### Changed
+- `zcash_client_backend::data_api::AccountSource::Imported` has a
+  `derivation: Option<Zip32Derivation>` field in place of its `purpose` field.
+- `zcash_client_backend::data_api::WalletWrite::import_account_ufvk` takes a
+  `derivation: Option<Zip32Derivation>` argument in place of its `purpose`
+  argument. The wallet no longer records whether the application holds
+  spending keys for an account; state spend authority per query with a
+  `SpendCapability` instead.
 - `zcash_client_backend::data_api::Balance::total` now includes the
   watch-only value.
 - Input selection now takes the caller's spend authority as a
@@ -81,6 +88,10 @@ workspace.
     discarded.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method,
   `queue_rescan`, which queues a range of block heights to be scanned again.
+
+### Removed
+- `zcash_client_backend::data_api::AccountPurpose`
+- `zcash_client_backend::data_api::Account::purpose`
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the

@@ -67,8 +67,6 @@ use crate::wallet::scanning::priority_code;
 ///   methods (usually to the chain tip height at which account recovery was initiated), and may
 ///   in future be automatically updated by the backend if the wallet is offline for an extended
 ///   period (to keep the scan progress percentage accurate to what actually needs scanning).
-/// - `has_spend_key`: A boolean flag (0 or 1) indicating whether the application that embeds
-///   this wallet database has access to spending key(s) for the account.
 /// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported
 ///   from a `zcashd` `wallet.dat` file, for "standalone" Sapling addresses (each of which
 ///   corresponds to an independent account) derived after the introduction of mnemonic seed
@@ -97,7 +95,6 @@ CREATE TABLE "accounts" (
     birthday_sapling_tree_size INTEGER,
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
-    has_spend_key INTEGER NOT NULL DEFAULT 1,
     zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1,
     CHECK (
       (

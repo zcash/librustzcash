@@ -681,17 +681,6 @@ impl Zip32Derivation {
     }
 }
 
-/// An enumeration used to control what information is tracked by the wallet for
-/// notes received by a given account.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum AccountPurpose {
-    /// For spending accounts, the wallet will track information needed to spend
-    /// received notes.
-    Spending { derivation: Option<Zip32Derivation> },
-    /// For view-only accounts, the wallet will not track spend information.
-    ViewOnly,
-}
-
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AccountSource {
@@ -703,7 +692,8 @@ pub enum AccountSource {
 
     /// An account imported from a viewing key.
     Imported {
-        purpose: AccountPurpose,
+        /// The ZIP 32 derivation of the viewing key, if known.
+        derivation: Option<Zip32Derivation>,
         key_source: Option<String>,
     },
 }
@@ -713,11 +703,7 @@ impl AccountSource {
     pub fn key_derivation(&self) -> Option<&Zip32Derivation> {
         match self {
             AccountSource::Derived { derivation, .. } => Some(derivation),
-            AccountSource::Imported {
-                purpose: AccountPurpose::Spending { derivation },
-                ..
-            } => derivation.as_ref(),
-            _ => None,
+            AccountSource::Imported { derivation, .. } => derivation.as_ref(),
         }
     }
 
@@ -733,19 +719,14 @@ impl AccountSource {
 /// A set of capabilities that a client account must provide.
 ///
 /// An account represents a distinct set of viewing keys within the wallet; the keys for an account
-/// must not be shared with any other account in the wallet, and an application managing wallet
-/// accounts must ensure that it either maintains spending keys that can be used for spending _all_
-/// outputs detectable by the viewing keys of the account, or for none of them (i.e. the account is
-/// view-only.)
+/// must not be shared with any other account in the wallet. The wallet does not record which
+/// spending keys the application holds for an account; operations that depend on spend authority
+/// take a [`SpendCapability`] that states it.
 ///
 /// Balance information is available for any full-viewing-key based account; for an
 /// incoming-viewing-key only account balance cannot be determined because spends cannot be
 /// detected, and so balance-related APIs and APIs that rely upon spentness checks MUST be
 /// implemented to return errors if invoked for an IVK-only account.
-///
-/// For spending accounts in implementations that support the `transparent-key-import` feature,
-/// care must be taken to ensure that spending keys corresponding to every imported transparent
-/// address in an account are maintained by the application.
 pub trait Account {
     type AccountId: Copy;
 
@@ -761,16 +742,6 @@ pub trait Account {
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
     fn source(&self) -> &AccountSource;
-
-    /// Returns whether the account is a spending account or a view-only account.
-    fn purpose(&self) -> AccountPurpose {
-        match self.source() {
-            AccountSource::Derived { derivation, .. } => AccountPurpose::Spending {
-                derivation: Some(derivation.clone()),
-            },
-            AccountSource::Imported { purpose, .. } => purpose.clone(),
-        }
-    }
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
@@ -804,7 +775,7 @@ impl<A: Copy> Account for (A, UnifiedFullViewingKey, BlockHeight) {
 
     fn source(&self) -> &AccountSource {
         &AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         }
     }
@@ -836,7 +807,7 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey, BlockHeight) {
 
     fn source(&self) -> &AccountSource {
         &AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         }
     }
@@ -3566,15 +3537,12 @@ impl AccountBirthday {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
-/// An account is treated as having a single root of spending authority that spans the shielded and
-/// transparent rules for the purpose of balance, transaction listing, and so forth. However,
-/// transparent keys imported via `WalletWrite::import_standalone_transparent_pubkey` or
+/// The wallet does not record which spending keys the application holds. An account may carry
+/// key material that the application can sign for alongside key material that it cannot, such as
+/// transparent keys imported with `WalletWrite::import_standalone_transparent_pubkey` or
 /// `WalletWrite::import_standalone_transparent_script` (available with the
-/// `transparent-key-import` feature) break this abstraction slightly, so wallets using this API
-/// need to be cautious to enforce the invariant that the wallet either maintains access to the
-/// keys required to spend **ALL** outputs received by the account, or that it **DOES NOT** offer
-/// any spending capability for the account, i.e. the account is treated as view-only for all
-/// user-facing operations.
+/// `transparent-key-import` feature). Operations that select inputs or report spendable value take
+/// a [`SpendCapability`] that states what the application's key store holds.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3727,10 +3695,6 @@ pub trait WalletWrite:
     /// ([`Self::create_account`] and [`Self::import_account_hd`]), no spending key is returned
     /// because the wallet has no information about how the UFVK was derived.
     ///
-    /// Certain optimizations are possible for accounts which will never be used to spend funds. If
-    /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
-    /// which case any attempt to spend funds from the account will result in an error.
-    ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
     /// # Arguments
@@ -3738,8 +3702,7 @@ pub trait WalletWrite:
     /// - `unified_key`: The UFVK used to detect transactions involving the account.
     /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
     ///   for the account.
-    /// - `purpose`: Metadata describing whether or not data required for spending should be
-    ///   tracked by the wallet.
+    /// - `derivation`: The ZIP 32 derivation of the UFVK, if known.
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.
     ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
     ///   applications which need to track additional identifying information for an account.
@@ -3748,7 +3711,7 @@ pub trait WalletWrite:
         account_name: &str,
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        purpose: AccountPurpose,
+        derivation: Option<Zip32Derivation>,
         key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error>;
 
@@ -3779,16 +3742,14 @@ pub trait WalletWrite:
     ///
     /// The imported address will contribute to the balance of the account, but the wallet holds
     /// neither the public key (P2PKH) nor the redeem script (P2SH) from which the address was
-    /// derived, so funds received by it cannot be spent — its outputs are excluded from spendable
-    /// input selection, and it must not be included in the addresses passed to
-    /// [`propose_shielding`]. Subsequently importing the corresponding key material with
+    /// derived, so funds received by it cannot be spent: no [`SpendCapability`] authorizes its
+    /// outputs. Subsequently importing the corresponding key material with
     /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
     /// upgrades the address in place, after which the spending limitations of those methods
     /// apply instead.
     ///
     /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
     /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_address(
         &mut self,
@@ -3804,13 +3765,11 @@ pub trait WalletWrite:
     /// associated transparent p2pkh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). Its outputs are spendable only under a [`SpendCapability`] that holds the
+    /// pubkey, and spending them requires the associated spending key to be provided explicitly
+    /// when calling [`create_proposed_transactions`].
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
@@ -3848,13 +3807,12 @@ pub trait WalletWrite:
     /// adds the associated transparent p2sh address.
     ///
     /// The imported address will contribute to the balance of the account (for UFVK-based
-    /// accounts), but spending funds held by this address requires the associated spending keys to
-    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
-    /// to [`propose_shielding`] must only include addresses for which the spending application
-    /// holds or can obtain the spending keys.
+    /// accounts). Its outputs are spendable only under a [`SpendCapability`] that names the P2SH
+    /// address, and spending them requires the associated spending keys to be provided
+    /// explicitly when calling [`create_proposed_transactions`], or signatures to be added to a
+    /// PCZT.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
-    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     ///
     /// # Spending limitations
     ///

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
+use zcash_client_backend::data_api::{AccountSource, Zip32Derivation};
 use zip32::fingerprint::SeedFingerprint;
 
 use crate::wallet::{account_kind_code, init::WalletMigrationError};
@@ -48,9 +48,9 @@ impl RusqliteMigration for Migration {
             key_source: None,
         });
         let account_kind_imported = account_kind_code(&AccountSource::Imported {
-            // the purpose here is irrelevant; we just use it to get the correct code
+            // the derivation here is irrelevant; we just use it to get the correct code
             // for the account kind
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         });
         transaction.execute_batch(&format!(
