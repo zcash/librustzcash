@@ -10,12 +10,31 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::{ChangeReceivers, TransparentChangeKind}`
+  (the latter under the `transparent-inputs` feature)
+- `zcash_client_backend::data_api::AccountMeta::change_receivers`
+- `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
 - MSRV is now 1.89
 - `zcash_client_backend::tor::Client::{create, create_with_timeouts}` now install
   the `ring` provider as the process-level `rustls` `CryptoProvider` when the
   application has not installed one.
+- `zcash_client_backend::data_api::InputSource` has a new required method
+  `get_change_receivers`, and `zcash_client_backend::fees::MetaSource` a new
+  required method `change_receivers`, which returns it for an `InputSource`.
+- `zcash_client_backend::data_api::AccountMeta::new` takes an additional
+  `change_receivers: ChangeReceivers` argument.
+- The `AccountMetaT` of `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy`
+  and `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy` is now
+  `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.
+- The change strategies in `zcash_client_backend::fees` size transparent
+  change as an output of the account's `TransparentChangeKind` instead of
+  always as a P2PKH output, and fail with `ChangeError::UnsupportedChangePool`
+  when they would send change, or an ephemeral output, to a pool in which the
+  account cannot receive it.
 
 ## [0.25.0-pre.2] - 2026-10-13
 

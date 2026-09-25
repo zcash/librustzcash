@@ -17,17 +17,17 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::{AccountMeta, wallet::TargetHeight};
+use crate::data_api::{AccountMeta, ChangeReceivers, wallet::TargetHeight};
 
 use super::{
     ChangeError, ChangeValue, DummyOutputCounts, DustAction, DustOutputPolicy, EphemeralBalance,
     SplitPolicy, TransactionBalance, sapling as sapling_fees,
 };
 
-#[cfg(feature = "transparent-inputs")]
-use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard::{self as orchard_fees, OutputView as _};
+#[cfg(feature = "transparent-inputs")]
+use {super::TransparentChangePolicy, crate::data_api::TransparentChangeKind};
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -315,6 +315,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
     wallet_meta: Option<&AccountMeta>,
+    change_receivers: &ChangeReceivers,
     target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
@@ -377,6 +378,22 @@ where
         && cfg.transparent_change_policy == TransparentChangePolicy::TransparentChangeAllowed;
     #[cfg(not(feature = "transparent-inputs"))]
     let wants_transparent_change = false;
+
+    // The size of the transparent change output, which depends on the kind of address the
+    // account receives it at.
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_change_size = if wants_transparent_change {
+        Some(
+            change_receivers
+                .transparent()
+                .ok_or(ChangeError::UnsupportedChangePool(PoolType::Transparent))?
+                .output_size(),
+        )
+    } else {
+        None
+    };
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_change_size = None;
 
     let total_in = net_flows
         .total_in()
@@ -658,9 +675,9 @@ where
                         transparent_input_sizes.clone(),
                         transparent_output_sizes
                             .clone()
-                            // Count the standard size of the P2PKH change output when change is
-                            // to be returned to the transparent pool.
-                            .chain(wants_transparent_change.then_some(P2PKH_STANDARD_OUTPUT_SIZE)),
+                            // Count the change output when change is to be returned to the
+                            // transparent pool.
+                            .chain(transparent_change_size),
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
@@ -831,6 +848,14 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
+    for change_value in &change {
+        if !can_receive_change(change_receivers, change_value) {
+            return Err(ChangeError::UnsupportedChangePool(
+                change_value.output_pool(),
+            ));
+        }
+    }
+
     // Record the exact number of dummy outputs in each shielded bundle. This is transaction
     // shape, rather than a builder policy; it can therefore be serialized in a proposal and
     // reproduced by every construction path without re-running the fee model.
@@ -876,6 +901,19 @@ where
             ))
         })
         .map_err(|_| overflow())
+}
+
+/// Returns whether an account that can receive change in `change_receivers` can receive
+/// `change`. Ephemeral outputs are sent to P2PKH addresses.
+fn can_receive_change(change_receivers: &ChangeReceivers, change: &ChangeValue) -> bool {
+    #[cfg(feature = "transparent-inputs")]
+    if change.is_ephemeral() {
+        return matches!(
+            change_receivers.transparent(),
+            Some(TransparentChangeKind::P2pkh)
+        );
+    }
+    change_receivers.can_receive(change.output_pool())
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided

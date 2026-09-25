@@ -110,7 +110,12 @@ use {
     crate::{fees::StandardFeeRule, wallet::TransparentAddressMetadata},
     getset::{CopyGetters, Getters},
     std::time::SystemTime,
-    transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
+    transparent::{
+        address::TransparentAddress,
+        bundle::{OutPoint, TxOut},
+        keys::TransparentKeyScope,
+    },
+    zcash_primitives::transaction::fees::transparent::OutputView as _,
 };
 
 #[cfg(all(
@@ -1499,6 +1504,81 @@ impl PoolMeta {
     }
 }
 
+/// The kind of output in which an account receives transparent change.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransparentChangeKind {
+    /// A P2PKH output, to a [BIP 44] internal-scope address.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+    P2pkh,
+    /// A P2SH output, to a [ZIP 48] internal-scope multisig address.
+    ///
+    /// [ZIP 48]: https://zips.z.cash/zip-0048
+    P2sh,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentChangeKind {
+    /// Returns the serialized size of a change output of this kind.
+    pub(crate) fn output_size(self) -> usize {
+        // Any address of the kind has the same script length.
+        let address = match self {
+            TransparentChangeKind::P2pkh => TransparentAddress::PublicKeyHash([0; 20]),
+            TransparentChangeKind::P2sh => TransparentAddress::ScriptHash([0; 20]),
+        };
+        TxOut::new(Zatoshis::ZERO, address.script().into()).serialized_size()
+    }
+}
+
+/// The outputs in which an account can receive change, as determined by the items of its
+/// unified viewing key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangeReceivers {
+    sapling: bool,
+    orchard: bool,
+    #[cfg(feature = "transparent-inputs")]
+    transparent: Option<TransparentChangeKind>,
+}
+
+impl ChangeReceivers {
+    /// Returns the outputs in which an account with the given viewing key can receive change.
+    pub fn from_uivk(uivk: &UnifiedIncomingViewingKey) -> Self {
+        Self {
+            sapling: uivk.has_sapling(),
+            orchard: uivk.has_orchard(),
+            #[cfg(feature = "transparent-inputs")]
+            transparent: match (uivk.p2pkh(), uivk.p2sh()) {
+                (Some(_), _) => Some(TransparentChangeKind::P2pkh),
+                (None, Some(_)) => Some(TransparentChangeKind::P2sh),
+                (None, None) => None,
+            },
+        }
+    }
+
+    /// Returns whether the account can receive change in the given pool. The Orchard and
+    /// Ironwood pools share the account's Orchard key.
+    pub fn can_receive(&self, pool: PoolType) -> bool {
+        match pool {
+            PoolType::Shielded(ShieldedPool::Sapling) => self.sapling,
+            PoolType::Shielded(ShieldedPool::Orchard | ShieldedPool::Ironwood) => self.orchard,
+            #[cfg(feature = "transparent-inputs")]
+            PoolType::Transparent => match self.transparent {
+                Some(TransparentChangeKind::P2pkh | TransparentChangeKind::P2sh) => true,
+                None => false,
+            },
+            #[cfg(not(feature = "transparent-inputs"))]
+            PoolType::Transparent => false,
+        }
+    }
+
+    /// Returns the kind of output in which the account receives transparent change, if it can.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(&self) -> Option<TransparentChangeKind> {
+        self.transparent
+    }
+}
+
 /// Metadata about the structure of the wallet for a particular account.
 ///
 /// At present this just contains counts of unspent outputs in each pool, but it may be extended in
@@ -1515,6 +1595,7 @@ pub struct AccountMeta {
     sapling: Option<PoolMeta>,
     orchard: Option<PoolMeta>,
     ironwood: Option<PoolMeta>,
+    change_receivers: ChangeReceivers,
 }
 
 impl AccountMeta {
@@ -1525,12 +1606,20 @@ impl AccountMeta {
         sapling: Option<PoolMeta>,
         orchard: Option<PoolMeta>,
         ironwood: Option<PoolMeta>,
+        change_receivers: ChangeReceivers,
     ) -> Self {
         Self {
             sapling,
             orchard,
             ironwood,
+            change_receivers,
         }
+    }
+
+    /// Returns the outputs in which the account for which this was generated can receive
+    /// change.
+    pub fn change_receivers(&self) -> &ChangeReceivers {
+        &self.change_receivers
     }
 
     /// Returns metadata about Sapling notes belonging to the account for which this was generated.
@@ -1864,6 +1953,14 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
+
+    /// Returns the outputs in which the specified account can receive change.
+    ///
+    /// Returns an error if the account is not known to the wallet.
+    fn get_change_receivers(
+        &self,
+        account: Self::AccountId,
+    ) -> Result<ChangeReceivers, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///
@@ -4766,8 +4863,9 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use crate::data_api::error::FindAccountForAddressError;
-    use crate::data_api::testing::{
-        MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    use crate::{
+        data_api::testing::{MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
+        fees::tests::all_change_receivers,
     };
 
     use transparent::address::TransparentAddress;
@@ -4977,6 +5075,7 @@ mod tests {
             Some(PoolMeta::new(2, Zatoshis::const_from_u64(200))),
             Some(PoolMeta::new(3, Zatoshis::const_from_u64(300))),
             Some(PoolMeta::new(5, Zatoshis::const_from_u64(500))),
+            all_change_receivers(),
         );
         assert_eq!(meta.note_count(ShieldedPool::Ironwood), Some(5));
         assert_eq!(meta.total_note_count(), Some(10));
@@ -4987,6 +5086,7 @@ mod tests {
             None,
             None,
             Some(PoolMeta::new(4, Zatoshis::const_from_u64(400))),
+            all_change_receivers(),
         );
         assert_eq!(ironwood_only.note_count(ShieldedPool::Ironwood), Some(4));
         assert_eq!(ironwood_only.total_note_count(), Some(4));

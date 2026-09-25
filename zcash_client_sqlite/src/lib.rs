@@ -57,10 +57,11 @@ use zcash_client_backend::{
     TransferType,
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
+        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -1184,6 +1185,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         )
     }
 
+    fn get_change_receivers(
+        &self,
+        account: Self::AccountId,
+    ) -> Result<ChangeReceivers, Self::Error> {
+        wallet::get_change_receivers(self.conn.borrow(), &self.params, account)
+    }
+
     /// Returns metadata for the spendable notes in the wallet.
     fn get_account_metadata(
         &self,
@@ -1233,6 +1241,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             sapling_pool_meta,
             orchard_pool_meta,
             ironwood_pool_meta,
+            self.get_change_receivers(account_id)?,
         ))
     }
 }

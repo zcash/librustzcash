@@ -16,7 +16,7 @@ use zcash_protocol::{
 
 use crate::{
     data_api::{
-        AccountMeta, InputSource, NoteFilter,
+        AccountMeta, ChangeReceivers, InputSource, NoteFilter,
         anchor_retention::PoolMigrationParams,
         wallet::{
             TargetHeight,
@@ -130,7 +130,7 @@ where
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
     type MetaSource = I;
-    type AccountMetaT = ();
+    type AccountMetaT = ChangeReceivers;
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -138,12 +138,12 @@ where
 
     fn fetch_wallet_meta(
         &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as MetaSource>::AccountId,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as MetaSource>::AccountId,
         _target_height: TargetHeight,
         _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
     ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
-        Ok(())
+        meta_source.change_receivers(account)
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -158,7 +158,7 @@ where
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        _wallet_meta: &Self::AccountMetaT,
+        wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -177,6 +177,7 @@ where
         single_pool_output_balance(
             cfg,
             None,
+            wallet_meta,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -330,6 +331,7 @@ where
         single_pool_output_balance(
             cfg,
             Some(wallet_meta),
+            wallet_meta.change_receivers(),
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -353,6 +355,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::fees::tests::all_change_receivers;
     // `sapling_fees` is named by both the orchard and the transparent-inputs tests.
     #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
     use crate::fees::sapling as sapling_fees;
@@ -430,7 +433,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -480,7 +483,12 @@ mod tests {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    &AccountMeta::new(Some(PoolMeta::new(existing_notes, total)), None, None),
+                    &AccountMeta::new(
+                        Some(PoolMeta::new(existing_notes, total)),
+                        None,
+                        None,
+                        all_change_receivers(),
+                    ),
                 )
             };
 
@@ -539,6 +547,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -586,6 +595,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -627,6 +637,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -676,6 +687,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -724,7 +736,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -770,7 +782,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -827,7 +839,7 @@ mod tests {
 
         // No note counts are known for the account, so the split policy proposes a single
         // change output: the assertions below are about the pool it lands in, not the split.
-        let wallet_meta = AccountMeta::new(None, None, None);
+        let wallet_meta = AccountMeta::new(None, None, None, all_change_receivers());
 
         // The Orchard bundle version whose action-count policy applies at each height. The
         // Orchard view is empty in both cases and so contributes no actions, but the version
@@ -958,7 +970,7 @@ mod tests {
                     &orchard_view,
                     &ironwood_view,
                     None,
-                    &(),
+                    &all_change_receivers(),
                 )
                 .expect("the input covers the payment and its fee")
                 .dummy_outputs()
@@ -1019,7 +1031,7 @@ mod tests {
                 &orchard_view,
                 &orchard_fees::EmptyBundleView,
                 None,
-                &(),
+                &all_change_receivers(),
             )
             .unwrap();
 
@@ -1039,7 +1051,7 @@ mod tests {
                     &orchard_outputs[..],
                 ),
                 None,
-                &(),
+                &all_change_receivers(),
             )
             .unwrap();
 
@@ -1105,7 +1117,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1152,7 +1164,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1199,7 +1211,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1252,7 +1264,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1303,7 +1315,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1352,7 +1364,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1399,7 +1411,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1453,7 +1465,12 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &AccountMeta::new(Some(PoolMeta::new(0, Zatoshis::ZERO)), None, None),
+            &AccountMeta::new(
+                Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                None,
+                None,
+                all_change_receivers(),
+            ),
         );
 
         assert_matches!(
@@ -1504,7 +1521,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1557,7 +1574,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1607,7 +1624,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1672,7 +1689,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1727,7 +1744,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         // We will get an error here, because the dust input isn't free to add
