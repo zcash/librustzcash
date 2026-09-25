@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::Zip48Derivation`, recording this wallet's cosigner
+  key and position in a ZIP 48 multisig account.
+- `zcash_client_backend::data_api::Account::zip48_derivation`, which reports it. The
+  default implementation returns `None`, so existing backends are unaffected.
 - `zcash_client_backend::util` module, providing the `Clock` capability trait,
   `SystemClock`, and (behind the `test-dependencies` feature)
   `testing::FixedClock`. These were previously defined in
