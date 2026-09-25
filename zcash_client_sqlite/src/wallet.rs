@@ -354,6 +354,7 @@ struct IvkItemCache {
     orchard: Option<Vec<u8>>,
     sapling: Option<Vec<u8>>,
     p2pkh: Option<Vec<u8>>,
+    p2sh: Option<Vec<u8>>,
 }
 
 impl IvkItemCache {
@@ -370,10 +371,16 @@ impl IvkItemCache {
         #[cfg(not(feature = "transparent-inputs"))]
         let p2pkh = None;
 
+        #[cfg(feature = "transparent-inputs")]
+        let p2sh = uivk.p2sh().map(|k| k.to_bytes());
+        #[cfg(not(feature = "transparent-inputs"))]
+        let p2sh = None;
+
         IvkItemCache {
             orchard,
             sapling,
             p2pkh,
+            p2sh,
         }
     }
 }
@@ -529,6 +536,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 key_source,
                 ufvk, uivk,
                 orchard_ivk_item_cache, sapling_ivk_item_cache, p2pkh_ivk_item_cache,
+                p2sh_ivk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
                 recover_until_height,
                 has_spend_key
@@ -541,6 +549,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :key_source,
                 :ufvk, :uivk,
                 :orchard_ivk_item_cache, :sapling_ivk_item_cache, :p2pkh_ivk_item_cache,
+                :p2sh_ivk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
                 :recover_until_height,
                 :has_spend_key
@@ -560,6 +569,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":orchard_ivk_item_cache": ivk_cache.orchard,
                 ":sapling_ivk_item_cache": ivk_cache.sapling,
                 ":p2pkh_ivk_item_cache": ivk_cache.p2pkh,
+                ":p2sh_ivk_item_cache": ivk_cache.p2sh,
                 ":birthday_height": u32::from(birthday.height()),
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
@@ -1913,7 +1923,8 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
          FROM accounts
          WHERE orchard_ivk_item_cache = :orchard_ivk_item_cache
             OR sapling_ivk_item_cache = :sapling_ivk_item_cache
-            OR p2pkh_ivk_item_cache = :p2pkh_ivk_item_cache",
+            OR p2pkh_ivk_item_cache = :p2pkh_ivk_item_cache
+            OR p2sh_ivk_item_cache = :p2sh_ivk_item_cache",
     )?;
 
     let accounts = stmt
@@ -1975,7 +1986,8 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
              uivk = :uivk,
              orchard_ivk_item_cache = :orchard_ivk,
              sapling_ivk_item_cache = :sapling_ivk,
-             p2pkh_ivk_item_cache = :p2pkh_ivk
+             p2pkh_ivk_item_cache = :p2pkh_ivk,
+             p2sh_ivk_item_cache = :p2sh_ivk
          WHERE id = :id",
         named_params![
             ":ufvk": ufvk_encoded,
@@ -1983,6 +1995,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
             ":orchard_ivk": ivk_cache.orchard,
             ":sapling_ivk": ivk_cache.sapling,
             ":p2pkh_ivk": ivk_cache.p2pkh,
+            ":p2sh_ivk": ivk_cache.p2sh,
             ":id": account_id.0,
         ],
     )?;
