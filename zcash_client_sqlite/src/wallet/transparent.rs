@@ -121,6 +121,39 @@ pub(crate) fn detect_spending_accounts<'a>(
     Ok(acc)
 }
 
+/// Returns the outpoints of the wallet's transparent outputs that are not known to have been
+/// spent in a mined transaction, each mapped to the account that received it.
+///
+/// An output whose only recorded spend is by a transaction that has not been mined is included:
+/// such a transaction may yet be replaced or expire, so the wallet must keep watching the
+/// outpoint for a spend that does reach the chain.
+pub(crate) fn get_unspent_outpoints(
+    conn: &Connection,
+) -> Result<HashMap<OutPoint, AccountUuid>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, tro.output_index, accounts.uuid
+         FROM transparent_received_outputs tro
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         JOIN accounts ON accounts.id = tro.account_id
+         WHERE tro.id NOT IN (
+             SELECT tros.transparent_received_output_id
+             FROM transparent_received_output_spends tros
+             JOIN transactions stx ON stx.id_tx = tros.transaction_id
+             WHERE stx.mined_height IS NOT NULL
+         )",
+    )?;
+
+    let rows = stmt.query_and_then([], |row| {
+        let txid: [u8; 32] = row.get("txid")?;
+        Ok::<_, SqliteClientError>((
+            OutPoint::new(txid, row.get("output_index")?),
+            AccountUuid(row.get("uuid")?),
+        ))
+    })?;
+
+    rows.collect()
+}
+
 /// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
 /// given as bytes in big-endian order (the reverse of the usual order).
 fn address_index_from_diversifier_index_be(
@@ -2672,6 +2705,49 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     Ok(None)
 }
 
+/// Returns every transparent receiver the wallet knows of, mapped to the account that controls
+/// it and the key scope under which it was derived.
+///
+/// This is the wallet-wide counterpart of [`find_account_uuid_for_transparent_address`] and
+/// searches the same locations: the `addresses` table, which holds the receivers of unified
+/// addresses, ephemeral receivers and imported standalone addresses; and the legacy transparent
+/// address (BIP 44 address index 0) of each account, which may have no `addresses` row. Where
+/// both name the same receiver, the `addresses` row takes precedence.
+pub(crate) fn get_receiver_accounts<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+) -> Result<
+    HashMap<TransparentAddress, (AccountUuid, Option<TransparentKeyScope>)>,
+    SqliteClientError,
+> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT addresses.cached_transparent_receiver_address, accounts.uuid, addresses.key_scope
+         FROM addresses
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE addresses.cached_transparent_receiver_address IS NOT NULL",
+    )?;
+
+    let mut receivers = stmt
+        .query_and_then([], |row| {
+            let address_str: String = row.get(0)?;
+            let address = TransparentAddress::decode(params, &address_str)?;
+            let account_id = AccountUuid(row.get(1)?);
+            let key_scope = KeyScope::decode(row.get(2)?)?;
+            Ok::<_, SqliteClientError>((address, (account_id, key_scope.as_transparent())))
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+
+    for account_id in get_account_ids(conn)? {
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
+            receivers
+                .entry(legacy_taddr)
+                .or_insert((account_id, KeyScope::EXTERNAL.as_transparent()));
+        }
+    }
+
+    Ok(receivers)
+}
+
 /// Add a transparent output relevant to this wallet to the database.
 ///
 /// `output_height` may be None if this is an ephemeral output from a
@@ -2827,7 +2903,9 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
 
     // If we have a record of the output already having been spent, then mark it as spent using the
-    // stored reference to the spending transaction.
+    // stored reference to the spending transaction. The spend may have been recorded by either
+    // route: against a transaction the wallet stores, or -- for a spend observed while scanning a
+    // block, whose spending transaction the wallet has no other reason to store -- by locator.
     let spending_tx_ref = conn
         .query_row(
             "SELECT ts.spending_transaction_id
@@ -2842,7 +2920,12 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
             ],
             |row| row.get::<_, i64>(0).map(TxRef),
         )
-        .optional()?;
+        .optional()?
+        .map(Ok)
+        .or_else(|| {
+            super::find_or_create_spending_tx_for_outpoint(conn, output.outpoint()).transpose()
+        })
+        .transpose()?;
 
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
@@ -2949,6 +3032,22 @@ mod tests {
     fn put_blocks_rolls_back_transparent_outputs() {
         zcash_client_backend::data_api::testing::transparent::put_blocks_rolls_back_transparent_outputs(
             TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_detects_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_detects_transparent_spend(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn scan_detects_out_of_order_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_detects_out_of_order_transparent_spend(
+            TestDbFactory::default(),
+            BlockCache::new(),
         );
     }
 
