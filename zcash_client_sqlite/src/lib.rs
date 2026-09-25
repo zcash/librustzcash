@@ -70,6 +70,7 @@ use zcash_client_backend::{
             ReceivedSaplingOutput, wallet::store_decrypted_tx,
         },
         scanning::{ScanPriority, ScanRange},
+        spend_authority::SpendAuthority,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     proto::compact_formats::CompactBlock,
@@ -87,7 +88,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
     value::Zatoshis,
@@ -153,9 +154,6 @@ use {
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
 use {crate::wallet::encoding::KeyScope, zcash_keys::address::Address};
-
-#[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
-use zcash_protocol::PoolType;
 
 use rusqlite::hooks::{AuthAction, Authorization};
 #[cfg(feature = "unstable")]
@@ -925,9 +923,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        let selectable = |pool: ShieldedPool| {
+            sources.contains(&pool)
+                && spend_authority.authorizes_account_pool(&account, PoolType::Shielded(pool))
+        };
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedPool::Sapling) {
+            if selectable(ShieldedPool::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -942,7 +945,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Orchard) {
+            if selectable(ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -957,7 +960,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Ironwood) {
+            if selectable(ShieldedPool::Ironwood) {
                 wallet::orchard::select_spendable_ironwood_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -983,10 +986,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
-        // Pools are tried in the caller's preference order; the first pool holding a covering
-        // note supplies it.
-        for pool in sources {
+        // Pools are tried in the caller's preference order; the first authorized pool holding a
+        // covering note supplies it.
+        for pool in sources.iter().filter(|pool| {
+            spend_authority.authorizes_account_pool(&account, PoolType::Shielded(**pool))
+        }) {
             match pool {
                 ShieldedPool::Sapling => {
                     if let Some(note) = wallet::sapling::select_single_spendable_sapling_note(
@@ -1129,6 +1135,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -1138,6 +1145,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             lock_filter,
+            spend_authority,
         )
     }
 
@@ -1149,6 +1157,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs_for_addresses(
             self.conn.borrow(),
@@ -1158,6 +1167,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             lock_filter,
+            spend_authority,
         )
     }
 
@@ -1173,6 +1183,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -1186,6 +1197,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             max_inputs,
             fee_rule,
             lock_filter,
+            spend_authority,
         )
     }
 

@@ -2,7 +2,7 @@
 
 use std::{
     cell::Cell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     convert::Infallible,
     fmt,
     hash::Hash,
@@ -30,6 +30,7 @@ use subtle::ConditionallySelectable;
 use {
     super::{
         CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
+        spend_authority::StandalonePubkeys,
         wallet::{
             input_selection::ShieldingSelector, propose_shielding, propose_shielding_coinbase,
             shield_transparent_funds,
@@ -65,7 +66,7 @@ use zcash_primitives::{
 #[cfg(feature = "pczt")]
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
@@ -102,6 +103,7 @@ use super::{
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
     scanning::{ScanPriority, ScanRange},
+    spend_authority::{AccountSpendAuthority, SpendAuthority},
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
         input_selection::{
@@ -1206,6 +1208,51 @@ where
     }
 }
 
+impl<Cache, DbT, ParamsT, AccountIdT> TestState<Cache, DbT, ParamsT>
+where
+    AccountIdT: Copy + Eq + Hash,
+    DbT: WalletTest + InputSource<AccountId = AccountIdT> + WalletRead<AccountId = AccountIdT>,
+    <DbT as WalletRead>::Error: fmt::Debug,
+{
+    /// Returns a spend authority that models a key store holding every key the wallet knows of:
+    /// every pool of every account, and every standalone public key and redeem script of each
+    /// account.
+    pub fn full_spend_authority(&self) -> SpendAuthority<AccountIdT> {
+        let pools = BTreeSet::from([
+            PoolType::TRANSPARENT,
+            PoolType::SAPLING,
+            PoolType::ORCHARD,
+            PoolType::IRONWOOD,
+        ]);
+        let accounts = self
+            .wallet()
+            .get_account_ids()
+            .unwrap()
+            .into_iter()
+            .map(|account| {
+                #[cfg(not(feature = "transparent-inputs"))]
+                let authority = AccountSpendAuthority::for_pools(pools.clone());
+
+                #[cfg(feature = "transparent-inputs")]
+                let authority = AccountSpendAuthority::new(
+                    pools.clone(),
+                    StandalonePubkeys::All,
+                    self.wallet()
+                        .get_transparent_receivers(account, true, true)
+                        .unwrap()
+                        .into_keys()
+                        .filter(|address| matches!(address, TransparentAddress::ScriptHash(_)))
+                        .collect(),
+                );
+
+                (account, authority)
+            })
+            .collect();
+
+        SpendAuthority::new(accounts)
+    }
+}
+
 impl<Cache, DbT, ParamsT, AccountIdT, ErrT> TestState<Cache, DbT, ParamsT>
 where
     ParamsT: consensus::Parameters + Send + 'static,
@@ -1280,6 +1327,7 @@ where
             .map_err(Error::DataSource)?
             .ok_or(Error::KeyNotRecognized)?;
 
+        let spend_authority = self.full_spend_authority();
         let proposal = propose_transfer(
             self.wallet_mut(),
             &network,
@@ -1291,6 +1339,7 @@ where
             &SpendPolicy::default(),
             None,
             None,
+            &spend_authority,
         )?;
 
         let clock = self.clock.clone();
@@ -1326,6 +1375,7 @@ where
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         propose_transfer::<_, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
@@ -1337,6 +1387,7 @@ where
             &SpendPolicy::default(),
             None,
             None,
+            &spend_authority,
         )
     }
 
@@ -1365,6 +1416,7 @@ where
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         propose_transfer::<_, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
@@ -1376,6 +1428,7 @@ where
             spend_policy,
             None,
             None,
+            &spend_authority,
         )
     }
 
@@ -1397,6 +1450,7 @@ where
         FeeRuleT: FeeRule + Clone,
     {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         propose_send_max_transfer::<_, _, _, Infallible>(
             self.wallet_mut(),
             &network,
@@ -1409,6 +1463,7 @@ where
             confirmations_policy,
             &LockedInputPolicy::Exclude,
             None,
+            &spend_authority,
         )
     }
 
@@ -1435,6 +1490,7 @@ where
         >,
     > {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
             self.wallet_mut(),
             &network,
@@ -1448,6 +1504,7 @@ where
             fallback_change_pool,
             None,
             None,
+            &spend_authority,
         );
 
         if let Ok(proposal) = &result {
@@ -1482,6 +1539,7 @@ where
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         propose_shielding::<_, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
@@ -1493,6 +1551,7 @@ where
             confirmations_policy,
             output_filter,
             None,
+            &spend_authority,
         )
     }
 
@@ -1521,6 +1580,7 @@ where
         FeeRuleT: zcash_primitives::transaction::fees::FeeRule + Clone,
     {
         let network = self.network().clone();
+        let spend_authority = self.full_spend_authority();
         propose_shielding_coinbase::<_, _, _, _, Infallible>(
             self.wallet_mut(),
             &network,
@@ -1532,6 +1592,7 @@ where
             memo,
             limit,
             None,
+            &spend_authority,
         )
     }
 
@@ -3294,6 +3355,7 @@ impl InputSource for MockWalletDb {
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
         _lock_filter: LockFilter<'_>,
+        _capability: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::empty())
     }

@@ -37,6 +37,8 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 use nonempty::NonEmpty;
 use rand_core::CryptoRng;
 use std::{
+    collections::{BTreeSet, HashMap},
+    hash::Hash,
     num::NonZeroU32,
     ops::{Add, Sub},
     time::SystemTime,
@@ -51,6 +53,7 @@ use crate::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
         WalletCommitmentTrees, WalletRead, WalletWrite,
         error::{AddressExpiryError, Error},
+        spend_authority::{AccountSpendAuthority, SpendAuthority},
         wallet::input_selection::propose_send_max,
     },
     decrypt_transaction,
@@ -102,12 +105,14 @@ use {
     },
     core::convert::Infallible,
     input_selection::ShieldingSelector,
-    std::collections::HashMap,
     transparent::bundle::TxOut,
 };
 
 #[cfg(feature = "transparent-key-import")]
-use zcash_script::script::{self as zs_script, Evaluable};
+use {
+    crate::data_api::spend_authority::StandalonePubkeys,
+    zcash_script::script::{self as zs_script, Evaluable},
+};
 
 #[cfg(feature = "pczt")]
 use {
@@ -739,6 +744,8 @@ impl ConfirmationsPolicy {
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
 ///
+/// Only inputs that `spend_authority` authorizes are selected; see [`SpendAuthority`].
+///
 /// When `lock_inputs` is `Some(request)`, every input selected by the returned proposal is
 /// locked via [`OutputLockStore::lock_outputs`] on behalf of the request's [`LockOwner`], with an
 /// expiry height of `target_height + request.for_blocks()`, so that the inputs are excluded from
@@ -785,6 +792,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     spend_policy: &input_selection::SpendPolicy,
     lock_inputs: Option<LockRequest>,
     proposed_version: Option<TxVersion>,
+    spend_authority: &SpendAuthority<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -893,6 +901,7 @@ where
             change_strategy,
             &orchard_only,
             proposed_version,
+            spend_authority,
         )
     });
 
@@ -936,6 +945,7 @@ where
             change_strategy,
             spend_policy,
             proposed_version,
+            spend_authority,
         )?,
     };
     proposal.check_transaction_size()?;
@@ -1020,6 +1030,8 @@ where
 /// * `change_memo`: A memo to be included in any change output that is created.
 /// * `fallback_change_pool`: The shielded pool to which change should be sent if
 ///   automatic change pool determination fails.
+/// * `spend_authority`: The spend authority held by the application's key store. Only inputs
+///   that it authorizes are selected.
 /// * `lock_inputs`: When `Some(request)`, the inputs selected by the proposal are locked on
 ///   behalf of the request's owner until `target_height + request.for_blocks()` to prevent
 ///   concurrent proposals from selecting them; when `None`, no locking is performed. See
@@ -1039,6 +1051,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     fallback_change_pool: ShieldedPool,
     lock_inputs: Option<LockRequest>,
     proposed_version: Option<TxVersion>,
+    spend_authority: &SpendAuthority<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     ProposeTransferErrT<
@@ -1089,6 +1102,7 @@ where
         &input_selection::SpendPolicy::default(),
         lock_inputs,
         proposed_version,
+        spend_authority,
     )
 }
 
@@ -1135,6 +1149,8 @@ where
 ///   amount, exactly as [`input_selection::SpendPolicy::locked_input_policy`] does for
 ///   [`propose_transfer`]; pass `&LockedInputPolicy::Exclude` (its default) to never select
 ///   a locked note.
+/// * `spend_authority`: The spend authority held by the application's key store. Only inputs
+///   that it authorizes are selected.
 /// * `lock_inputs`: When `Some(request)`, the inputs selected by the proposal are locked on
 ///   behalf of the request's owner until `target_height + request.for_blocks()` to prevent
 ///   concurrent proposals from selecting them; when `None`, no locking is performed. See
@@ -1153,6 +1169,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     confirmations_policy: ConfirmationsPolicy,
     locked_input_policy: &input_selection::LockedInputPolicy,
     lock_inputs: Option<LockRequest>,
+    spend_authority: &SpendAuthority<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
@@ -1185,6 +1202,7 @@ where
         recipient,
         memo,
         locked_input_policy,
+        spend_authority,
     )?;
 
     if let Some(request) = lock_inputs {
@@ -1219,6 +1237,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
     lock_inputs: Option<LockRequest>,
+    spend_authority: &SpendAuthority<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -1247,6 +1266,7 @@ where
             &wallet_db.pool_migration_params(params),
             confirmations_policy,
             output_filter,
+            spend_authority,
         )
         .map_err(Error::from)?;
 
@@ -1319,6 +1339,7 @@ pub fn propose_shielding_coinbase<DbT, ParamsT, InputsT, FeeRuleT, CommitmentTre
     memo: Option<MemoBytes>,
     limit: Option<usize>,
     lock_inputs: Option<LockRequest>,
+    spend_authority: &SpendAuthority<<DbT as InputSource>::AccountId>,
 ) -> Result<
     Proposal<FeeRuleT, Infallible>,
     ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT>,
@@ -1346,6 +1367,7 @@ where
             limit,
             target_height,
             anchor_height,
+            spend_authority,
         )
         .map_err(Error::from)?;
 
@@ -1404,6 +1426,50 @@ impl SpendingKeys {
             #[cfg(feature = "transparent-key-import")]
             standalone_transparent_keys: HashMap::new(),
         }
+    }
+
+    /// Returns the spend authority that these keys provide, when the unified spending key is
+    /// the key of `account`.
+    ///
+    /// The unified spending key authorizes every pool of `account`. Each standalone key set
+    /// authorizes the address it is keyed by: the public keys of a P2PKH address, or the
+    /// script of a P2SH address.
+    pub fn spend_authority<AccountId: Eq + Hash>(
+        &self,
+        account: AccountId,
+    ) -> SpendAuthority<AccountId> {
+        let pools = BTreeSet::from([
+            #[cfg(feature = "transparent-inputs")]
+            PoolType::Transparent,
+            PoolType::SAPLING,
+            #[cfg(feature = "orchard")]
+            PoolType::ORCHARD,
+            #[cfg(feature = "orchard")]
+            PoolType::IRONWOOD,
+        ]);
+
+        #[cfg(not(feature = "transparent-key-import"))]
+        let authority = AccountSpendAuthority::for_pools(pools);
+
+        #[cfg(feature = "transparent-key-import")]
+        let authority = {
+            let secp = secp256k1::Secp256k1::signing_only();
+            let mut pubkeys = BTreeSet::new();
+            let mut scripts = BTreeSet::new();
+            for (address, keys) in &self.standalone_transparent_keys {
+                match address {
+                    TransparentAddress::PublicKeyHash(_) => {
+                        pubkeys.extend(keys.iter().map(|sk| sk.public_key(&secp)));
+                    }
+                    TransparentAddress::ScriptHash(_) => {
+                        scripts.insert(*address);
+                    }
+                }
+            }
+            AccountSpendAuthority::new(pools, StandalonePubkeys::Only(pubkeys), scripts)
+        };
+
+        SpendAuthority::new(HashMap::from([(account, authority)]))
     }
 }
 
@@ -4160,6 +4226,7 @@ where
         confirmations_policy,
         CoinbaseFilter::AllTransparentOutputs,
         None,
+        &spending_keys.spend_authority(to_account),
     )?;
 
     create_proposed_transactions(
