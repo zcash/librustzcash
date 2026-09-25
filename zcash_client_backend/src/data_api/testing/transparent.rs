@@ -33,7 +33,9 @@ use {
     crate::{
         data_api::{
             AccountBirthday,
-            spend_authority::{AccountSpendAuthority, SpendAuthority, StandalonePubkeys},
+            spend_authority::{
+                AccountSpendAuthority, SpendAuthority, SpendingKeyCustody, StandalonePubkeys,
+            },
             wallet::{self, SpendingKeys},
         },
         wallet::TransparentAddressSource,
@@ -1502,7 +1504,11 @@ where
         .public_key(&secp);
     let p2pkh_addr = TransparentAddress::from_pubkey(&standalone_pubkey);
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, standalone_pubkey)
+        .import_standalone_transparent_pubkey(
+            account_id,
+            standalone_pubkey,
+            SpendingKeyCustody::Held,
+        )
         .unwrap();
 
     let (redeem_script, member_key) = build_test_redeem_script();
@@ -1665,6 +1671,164 @@ where
     );
 }
 
+/// Tests that the wallet records the spending key custody of each standalone public key as
+/// the import methods specify, and that [`StandalonePubkeys::ImportedAs`] follows it: a
+/// watch-only public key becomes held when it is imported with its spending key held, and a held
+/// public key never becomes watch-only.
+#[cfg(feature = "transparent-key-import")]
+pub fn standalone_pubkey_custody_follows_imports<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let pubkey_of = |secret_byte: u8| {
+        SecretKey::from_slice(&[secret_byte; 32])
+            .expect("valid secret key")
+            .public_key(&secp)
+    };
+    let watch_only_pubkey = pubkey_of(2);
+    let held_pubkey = pubkey_of(3);
+    let address_only_pubkey = pubkey_of(4);
+    let watch_only_addr = TransparentAddress::from_pubkey(&watch_only_pubkey);
+    let held_addr = TransparentAddress::from_pubkey(&held_pubkey);
+    let address_only_addr = TransparentAddress::from_pubkey(&address_only_pubkey);
+
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            watch_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_pubkeys(account_id, &[held_pubkey], SpendingKeyCustody::Held)
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, address_only_addr)
+        .unwrap();
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    let value = Zatoshis::const_from_u64(50_000);
+    let addresses = [watch_only_addr, held_addr, address_only_addr];
+    for (txid_byte, address) in (1u8..).zip(addresses) {
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([txid_byte; 32], 0),
+            TxOut::new(value, address.script().into()),
+            Some(height),
+            Some(account_id),
+            None,
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height + 1);
+    let spendable_under = |wallet: &<DSF as DataStoreFactory>::DataStore,
+                           pubkeys: StandalonePubkeys| {
+        let authority = SpendAuthority::new(HashMap::from([(
+            account_id,
+            AccountSpendAuthority::new(BTreeSet::new(), pubkeys, BTreeSet::new()),
+        )]));
+        wallet
+            .get_spendable_transparent_outputs_for_addresses(
+                &addresses,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &authority,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|output| *output.recipient_address())
+            .collect::<BTreeSet<_>>()
+    };
+    let held = || StandalonePubkeys::ImportedAs(SpendingKeyCustody::Held);
+    let watch_only = || StandalonePubkeys::ImportedAs(SpendingKeyCustody::WatchOnly);
+
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from([held_addr])
+    );
+    assert_eq!(
+        spendable_under(st.wallet(), watch_only()),
+        BTreeSet::from([watch_only_addr])
+    );
+    assert_eq!(
+        spendable_under(st.wallet(), StandalonePubkeys::All),
+        BTreeSet::from([watch_only_addr, held_addr])
+    );
+    // A listed public key is held whatever its recorded custody.
+    assert_eq!(
+        spendable_under(
+            st.wallet(),
+            StandalonePubkeys::Only(BTreeSet::from([watch_only_pubkey]))
+        ),
+        BTreeSet::from([watch_only_addr])
+    );
+
+    // Importing a public key again never records a held spending key as watch-only.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            held_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            watch_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from([held_addr])
+    );
+
+    // An address-only import upgraded with a watch-only public key records it as watch-only.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            address_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), watch_only()),
+        BTreeSet::from([watch_only_addr, address_only_addr])
+    );
+
+    // Importing a watch-only public key with its spending key held records it as held.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkeys(
+            account_id,
+            &[watch_only_pubkey, address_only_pubkey],
+            SpendingKeyCustody::Held,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from(addresses)
+    );
+    assert_eq!(spendable_under(st.wallet(), watch_only()), BTreeSet::new());
+}
+
 /// Tests that importing key material for a previously address-only import upgrades the
 /// address in place: the pubkey (P2PKH) or redeem script (P2SH) becomes the address's
 /// source, without a duplicate receiver appearing.
@@ -1704,7 +1868,7 @@ where
 
     // Import the key material for each address.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
     st.wallet_mut()
         .import_standalone_transparent_script(account_id, redeem_script)
@@ -1752,8 +1916,11 @@ where
     let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
     let pubkey = secret_key.public_key(&secp);
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 }
@@ -1777,8 +1944,11 @@ where
 
     // First import
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1790,8 +1960,11 @@ where
 
     // Second import to same account should also succeed (idempotent)
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1832,8 +2005,11 @@ where
 
     // Import to first account
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account1_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account1_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1856,8 +2032,11 @@ where
 
     // Import same pubkey to second account should fail
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account2_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account2_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Err(_)
     );
 }
@@ -1883,7 +2062,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
 
     // Derive the P2PKH address.
@@ -1963,7 +2142,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
 
     // Derive the P2PKH address.

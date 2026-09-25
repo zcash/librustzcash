@@ -61,6 +61,9 @@ use {
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
+#[cfg(feature = "transparent-key-import")]
+use zcash_client_backend::data_api::spend_authority::SpendingKeyCustody;
+
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
 const TEST_EPOCH_SECONDS_OFFSET: Duration = Duration::from_secs(1740441600);
 

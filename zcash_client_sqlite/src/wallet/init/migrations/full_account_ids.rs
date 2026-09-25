@@ -5,7 +5,7 @@ use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
-use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
+use zcash_client_backend::data_api::{AccountSource, Zip32Derivation};
 use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_protocol::consensus;
 use zip32::fingerprint::SeedFingerprint;
@@ -60,9 +60,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             key_source: None,
         });
         let account_kind_imported = account_kind_code(&AccountSource::Imported {
-            // the purpose here is irrelevant; we just use it to get the correct code
+            // the derivation here is irrelevant; we just use it to get the correct code
             // for the account kind
-            purpose: AccountPurpose::ViewOnly,
+            derivation: None,
             key_source: None,
         });
         transaction.execute_batch(&format!(

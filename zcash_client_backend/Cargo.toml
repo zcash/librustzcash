@@ -187,10 +187,8 @@ transparent-inputs = [
     "zcash_primitives/transparent-inputs",
 ]
 
-# Enables operations that permit arbitrary transparent pubkeys to be associated
-# with an account in the wallet. Applications that rely on this feature must
-# maintain spending keys corresponding to all imported pubkeys for any account
-# from which it permits spending.
+# Enables operations that permit arbitrary transparent pubkeys and redeem scripts
+# to be associated with an account in the wallet.
 transparent-key-import = ["transparent-inputs"]
 
 ## Enables per-outpoint transparent spend queries, for consumers that have access

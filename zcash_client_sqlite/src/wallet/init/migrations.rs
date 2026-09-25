@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    remove_spend_key_flag,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -407,6 +408,7 @@ pub(super) fn all_migrations<
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
         Box::new(fix_v_transactions_multi_account_totals::Migration),
+        Box::new(remove_spend_key_flag::Migration),
     ]
 }
 
@@ -1147,10 +1149,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// Inserts the `accounts` row that `wallet::add_account` writes for an
-    /// [`AccountPurpose::ViewOnly`](zcash_client_backend::data_api::AccountPurpose) UIVK
-    /// import: `account_kind = 1` (imported), no HD derivation metadata, no spend key, and a
-    /// `NULL` `ufvk`. Returns the new row's `id`.
+    /// Inserts the `accounts` row that `wallet::add_account` writes for a UIVK import:
+    /// `account_kind = 1` (imported), no HD derivation metadata, and a `NULL` `ufvk`. Returns
+    /// the new row's `id`.
     ///
     /// Writing the row directly gives these tests control over the two things `add_account`
     /// fixes for them: the network the stored `uivk` is encoded for (`add_account` always
@@ -1166,9 +1167,9 @@ pub(crate) mod tests {
     ) -> i64 {
         conn.query_row(
             "INSERT INTO accounts (
-                 name, uuid, account_kind, ufvk, uivk, has_spend_key, birthday_height
+                 name, uuid, account_kind, ufvk, uivk, birthday_height
              )
-             VALUES (:name, :uuid, :account_kind, NULL, :uivk, 0, :birthday_height)
+             VALUES (:name, :uuid, :account_kind, NULL, :uivk, :birthday_height)
              RETURNING id",
             named_params![
                 ":name": "uivk-only",
