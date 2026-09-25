@@ -1,4 +1,7 @@
-use std::hash::Hash;
+use std::{
+    collections::{BTreeSet, HashMap},
+    hash::Hash,
+};
 
 use incrementalmerkletree::{Address as TreeAddress, Hashable, Level, Position};
 use sapling::{
@@ -9,7 +12,7 @@ use shardtree::error::ShardTreeError;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::transaction::{Transaction, components::sapling::zip212_enforcement};
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
@@ -21,6 +24,7 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
+        spend_authority::{AccountSpendAuthority, SpendAuthority},
         wallet::{
             ConfirmationsPolicy, TargetHeight,
             input_selection::{LockFilter, LockedInputPolicy},
@@ -125,6 +129,10 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 confirmations_policy,
                 exclude,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &SpendAuthority::new(HashMap::from([(
+                    account,
+                    AccountSpendAuthority::for_pools(BTreeSet::from([PoolType::SAPLING])),
+                )])),
             )
             .map(|n| n.take_sapling())
     }

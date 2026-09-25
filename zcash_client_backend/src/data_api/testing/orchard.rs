@@ -1,4 +1,7 @@
-use std::hash::Hash;
+use std::{
+    collections::{BTreeSet, HashMap},
+    hash::Hash,
+};
 
 use ::orchard::{
     keys::{FullViewingKey, SpendingKey},
@@ -15,7 +18,7 @@ use zcash_keys::{
 use zcash_note_encryption::try_output_recovery_with_ovk;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
@@ -26,6 +29,7 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
+        spend_authority::{AccountSpendAuthority, SpendAuthority},
         testing::{TestState, pool::ShieldedPoolTester},
         wallet::{
             ConfirmationsPolicy, TargetHeight,
@@ -143,6 +147,10 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 confirmations_policy,
                 exclude,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &SpendAuthority::new(HashMap::from([(
+                    account,
+                    AccountSpendAuthority::for_pools(BTreeSet::from([PoolType::ORCHARD])),
+                )])),
             )
             .map(|n| n.take_orchard())
     }
