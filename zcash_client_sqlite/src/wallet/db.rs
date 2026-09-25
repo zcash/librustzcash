@@ -52,6 +52,11 @@ use crate::wallet::scanning::priority_code;
 ///   from the account's viewing key, if any. Used for collision detection.
 /// - `p2pkh_ivk_item_cache`: The serialized representation of the transparent P2PKH IVK item
 ///   derived from the account's viewing key, if any. Used for collision detection.
+/// - `zip48_seed_fingerprint`, `zip48_account_index`, `zip48_cosigner_index`: For a ZIP 48
+///   multisig account in which this wallet holds a cosigner key, the seed that key is
+///   derived from, the account-level index of its ZIP 48 derivation path, and this
+///   wallet's position in the account's key information vector. Written together or not
+///   at all; an account this wallet only watches has none of them.
 /// - `p2sh_ivk_item_cache`: The serialized representation of a P2SH IVK item derived from
 ///   the account's viewing key, if any. At most one of `p2pkh_ivk_item_cache` and
 ///   `p2sh_ivk_item_cache` may be non-NULL.
@@ -99,6 +104,9 @@ CREATE TABLE "accounts" (
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
     zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1,
+    zip48_seed_fingerprint BLOB,
+    zip48_account_index INTEGER,
+    zip48_cosigner_index INTEGER,
     CHECK (
       (
         account_kind = 0

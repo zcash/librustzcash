@@ -186,6 +186,7 @@ migration_modules!(
     wallet_summaries,
     witness_stabilized_notes,
     zip318_classification,
+    zip48_derivation,
 );
 
 use std::{rc::Rc, sync::Mutex};
@@ -400,6 +401,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
         Box::new(v_tx_outputs_transparent_addresses::Migration),
         Box::new(v_tx_outputs_diversifier_index::Migration),
+        Box::new(zip48_derivation::Migration),
         Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
         Box::new(orchard_ironwood_migration_history::Migration),
         Box::new(orchard_ironwood_broadcast_binding::Migration),
