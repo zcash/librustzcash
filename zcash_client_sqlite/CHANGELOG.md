@@ -13,8 +13,8 @@ workspace.
 ### Added
 - `accounts.zip48_seed_fingerprint`, `accounts.zip48_account_index` and
   `accounts.zip48_cosigner_index` store which cosigner key of a ZIP 48 multisig
-  account this wallet holds. `Account::zip48_derivation` reports them. Nothing writes
-  them yet.
+  account this wallet holds, as supplied to `WalletWrite::import_account_ufvk`.
+  `Account::zip48_derivation` reports them.
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts

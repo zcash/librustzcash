@@ -460,6 +460,7 @@ pub(crate) fn max_zip32_account_index(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -467,6 +468,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: &AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
+    zip48_derivation: Option<&Zip48Derivation>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Account, SqliteClientError> {
     // Check whether any IVK component collides with an existing account.
@@ -534,6 +536,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 key_source,
                 ufvk, uivk,
                 orchard_ivk_item_cache, sapling_ivk_item_cache, p2pkh_ivk_item_cache,
+                zip48_seed_fingerprint, zip48_account_index, zip48_cosigner_index,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
                 recover_until_height,
                 has_spend_key
@@ -546,6 +549,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :key_source,
                 :ufvk, :uivk,
                 :orchard_ivk_item_cache, :sapling_ivk_item_cache, :p2pkh_ivk_item_cache,
+                :zip48_seed_fingerprint, :zip48_account_index, :zip48_cosigner_index,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
                 :recover_until_height,
                 :has_spend_key
@@ -565,6 +569,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":orchard_ivk_item_cache": ivk_cache.orchard,
                 ":sapling_ivk_item_cache": ivk_cache.sapling,
                 ":p2pkh_ivk_item_cache": ivk_cache.p2pkh,
+                ":zip48_seed_fingerprint": zip48_derivation.map(|d| d.seed_fingerprint().to_bytes()),
+                ":zip48_account_index": zip48_derivation.map(|d| u32::from(d.account_index())),
+                ":zip48_cosigner_index": zip48_derivation.map(|d| d.cosigner_index()),
                 ":birthday_height": u32::from(birthday.height()),
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
@@ -601,8 +608,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         kind: kind.clone(),
         viewing_key,
         birthday: birthday.height(),
-        // Nothing supplies this at account creation yet; it is set separately.
-        zip48_derivation: None,
+        zip48_derivation: zip48_derivation.cloned(),
     };
 
     // Bring the wallet's note commitment tree, scan queue, and birthday metadata into a state
