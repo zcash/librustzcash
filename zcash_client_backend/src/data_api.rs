@@ -2397,7 +2397,8 @@ pub trait WalletRead {
 
     /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
     /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
-    /// or `Ok(None)` if the wallet has no summary data available.
+    /// or `Ok(None)` if the wallet has no summary data available. Value that `spend_authority` does
+    /// not authorize is reported as watch-only value.
     ///
     /// The summary reports a shielded note as spendable only if the wallet can build its witness
     /// at the anchor that [`WalletRead::get_target_and_anchor_heights`] returns for the trusted
@@ -2408,6 +2409,7 @@ pub trait WalletRead {
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
@@ -2676,13 +2678,15 @@ pub trait WalletRead {
 
     /// Returns a mapping from each transparent receiver associated with the specified account
     /// to the key scope for that address and the balance of funds given the specified target
-    /// height and confirmations policy.
+    /// height and confirmations policy. Value that `spend_authority` does not authorize is reported
+    /// as watch-only value.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
+        _capability: &SpendAuthority<Self::AccountId>,
     ) -> Result<TransparentBalances, Self::Error> {
         unimplemented!(
             "WalletRead::get_transparent_balances must be overridden for wallets to use the `transparent-inputs` feature"

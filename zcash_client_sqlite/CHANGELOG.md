@@ -67,6 +67,9 @@ workspace.
   `min_confirmations` blocks or more therefore reports no spendable shielded
   balance, and proposals fail with `ScanRequired`, until it has scanned to
   that depth.
+- The `AccountBalance` values that `WalletDb` reports now carry the value
+  received at each standalone P2SH address in
+  `AccountBalance::script_balances`, not in the unshielded balances.
 
 ### Fixed
 - `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,

@@ -1731,7 +1731,7 @@ where
     ) -> T {
         let binding = self
             .wallet()
-            .get_wallet_summary(confirmations_policy)
+            .get_wallet_summary(confirmations_policy, &self.full_spend_authority())
             .unwrap()
             .unwrap();
         f(binding.account_balances().get(&account).unwrap())
@@ -1793,7 +1793,7 @@ where
         confirmations_policy: ConfirmationsPolicy,
     ) -> Option<WalletSummary<AccountIdT>> {
         self.wallet()
-            .get_wallet_summary(confirmations_policy)
+            .get_wallet_summary(confirmations_policy, &self.full_spend_authority())
             .unwrap()
     }
 }
@@ -3479,6 +3479,7 @@ impl WalletRead for MockWalletDb {
     fn get_wallet_summary(
         &self,
         _confirmations_policy: ConfirmationsPolicy,
+        _capability: &SpendAuthority<Self::AccountId>,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         Ok(None)
     }
@@ -3592,6 +3593,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
+        _capability: &SpendAuthority<Self::AccountId>,
     ) -> Result<TransparentBalances, Self::Error> {
         Ok(HashMap::new())
     }
