@@ -609,6 +609,73 @@ impl Zip32Derivation {
     }
 }
 
+/// Source metadata for this wallet's share of a [ZIP 48] multisig account.
+///
+/// A ZIP 48 account is not derived from a seed. It is defined by the set of its cosigners'
+/// account keys, and every participant derives the same addresses from that whole set.
+/// What a wallet derives from its own seed is one key of the set, at
+/// `m/48'/<coin_type>'/<account_index>'/133000'`; this records which key that is, and where
+/// it sits among the others.
+///
+/// [`Zip32Derivation`] cannot stand in for this. A seed fingerprint and an account index
+/// there determine an account's entire key material, and a consumer is entitled to read
+/// them that way. Here they determine one participant's share of it, and the account is
+/// not recoverable from that seed alone — reproducing it also requires every other
+/// cosigner's key.
+///
+/// The cosigner index is recorded rather than recomputed because the ZIP 316 Revision 2
+/// encoding of such an account carries a chain code and public key per cosigner and no key
+/// origin. A wallet holding only the encoded account cannot tell which entry is its own,
+/// and so cannot tell whether it is able to contribute a signature at all. Recovering that
+/// otherwise means unlocking the seed and re-deriving a candidate key, which a locked
+/// wallet cannot do.
+///
+/// [ZIP 48]: https://zips.z.cash/zip-0048
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Zip48Derivation {
+    seed_fingerprint: SeedFingerprint,
+    account_index: zip32::AccountId,
+    cosigner_index: u8,
+}
+
+impl Zip48Derivation {
+    /// Constructs new derivation metadata from its constituent parts.
+    ///
+    /// `cosigner_index` is a position in the account's key information vector, which ZIP 48
+    /// bounds at 15 entries.
+    pub fn new(
+        seed_fingerprint: SeedFingerprint,
+        account_index: zip32::AccountId,
+        cosigner_index: u8,
+    ) -> Self {
+        Self {
+            seed_fingerprint,
+            account_index,
+            cosigner_index,
+        }
+    }
+
+    /// Returns the fingerprint of the seed this wallet derives its own cosigner key from.
+    ///
+    /// The other cosigners' keys are derived from seeds this wallet does not hold.
+    pub fn seed_fingerprint(&self) -> &SeedFingerprint {
+        &self.seed_fingerprint
+    }
+
+    /// Returns the account-level index in the ZIP 48 derivation path.
+    ///
+    /// The coin type that accompanies it in that path is determined by the network the
+    /// wallet is operating on, and is not recorded separately.
+    pub fn account_index(&self) -> zip32::AccountId {
+        self.account_index
+    }
+
+    /// Returns this wallet's position in the account's key information vector.
+    pub fn cosigner_index(&self) -> u8 {
+        self.cosigner_index
+    }
+}
+
 /// An enumeration used to control what information is tracked by the wallet for
 /// notes received by a given account.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -698,6 +765,28 @@ pub trait Account {
             },
             AccountSource::Imported { purpose, .. } => purpose.clone(),
         }
+    }
+
+    /// Returns this wallet's [ZIP 48] derivation metadata for the account, if the account is
+    /// a ZIP 48 multisig account and this wallet holds one of its cosigner keys.
+    ///
+    /// Returns `None` for every other kind of account, and also for a ZIP 48 account that
+    /// this wallet merely watches: being able to derive a multisig account's addresses does
+    /// not imply holding a key in it.
+    ///
+    /// This is separate from [`Account::source`] because the two answer different questions.
+    /// `source` reports where an account's key material came from, and for a ZIP 48 account
+    /// that is an import: the account is defined by keys this wallet did not derive. What
+    /// this reports is the wallet's own share of it, which is derived, and which nothing in
+    /// the stored unified key records — the ZIP 316 Revision 2 encoding carries no key
+    /// origin, so which cosigner a wallet is cannot be recovered from the account itself.
+    ///
+    /// The default implementation returns `None`. A backend that stores this metadata must
+    /// override it; one that does not will silently report every account as non-signable.
+    ///
+    /// [ZIP 48]: https://zips.z.cash/zip-0048
+    fn zip48_derivation(&self) -> Option<&Zip48Derivation> {
+        None
     }
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
@@ -3656,6 +3745,16 @@ pub trait WalletWrite:
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.
     ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
     ///   applications which need to track additional identifying information for an account.
+    /// - `zip48_derivation`: For a [ZIP 48] multisig account in which the importing wallet holds
+    ///   a cosigner key, which key that is. `None` for every other account, and also for a ZIP 48
+    ///   account the wallet only watches.
+    ///
+    ///   This cannot be recovered from `unified_key` later. A ZIP 316 Revision 2 P2SH viewing key
+    ///   item carries a chain code and public key per cosigner and no key origin, so which entry
+    ///   belongs to this wallet is knowable only at import, while the caller still has the
+    ///   origin-bearing keys it assembled the account from.
+    ///
+    /// [ZIP 48]: https://zips.z.cash/zip-0048
     fn import_account_ufvk(
         &mut self,
         account_name: &str,
@@ -3663,6 +3762,7 @@ pub trait WalletWrite:
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
+        zip48_derivation: Option<&Zip48Derivation>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error>;
 
     /// Deletes the specified account, and all transactions that exclusively involve it, from the
