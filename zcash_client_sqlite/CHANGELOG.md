@@ -12,6 +12,10 @@ workspace.
 
 ### Added
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
+- `zewif::ZewifImportReport::watch_only_receivers_imported` and
+  `zewif::ZewifImportReport::watch_only_conflicts` (with the supporting types
+  `zewif::WatchOnlyConflict` and `zewif::WatchOnlyForm`), reporting how the
+  watch-only transparent records in a document were handled.
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
@@ -77,6 +81,15 @@ workspace.
 - The `AccountBalance` values that `WalletDb` reports now carry the value
   received at each standalone P2SH address in
   `AccountBalance::script_balances`, not in the unshielded balances.
+- `zewif::import_wallet` imports the watch-only transparent records of a
+  document — bare addresses, public keys whose spending keys are absent from
+  the document's secret store, and the addresses of redeem scripts the wallet
+  cannot represent — as standalone receivers of the accounts that carry them.
+  They were previously dropped. A record that another account in the wallet
+  already holds is reported in `ZewifImportReport::watch_only_conflicts`.
+  Public keys are recorded with `SpendingKeyCustody::WatchOnly`, and the
+  public keys of spending keys in the document's secret store with
+  `SpendingKeyCustody::Held`.
 
 ### Fixed
 - `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
