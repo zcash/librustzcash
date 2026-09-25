@@ -1198,7 +1198,12 @@ where
     // unaffected by lock state.
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
@@ -1218,7 +1223,12 @@ where
     let expired_target = TargetHeight::from(height + 11);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            expired_target,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
@@ -1247,7 +1257,12 @@ where
     );
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            expired_target,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     let (_, bal) = balances
         .get(taddr)
