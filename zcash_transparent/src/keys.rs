@@ -744,10 +744,13 @@ impl ShieldingOvks {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+    use core::ops::Range;
+
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
 
-    use crate::keys::NonHardenedChildIndex;
+    use crate::keys::{NonHardenedChildIndex, NonHardenedChildRange};
 
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -903,6 +906,22 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn nonhardened_child_range() {
+        let collect = |range: Range<NonHardenedChildIndex>| {
+            NonHardenedChildRange::from(range)
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+        let zero = NonHardenedChildIndex::ZERO;
+        let one = zero.next().unwrap();
+        let two = one.next().unwrap();
+
+        assert_eq!(collect(zero..two), [zero, one]);
+        assert_eq!(collect(one..one), []);
+        assert_eq!(collect(two..one), []);
     }
 
     #[test]
