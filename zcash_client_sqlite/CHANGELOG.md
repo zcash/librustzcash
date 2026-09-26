@@ -44,6 +44,9 @@ workspace.
   resolved when that output is discovered.
 
 ### Fixed
+- Importing a UFVK or UIVK that extends an existing account now requeues
+  previously scanned blocks from the supplied birthday, allowing notes newly
+  visible to that account to be found.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
   accounts_new.zcashd_legacy_address_index`. In such a database every account
