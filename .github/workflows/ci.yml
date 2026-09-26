@@ -53,7 +53,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7", "NuTachyon"]'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NuTachyon"]'
               || (
                 github.event_name == 'pull_request'
                 && '["all-features"]'
@@ -69,17 +69,13 @@ jobs:
     env:
       RUSTFLAGS: >-
         ${{
-          matrix.state == 'NU7'
-          && '--cfg zcash_unstable="nu7"'
-          || matrix.state == 'NuTachyon'
+          matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
           || ''
         }}
       RUSTDOCFLAGS: >-
         ${{
-          matrix.state == 'NU7'
-          && '--cfg zcash_unstable="nu7"'
-          || matrix.state == 'NuTachyon'
+          matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
           || ''
         }}
@@ -94,7 +90,7 @@ jobs:
           transparent-pool: ${{ matrix.state == 'transparent' }}
           orchard-pool: ${{ matrix.state == 'Orchard' }}
           all-pools: ${{ matrix.state == 'all-pools' }}
-          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
           extra-features: >-
             ${{
               matrix.state == 'transparent-inputs-only'
@@ -109,7 +105,7 @@ jobs:
         with:
           shared-key: msrv
           # Unstable cfg states have distinct RUSTFLAGS-derived cache keys.
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
       - name: Run tests
         shell: bash
         env:
@@ -197,7 +193,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-features", "NU7", "NuTachyon"]'
+              && '["all-features", "NuTachyon"]'
               || '["all-features"]'
             )
           }}
@@ -210,24 +206,18 @@ jobs:
 
         exclude:
           - target: macOS
-            state: NU7
-          - target: macOS
             state: NuTachyon
 
     env:
       RUSTFLAGS: >-
         ${{
-          matrix.state == 'NU7'
-          && '--cfg zcash_unstable="nu7"'
-          || matrix.state == 'NuTachyon'
+          matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
           || ''
         }}
       RUSTDOCFLAGS: >-
         ${{
-          matrix.state == 'NU7'
-          && '--cfg zcash_unstable="nu7"'
-          || matrix.state == 'NuTachyon'
+          matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
           || ''
         }}
@@ -243,7 +233,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
       - name: Run tests
         shell: bash
         env:
@@ -272,7 +262,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-pools", "NU7", "NuTachyon"]'
+              && '["all-pools", "NuTachyon"]'
               || '["all-pools"]'
             )
           }}
@@ -280,9 +270,6 @@ jobs:
         include:
           - target: Linux
             os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
-
-          - state: NU7
-            rustflags: '--cfg zcash_unstable="nu7"'
 
           - state: NuTachyon
             rustflags: '--cfg zcash_unstable="nutachyon"'
