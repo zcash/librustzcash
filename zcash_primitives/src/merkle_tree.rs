@@ -438,6 +438,14 @@ mod tests {
     }
 
     #[test]
+    fn merkle_path_from_empty_slice() {
+        assert_matches!(
+            merkle_path_from_slice::<Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(&[]),
+            Err(_)
+        );
+    }
+
+    #[test]
     fn empty_commitment_tree_roots() {
         let tree = sapling::CommitmentTree::empty();
         let mut tmp = [0u8; 32];
