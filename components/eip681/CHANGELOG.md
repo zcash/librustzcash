@@ -22,6 +22,11 @@ workspace.
   the intent of the EIP-681 `value = number / ethereum_address / STRING`
   grammar. `Number::parse` itself remains permissive for its standalone
   callers.
+- `parse::AddressOrEnsName::to_erc55_validated_string` now returns
+  `error::ValidationError::IncorrectEthAddressLen` for a hex address that is
+  not 40 digits long, instead of returning it unvalidated.
+  `TransactionRequest::parse` therefore no longer produces a `NativeRequest` or
+  `Erc20Request` for such an address.
 
 ## [0.1.0] - Tue 31 March 2026
 
