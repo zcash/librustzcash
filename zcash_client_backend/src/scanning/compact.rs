@@ -328,8 +328,13 @@ where
 
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
-        let tx_index =
-            TxIndex::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
+        // The index of a compact transaction is reported by the server rather than derived from
+        // the transaction's position in the block, so it must be validated.
+        let tx_index = TxIndex::try_from(tx.index).map_err(|_| ScanError::TxIndexInvalid {
+            at_height: cur_height,
+            txid,
+            index: tx.index,
+        })?;
 
         // A compact spend carries its nullifier as raw bytes; validate them up front so that a
         // malformed (wrong-length) nullifier from an untrusted server yields a handleable
@@ -752,14 +757,20 @@ impl PositionTracker {
 
             // We pre-compute the end tree size here so we can determine when we reach the
             // last transaction in the block that adds notes to the tree. This enables us
-            // to correctly set the tree checkpoint in `find_received`.
-            let end_tree_size = start_tree_size
-                + block
-                    .vtx
-                    .iter()
-                    .map(tx_output_count)
-                    .map(|tx_outputs| u32::try_from(tx_outputs).unwrap())
-                    .sum::<u32>();
+            // to correctly set the tree checkpoint in `find_received`. The starting size
+            // may come from chain metadata provided by the server, so overflow here
+            // indicates invalid input rather than a valid chain state.
+            let overflow = || ScanError::TreeSizeOverflow {
+                protocol,
+                at_height,
+            };
+            let end_tree_size = block.vtx.iter().map(tx_output_count).try_fold(
+                start_tree_size,
+                |acc, tx_outputs| {
+                    let tx_outputs = u32::try_from(tx_outputs).map_err(|_| overflow())?;
+                    acc.checked_add(tx_outputs).ok_or_else(overflow)
+                },
+            )?;
 
             Ok((start_tree_size, end_tree_size))
         }
@@ -1261,7 +1272,10 @@ mod tests {
             #[cfg(feature = "transparent-inputs")]
             |_addr| Ok::<_, Infallible>(None),
         );
-        assert!(matches!(result, Err(ScanBlockError::Scan(_))));
+        assert!(matches!(
+            result,
+            Err(ScanBlockError::Scan(ScanError::TxIndexInvalid { .. }))
+        ));
     }
 
     #[test]
