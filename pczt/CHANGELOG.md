@@ -31,6 +31,10 @@ workspace.
   consensus branch ID `0x77190AD9`, and the `pczt::roles::updater::Updater`
   anchor setters accept a PCZT with that branch ID. Neither needs the
   `--cfg zcash_unstable="nu7"` configuration flag any more.
+- `pczt::roles::creator::Creator::build` now returns
+  `Error::AnchorRequiredForV5` for a v5 PCZT whose Sapling or Orchard anchor is
+  `None`, as documented on `Creator::new`. Such a PCZT was previously built
+  without the anchor, which cannot be set on a v5 PCZT afterwards.
 
 ## [0.9.3] - 2026-08-07
 

@@ -230,8 +230,7 @@ impl Creator {
     /// # Errors
     ///
     /// Returns [`Error::AnchorRequiredForV5`] if this Creator describes a v5
-    /// transaction and either the Sapling anchor is missing from a bundle with
-    /// spends, or the Orchard anchor is missing from a bundle with actions.
+    /// transaction and either the Sapling or the Orchard anchor is missing.
     pub fn build(self) -> Result<Pczt, Error> {
         let sapling = crate::sapling::Bundle {
             spends: vec![],
@@ -257,9 +256,10 @@ impl Creator {
             bsk: None,
         };
 
+        // The bundles are always empty at this point, and the anchors of a v5 PCZT
+        // cannot be set afterwards, so both must be known now.
         if self.tx_version == V5_TX_VERSION
-            && ((sapling.anchor.is_none() && !sapling.spends.is_empty())
-                || (orchard.anchor.is_none() && !orchard.actions.is_empty()))
+            && (sapling.anchor.is_none() || orchard.anchor.is_none())
         {
             return Err(Error::AnchorRequiredForV5);
         }
@@ -407,21 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_anchors_are_supported_for_empty_bundles() {
-        let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, None, Some([0; 32]))
-            .unwrap()
-            .build()
-            .unwrap();
-        assert!(pczt.sapling.anchor.is_none());
-        assert_eq!(pczt.orchard.anchor, Some([0; 32]));
-
-        let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, Some([0; 32]), None)
-            .unwrap()
-            .build()
-            .unwrap();
-        assert_eq!(pczt.sapling.anchor, Some([0; 32]));
-        assert!(pczt.orchard.anchor.is_none());
-
+    fn optional_anchors_are_supported_for_v6() {
         let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
             .unwrap()
             .build()
