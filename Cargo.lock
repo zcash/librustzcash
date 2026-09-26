@@ -3317,12 +3317,14 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "shardtree",
+ "subtle",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
+ "zeroize",
  "zip32",
 ]
 

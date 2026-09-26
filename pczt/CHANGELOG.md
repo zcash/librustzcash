@@ -18,8 +18,12 @@ workspace.
 - `pczt::common::Global::{coin_type, fallback_lock_time, tx_modifiable}`
 - `pczt::roles::signer::Signer::with_transparent_sighash_policy`
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
+- `pczt::common::SecretKeyBytes`
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
+  `redjubjub 0.9`, and `zcash_note_encryption 0.5`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
 - `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
   `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
   create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
@@ -29,9 +33,13 @@ workspace.
   drawing randomness from the operating system. Pass
   `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behavior.
 - The role features no longer depend on `getrandom`.
-- Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
-  `redjubjub 0.9`, and `zcash_note_encryption 0.5`,
-  and to the `orchard` and `sapling-crypto` releases that use them.
+- `pczt::orchard::Spend::dummy_sk` now returns `&Option<SecretKeyBytes>` in
+  place of `&Option<[u8; 32]>`; use `SecretKeyBytes::expose_secret` to read the
+  bytes.
+- The Orchard and Sapling binding signing keys, `pczt::orchard::Spend::dummy_sk`,
+  and the Sapling dummy spend authorizing key are now erased from memory when the
+  PCZT holding them is dropped or they are redacted, and are omitted from `Debug`
+  output. Their serialized encoding is unchanged.
 - `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
   transparent_sighash}` now check the consistency of the transparent input, and use only
   `SighashType::ALL`. Use `Signer::with_transparent_sighash_policy` to permit other

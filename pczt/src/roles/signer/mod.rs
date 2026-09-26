@@ -670,7 +670,7 @@ mod tests {
         Action {
             spend: Spend {
                 alpha: Some(alpha.to_repr()),
-                dummy_sk: Some(*sk.to_bytes()),
+                dummy_sk: Some(crate::common::SecretKeyBytes::new(*sk.to_bytes())),
                 ..base.spend
             },
             rcv: Some([3; 32]),

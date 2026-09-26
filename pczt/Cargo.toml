@@ -47,6 +47,10 @@ pasta_curves = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Secret management
+subtle.workspace = true
+zeroize.workspace = true
+
 # - Boilerplate
 getset.workspace = true
 

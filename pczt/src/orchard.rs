@@ -31,7 +31,7 @@ use {
 };
 
 use crate::{
-    common::{Global, Zip32Derivation},
+    common::{Global, SecretKeyBytes, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -91,7 +91,7 @@ pub struct Bundle {
     ///
     /// - This is `None` until it is set by the IO Finalizer.
     /// - The Transaction Extractor uses this to produce the binding signature.
-    pub(crate) bsk: Option<[u8; 32]>,
+    pub(crate) bsk: Option<SecretKeyBytes>,
 }
 
 /// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
@@ -617,7 +617,7 @@ pub struct Spend {
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_sk` values.
     #[getset(get = "pub")]
-    pub(crate) dummy_sk: Option<[u8; 32]>,
+    pub(crate) dummy_sk: Option<SecretKeyBytes>,
 
     /// Proprietary fields related to the note being spent.
     #[getset(get = "pub")]
@@ -716,7 +716,7 @@ pub mod v1 {
         value_sum: (u64, bool),
         anchor: [u8; 32],
         zkproof: Option<Vec<u8>>,
-        bsk: Option<[u8; 32]>,
+        bsk: Option<crate::common::SecretKeyBytes>,
     }
 
     /// Information about an Orchard action within a transaction.
@@ -746,7 +746,7 @@ pub mod v1 {
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
         zip32_derivation: Option<Zip32Derivation>,
-        dummy_sk: Option<[u8; 32]>,
+        dummy_sk: Option<crate::common::SecretKeyBytes>,
         proprietary: BTreeMap<String, Vec<u8>>,
     }
 
@@ -979,7 +979,7 @@ pub(crate) mod v2 {
         anchor: Option<[u8; 32]>,
         note_version: SerializedNoteVersion,
         zkproof: Option<Vec<u8>>,
-        bsk: Option<[u8; 32]>,
+        bsk: Option<crate::common::SecretKeyBytes>,
     }
 
     /// Information about an Orchard action within a transaction.
@@ -1011,7 +1011,7 @@ pub(crate) mod v2 {
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
         zip32_derivation: Option<crate::common::Zip32Derivation>,
-        dummy_sk: Option<[u8; 32]>,
+        dummy_sk: Option<crate::common::SecretKeyBytes>,
         proprietary: BTreeMap<String, Vec<u8>>,
     }
 
@@ -2305,7 +2305,7 @@ impl Bundle {
                     action.spend.witness,
                     action.spend.alpha,
                     spend_zip32_derivation,
-                    action.spend.dummy_sk,
+                    action.spend.dummy_sk.as_ref().map(|sk| *sk.expose_secret()),
                     note_version,
                     action.spend.proprietary,
                 )
@@ -2322,7 +2322,7 @@ impl Bundle {
                     action.spend.witness,
                     action.spend.alpha,
                     spend_zip32_derivation,
-                    action.spend.dummy_sk,
+                    action.spend.dummy_sk.as_ref().map(|sk| *sk.expose_secret()),
                     note_version,
                     action.spend.proprietary,
                 )
@@ -2382,7 +2382,7 @@ impl Bundle {
             self.value_sum,
             anchor,
             self.zkproof,
-            self.bsk,
+            self.bsk.as_ref().map(|bsk| *bsk.expose_secret()),
         )?;
 
         Ok(Parsed {
@@ -2451,7 +2451,7 @@ impl Bundle {
                         dummy_sk: action
                             .spend()
                             .dummy_sk()
-                            .map(|dummy_sk| *dummy_sk.to_bytes()),
+                            .map(|dummy_sk| SecretKeyBytes::new(*dummy_sk.to_bytes())),
                         proprietary: spend.proprietary().clone(),
                     },
                     output: Output {
@@ -2505,7 +2505,10 @@ impl Bundle {
                 .zkproof()
                 .as_ref()
                 .map(|zkproof| zkproof.as_ref().to_vec()),
-            bsk: bundle.bsk().as_ref().map(|bsk| bsk.into()),
+            bsk: bundle
+                .bsk()
+                .as_ref()
+                .map(|bsk| SecretKeyBytes::new(bsk.into())),
         }
     }
 }
