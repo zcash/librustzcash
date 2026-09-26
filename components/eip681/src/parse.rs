@@ -735,21 +735,16 @@ impl AddressOrEnsName {
     /// Returns the ERC-55 validated string representation of the address, or the ENS name, if possible.
     pub fn to_erc55_validated_string(&self) -> Result<String, ValidationError> {
         match self {
-            AddressOrEnsName::Address(hex_digits) => {
-                if let Err(ValidationError::Erc55Validation { reason }) =
-                    hex_digits.validate_erc55()
-                {
-                    match reason {
+            AddressOrEnsName::Address(hex_digits) => match hex_digits.validate_erc55() {
+                Ok(()) => Ok(format!("0x{hex_digits}")),
+                // An all-lowercase or all-uppercase address carries no checksum to verify.
+                Err(ValidationError::Erc55Validation {
+                    reason:
                         Erc55ValidationFailureReason::AllLowercase
-                        | Erc55ValidationFailureReason::AllUppercase => {
-                            Ok(format!("0x{hex_digits}"))
-                        }
-                        e => Erc55ValidationSnafu { reason: e }.fail(),
-                    }
-                } else {
-                    Ok(format!("0x{hex_digits}"))
-                }
-            }
+                        | Erc55ValidationFailureReason::AllUppercase,
+                }) => Ok(format!("0x{hex_digits}")),
+                Err(e) => Err(e),
+            },
             AddressOrEnsName::Name(ens_name) => Ok(ens_name.to_string()),
         }
     }
