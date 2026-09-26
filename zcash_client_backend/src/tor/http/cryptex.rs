@@ -2,7 +2,7 @@
 
 use futures_util::{future::join_all, join};
 use hyper::StatusCode;
-use rand::{seq::IteratorRandom, thread_rng};
+use rand::seq::IteratorRandom;
 use rust_decimal::Decimal;
 use tracing::{error, trace};
 
@@ -215,7 +215,7 @@ impl Client {
                 .expect("At least one request failed"));
         }
         let evict_random = |s: &mut Vec<Decimal>| {
-            if let Some(index) = (0..s.len()).choose(&mut thread_rng()) {
+            if let Some(index) = (0..s.len()).choose(&mut rand::rng()) {
                 s.remove(index);
             }
         };

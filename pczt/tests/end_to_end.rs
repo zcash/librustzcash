@@ -28,8 +28,8 @@ use pczt::{
     },
     v1, v2,
 };
+use rand::{SeedableRng, rand_core::UnwrapErr, rngs::SysRng};
 use rand_chacha::ChaCha20Rng;
-use rand_core::{OsRng, SeedableRng};
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
@@ -120,7 +120,7 @@ fn assert_external_orchard_signature_round_trip(
 #[test]
 fn transparent_to_orchard() {
     let params = pre_nu6_3_test_network();
-    let rng = OsRng;
+    let rng = UnwrapErr(SysRng);
 
     // Create a transparent account to send funds from.
     let transparent_account_sk =
@@ -307,7 +307,7 @@ fn transparent_to_orchard() {
 #[test]
 fn transparent_p2sh_multisig_to_orchard() {
     let params = pre_nu6_3_test_network();
-    let rng = OsRng;
+    let rng = UnwrapErr(SysRng);
 
     // Construct a 2-of-3 ZIP 48 P2SH account.
     let account_sk =
@@ -487,13 +487,15 @@ fn transparent_p2sh_multisig_to_orchard() {
 
 #[test]
 fn sapling_to_orchard() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create a Sapling account to send funds from.
-    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32]);
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key");
     let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
     let sapling_internal_dfvk = sapling_extsk
         .derive_internal()
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key();
     let sapling_recipient = sapling_dfvk.default_address().1;
 
@@ -589,7 +591,7 @@ fn sapling_to_orchard() {
         sapling_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     // Create the base PCZT.
@@ -605,7 +607,7 @@ fn sapling_to_orchard() {
     let pczt = Updater::new(pczt)
         .update_sapling_with(|mut updater| {
             updater.update_spend_with(index, |mut spend_updater| {
-                spend_updater.set_proof_generation_key(sapling_extsk.expsk.proof_generation_key())
+                spend_updater.set_proof_generation_key(sapling_extsk.expsk().proof_generation_key())
             })
         })
         .unwrap()
@@ -636,7 +638,7 @@ fn sapling_to_orchard() {
     // Apply signatures.
     let mut signer = Signer::new(pczt).unwrap();
     signer
-        .sign_sapling(index, &sapling_extsk.expsk.ask)
+        .sign_sapling(index, sapling_extsk.expsk().ask())
         .unwrap();
     let pczt_with_sapling_signatures = signer.finish();
     check_round_trip(&pczt_with_sapling_signatures);
@@ -667,7 +669,7 @@ fn sapling_to_orchard() {
 
 #[test]
 fn orchard_to_orchard() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create an Orchard account to receive funds.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -754,7 +756,7 @@ fn orchard_to_orchard() {
         orchard_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     // Create the base PCZT.
@@ -883,7 +885,7 @@ fn assert_valid_spend_auth_sig(rk: &[u8; 32], sighash: [u8; 32], sig: [u8; 64]) 
 
 #[test]
 fn orchard_low_level_signer_uses_preverified_signing_parse() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create an Orchard account to send funds from.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -970,7 +972,7 @@ fn orchard_low_level_signer_uses_preverified_signing_parse() {
         orchard_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     // Create the base PCZT, and finalize the I/O.
@@ -1148,7 +1150,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
         .unwrap();
 
     let PcztResult { pczt_parts, .. } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -1204,12 +1206,14 @@ fn redacted_sapling_anchor_round_trips_v2() {
 
 #[test]
 fn redacted_sapling_anchor_can_be_restored_after_signing() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
-    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32]);
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key");
     let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
     let sapling_internal_dfvk = sapling_extsk
         .derive_internal()
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key();
     let sapling_recipient = sapling_dfvk.default_address().1;
 
@@ -1289,7 +1293,7 @@ fn redacted_sapling_anchor_can_be_restored_after_signing() {
         sapling_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -1299,7 +1303,7 @@ fn redacted_sapling_anchor_can_be_restored_after_signing() {
     let pczt = Updater::new(pczt)
         .update_sapling_with(|mut updater| {
             updater.update_spend_with(index, |mut spend_updater| {
-                spend_updater.set_proof_generation_key(sapling_extsk.expsk.proof_generation_key())
+                spend_updater.set_proof_generation_key(sapling_extsk.expsk().proof_generation_key())
             })
         })
         .unwrap()
@@ -1314,7 +1318,7 @@ fn redacted_sapling_anchor_can_be_restored_after_signing() {
     let mut signer = Signer::new(pczt).unwrap();
     let sighash = signer.shielded_sighash();
     signer
-        .sign_sapling(index, &sapling_extsk.expsk.ask)
+        .sign_sapling(index, sapling_extsk.expsk().ask())
         .unwrap();
     let signed = signer.finish();
 
@@ -1358,13 +1362,15 @@ fn redacted_sapling_anchor_can_be_restored_after_signing() {
 
 #[test]
 fn wallet_can_set_sapling_witness_after_signing() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create a Sapling account to spend from and send back to.
-    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32]);
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key");
     let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
     let sapling_internal_dfvk = sapling_extsk
         .derive_internal()
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key();
     let sapling_recipient = sapling_dfvk.default_address().1;
 
@@ -1450,7 +1456,7 @@ fn wallet_can_set_sapling_witness_after_signing() {
         sapling_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -1460,7 +1466,7 @@ fn wallet_can_set_sapling_witness_after_signing() {
     let pczt = Updater::new(pczt)
         .update_sapling_with(|mut updater| {
             updater.update_spend_with(index, |mut spend_updater| {
-                spend_updater.set_proof_generation_key(sapling_extsk.expsk.proof_generation_key())
+                spend_updater.set_proof_generation_key(sapling_extsk.expsk().proof_generation_key())
             })
         })
         .unwrap()
@@ -1470,7 +1476,7 @@ fn wallet_can_set_sapling_witness_after_signing() {
     let mut signer = Signer::new(pczt).unwrap();
     let sighash = signer.shielded_sighash();
     signer
-        .sign_sapling(index, &sapling_extsk.expsk.ask)
+        .sign_sapling(index, sapling_extsk.expsk().ask())
         .unwrap();
     let signed = signer.finish();
 
@@ -1570,7 +1576,7 @@ fn redacted_orchard_anchor_round_trips_v2() {
 
 #[test]
 fn redacted_orchard_anchor_can_be_restored_after_signing() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
     let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
@@ -1647,7 +1653,7 @@ fn redacted_orchard_anchor_can_be_restored_after_signing() {
         orchard_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -1717,7 +1723,7 @@ fn redacted_orchard_anchor_can_be_restored_after_signing() {
 
 #[test]
 fn wallet_can_set_orchard_witness_after_signing() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create an Orchard account to spend from and send back to.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -1799,7 +1805,7 @@ fn wallet_can_set_orchard_witness_after_signing() {
         orchard_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -1888,7 +1894,7 @@ fn redacted_ironwood_anchor_survives_signer_finish() {
 
 #[test]
 fn wallet_can_set_ironwood_witness_after_signing() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create an Orchard account to spend from and send back to through Ironwood.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -1972,7 +1978,7 @@ fn wallet_can_set_ironwood_witness_after_signing() {
         ironwood_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
@@ -2065,7 +2071,7 @@ fn anchor_setters_reject_unsupported_transaction_formats() {
 
 #[test]
 fn ironwood_low_level_signer_uses_preverified_signing_parse() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     // Create an Orchard account to send funds from.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -2146,7 +2152,7 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
         ironwood_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
 
     // Create the base PCZT, and finalize the I/O.
@@ -2351,7 +2357,7 @@ fn redacted_anchor_is_not_resolved() {
 
 #[test]
 fn builder_can_defer_anchors_until_proving() {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
 
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
     let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
@@ -2428,7 +2434,7 @@ fn builder_can_defer_anchors_until_proving() {
         orchard_meta,
         ..
     } = builder
-        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
         .unwrap();
     // The Creator strips the builder's internal placeholders: both anchors and the real
     // spend's witness are ABSENT. The fabricated dummy spends keep their (dummy) witnesses:

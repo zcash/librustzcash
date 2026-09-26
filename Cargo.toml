@@ -52,16 +52,17 @@ zcash_pool_migration = { version = "0.1.0", path = "zcash_pool_migration" }
 zcash_protocol = { version = "0.10.6", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.9.0", path = "components/zip321" }
 
-zcash_note_encryption = "0.4.1"
+zcash_note_encryption = "0.5"
 zcash_primitives = { version = "0.30.1", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.30.0", path = "zcash_proofs", default-features = false }
 
 pczt = { version = "0.9.3", path = "pczt", default-features = false }
 
 # Shielded protocols
-bellman = { version = "0.14", default-features = false, features = ["groth16"] }
-ff = { version = "0.13", default-features = false }
-group = "0.13"
+bellman = { version = "0.15", default-features = false }
+groth16 = { version = "0.2", default-features = false }
+ff = { version = "0.14", default-features = false }
+group = "0.14"
 incrementalmerkletree = { version = "0.8.2", default-features = false }
 shardtree = "0.7"
 tempfile = "3.5.0"
@@ -71,14 +72,14 @@ zcash_spec = "0.2"
 # - Sapling
 bitvec = { version = "1", default-features = false, features = ["alloc"] }
 blake2s_simd = { version = "1", default-features = false }
-bls12_381 = "0.8"
-jubjub = "0.10"
-redjubjub = { version = "0.8", default-features = false }
+bls12_381 = "0.9"
+jubjub = "0.11"
+redjubjub = { version = "0.9", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
 orchard = { version = "0.15.0", default-features = false }
-pasta_curves = "0.5"
+pasta_curves = "0.6"
 
 # - Transparent
 bip32 = { version = "=0.6.0-pre.1", default-features = false, features = ["alloc"] }
@@ -97,9 +98,9 @@ nonempty = { version = "0.11", default-features = false }
 pastey = "0.2"
 
 # CSPRNG
-rand = { version = "0.8", default-features = false }
-rand_core = { version = "0.6", default-features = false }
-rand_distr = { version = "0.4", default-features = false }
+rand = { version = "0.10", default-features = false }
+rand_core = { version = "0.10", default-features = false }
+rand_distr = { version = "0.6", default-features = false }
 
 # Currency conversions
 rust_decimal = { version = "1.35", default-features = false, features = ["serde"] }
@@ -174,8 +175,8 @@ ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
 proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
-rand_chacha = "0.3"
-rand_xorshift = "0.3"
+rand_chacha = "0.10"
+rand_xorshift = "0.5"
 incrementalmerkletree-testing = "0.3"
 
 # Tor
@@ -240,3 +241,14 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nutachyon", "zip233"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+halo2_gadgets = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
+halo2_poseidon = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
+halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
+incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "3cc0781df0afa3b069bd02264b479e54c74fc3d8" }
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "cc5353d3590b8defc5c4333d1528bc123b7ab0f8" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
+zip32 = { git = "https://github.com/zcash/zip32.git", rev = "0399cd62dae9b3abe5dc8d5e761b8ef11b57b12a" }

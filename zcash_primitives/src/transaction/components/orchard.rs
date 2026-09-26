@@ -12,11 +12,12 @@ use orchard::{
     Action, Anchor, ValuePool,
     bundle::{Authorization, Authorized, BundleVersion, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption::{ENC_CIPHERTEXT_SIZE, NoteBytesData},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_note_encryption::{ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
+use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
 use zcash_protocol::{
     consensus::{BranchId, OrchardProtocolRevision},
     value::ZatBalance,
@@ -284,12 +285,12 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 pub fn read_note_ciphertext<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
     let mut tnc = TransmittedNoteCiphertext {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: [0u8; 580],
-        out_ciphertext: [0u8; 80],
+        enc_ciphertext: NoteBytesData([0u8; ENC_CIPHERTEXT_SIZE]),
+        out_ciphertext: [0u8; OUT_CIPHERTEXT_SIZE],
     };
 
     reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext)?;
+    reader.read_exact(&mut tnc.enc_ciphertext.0)?;
     reader.read_exact(&mut tnc.out_ciphertext)?;
 
     Ok(tnc)
@@ -408,7 +409,7 @@ pub fn write_note_ciphertext<W: Write>(
     nc: &TransmittedNoteCiphertext,
 ) -> io::Result<()> {
     writer.write_all(&nc.epk_bytes)?;
-    writer.write_all(&nc.enc_ciphertext)?;
+    writer.write_all(&nc.enc_ciphertext.0)?;
     writer.write_all(&nc.out_ciphertext)
 }
 

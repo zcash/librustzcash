@@ -744,7 +744,8 @@ mod tests {
 
         #[cfg(feature = "sapling")]
         let sapling = {
-            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
+            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO)
+                .expect("the derivation path yields a valid key");
             let dfvk = extsk.to_diversifiable_full_viewing_key();
             Some(dfvk.default_address().1)
         };

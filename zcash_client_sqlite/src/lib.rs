@@ -35,7 +35,7 @@
 
 use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
-use rand::RngCore;
+use rand::Rng;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
@@ -817,7 +817,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::Rng> WalletDb<C, P, CL, R> {
     /// For each ephemeral address in the wallet, ensure that the transaction data request queue
     /// contains a request for the wallet to check for UTXOs belonging to that address at some time
     /// during the next 24-hour period.
@@ -1830,7 +1830,7 @@ where
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters,
     CL: Clock,
-    R: RngCore,
+    R: Rng,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -1859,8 +1859,8 @@ where
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
-    WalletWrite for WalletDb<C, P, CL, R>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
+    for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -2138,7 +2138,7 @@ impl<P, CL, R> OutputLockStore for WalletDb<SqlTransaction<'_>, P, CL, R>
 where
     P: consensus::Parameters,
     CL: Clock,
-    R: RngCore,
+    R: Rng,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -2176,7 +2176,7 @@ where
     }
 }
 
-impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
+impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     for WalletDb<SqlTransaction<'_>, P, CL, R>
 {
     type UtxoRef = UtxoId;
@@ -2737,7 +2737,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     }
 }
 
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     LowLevelWalletRead for WalletDb<C, P, CL, R>
 {
     type AccountId = AccountUuid;
@@ -2898,7 +2898,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 }
 
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     LowLevelWalletWrite for WalletDb<C, P, CL, R>
 {
     fn put_block_meta(
@@ -3627,7 +3627,7 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     AddressStore for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
@@ -5139,7 +5139,8 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let hd_account_index = zip32::AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index);
+        let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index)
+            .expect("the derivation path yields a valid key");
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

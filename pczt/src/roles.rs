@@ -114,7 +114,7 @@ mod tests {
                 SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy,
             },
         };
-        use rand_core::OsRng;
+        use rand::{rand_core::UnwrapErr, rngs::SysRng};
         use zcash_primitives::transaction::{
             builder::{BuildConfig, Builder, BundlePadding, PcztResult},
             fees::zip317,
@@ -164,7 +164,7 @@ mod tests {
 
         fn finalize(builder: Builder<MainNetwork, ()>) -> Pczt {
             let PcztResult { pczt_parts, .. } = builder
-                .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+                .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
                 .unwrap();
 
             IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())

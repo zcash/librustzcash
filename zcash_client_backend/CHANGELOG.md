@@ -31,6 +31,11 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `group 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
+  `rand_core 0.10`, and `zcash_note_encryption 0.5`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
+- `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
+  `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for

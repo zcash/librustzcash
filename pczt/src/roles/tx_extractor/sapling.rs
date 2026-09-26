@@ -1,4 +1,4 @@
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use sapling::{
     BatchValidator, Bundle,
     bundle::Authorized,
@@ -18,7 +18,7 @@ pub(super) fn verify_bundle(
         return Err(SaplingError::ConsensusRuleViolation);
     }
 
-    if !validator.validate(spend_vk, output_vk, OsRng) {
+    if !validator.validate(spend_vk, output_vk, UnwrapErr(SysRng)) {
         return Err(SaplingError::InvalidProofsOrSignatures);
     }
 

@@ -3,7 +3,7 @@
 //! - Sets the appropriate bits in `Global.tx_modifiable` to 0.
 //! - Updates the various bsk values using the rcv information from spends and outputs.
 
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use zcash_primitives::transaction::{sighash::SignableInput, txid::TxIdDigester};
 
 use crate::{
@@ -81,7 +81,7 @@ impl IoFinalizer {
         // the bundle is empty.
         sapling
             .bundle
-            .finalize_io(shielded_sighash, OsRng)
+            .finalize_io(shielded_sighash, UnwrapErr(SysRng))
             .map_err(Error::SaplingFinalize)?;
         // An empty Orchard-protocol bundle carries no value commitment information
         // and contributes nothing to the transaction; leave its `bsk` unset so that
@@ -90,13 +90,13 @@ impl IoFinalizer {
         if has_orchard_actions {
             orchard
                 .bundle
-                .finalize_io(shielded_sighash, OsRng)
+                .finalize_io(shielded_sighash, UnwrapErr(SysRng))
                 .map_err(Error::OrchardFinalize)?;
         }
         if has_ironwood_actions {
             ironwood
                 .bundle
-                .finalize_io(shielded_sighash, OsRng)
+                .finalize_io(shielded_sighash, UnwrapErr(SysRng))
                 .map_err(Error::IronwoodFinalize)?;
         }
 

@@ -35,7 +35,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 //! [`propose_transfer`]: crate::data_api::wallet::propose_transfer
 
 use nonempty::NonEmpty;
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use std::{
     num::NonZeroU32,
     ops::{Add, Sub},
@@ -122,9 +122,7 @@ use {
     serde::{Deserialize, Serialize},
     std::collections::BTreeMap,
     transparent::pczt::Bip32Derivation,
-    zcash_note_encryption::{
-        Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput, try_output_recovery_with_pkd_esk,
-    },
+    zcash_note_encryption::{Domain, ShieldedOutput, try_output_recovery_with_pkd_esk},
     zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
 
@@ -2722,7 +2720,11 @@ where
     }
     let sapling_extsks = &[
         spending_keys.usk.sapling().clone(),
-        spending_keys.usk.sapling().derive_internal(),
+        spending_keys
+            .usk
+            .sapling()
+            .derive_internal()
+            .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?,
     ];
     #[cfg(feature = "orchard")]
     let orchard_saks = &[spending_keys.usk.orchard().into()];
@@ -2732,7 +2734,7 @@ where
         &transparent_signing_set,
         sapling_extsks,
         orchard_saks,
-        OsRng,
+        UnwrapErr(SysRng),
         spend_prover,
         output_prover,
         fee_rule,
@@ -3023,7 +3025,9 @@ where
     // Build the transaction with the specified fee rule. The caller's expiry override
     // (validated against canonical ZIP 318 crossings) was applied via the builder in
     // `build_proposed_transaction` above, so the PCZT parts already carry it.
-    let build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+    let build_result = build_state
+        .builder
+        .build_for_pczt(UnwrapErr(SysRng), fee_rule)?;
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
 
@@ -3777,7 +3781,7 @@ where
     fn to_sent_transaction_output<
         AccountId: Copy,
         D: Domain,
-        O: ShieldedOutput<D, { ENC_CIPHERTEXT_SIZE }>,
+        O: ShieldedOutput<D>,
         DbT: WalletRead + WalletCommitmentTrees,
         N,
     >(

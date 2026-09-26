@@ -24,7 +24,7 @@ use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use getset::{CopyGetters, Getters};
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
@@ -668,7 +668,7 @@ impl MigrationState {
     /// by [`advance_migration`](crate::satisfiability::advance_migration) at its scheduled height.
     /// Nothing is persisted: the schedule is derived from the migration state, so recompute it —
     /// with fresh jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
-    pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
+    pub fn sync_wakeup_schedule<R: Rng + CryptoRng>(
         &self,
         current_tip: BlockHeight,
         params: &WakeupParams,
@@ -854,7 +854,7 @@ impl MigrationState {
     /// preparation carries no drawn boundary at all. In the rare case where no candidate exists at
     /// or above the prior boundary (see [`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)),
     /// the prior — still provable — boundary is kept.
-    pub(crate) fn shift_schedule<R: RngCore + CryptoRng>(&mut self, delta: u32, rng: &mut R) {
+    pub(crate) fn shift_schedule<R: Rng + CryptoRng>(&mut self, delta: u32, rng: &mut R) {
         let interval = self.anchor_bucket_interval;
         for tx in &mut self.transactions {
             match tx.state {

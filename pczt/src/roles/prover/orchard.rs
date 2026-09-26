@@ -1,5 +1,5 @@
 use orchard::circuit::ProvingKey;
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 
 use crate::{Pczt, common::AnchorRequirement};
 
@@ -26,7 +26,7 @@ impl super::Prover {
 
         parsed
             .bundle
-            .create_proof(pk, OsRng)
+            .create_proof(pk, UnwrapErr(SysRng))
             .map_err(OrchardError::Prover)?;
 
         Ok(Self {
@@ -58,7 +58,7 @@ impl super::Prover {
 
         parsed
             .bundle
-            .create_proof(pk, OsRng)
+            .create_proof(pk, UnwrapErr(SysRng))
             .map_err(IronwoodError::Prover)?;
 
         Ok(Self {

@@ -1,5 +1,5 @@
 use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey};
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use zcash_protocol::value::ZatBalance;
 
 pub(super) fn verify_bundle(
@@ -29,7 +29,7 @@ fn verify_bundle_with_key(
         .add_bundle(bundle, sighash)
         .map_err(|_| OrchardError::InvalidProof)?;
 
-    if validator.validate(OsRng) {
+    if validator.validate(UnwrapErr(SysRng)) {
         Ok(())
     } else {
         Err(OrchardError::InvalidProof)

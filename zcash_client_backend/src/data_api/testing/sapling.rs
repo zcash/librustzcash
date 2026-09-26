@@ -53,7 +53,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
     }
 
     fn sk(seed: &[u8]) -> Self::Sk {
-        ExtendedSpendingKey::master(seed)
+        ExtendedSpendingKey::master(seed).expect("the derivation path yields a valid key")
     }
 
     fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk {
@@ -214,7 +214,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 // Assume all non-dummy spent notes are from the same account.
                 for index in non_dummy_spends {
                     updater.update_spend_with(index, |mut spend_updater| {
-                        spend_updater.set_proof_generation_key(extsk.expsk.proof_generation_key())
+                        spend_updater.set_proof_generation_key(extsk.expsk().proof_generation_key())
                     })?;
                 }
 
@@ -232,7 +232,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
 
         // Figuring out which one is for us is hard. Let's just try signing all of them!
         for index in 0.. {
-            match signer.sign_sapling(index, &extsk.expsk.ask) {
+            match signer.sign_sapling(index, extsk.expsk().ask()) {
                 // Loop termination.
                 Err(pczt::roles::signer::Error::InvalidIndex) => break,
                 // Ignore any errors due to using the wrong key.

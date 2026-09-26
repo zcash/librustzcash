@@ -212,7 +212,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO).expect("the derivation path yields a valid key");
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
 /// [`ExtendedSpendingKey`]: sapling::zip32::ExtendedSpendingKey
@@ -245,7 +245,7 @@ pub fn decode_extended_spending_key(
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO).expect("the derivation path yields a valid key");
 /// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
@@ -506,7 +506,8 @@ mod tests_sapling {
 
     #[test]
     fn extended_spending_key() {
-        let extsk = ExtendedSpendingKey::master(&[0; 32][..]);
+        let extsk = ExtendedSpendingKey::master(&[0; 32][..])
+            .expect("the derivation path yields a valid key");
 
         let encoded_main = "secret-extended-key-main1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qysqws3xh6qmha7gna72fs2n4clnc9zgyd22s658f65pex4exe56qjk5pqj9vfdq7dfdhjc2rs9jdwq0zl99uwycyrxzp86705rk687spn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs87qvlj";
         let encoded_test = "secret-extended-key-test1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qysqws3xh6qmha7gna72fs2n4clnc9zgyd22s658f65pex4exe56qjk5pqj9vfdq7dfdhjc2rs9jdwq0zl99uwycyrxzp86705rk687spn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsvzyw8j";
@@ -547,7 +548,9 @@ mod tests_sapling {
     #[test]
     #[allow(deprecated)]
     fn extended_full_viewing_key() {
-        let extfvk = ExtendedSpendingKey::master(&[0; 32][..]).to_extended_full_viewing_key();
+        let extfvk = ExtendedSpendingKey::master(&[0; 32][..])
+            .expect("the derivation path yields a valid key")
+            .to_extended_full_viewing_key();
 
         let encoded_main = "zxviews1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsxmansf";
         let encoded_test = "zxviewtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs8evfkz";

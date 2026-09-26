@@ -19,7 +19,7 @@
 
 use alloc::vec::Vec;
 
-use rand_core::RngCore;
+use rand_core::Rng;
 
 use zcash_protocol::value::COIN;
 
@@ -86,7 +86,7 @@ impl WalletShape {
 /// magnitudes are not swamped by the large ones the way a uniform draw would swamp them).
 fn log_uniform<R>(rng: &mut R, min: u64, max: u64) -> u64
 where
-    R: RngCore,
+    R: Rng,
 {
     debug_assert!(0 < min && min <= max);
     // Work in the log domain over a fixed-point fraction of the span, so no float RNG is needed.
@@ -108,7 +108,7 @@ where
 /// note exceeds [`MAX_GENERATED_NOTE`].
 pub fn generate_notes<R>(shape: WalletShape, note_count: usize, rng: &mut R) -> Vec<u64>
 where
-    R: RngCore,
+    R: Rng,
 {
     // The floor on any generated note: well below the minimum denomination (so sub-quantum notes are
     // genuinely sub-quantum) but comfortably above a transaction fee, so no note is unspendable

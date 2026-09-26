@@ -66,7 +66,7 @@ use bip0039::{
     ChineseSimplified, ChineseTraditional, Czech, English, French, Italian, Japanese, Korean,
     Mnemonic, Portuguese, Spanish,
 };
-use rand::RngCore;
+use rand::Rng;
 use secrecy::{ExposeSecret, SecretVec};
 use zcash_client_backend::{
     data_api::{
@@ -888,7 +888,7 @@ where
     C: std::borrow::BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters,
     CL: Clock,
-    R: RngCore,
+    R: Rng,
     S: SecretSink,
 {
     let params = wdb.params().clone();

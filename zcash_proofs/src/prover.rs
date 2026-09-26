@@ -1,7 +1,7 @@
 //! Abstractions over the proving system and parameters for ease of use.
 
-use bellman::groth16::Proof;
 use bls12_381::Bls12;
+use groth16::Proof;
 use std::path::Path;
 
 use sapling::{
@@ -165,7 +165,7 @@ impl SpendProver for LocalTxProver {
         )
     }
 
-    fn create_proof<R: rand_core::RngCore>(
+    fn create_proof<R: rand_core::Rng>(
         &self,
         circuit: sapling::circuit::Spend,
         rng: &mut R,
@@ -195,7 +195,7 @@ impl OutputProver for LocalTxProver {
         OutputParameters::prepare_circuit(esk, payment_address, rcm, value, rcv)
     }
 
-    fn create_proof<R: rand_core::RngCore>(
+    fn create_proof<R: rand_core::Rng>(
         &self,
         circuit: sapling::circuit::Output,
         rng: &mut R,

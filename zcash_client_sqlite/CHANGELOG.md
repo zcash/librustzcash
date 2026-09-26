@@ -30,6 +30,10 @@ workspace.
   query naming it failed with "no such column".
 
 ### Changed
+- Migrated to `group 0.14`, `jubjub 0.11`, and `rand_core 0.10`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
+- The `R` parameter of `WalletDb` must now implement `rand_core::Rng` in place
+  of `rand_core::RngCore` wherever it previously required the latter.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
   `util::testing::FixedClock`) are now re-exports of the same-named types in
   `zcash_client_backend::util`.
