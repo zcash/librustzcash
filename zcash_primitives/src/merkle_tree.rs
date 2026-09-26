@@ -240,13 +240,16 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 ) -> io::Result<MerklePath<Node, DEPTH>> {
     // Skip the first byte, which should be DEPTH to signify the length of
     // the following vector of Pedersen hashes.
-    if witness[0] != DEPTH {
+    let (&depth, rest) = witness
+        .split_first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "witness is empty"))?;
+    if depth != DEPTH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "depth is not as expected",
         ));
     }
-    witness = &witness[1..];
+    witness = rest;
 
     // Begin to construct the authentication path
     let (chunks, remainder) = witness.as_chunks::<33>();
