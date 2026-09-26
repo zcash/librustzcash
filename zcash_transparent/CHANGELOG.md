@@ -55,6 +55,11 @@ workspace.
     - `DisallowedSighashType`
     - `MismatchedSighashType`
 
+### Fixed
+- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
+  is not less than its end now yields no indices. It previously yielded the
+  start index.
+
 ## [0.10.0] - 2026-07-23
 
 ### Changed

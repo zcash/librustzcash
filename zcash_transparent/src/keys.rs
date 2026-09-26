@@ -217,7 +217,7 @@ impl IntoIterator for NonHardenedChildRange {
 
     fn into_iter(self) -> Self::IntoIter {
         NonHardenedChildIter {
-            next: Some(self.0.start),
+            next: (self.0.start < self.0.end).then_some(self.0.start),
             end: self.0.end,
         }
     }
