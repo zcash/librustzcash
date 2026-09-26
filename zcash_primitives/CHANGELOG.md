@@ -19,6 +19,10 @@ workspace.
 - `BranchId::Nu7` is available without a custom compiler configuration, with
   consensus branch ID `0x77190AD9`.
 
+### Fixed
+- `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
+  for an empty slice instead of panicking.
+
 ## [0.30.1] - 2026-08-18
 
 ### Added
