@@ -6298,8 +6298,9 @@ mod tests {
 
     use super::{
         KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday, chain_tip_height,
-        flag_previously_received_change, get_transaction, min_shared_checkpoint_height, parse_tx,
-        put_zip318_classification, queue_tx_retrieval, select_truncation_height,
+        flag_previously_received_change, get_transaction, get_txs_spending_transparent_outputs_of,
+        min_shared_checkpoint_height, parse_tx, put_zip318_classification, queue_tx_retrieval,
+        select_truncation_height,
     };
 
     use incrementalmerkletree::frontier::Frontier;
@@ -6846,6 +6847,87 @@ mod tests {
             .expect("transaction is present");
         assert_eq!(height, chain_tip);
         assert_eq!(tx.expiry_height(), BlockHeight::from(0));
+    }
+
+    #[test]
+    fn get_txs_spending_transparent_outputs_of_ignores_spends_of_other_txs() {
+        const TARGET_TXID_BYTES: [u8; 32] = [1; 32];
+        const OTHER_TXID_BYTES: [u8; 32] = [2; 32];
+        const SPENDING_TXID_BYTES: [u8; 32] = [3; 32];
+        const OUTPUT_VALUE: Zatoshis = Zatoshis::const_from_u64(10_000);
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let conn = st.wallet().conn();
+        let mined_height = u32::from(st.sapling_activation_height());
+
+        let (account_id, address_id, address): (i64, i64, String) = conn
+            .query_row(
+                "SELECT account_id, id, address FROM addresses LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        // Stores a mined transaction with no known fee.
+        let insert_tx = |txid: [u8; 32]| {
+            conn.execute(
+                "INSERT INTO transactions (txid, raw, mined_height, min_observed_height)
+                 VALUES (:txid, :raw, :height, :height)",
+                named_params![
+                    ":txid": &txid[..],
+                    ":raw": raw_v1_zero_expiry_tx(),
+                    ":height": mined_height,
+                ],
+            )
+            .unwrap();
+            TxRef(conn.last_insert_rowid())
+        };
+        // Stores a transparent output of `tx_ref` received by the test account.
+        let insert_output = |tx_ref: TxRef| {
+            conn.execute(
+                "INSERT INTO transparent_received_outputs
+                     (transaction_id, output_index, account_id, address, script, value_zat,
+                      address_id)
+                 VALUES (:tx, 0, :account_id, :address, X'', :value, :address_id)",
+                named_params![
+                    ":tx": tx_ref.0,
+                    ":account_id": account_id,
+                    ":address": &address,
+                    ":value": u64::from(OUTPUT_VALUE),
+                    ":address_id": address_id,
+                ],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+
+        let target_tx = insert_tx(TARGET_TXID_BYTES);
+        let other_tx = insert_tx(OTHER_TXID_BYTES);
+        let spending_tx = insert_tx(SPENDING_TXID_BYTES);
+        insert_output(target_tx);
+        let other_output = insert_output(other_tx);
+
+        // `spending_tx` spends the output of `other_tx`, and nothing from `target_tx`.
+        conn.execute(
+            "INSERT INTO transparent_received_output_spends
+                 (transparent_received_output_id, transaction_id)
+             VALUES (:output_id, :tx)",
+            named_params![":output_id": other_output, ":tx": spending_tx.0],
+        )
+        .unwrap();
+
+        let spenders_of = |tx_ref: TxRef| {
+            get_txs_spending_transparent_outputs_of(conn, st.network(), tx_ref)
+                .unwrap()
+                .into_iter()
+                .map(|(spender, _)| spender)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(spenders_of(other_tx), vec![spending_tx]);
+        assert_eq!(spenders_of(target_tx), vec![]);
     }
 
     #[test]
