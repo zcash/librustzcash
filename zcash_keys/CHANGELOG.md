@@ -35,6 +35,7 @@ workspace.
   - Address expiry height and expiry time metadata fields.
   - Expiry metadata is propagated from UFVK → UIVK → UA per spec.
   - Automatic R2 revision selection when metadata items are present.
+- `zcash_keys::keys::transparent::gap_limits::ReconcileOutcome`
 
 ### Changed
 - `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
@@ -85,6 +86,11 @@ workspace.
   address, instead of returning a bare transparent address for that error.
 - `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
   renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
+- `zcash_keys::keys::transparent::gap_limits::AddressStore` has a new required
+  method, `reconcile_stored_addresses`, which has no default implementation.
+- `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses` derives
+  successive windows of addresses until a window reconciles without moving the
+  account's gap, rather than deriving a single window.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer

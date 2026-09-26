@@ -630,6 +630,32 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         known_unspent: bool,
     ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error>;
 
+    /// Records the transparent addresses that the given transaction's transparent data names,
+    /// including addresses the wallet does not control.
+    ///
+    /// The wallet's recognition of a transaction is the join of its stored transaction data with
+    /// its address book. Checking a transaction against the book at the moment the transaction
+    /// is stored maintains only one side of that join; this method maintains the other, by
+    /// keeping the involvement durable so that an address added later can be checked against it.
+    ///
+    /// `tx_ref` must name a transaction that the wallet has determined to involve it: the
+    /// observations of a transaction with no wallet involvement are unbounded in number and
+    /// carry no information the wallet can act on.
+    ///
+    /// Each observation is keyed by `tx_ref` together with the direction and index reported by
+    /// [`TransparentAddressObservation`], and an implementation MUST record it as an idempotent
+    /// upsert on that key. A transaction may be observed repeatedly and at differing fidelity —
+    /// compact block data yields output observations only, full transaction data yields both
+    /// directions — so any order of calls must converge to the same recorded state.
+    ///
+    /// [`TransparentAddressObservation`]: crate::wallet::TransparentAddressObservation
+    #[cfg(feature = "transparent-inputs")]
+    fn put_transparent_address_observations(
+        &mut self,
+        tx_ref: Self::TxRef,
+        observations: &[crate::wallet::TransparentAddressObservation],
+    ) -> Result<(), Self::Error>;
+
     /// Updates the backing store to indicate that the UTXO referred to by `outpoint` is spent
     /// in the transaction referenced by `spent_in_tx`.
     #[cfg(feature = "transparent-inputs")]
