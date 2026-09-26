@@ -432,6 +432,26 @@ mod tests {
     }
 
     #[test]
+    fn v5_requires_sapling_and_orchard_anchors() {
+        for (sapling_anchor, orchard_anchor) in
+            [(None, Some([0; 32])), (Some([0; 32]), None), (None, None)]
+        {
+            assert!(matches!(
+                Creator::new(
+                    BranchId::Nu6_2.into(),
+                    10_000_000,
+                    133,
+                    sapling_anchor,
+                    orchard_anchor
+                )
+                .unwrap()
+                .build(),
+                Err(Error::AnchorRequiredForV5)
+            ));
+        }
+    }
+
+    #[test]
     fn ironwood_anchor_requires_v6() {
         assert!(matches!(
             Creator::new(
