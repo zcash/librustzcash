@@ -776,6 +776,14 @@ pub enum ScanError {
         at_height: BlockHeight,
     },
 
+    /// The index of a compact transaction within its block does not fit in a
+    /// [`TxIndex`](zcash_protocol::consensus::TxIndex).
+    TxIndexInvalid {
+        at_height: BlockHeight,
+        txid: TxId,
+        index: u64,
+    },
+
     /// The prevout reference of a compact transparent input could not be decoded.
     ///
     /// Scanning fails rather than skipping such an input: without its prevout the wallet cannot
@@ -800,6 +808,7 @@ impl ScanError {
             TreeSizeUnknown { .. } => false,
             TreeSizeInvalid { .. } => false,
             TreeSizeOverflow { .. } => false,
+            TxIndexInvalid { .. } => false,
             #[cfg(feature = "transparent-inputs")]
             TransparentPrevoutInvalid { .. } => false,
         }
@@ -815,6 +824,7 @@ impl ScanError {
             TreeSizeUnknown { at_height, .. } => *at_height,
             TreeSizeInvalid { at_height, .. } => *at_height,
             TreeSizeOverflow { at_height, .. } => *at_height,
+            TxIndexInvalid { at_height, .. } => *at_height,
             #[cfg(feature = "transparent-inputs")]
             TransparentPrevoutInvalid { at_height, .. } => *at_height,
         }
@@ -882,6 +892,16 @@ impl fmt::Display for ScanError {
                 write!(
                     f,
                     "The {protocol:?} note commitment tree size at height {at_height} would exceed the `u32` range."
+                )
+            }
+            TxIndexInvalid {
+                at_height,
+                txid,
+                index,
+            } => {
+                write!(
+                    f,
+                    "Transaction {txid} at height {at_height} has an invalid index {index} within its block."
                 )
             }
             #[cfg(feature = "transparent-inputs")]

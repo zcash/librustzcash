@@ -27,6 +27,7 @@ workspace.
 - `zcash_client_backend::scanning::SpendIdentifiers`
 - `zcash_client_backend::scanning::ScanError::TransparentPrevoutInvalid` (behind
   `transparent-inputs`)
+- `zcash_client_backend::scanning::ScanError::TxIndexInvalid`
 - `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
   `TxOut::to_txout` (behind `transparent-inputs`)
 
@@ -116,6 +117,10 @@ workspace.
   holds that pool's key. Cross-pool sends, shielding transactions, and outputs
   encrypted under an internal-scope OVK now recover their recipient, value and
   memo as `zcash_client_backend::TransferType::Outgoing`.
+- `zcash_client_backend::scanning::scan_block` now returns
+  `ScanError::TxIndexInvalid` for a compact transaction whose index does not fit
+  in a `TxIndex`, and `ScanError::TreeSizeOverflow` when a block's outputs would
+  take a note commitment tree size beyond the `u32` range, instead of panicking.
 
 ## [0.24.0] - 2026-08-18
 
