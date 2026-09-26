@@ -905,10 +905,7 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        super::{ScanBlockError, ScanError},
-        crate::proto::compact_formats::{
-            ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
-        },
+        crate::proto::compact_formats::{ChainMetadata, CompactOrchardAction},
         orchard::{
             keys::Scope,
             note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
@@ -922,7 +919,6 @@ mod tests {
         proptest::prelude::*,
         rand_core::{OsRng, RngCore},
         zcash_note_encryption::Domain,
-        zcash_protocol::ShieldedPool,
     };
 
     use incrementalmerkletree::{Marking, Position, Retention};
@@ -930,14 +926,16 @@ mod tests {
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
+        ShieldedPool,
         consensus::{BlockHeight, Network},
         value::Zatoshis,
     };
     use zip32::AccountId;
 
-    use super::{BatchRunners, scan_block_with_runners};
+    use super::{BatchRunners, ScanBlockError, ScanError, scan_block_with_runners};
     use crate::{
         data_api::BlockMetadata,
+        proto::compact_formats::{CompactBlock, CompactSaplingOutput, CompactTx},
         scanning::{
             Nullifiers, ScanningKeys, SpendIdentifiers, scan_block, testing::fake_compact_block,
         },
@@ -1231,6 +1229,92 @@ mod tests {
             ),
             "a malformed Ironwood spend nullifier must produce a handleable ScanError",
         );
+    }
+
+    #[test]
+    fn out_of_range_compact_tx_index_is_a_scan_error() {
+        let network = Network::TestNetwork;
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+
+        // The index of a compact transaction is reported by the server, and may not fit in a
+        // `TxIndex`.
+        let ctx = CompactTx {
+            index: u64::from(u16::MAX) + 1,
+            txid: vec![0u8; 32],
+            ..Default::default()
+        };
+        let cb = CompactBlock {
+            hash: vec![0u8; 32],
+            prev_hash: vec![0u8; 32],
+            height: 1,
+            vtx: vec![ctx],
+            ..Default::default()
+        };
+
+        let result = scan_block_with_runners::<_, _, _, (), (), (), Infallible>(
+            &network,
+            cb,
+            &scanning_keys,
+            &SpendIdentifiers::empty(),
+            None,
+            None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
+        );
+        assert!(matches!(result, Err(ScanBlockError::Scan(_))));
+    }
+
+    #[test]
+    fn compact_block_tree_size_overflow_is_a_scan_error() {
+        let network = Network::TestNetwork;
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+
+        let ctx = CompactTx {
+            txid: vec![0u8; 32],
+            outputs: vec![CompactSaplingOutput {
+                cmu: vec![0u8; 32],
+                ephemeral_key: vec![0u8; 32],
+                ciphertext: vec![0u8; 52],
+            }],
+            ..Default::default()
+        };
+        let cb = CompactBlock {
+            hash: vec![1u8; 32],
+            prev_hash: vec![0u8; 32],
+            height: 1,
+            vtx: vec![ctx],
+            ..Default::default()
+        };
+
+        // The prior Sapling tree size comes from chain metadata reported by the server, so
+        // adding this block's output to it can exceed the `u32` range.
+        let prior_block_metadata = BlockMetadata::from_parts(
+            BlockHeight::from(0),
+            BlockHash([0u8; 32]),
+            Some(u32::MAX),
+            #[cfg(feature = "orchard")]
+            Some(0),
+            #[cfg(feature = "orchard")]
+            Some(0),
+        );
+
+        let result = scan_block_with_runners::<_, _, _, (), (), (), Infallible>(
+            &network,
+            cb,
+            &scanning_keys,
+            &SpendIdentifiers::empty(),
+            Some(&prior_block_metadata),
+            None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
+        );
+        assert!(matches!(
+            result,
+            Err(ScanBlockError::Scan(ScanError::TreeSizeOverflow {
+                protocol: ShieldedPool::Sapling,
+                ..
+            }))
+        ));
     }
 
     #[test]
