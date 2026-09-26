@@ -5157,14 +5157,13 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
         "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
          -- find transactions that spend transparent outputs of the decrypted tx
-         LEFT OUTER JOIN transparent_received_output_spends ts
+         JOIN transparent_received_output_spends ts
             ON ts.transaction_id = t.id_tx
-         LEFT OUTER JOIN transparent_received_outputs tro
-            ON tro.transaction_id = :transaction_id
-            AND tro.id = ts.transparent_received_output_id
-         WHERE t.fee IS NULL
-         AND t.raw IS NOT NULL
-         AND ts.transaction_id IS NOT NULL",
+         JOIN transparent_received_outputs tro
+            ON tro.id = ts.transparent_received_output_id
+         WHERE tro.transaction_id = :transaction_id
+         AND t.fee IS NULL
+         AND t.raw IS NOT NULL",
     )?;
 
     let chain_tip = chain_tip_height(conn)?;
