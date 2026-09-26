@@ -44,6 +44,9 @@ workspace.
   resolved when that output is discovered.
 
 ### Fixed
+- `accounts.p2sh_ivk_item_cache` is now populated. The column and its unique index
+  were added with the rest of the IVK item cache but never written, so two imports of
+  the same P2SH viewing key item were not detected as the same account.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
   accounts_new.zcashd_legacy_address_index`. In such a database every account
