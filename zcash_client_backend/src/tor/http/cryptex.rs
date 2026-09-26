@@ -2,7 +2,7 @@
 
 use futures_util::{future::join_all, join};
 use hyper::StatusCode;
-use rand::seq::IteratorRandom;
+use rand::{Rng, seq::IteratorRandom};
 use rust_decimal::Decimal;
 use tracing::{error, trace};
 
@@ -172,11 +172,14 @@ impl ExchangesBuilder {
 impl Client {
     /// Fetches the latest USD/ZEC exchange rate, derived from the given exchanges.
     ///
+    /// `rng` chooses which rate to drop when an odd number of rates is needed.
+    ///
     /// Returns:
     /// - `Ok(rate)` if at least one exchange request succeeds.
     /// - `Err(_)` if none of the exchange queries succeed.
     pub async fn get_latest_zec_to_usd_rate(
         &self,
+        rng: &mut impl Rng,
         exchanges: &Exchanges,
     ) -> Result<Decimal, Error> {
         self.ensure_bootstrapped().await?;
@@ -214,8 +217,8 @@ impl Client {
                 .next()
                 .expect("At least one request failed"));
         }
-        let evict_random = |s: &mut Vec<Decimal>| {
-            if let Some(index) = (0..s.len()).choose(&mut rand::rng()) {
+        let mut evict_random = |s: &mut Vec<Decimal>| {
+            if let Some(index) = (0..s.len()).choose(&mut *rng) {
                 s.remove(index);
             }
         };

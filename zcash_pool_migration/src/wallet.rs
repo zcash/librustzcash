@@ -40,6 +40,7 @@ use ::orchard::keys::FullViewingKey;
 use ::orchard::note::{Note as OrchardNote, Nullifier};
 use ::orchard::tree::MerklePath;
 use incrementalmerkletree::Position;
+use rand_core::{CryptoRng, Rng};
 use shardtree::error::ShardTreeError;
 
 use ::pczt::roles::prover::Prover;
@@ -597,13 +598,17 @@ type ProverError<W> = WalletProveError<
 /// plus an Ironwood output) and a preparation transaction (one or more spends, no Ironwood). The
 /// anchor checkpoint the witnesses are taken against must still exist in the tree at proving time
 /// (the wallet backend must retain that checkpoint until the migration's transfers are proven).
-pub struct WalletMigrationProver<'a, W>
+///
+/// The prover owns the RNG that provides the randomness for its proofs, so proving is a single
+/// capability that needs no separate source of randomness.
+pub struct WalletMigrationProver<'a, W, R>
 where
     W: InputSource,
 {
     wallet: &'a mut W,
     account: <W as InputSource>::AccountId,
     fvk: FullViewingKey,
+    rng: R,
 }
 
 /// One deferred-witness Orchard spend of a migration transaction, resolved against the account's
@@ -657,15 +662,17 @@ fn migration_lock_owner(spends: &[ResolvedSpend]) -> MigrationLockOwner {
     MigrationLockOwner::from_bytes(bytes)
 }
 
-impl<'a, W> WalletMigrationProver<'a, W>
+impl<'a, W, R> WalletMigrationProver<'a, W, R>
 where
     W: InputSource,
 {
-    /// Wrap a wallet (borrowed mutably for commitment-tree access), the account whose notes the
-    /// migration spends, and that account's Orchard full viewing key (used to recompute each spent
-    /// note's nullifier when locating it among the account's unspent notes).
+    /// Wrap a wallet (borrowed mutably for commitment-tree access), the RNG that provides the
+    /// randomness for the proofs, the account whose notes the migration spends, and that account's
+    /// Orchard full viewing key (used to recompute each spent note's nullifier when locating it
+    /// among the account's unspent notes).
     pub fn new(
         wallet: &'a mut W,
+        rng: R,
         account: <W as InputSource>::AccountId,
         fvk: FullViewingKey,
     ) -> Self {
@@ -673,14 +680,16 @@ where
             wallet,
             account,
             fvk,
+            rng,
         }
     }
 }
 
-impl<'a, W> WalletMigrationProver<'a, W>
+impl<'a, W, R> WalletMigrationProver<'a, W, R>
 where
     W: WalletCommitmentTrees + InputSource + WalletRead + OutputLockStore,
     <W as InputSource>::AccountId: Copy,
+    R: Rng + CryptoRng,
 {
     /// Prove one migration transaction's Orchard bundle (and its Ironwood bundle, when it has one)
     /// against `anchor_height`: install the source anchor and every deferred spend's witness through the
@@ -837,11 +846,11 @@ where
         // post-NU6.3 Orchard proving key.
         let pk = cached_orchard_proving_key(OrchardCircuitVersion::PostNu6_3);
         let orchard_proven = Prover::new(updated)
-            .create_orchard_proof(pk)
+            .create_orchard_proof(&mut self.rng, pk)
             .map_err(|e| WalletProveError::Prove(alloc::format!("orchard proof: {e:?}")))?;
         let proven = if has_ironwood {
             orchard_proven
-                .create_ironwood_proof(pk)
+                .create_ironwood_proof(&mut self.rng, pk)
                 .map_err(|e| WalletProveError::Prove(alloc::format!("ironwood proof: {e:?}")))?
         } else {
             orchard_proven
@@ -898,10 +907,11 @@ where
     }
 }
 
-impl<'a, W> MigrationProver for WalletMigrationProver<'a, W>
+impl<'a, W, R> MigrationProver for WalletMigrationProver<'a, W, R>
 where
     W: WalletCommitmentTrees + InputSource + WalletRead + OutputLockStore,
     <W as InputSource>::AccountId: Copy,
+    R: Rng + CryptoRng,
 {
     type Error = ProverError<W>;
 
@@ -967,7 +977,6 @@ where
 mod tests {
     use super::*;
 
-    use rand_core::{CryptoRng, Rng};
     use zcash_client_backend::data_api::testing::MockWalletDb;
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::{Network, Parameters};

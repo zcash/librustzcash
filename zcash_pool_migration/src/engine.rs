@@ -3609,9 +3609,12 @@ where
     let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(RebuildError::TxId)?;
     let (bytes, new_state, unsigned) = match signing {
         Signing::InProcess(sk) => {
-            let signed =
-                crate::build::sign_pczt(pczt, &orchard::keys::SpendAuthorizingKey::from(sk))
-                    .map_err(RebuildError::Build)?;
+            let signed = crate::build::sign_pczt(
+                &mut *rng,
+                pczt,
+                &orchard::keys::SpendAuthorizingKey::from(sk),
+            )
+            .map_err(RebuildError::Build)?;
             let bytes = signed.serialize().map_err(RebuildError::Serialize)?;
             (bytes, MigrationTxState::Signed, None)
         }
@@ -3781,7 +3784,8 @@ impl MigrationPlan {
 /// Takes no backend: signing an already-built PCZT needs nothing from the wallet but the key, and
 /// the key arrives with the request.
 #[cfg(feature = "orchard")]
-fn finish_built_pczt<E>(
+fn finish_built_pczt<E, R: Rng + rand_core::CryptoRng>(
+    rng: &mut R,
     pczt: ::pczt::Pczt,
     signing: Signing<'_>,
 ) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<E>> {
@@ -3793,7 +3797,7 @@ fn finish_built_pczt<E>(
     match signing {
         Signing::InProcess(sk) => {
             let signed =
-                crate::build::sign_pczt(pczt, &orchard::keys::SpendAuthorizingKey::from(sk))
+                crate::build::sign_pczt(rng, pczt, &orchard::keys::SpendAuthorizingKey::from(sk))
                     .map_err(CommitError::Build)?;
             let bytes = signed.serialize().map_err(CommitError::Serialize)?;
             Ok((bytes, txid, MigrationTxState::Signed))
@@ -4298,7 +4302,7 @@ where
                 .into_iter()
                 .map(|(_, nf)| nf.to_bytes())
                 .collect();
-            let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
+            let (bytes, txid, tx_state) = finish_built_pczt(&mut *self.rng, pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
@@ -4484,7 +4488,7 @@ where
                 .into_iter()
                 .map(|(_, nf)| nf.to_bytes())
                 .collect();
-            let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
+            let (bytes, txid, tx_state) = finish_built_pczt(&mut *self.rng, pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
@@ -6349,6 +6353,7 @@ mod commit_tests {
         for u in unsigned {
             let (id, bytes) = u.into_parts();
             let signed = sign_pczt(
+                &mut rng,
                 pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses"),
                 &backend.ask,
             )
@@ -6406,7 +6411,7 @@ mod commit_tests {
         );
 
         // The externally produced signature completes it back to Signed.
-        let signed = sign_pczt(parsed, &backend.ask).expect("the external signer signs");
+        let signed = sign_pczt(&mut rng, parsed, &backend.ask).expect("the external signer signs");
         assert!(state.apply_signature(old.id, signed.serialize().expect("serializes")));
         assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
     }
@@ -7010,6 +7015,7 @@ mod commit_tests {
             for unsigned_tx in session {
                 let (id, bytes) = unsigned_tx.into_parts();
                 let signed = sign_pczt(
+                    &mut rng,
                     pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses"),
                     &ask,
                 )
@@ -7964,7 +7970,7 @@ mod commit_tests {
                 &mut prover,
                 &mut state,
                 prep_id,
-                BlockHeight::from_u32(TARGET_HEIGHT)
+                BlockHeight::from_u32(TARGET_HEIGHT),
             ),
             Err(ProveError::Prover(MockProveError))
         ));

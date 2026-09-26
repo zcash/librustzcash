@@ -8,6 +8,12 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- `zcash_pool_migration::build::sign_pczt` takes an additional `rng` first
+  argument that implements `rand_core::{Rng, CryptoRng}`.
+- `zcash_pool_migration::wallet::WalletMigrationProver` has an additional type
+  parameter `R` for the RNG it uses to create proofs, and
+  `WalletMigrationProver::new` takes that RNG as an additional `rng` argument,
+  following `wallet`. It implements `MigrationProver` when `R` implements `rand_core::{Rng, CryptoRng}`.
 - Migrated to `rand_core 0.10`, and to the `orchard` release that uses it.
 - Public APIs that took an `RngCore` now require a `rand_core::Rng` in its
   place.

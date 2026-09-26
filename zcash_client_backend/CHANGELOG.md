@@ -31,6 +31,8 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 
 ### Changed
+- `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
+  additional `rng: &mut impl Rng` first argument.
 - Migrated to `bls12_381 0.9`, `group 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
   `rand_core 0.10`, and `zcash_note_encryption 0.5`,
   and to the `orchard` and `sapling-crypto` releases that use them.
@@ -39,7 +41,10 @@ workspace.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
-  transaction-creation timestamps and to enforce recipient address expiry.
+  transaction-creation timestamps and to enforce recipient address expiry, and an
+  `rng: &mut impl CryptoRng` argument, which supplies the randomness for
+  constructing, proving, and signing transactions in place of the operating
+  system's RNG.
 - `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
   create_pczt_from_proposal}` now enforce the ZIP 316 Revision 2 address
   expiration rules for every payment recipient: a payment to an address that is

@@ -11,6 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- `zcash_proofs::sprout::create_proof` takes an additional `rng` first argument
+  that implements `rand_core::{Rng, CryptoRng}`, in place of drawing randomness from
+  the operating system.
 - Migrated to `bellman 0.15`, `groth16 0.2`, `bls12_381 0.9`, `group 0.14`,
   `jubjub 0.11`, and `rand_core 0.10`, and to the `sapling-crypto` release that
   uses them.

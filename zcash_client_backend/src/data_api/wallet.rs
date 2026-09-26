@@ -35,7 +35,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 //! [`propose_transfer`]: crate::data_api::wallet::propose_transfer
 
 use nonempty::NonEmpty;
-use rand::{rand_core::UnwrapErr, rngs::SysRng};
+use rand_core::CryptoRng;
 use std::{
     num::NonZeroU32,
     ops::{Add, Sub},
@@ -1415,6 +1415,8 @@ impl SpendingKeys {
 /// Returns the database identifier for each newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
 ///
+/// `rng` supplies the randomness used to construct, prove, and sign each transaction.
+///
 /// When evaluating multi-step proposals, only transparent outputs of any given step may be spent
 /// in later steps; attempting to spend a shielded note (including change) output by an earlier
 /// step is not supported, because the ultimate positions of those notes in the global note
@@ -1434,6 +1436,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     wallet_db: &mut DbT,
     params: &ParamsT,
     clock: &impl Clock,
+    rng: &mut impl CryptoRng,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     spending_keys: &SpendingKeys,
@@ -1484,6 +1487,7 @@ where
         let step_result: StepResult<_> = create_proposed_transaction(
             wallet_db,
             params,
+            &mut *rng,
             spend_prover,
             output_prover,
             spending_keys,
@@ -2636,6 +2640,7 @@ where
 fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
+    rng: &mut impl CryptoRng,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     spending_keys: &SpendingKeys,
@@ -2734,7 +2739,7 @@ where
         &transparent_signing_set,
         sapling_extsks,
         orchard_saks,
-        UnwrapErr(SysRng),
+        rng,
         spend_prover,
         output_prover,
         fee_rule,
@@ -2948,6 +2953,8 @@ where
 /// The Ironwood bundle's padding is not a caller's to choose: it is derived from the
 /// proposal by [`Step::ironwood_bundle_padding`](crate::proposal::Step::ironwood_bundle_padding),
 /// so that it matches the action count the fee was computed from.
+///
+/// `rng` supplies the randomness used to construct the PCZT and to sign its dummy spends.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
@@ -2955,6 +2962,7 @@ pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT,
     wallet_db: &mut DbT,
     params: &ParamsT,
     clock: &impl Clock,
+    rng: &mut impl CryptoRng,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
@@ -3025,13 +3033,11 @@ where
     // Build the transaction with the specified fee rule. The caller's expiry override
     // (validated against canonical ZIP 318 crossings) was applied via the builder in
     // `build_proposed_transaction` above, so the PCZT parts already carry it.
-    let build_result = build_state
-        .builder
-        .build_for_pczt(UnwrapErr(SysRng), fee_rule)?;
+    let build_result = build_state.builder.build_for_pczt(&mut *rng, fee_rule)?;
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
 
-    let io_finalized = IoFinalizer::new(created).finalize_io()?;
+    let io_finalized = IoFinalizer::new(created).finalize_io(rng)?;
 
     #[cfg(feature = "orchard")]
     let orchard_outputs = build_state
@@ -3572,10 +3578,14 @@ pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
 /// - `orchard_vk` is optional to allow the caller to control where the Orchard verifying
 ///   key is generated or cached. If `orchard_vk` is `None`, and the PCZT has an Orchard
 ///   bundle, an Orchard verifying key will be generated on the fly.
+///
+/// `rng` supplies the randomness for the binding signatures and for verifying the extracted
+/// transaction.
 #[cfg(feature = "pczt")]
 pub fn extract_and_store_transaction_from_pczt<DbT, N>(
     wallet_db: &mut DbT,
     clock: &impl Clock,
+    rng: &mut impl CryptoRng,
     pczt: pczt::Pczt,
     sapling_vk: Option<(
         &sapling::circuit::SpendVerifyingKey,
@@ -3774,7 +3784,7 @@ where
     if let Some(orchard_vk) = orchard_vk {
         tx_extractor = tx_extractor.with_orchard(orchard_vk);
     }
-    let transaction = tx_extractor.extract()?;
+    let transaction = tx_extractor.extract(rng)?;
     let txid = transaction.txid();
 
     #[allow(clippy::too_many_arguments)]
@@ -4066,6 +4076,7 @@ where
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
+/// * `rng`: The source of randomness used to construct, prove, and sign the transaction.
 /// * `spend_prover`: The [`sapling::SpendProver`] to use in constructing the shielded
 ///   transaction.
 /// * `output_prover`: The [`sapling::OutputProver`] to use in constructing the shielded
@@ -4095,6 +4106,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     clock: &impl Clock,
+    rng: &mut impl CryptoRng,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     input_selector: &InputsT,
@@ -4128,6 +4140,7 @@ where
         wallet_db,
         params,
         clock,
+        rng,
         spend_prover,
         output_prover,
         spending_keys,

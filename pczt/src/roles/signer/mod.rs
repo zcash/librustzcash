@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
-use rand::{rand_core::UnwrapErr, rngs::SysRng};
+use rand_core::{CryptoRng, Rng};
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
 use zcash_primitives::transaction::{
@@ -373,13 +373,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_sapling(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_sapling<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &sapling::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -439,13 +442,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_orchard(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_orchard<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -530,13 +536,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_ironwood(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_ironwood<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_ironwood_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -640,6 +649,7 @@ impl From<crate::ExtractError> for Error {
 mod tests {
     use ff::{Field, PrimeField};
     use pasta_curves::pallas;
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
     use zcash_protocol::consensus::BranchId;
 
     use super::Signer;
@@ -688,7 +698,9 @@ mod tests {
 
         assert!(pczt.ironwood.anchor.is_none());
 
-        let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
         assert!(pczt.ironwood.anchor.is_none());
         assert!(pczt.ironwood.bsk.is_some());
         // The IO Finalizer signs and clears the dummy spending key.
@@ -778,7 +790,9 @@ mod tests {
             .unwrap();
         pczt.ironwood.actions.push(action);
 
-        let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
         let pczt = Signer::new(pczt).unwrap().finish();
 
         assert_eq!(
