@@ -30,6 +30,8 @@ workspace.
   query naming it failed with "no such column".
 
 ### Changed
+- `SqliteClientError` now reports diverged note commitment tree checkpoints using
+  `DivergedCheckpoints`, exposing the affected shielded pool and requested truncation height.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
   `util::testing::FixedClock`) are now re-exports of the same-named types in
   `zcash_client_backend::util`.
