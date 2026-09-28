@@ -477,17 +477,28 @@ mod test {
     fn parse_rejects_hex_address_longer_than_40_digits() {
         // The grammar allows "0x" followed by 40 or more hex digits, but an Ethereum
         // address is exactly 40 of them.
-        let native = "ethereum:0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d35900?value=1";
-        assert!(matches!(
-            TransactionRequest::parse(native).unwrap(),
-            TransactionRequest::Unrecognised(_)
-        ));
+        let recipient = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
+        let token = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 
-        let erc20 = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/transfer?address=0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d35900&uint256=1000000";
-        assert!(matches!(
-            TransactionRequest::parse(erc20).unwrap(),
-            TransactionRequest::Unrecognised(_)
-        ));
+        for extra in 1..=24 {
+            let long_recipient = format!("{recipient}{}", "0".repeat(extra));
+            let long_token = format!("{token}{}", "0".repeat(extra));
+
+            let inputs = [
+                format!("ethereum:{long_recipient}?value=1"),
+                format!("ethereum:{token}/transfer?address={long_recipient}&uint256=1000000"),
+                format!("ethereum:{long_token}/transfer?address={recipient}&uint256=1000000"),
+            ];
+            for input in inputs {
+                assert!(
+                    matches!(
+                        TransactionRequest::parse(&input).unwrap(),
+                        TransactionRequest::Unrecognised(_)
+                    ),
+                    "{input}"
+                );
+            }
+        }
     }
 
     #[test]
