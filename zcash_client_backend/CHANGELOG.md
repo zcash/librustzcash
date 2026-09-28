@@ -29,6 +29,11 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
   `TxOut::to_txout` (behind `transparent-inputs`)
+- `zcash_client_backend::sync::decryptor::Handle::{closed, is_closed}`, the only
+  reliable liveness test for the engine: a request that wins its queue slot
+  concurrently with shutdown is still accepted, and is then never dropped while
+  any `Handle` remains, so neither the queuing methods' `None` nor the returned
+  receiver reports shutdown (behind `sync-decryptor`)
 
 ### Changed
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
