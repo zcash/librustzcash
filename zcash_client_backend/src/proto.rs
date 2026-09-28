@@ -17,7 +17,7 @@ use self::proposal::proposed_input::Value::*;
 use self::proposal::{PriorStepChange, PriorStepOutput, ReceivedOutput};
 
 use sapling::{self, Node, note::ExtractedNoteCommitment};
-use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
+use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,
@@ -180,7 +180,8 @@ impl<Proof> From<&sapling::bundle::OutputDescription<Proof>>
         compact_formats::CompactSaplingOutput {
             cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
-            ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: out.enc_ciphertext()[..sapling::note_encryption::COMPACT_NOTE_SIZE]
+                .to_vec(),
         }
     }
 }
@@ -322,7 +323,9 @@ impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOr
             nullifier: action.nullifier().to_bytes().to_vec(),
             cmx: action.cmx().to_bytes().to_vec(),
             ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
-            ciphertext: action.encrypted_note().enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: action.encrypted_note().enc_ciphertext.0
+                [..orchard::note_encryption::COMPACT_NOTE_SIZE]
+                .to_vec(),
         }
     }
 }

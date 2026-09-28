@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `bellman 0.15`, `groth16 0.2`, `bls12_381 0.9`, `group 0.14`,
+  `jubjub 0.11`, and `rand_core 0.10`, and to the `sapling-crypto` release that
+  uses them.
+- `ZcashParameters::sprout_vk` and `sprout::{create_proof, verify_proof}` now
+  use the Groth16 types of the `groth16` crate in place of `bellman::groth16`.
+
 ## [0.30.0] - 2026-07-23
 
 ### Changed

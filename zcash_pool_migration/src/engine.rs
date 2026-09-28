@@ -57,7 +57,7 @@ use core::{
 use corez::io;
 
 use getset::{CopyGetters, Getters};
-use rand_core::RngCore;
+use rand_core::Rng;
 use zcash_protocol::{
     TxId,
     consensus::BlockHeight,
@@ -1569,7 +1569,7 @@ pub fn plan_migration<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     plan_migration_with(
         &crate::preparation::default_portfolio(),
@@ -1605,7 +1605,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     plan_migration_sized_with(portfolio, RunSizing::Notes(max_notes), params, backend, rng)
 }
@@ -1633,7 +1633,7 @@ pub fn plan_migration_for_signer<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     plan_migration_for_signer_with(
         &crate::preparation::default_portfolio(),
@@ -1662,7 +1662,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     plan_migration_sized_with(portfolio, RunSizing::Signer(capacity), params, backend, rng)
 }
@@ -1711,7 +1711,7 @@ fn plan_run_denominations<Pf, R>(
 ) -> DenominationPlan
 where
     Pf: crate::preparation::Portfolio,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     plan_denominations(
         balance,
@@ -1749,7 +1749,7 @@ fn run_shape_at<Pf, R>(
 ) -> Option<RunShape>
 where
     Pf: crate::preparation::Portfolio,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     let funding = plan_run_denominations(
         portfolio,
@@ -1782,7 +1782,7 @@ fn resolve_max_notes<Pf, R>(
 ) -> NonZeroUsize
 where
     Pf: crate::preparation::Portfolio,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     match sizing {
         RunSizing::Notes(max_notes) => max_notes,
@@ -1815,7 +1815,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     let notes = backend
         .spendable_orchard_note_values()
@@ -2143,7 +2143,7 @@ pub fn estimate_migration_runs<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     estimate_migration_runs_with(
         &crate::preparation::default_portfolio(),
@@ -2175,7 +2175,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     estimate_migration_runs_sized_with(portfolio, RunSizing::Notes(max_notes), params, backend, rng)
 }
@@ -2196,7 +2196,7 @@ pub fn estimate_migration_runs_for_signer<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     estimate_migration_runs_for_signer_with(
         &crate::preparation::default_portfolio(),
@@ -2224,7 +2224,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     estimate_migration_runs_sized_with(portfolio, RunSizing::Signer(capacity), params, backend, rng)
 }
@@ -2243,7 +2243,7 @@ where
     Pf: crate::preparation::Portfolio,
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     let height = backend
         .chain_tip_height()
@@ -2900,7 +2900,7 @@ pub fn prove_transfer<C, P, R>(
 where
     C: zcash_protocol::consensus::Parameters,
     P: MigrationProver,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     let tx = state
         .transactions()
@@ -3358,7 +3358,7 @@ pub fn rebuild_expired_transfer<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess(sk))
         .map(|_| ())
@@ -3388,7 +3388,7 @@ pub fn rebuild_expired_transfer_unsigned<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::External)
         .map(|unsigned| unsigned.expect("the external signing path always returns the unsigned tx"))
@@ -3409,7 +3409,7 @@ fn rebuild_expired_transfer_inner<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     // A rebuilt transfer draws a fresh anchor. If the backend's grid has moved since the commit,
     // that anchor would sit on a different grid from its siblings', leaving the migration anchored
@@ -3875,7 +3875,7 @@ where
         + MigrationCrypto<Error = <B as MigrationBackend>::Error>
         + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
         + PoolMigrationWrite,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     commit_preparation_inner(
         params,
@@ -3920,7 +3920,7 @@ where
         + MigrationCrypto<Error = <B as MigrationBackend>::Error>
         + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
         + PoolMigrationWrite,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     commit_preparation_inner(
         params,
@@ -3953,7 +3953,7 @@ where
         + MigrationCrypto<Error = <B as MigrationBackend>::Error>
         + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
         + PoolMigrationWrite,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     // The run's shape — which transaction gets which id, what each waits on, when each is
     // scheduled, and which minted note each spends — is decided ONCE, by the plan, and the build
@@ -4001,7 +4001,7 @@ where
         + MigrationCrypto<Error = <B as MigrationBackend>::Error>
         + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
         + PoolMigrationWrite,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     commit_preparation_inner(
         params,
@@ -4058,7 +4058,7 @@ where
         + MigrationCrypto<Error = <B as MigrationBackend>::Error>
         + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
         + PoolMigrationWrite,
-    R: RngCore + rand_core::CryptoRng,
+    R: Rng + rand_core::CryptoRng,
 {
     /// Open a commit: guard against overwriting a live migration, resolve the account's Orchard FVK,
     /// and initialize the empty accumulators.

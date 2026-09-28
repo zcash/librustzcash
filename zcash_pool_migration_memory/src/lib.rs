@@ -32,7 +32,7 @@ use orchard::tree::{MerkleHashOrchard, MerklePath};
 use orchard::value::NoteValue;
 use orchard::{Anchor, NOTE_COMMITMENT_TREE_DEPTH};
 use rand_chacha::ChaCha8Rng;
-use rand_core::{RngCore, SeedableRng};
+use rand_core::{Rng, SeedableRng};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;

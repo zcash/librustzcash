@@ -9,7 +9,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use rand::RngCore;
+use rand::Rng;
 use rand_distr::Distribution;
 use rusqlite::{Connection, OptionalExtension, Row, ToSql, named_params, types::Value};
 use tracing::{debug, warn};
@@ -2222,7 +2222,7 @@ impl From<TryFromIntError> for SchedulingError {
 
 /// Sample a random timestamp from an exponential distribution such that the expected value of the
 /// generated timestamp is `check_interval_seconds` after the provided `from_event` time.
-pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
+pub(crate) fn next_check_time<R: Rng, D: DerefMut<Target = R>>(
     mut rng: D,
     from_event: SystemTime,
     check_interval_seconds: u32,
@@ -2235,7 +2235,7 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     Ok(from_event + Duration::new(event_delay, 0))
 }
 
-pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore>(
+pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: Rng>(
     conn: &rusqlite::Transaction,
     params: &P,
     clock: C,

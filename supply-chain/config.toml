@@ -34,16 +34,32 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
+[policy.halo2_gadgets]
+audit-as-crates-io = false
+
+[policy.halo2_poseidon]
+audit-as-crates-io = false
+
+[policy.halo2_proofs]
+audit-as-crates-io = false
+
 [policy.incrementalmerkletree]
+audit-as-crates-io = false
 
 [policy.incrementalmerkletree-testing]
+audit-as-crates-io = false
 
 [policy.orchard]
+audit-as-crates-io = false
 
 [policy.pczt]
 audit-as-crates-io = true
 
+[policy.sapling-crypto]
+audit-as-crates-io = false
+
 [policy.shardtree]
+audit-as-crates-io = false
 
 [policy.zcash]
 audit-as-crates-io = true
@@ -84,6 +100,9 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.zewif]
+
+[policy.zip32]
+audit-as-crates-io = false
 
 [policy.zip321]
 audit-as-crates-io = true
@@ -192,10 +211,6 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bellman]]
-version = "0.14.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.bincode]]
 version = "2.0.1"
 criteria = "safe-to-deploy"
@@ -228,10 +243,6 @@ criteria = "safe-to-deploy"
 version = "0.11.0-rc.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.bls12_381]]
-version = "0.8.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.bs58]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
@@ -262,6 +273,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.chacha20]]
 version = "0.9.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.chacha20]]
+version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.chacha20poly1305]]
@@ -306,6 +321,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cpufeatures]]
 version = "0.2.11"
+criteria = "safe-to-deploy"
+
+[[exemptions.cpufeatures]]
+version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.criterion]]
@@ -524,10 +543,6 @@ criteria = "safe-to-run"
 version = "5.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.ff]]
-version = "0.13.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.figment]]
 version = "0.10.19"
 criteria = "safe-to-deploy"
@@ -588,6 +603,10 @@ criteria = "safe-to-deploy"
 version = "0.2.11"
 criteria = "safe-to-deploy"
 
+[[exemptions.getrandom]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.getset]]
 version = "0.1.6"
 criteria = "safe-to-deploy"
@@ -598,10 +617,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.glob-match]]
 version = "0.2.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.group]]
-version = "0.13.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.gumdrop]]
@@ -718,10 +733,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
 version = "0.3.65"
-criteria = "safe-to-deploy"
-
-[[exemptions.jubjub]]
-version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.kqueue]]
@@ -876,10 +887,6 @@ criteria = "safe-to-deploy"
 version = "0.13.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.pairing]]
-version = "0.23.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.parking]]
 version = "2.2.0"
 criteria = "safe-to-deploy"
@@ -894,10 +901,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.password-hash]]
 version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.pasta_curves]]
-version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.paste]]
@@ -1040,20 +1043,36 @@ criteria = "safe-to-run"
 version = "5.3.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.r-efi]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.radium]]
 version = "0.7.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rand]]
+version = "0.10.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.rand_chacha]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rand_core]]
+version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_jitter]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rand_xorshift]]
+version = "0.5.0"
+criteria = "safe-to-run"
+
 [[exemptions.rdrand]]
 version = "0.8.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.reddsa]]
-version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]

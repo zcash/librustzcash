@@ -53,7 +53,7 @@
 
 use alloc::vec::Vec;
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use orchard::keys::{FullViewingKey, Scope};
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
@@ -116,7 +116,7 @@ pub type PlacedPrepOutput = (u32, PrepOutput, orchard::note::Note);
 /// (see [`sign_pczt`](super::sign_pczt), which matches by key rather than by path) but not by a
 /// derivation-matching Signer.
 ///
-/// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
+/// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `UnwrapErr(SysRng)`; tests can
 /// pass a seeded one), keeping this builder pure.
 ///
 /// [ZIP 374]: https://zips.z.cash/zip-0374
@@ -133,7 +133,7 @@ pub fn build_prep_tx<P, R>(
 ) -> Result<(pczt::Pczt, Vec<PlacedPrepOutput>), BuildError>
 where
     P: Parameters + Clone,
-    R: RngCore + CryptoRng,
+    R: Rng + CryptoRng,
 {
     if spends.is_empty() {
         return Err(BuildError::Balance(

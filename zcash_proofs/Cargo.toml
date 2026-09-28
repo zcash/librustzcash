@@ -23,6 +23,7 @@ zcash_primitives = { workspace = true, features = ["circuits"] }
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 bellman.workspace = true
+groth16.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 jubjub.workspace = true
@@ -37,6 +38,7 @@ blake2b_simd.workspace = true
 document-features.workspace = true
 home = { version = "0.5", optional = true }
 known-folders = { version = "1", optional = true }
+rand = { workspace = true, features = ["sys_rng"] }
 redjubjub.workspace = true
 wagyu-zcash-parameters = { version = "0.2", optional = true }
 xdg = { version = "3", optional = true }
@@ -64,7 +66,7 @@ download-params = ["dep:minreq", "directories"]
 local-prover = ["directories"]
 
 ## Enables multithreading support for creating proofs.
-multicore = ["bellman/multicore", "zcash_primitives/multicore"]
+multicore = ["bellman/multicore", "groth16/multicore", "zcash_primitives/multicore"]
 
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []

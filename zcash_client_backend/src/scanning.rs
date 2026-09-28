@@ -1105,10 +1105,9 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, CIPHERTEXT_SIZE>,
+    Output: ShieldedOutput<D>,
     NoteCommitment,
     Note,
-    const CIPHERTEXT_SIZE: usize,
 >(
     block_height: BlockHeight,
     last_commitments_in_block: bool,
@@ -1226,16 +1225,16 @@ pub mod testing {
         GroupEncoding,
         ff::{Field, PrimeField},
     };
-    use rand_core::{OsRng, RngCore};
+    use rand::{Rng, rand_core::UnwrapErr, rngs::SysRng};
     use sapling::{
         Nullifier,
         constants::SPENDING_KEY_GENERATOR,
-        note_encryption::{SaplingDomain, sapling_note_encryption},
+        note_encryption::{COMPACT_NOTE_SIZE, SaplingDomain, sapling_note_encryption},
         util::generate_random_rseed,
         value::NoteValue,
         zip32::DiversifiableFullViewingKey,
     };
-    use zcash_note_encryption::{COMPACT_NOTE_SIZE, Domain};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash, transaction::components::sapling::zip212_enforcement,
     };
@@ -1249,7 +1248,7 @@ pub mod testing {
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     };
 
-    fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
+    fn random_compact_tx(mut rng: impl Rng) -> CompactTx {
         let fake_nf = {
             let mut nf = vec![0; 32];
             rng.fill_bytes(&mut nf);
@@ -1300,7 +1299,7 @@ pub mod testing {
         let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption(
@@ -1336,7 +1335,7 @@ pub mod testing {
         let cout = CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..COMPACT_NOTE_SIZE].to_vec(),
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];

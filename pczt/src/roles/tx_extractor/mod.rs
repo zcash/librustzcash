@@ -3,7 +3,7 @@
 //! - Creates bindingSig and extracts the final transaction.
 
 use core::marker::PhantomData;
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 
 use zcash_primitives::transaction::{
     Authorization, Transaction,
@@ -106,14 +106,14 @@ impl<'a> TransactionExtractor<'a> {
             |t| Ok(t.map(|t| t.map_authorization(transparent::RemoveInputInfo))),
             |s| {
                 s.map(|s| {
-                    s.apply_binding_signature(*shielded_sighash.as_ref(), OsRng)
+                    s.apply_binding_signature(*shielded_sighash.as_ref(), UnwrapErr(SysRng))
                         .ok_or(Error::SighashMismatch)
                 })
                 .transpose()
             },
             |o| {
                 o.map(|o| {
-                    o.apply_binding_signature(*shielded_sighash.as_ref(), OsRng)
+                    o.apply_binding_signature(*shielded_sighash.as_ref(), UnwrapErr(SysRng))
                         .ok_or(Error::SighashMismatch)
                 })
                 .transpose()

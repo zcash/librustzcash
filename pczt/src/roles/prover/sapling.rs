@@ -1,4 +1,4 @@
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use sapling::prover::{OutputProver, SpendProver};
 
 use crate::{Pczt, common::AnchorRequirement};
@@ -30,7 +30,7 @@ impl super::Prover {
 
         parsed
             .bundle
-            .create_proofs(spend_prover, output_prover, OsRng)
+            .create_proofs(spend_prover, output_prover, UnwrapErr(SysRng))
             .map_err(SaplingError::Prover)?;
 
         Ok(Self {

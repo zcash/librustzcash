@@ -20,6 +20,9 @@ workspace.
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
+  `redjubjub 0.9`, and `zcash_note_encryption 0.5`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
 - `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
   transparent_sighash}` now check the consistency of the transparent input, and use only
   `SighashType::ALL`. Use `Signer::with_transparent_sighash_policy` to permit other

@@ -21,7 +21,7 @@
 //!
 //! [ZIP 374]: https://zips.z.cash/zip-0374
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use orchard::keys::{FullViewingKey, Scope};
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
@@ -65,7 +65,7 @@ const IRONWOOD_TRANSFER_PADDING: BundlePadding = BundlePadding {
 /// [`sign_pczt`](super::sign_pczt), which matches by key rather than by path) but not by a
 /// derivation-matching Signer.
 ///
-/// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
+/// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `UnwrapErr(SysRng)`; tests can
 /// pass a seeded one), keeping this builder pure.
 ///
 /// # Errors
@@ -86,7 +86,7 @@ pub fn build_transfer_pczt<P, R>(
 ) -> Result<pczt::Pczt, BuildError>
 where
     P: Parameters + Clone,
-    R: RngCore + CryptoRng,
+    R: Rng + CryptoRng,
 {
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),

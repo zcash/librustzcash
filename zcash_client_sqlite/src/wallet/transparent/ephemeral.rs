@@ -1,5 +1,5 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-use rand::{RngCore, seq::SliceRandom};
+use rand::{Rng, seq::SliceRandom};
 use rusqlite::named_params;
 
 use crate::{
@@ -164,7 +164,7 @@ pub(crate) fn find_account_for_ephemeral_address_str(
         .optional()?)
 }
 
-pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: RngCore>(
+pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: Rng>(
     conn: &rusqlite::Transaction,
     clock: C,
     mut rng: R,

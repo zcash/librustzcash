@@ -278,7 +278,7 @@ mod tests {
     use std::convert::Infallible;
 
     use incrementalmerkletree::Position;
-    use rand_core::OsRng;
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
     use rusqlite::{Connection, OptionalExtension, named_params, params};
     use tempfile::NamedTempFile;
 
@@ -412,7 +412,7 @@ mod tests {
                 &transparent_signing_set,
                 &[],
                 &[],
-                OsRng,
+                UnwrapErr(SysRng),
                 &prover,
                 &prover,
                 #[allow(deprecated)]

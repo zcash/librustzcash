@@ -16,7 +16,7 @@ use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
-use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand::{CryptoRng, Rng, RngExt, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{
@@ -2259,12 +2259,7 @@ pub trait TestFvk: Clone {
 
     /// Adds a single spend to the given [`CompactTx`] of a note previously received by
     /// this full viewing key.
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        rng: &mut R,
-    );
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, rng: &mut R);
 
     /// Adds a single output to the given [`CompactTx`], where the output will be discovered when
     /// scanning with an incoming viewing key corresponding to this FVK. Its outputs will also be
@@ -2276,7 +2271,7 @@ pub trait TestFvk: Clone {
     /// Returns the nullifier of the newly created note, so that tests can readily have it on hand
     /// for the purpose of spending that note.
     #[allow(clippy::too_many_arguments)]
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2304,7 +2299,7 @@ pub trait TestFvk: Clone {
     /// Returns the nullifier full the newly created note which will need to be revealed when that
     /// note is later spent.
     #[allow(clippy::too_many_arguments)]
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2332,16 +2327,11 @@ impl<A: TestFvk> TestFvk for &A {
         (*self).ovk_bytes(scope)
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        rng: &mut R,
-    ) {
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, rng: &mut R) {
         (*self).add_spend(ctx, nf, rng)
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2366,7 +2356,7 @@ impl<A: TestFvk> TestFvk for &A {
         )
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2406,17 +2396,12 @@ impl TestFvk for DiversifiableFullViewingKey {
         self.to_ovk(scope).0
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        _: &mut R,
-    ) {
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, _: &mut R) {
         let cspend = CompactSaplingSpend { nf: nf.to_vec() };
         ctx.spends.push(cspend);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2439,11 +2424,11 @@ impl TestFvk for DiversifiableFullViewingKey {
             compact_sapling_output(params, height, recipient, value, sender_ovk.copied(), rng);
         ctx.outputs.push(cout);
 
-        note.nf(&self.fvk().vk.nk, u64::from(position))
+        note.nf(self.fvk().vk.nk(), u64::from(position))
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2482,7 +2467,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         *self.to_ovk(scope).as_ref()
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
+    fn add_spend<R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         nullifier_to_reveal: Self::Nullifier,
@@ -2505,7 +2490,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         ctx.actions.push(cact);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2539,7 +2524,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         note.nullifier(self)
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2592,7 +2577,7 @@ impl TestFvk for IronwoodFvk {
         *self.0.to_ovk(scope).as_ref()
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
+    fn add_spend<R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         nullifier_to_reveal: Self::Nullifier,
@@ -2615,7 +2600,7 @@ impl TestFvk for IronwoodFvk {
         ctx.ironwood_actions.push(cact);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2649,7 +2634,7 @@ impl TestFvk for IronwoodFvk {
         note.nullifier(&self.0)
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2702,7 +2687,7 @@ pub enum AddressType {
 /// Creates a `CompactSaplingOutput` at the given height paying the given recipient.
 ///
 /// Returns the `CompactSaplingOutput` and the new note.
-fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+fn compact_sapling_output<P: consensus::Parameters, R: Rng + CryptoRng>(
     params: &P,
     height: BlockHeight,
     recipient: ::sapling::PaymentAddress,
@@ -2730,7 +2715,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..::sapling::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
         },
         note,
     )
@@ -2740,7 +2725,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
 ///
 /// Returns the `CompactOrchardAction` and the new note.
 #[cfg(feature = "orchard")]
-fn compact_orchard_action<R: RngCore + CryptoRng>(
+fn compact_orchard_action<R: Rng + CryptoRng>(
     nf_old: ::orchard::note::Nullifier,
     recipient: ::orchard::Address,
     value: Zatoshis,
@@ -2760,16 +2745,17 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key:
-                ShieldedOutput::<::orchard::note_encryption::OrchardDomain, 52>::ephemeral_key(
+                ShieldedOutput::<::orchard::note_encryption::OrchardDomain>::ephemeral_key(
                     &compact_action,
                 )
                 .0
                 .to_vec(),
             ciphertext:
-                ShieldedOutput::<::orchard::note_encryption::OrchardDomain, 52>::enc_ciphertext(
+                ShieldedOutput::<::orchard::note_encryption::OrchardDomain>::enc_ciphertext_compact(
                     &compact_action,
-                )[..52]
-                    .to_vec(),
+                )
+                .0
+                .to_vec(),
         },
         note,
     )
@@ -2780,7 +2766,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
 /// `CompactOrchardAction` and the note. This mirrors [`compact_orchard_action`], but constructs the
 /// action directly because the orchard crate's `fake_compact_action` only produces version 2 notes.
 #[cfg(feature = "orchard")]
-fn compact_ironwood_action<R: RngCore + CryptoRng>(
+fn compact_ironwood_action<R: Rng + CryptoRng>(
     nf_old: ::orchard::note::Nullifier,
     recipient: ::orchard::Address,
     value: Zatoshis,
@@ -2816,14 +2802,14 @@ fn compact_ironwood_action<R: RngCore + CryptoRng>(
             nullifier: nf_old.to_bytes().to_vec(),
             cmx: cmx.to_bytes().to_vec(),
             ephemeral_key: ephemeral_key.0.to_vec(),
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..::orchard::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
         },
         note,
     )
 }
 
 /// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
-fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
+fn fake_compact_tx<R: Rng + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
     rng.fill_bytes(&mut txid);
@@ -2856,11 +2842,11 @@ impl<Fvk> FakeCompactOutput<Fvk> {
 
     /// Constructs a new random fake external output to the given FVK with a value in the range
     /// 10000..1000000 ZAT.
-    pub fn random<R: RngCore>(rng: &mut R, recipient_fvk: Fvk) -> Self {
+    pub fn random<R: Rng>(rng: &mut R, recipient_fvk: Fvk) -> Self {
         Self {
             recipient_fvk,
             recipient_address_type: AddressType::DefaultExternal,
-            value: Zatoshis::const_from_u64(rng.gen_range(10000..1000000)),
+            value: Zatoshis::const_from_u64(rng.random_range(10000..1000000)),
         }
     }
 }
@@ -2879,7 +2865,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore + CryptoRng,
+    mut rng: impl CryptoRng,
 ) -> (CompactBlock, Vec<Fvk::Nullifier>) {
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
@@ -2921,7 +2907,7 @@ fn fake_compact_block_from_tx(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    rng: impl RngCore,
+    rng: impl Rng,
 ) -> CompactBlock {
     // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
@@ -2978,7 +2964,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore + CryptoRng,
+    mut rng: impl CryptoRng,
 ) -> CompactBlock {
     let mut ctx = fake_compact_tx(&mut rng);
 
@@ -3076,7 +3062,7 @@ fn fake_compact_block_from_compact_tx(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore,
+    mut rng: impl Rng,
 ) -> CompactBlock {
     let mut cb = CompactBlock {
         hash: {

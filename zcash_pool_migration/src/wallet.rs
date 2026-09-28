@@ -967,7 +967,7 @@ where
 mod tests {
     use super::*;
 
-    use rand_core::{CryptoRng, RngCore};
+    use rand_core::{CryptoRng, Rng};
     use zcash_client_backend::data_api::testing::MockWalletDb;
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::{Network, Parameters};
@@ -1047,7 +1047,7 @@ mod tests {
         W: WalletRead<AccountId = <W as InputSource>::AccountId> + InputSource + 'a,
         <W as InputSource>::AccountId: Copy,
         St: PoolMigrationWrite,
-        R: RngCore + CryptoRng,
+        R: Rng + CryptoRng,
     {
         let _ = commit_preparation::<P, WalletMigration<'a, W, St>, R>;
     }

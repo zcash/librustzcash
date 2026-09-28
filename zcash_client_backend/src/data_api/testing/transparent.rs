@@ -271,7 +271,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -430,7 +432,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -639,7 +643,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -725,7 +731,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1718,7 +1726,9 @@ where
     let taddr = TransparentAddress::from_pubkey(&pubkey);
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2050,7 +2060,9 @@ where
     let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2967,7 +2979,9 @@ where
 
     // Seed the chain with notes that do not belong to us so that heights resolve while
     // the account remains without any shielded notes.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3127,7 +3141,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3166,6 +3182,7 @@ where
     // undershoots and a re-gather is required to actually satisfy the request.
     let network = *st.network();
     let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key()
         .default_address()
         .1;
@@ -3270,7 +3287,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3345,7 +3364,9 @@ where
     let account = st.test_account().cloned().unwrap();
 
     // Seed the chain with notes that do not belong to us so heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3456,7 +3477,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3593,7 +3616,9 @@ pub fn reserve_next_n_internal_addresses_gap_limit<DSF>(
 
     // Seed the chain so that a chain height is known; address reservation records the
     // exposure height of each reserved address.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);

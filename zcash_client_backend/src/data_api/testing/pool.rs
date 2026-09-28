@@ -8,7 +8,7 @@ use std::{
 
 use assert_matches::assert_matches;
 use incrementalmerkletree::{Hashable, Level, Position, frontier::Frontier};
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 
@@ -125,7 +125,8 @@ use {
 use {
     crate::data_api::wallet::{SignerView, redact_pczt_for_batch_signer, redact_pczt_for_signer},
     pczt::roles::{combiner::Combiner, prover::Prover, signer::Signer},
-    rand_core::OsRng,
+    rand::rngs::SysRng,
+    rand_core::UnwrapErr,
     transparent::builder::TransparentSigningSet,
     zcash_primitives::transaction::builder::{BuildConfig, Builder},
     zcash_proofs::prover::LocalTxProver,
@@ -178,7 +179,7 @@ pub trait ShieldedPoolTester {
     fn fvk_default_address(fvk: &Self::Fvk) -> Address;
     fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool;
 
-    fn random_fvk(mut rng: impl RngCore) -> Self::Fvk {
+    fn random_fvk(mut rng: impl Rng) -> Self::Fvk {
         let sk = {
             let mut sk_bytes = vec![0; 32];
             rng.fill_bytes(&mut sk_bytes);
@@ -187,7 +188,7 @@ pub trait ShieldedPoolTester {
 
         Self::sk_to_fvk(&sk)
     }
-    fn random_address(rng: impl RngCore) -> Address {
+    fn random_address(rng: impl Rng) -> Address {
         Self::fvk_default_address(&Self::random_fvk(rng))
     }
 
@@ -6302,7 +6303,7 @@ where
 
     // Generate some new random blocks
     for _ in 0..10 {
-        let output_count = st.rng_mut().gen_range(2..10);
+        let output_count = st.rng_mut().random_range(2..10);
         gen_random_block(&mut st, output_count);
     }
 
@@ -7154,7 +7155,7 @@ fn build_transparent_coinbase_tx(
             &[],
             // unused internally
             &[],
-            OsRng,
+            UnwrapErr(SysRng),
             &LocalTxProver::bundled(),
             &LocalTxProver::bundled(),
             // unused internally
@@ -8501,7 +8502,7 @@ where
         .sign_orchard_with::<pczt::roles::low_level_signer::OrchardParseError, _>(|_, bundle, _| {
             for &index in &orchard_signable {
                 bundle.actions_mut()[index]
-                    .sign(original_sighash, &ask, OsRng)
+                    .sign(original_sighash, &ask, UnwrapErr(SysRng))
                     .unwrap();
             }
             Ok(())
@@ -8511,7 +8512,7 @@ where
             |_, bundle, _| {
                 for &index in &ironwood_signable {
                     bundle.actions_mut()[index]
-                        .sign(original_sighash, &ask, OsRng)
+                        .sign(original_sighash, &ask, UnwrapErr(SysRng))
                         .unwrap();
                 }
                 Ok(())

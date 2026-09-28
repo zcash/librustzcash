@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `rand_core 0.10`, and to the `orchard` release that uses it.
+- Public APIs that took an `RngCore` now require a `rand_core::Rng` in its
+  place.
+
 ## [0.1.0] - 2026-08-18
 
 Initial release.

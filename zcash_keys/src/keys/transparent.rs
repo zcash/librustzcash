@@ -371,7 +371,7 @@ pub mod test_vectors;
 
 #[cfg(all(test, feature = "transparent-key-encoding"))]
 mod tests {
-    use rand::{Rng, SeedableRng as _};
+    use rand::{Rng, RngExt, SeedableRng as _};
     use rand_chacha::ChaChaRng;
     use secp256k1::{Secp256k1, SecretKey};
     use secrecy::SecretString;
@@ -384,14 +384,25 @@ mod tests {
         test_vectors::{INVALID, VALID, VectorKind},
     };
 
+    /// Generates a uniformly random secp256k1 secret key.
+    fn random_secret_key(rng: &mut impl Rng) -> SecretKey {
+        loop {
+            let mut bytes = [0u8; 32];
+            rng.fill_bytes(&mut bytes);
+            if let Ok(secret) = SecretKey::from_slice(&bytes) {
+                return secret;
+            }
+        }
+    }
+
     #[test]
     #[cfg(feature = "transparent-key-encoding")]
     fn der_encoding_roundtrip() {
         let mut rng = ChaChaRng::from_seed([0u8; 32]);
         let secp = Secp256k1::new();
         for _ in 0..100 {
-            let secret = SecretKey::new(&mut rng);
-            let compressed = rng.gen_bool(0.5);
+            let secret = random_secret_key(&mut rng);
+            let compressed = rng.random_bool(0.5);
             let key = Key { secret, compressed };
 
             let encoded = key.der_encode_with_context(&secp);
@@ -460,7 +471,7 @@ mod tests {
     #[cfg(feature = "transparent-key-encoding")]
     fn key_debug_redaction() {
         let mut rng = ChaChaRng::from_seed([0u8; 32]);
-        let secret = SecretKey::new(&mut rng);
+        let secret = random_secret_key(&mut rng);
         let key = Key {
             secret,
             compressed: true,

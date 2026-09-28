@@ -83,6 +83,7 @@ criterion.workspace = true
 incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 proptest.workspace = true
 assert_matches.workspace = true
+rand = { workspace = true, features = ["sys_rng"] }
 rand_xorshift.workspace = true
 transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }

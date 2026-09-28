@@ -16,6 +16,12 @@ workspace.
   uses the V6 transaction body and digest structure.
 
 ### Changed
+- Migrated to `ff 0.14`, `group 0.14`, `bls12_381 0.9`, `jubjub 0.11`,
+  `redjubjub 0.9`, `rand_core 0.10`, and `zcash_note_encryption 0.5`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
+- `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}`
+  (and `mock_build`, behind `test-dependencies`) now require their `rng`
+  argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
 - `BranchId::Nu7` is available without a custom compiler configuration, with
   consensus branch ID `0x77190AD9`.
 

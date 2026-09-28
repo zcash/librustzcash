@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
-use rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
 use zcash_primitives::transaction::{
@@ -379,7 +379,7 @@ impl Signer {
         ask: &sapling::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
         })
     }
 
@@ -445,7 +445,7 @@ impl Signer {
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
         })
     }
 
@@ -536,7 +536,7 @@ impl Signer {
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_ironwood_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, UnwrapErr(SysRng))
         })
     }
 
@@ -756,7 +756,7 @@ mod tests {
         // Only the ephemeral key comes from the encryptor; the ciphertext is replaced
         // with bytes that trial-decryption cannot recover a note from.
         let encryptor = OrchardNoteEncryption::new(None, note, [0; 512]);
-        let mut randomized_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
+        let mut randomized_ciphertext = encryptor.encrypt_note_plaintext().0.to_vec();
         randomized_ciphertext.fill(0xab);
 
         action.output.cmx = Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes());

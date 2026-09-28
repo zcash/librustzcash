@@ -10,6 +10,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_keys::keys::DerivationError::Sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`
 - `zcash_keys::keys::UnifiedFullViewingKey::expiry_height`
@@ -37,6 +38,12 @@ workspace.
   - Automatic R2 revision selection when metadata items are present.
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `group 0.14`, and `rand_core 0.10`,
+  and to the `orchard` and `sapling-crypto` releases that use them.
+- `zcash_keys::keys::sapling::spending_key` now returns
+  `Option<ExtendedSpendingKey>`, and returns `None` if derivation produces an
+  invalid Sapling spending key. `UnifiedSpendingKey::from_seed` returns
+  `DerivationError::Sapling` in that case.
 - `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
   `zcash_keys::keys::UnifiedIncomingViewingKey::transparent` are deprecated in favour of
   `p2pkh`, and now both return `Option<&_>`. A unified viewing key carries at most one
