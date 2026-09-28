@@ -2688,6 +2688,7 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 let len = len + 2 + 32;
 
+                #[cfg(feature = "sapling")]
                 let len = len + 2 + 169;
 
                 // Transparent part is an `xprv` transparent extended key deserialized
@@ -2706,6 +2707,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             assert!(bool::from(decoded.orchard().ct_eq(usk.orchard())));
 
+            #[cfg(feature = "sapling")]
             assert_eq!(decoded.sapling(), usk.sapling());
 
             #[cfg(feature = "transparent-inputs")]
