@@ -10,6 +10,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zeroize` feature, enabled by default, which erases the Sapling, Orchard,
+  and ZIP 32 secret key material held by `UnifiedSpendingKey` when it is dropped.
 - `zcash_keys::keys::DerivationError::Sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`

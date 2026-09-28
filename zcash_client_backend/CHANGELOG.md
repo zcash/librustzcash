@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
 - `zcash_client_backend::util` module, providing the `Clock` capability trait,
   `SystemClock`, and (behind the `test-dependencies` feature)
   `testing::FixedClock`. These were previously defined in

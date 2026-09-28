@@ -238,6 +238,9 @@ impl Era {
 }
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
+///
+/// With the `zeroize` feature, the Sapling and Orchard spending keys are erased from
+/// memory when this key is dropped. The transparent spending key is not erased.
 #[derive(Clone)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
@@ -2286,6 +2289,9 @@ mod tests {
     #[cfg(feature = "orchard")]
     use zip32::Scope;
 
+    #[cfg(feature = "zeroize")]
+    use zeroize::ZeroizeOnDrop;
+
     #[cfg(feature = "sapling")]
     use super::sapling;
 
@@ -3276,5 +3282,17 @@ mod tests {
         // UFVKs from different seeds do not subsume each other.
         assert!(!ufvk0.subsumes_ufvk(&ufvk1));
         assert!(!ufvk1.subsumes_ufvk(&ufvk0));
+    }
+
+    /// Fails to compile unless the shielded spending keys held by a
+    /// `UnifiedSpendingKey` erase themselves on drop.
+    #[cfg(feature = "zeroize")]
+    #[test]
+    fn shielded_spending_keys_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+        #[cfg(feature = "sapling")]
+        assert_zeroize_on_drop::<::sapling::zip32::ExtendedSpendingKey>();
+        #[cfg(feature = "orchard")]
+        assert_zeroize_on_drop::<::orchard::keys::SpendingKey>();
     }
 }

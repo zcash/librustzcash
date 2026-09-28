@@ -86,6 +86,7 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
+    "orchard/zeroize",
     "dep:zcash_note_encryption",
 ]
 
@@ -97,6 +98,7 @@ sapling = [
     "dep:redjubjub",
     "dep:sapling",
     "dep:zcash_note_encryption",
+    "sapling/zeroize",
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.

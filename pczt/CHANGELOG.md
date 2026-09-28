@@ -33,6 +33,8 @@ workspace.
   drawing randomness from the operating system. Pass
   `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behavior.
 - The role features no longer depend on `getrandom`.
+- The `orchard` and `sapling` features now enable the `zeroize` features of
+  `orchard` and `sapling-crypto` respectively.
 - `pczt::orchard::Spend::dummy_sk` now returns `&Option<SecretKeyBytes>` in
   place of `&Option<[u8; 32]>`; use `SecretKeyBytes::expose_secret` to read the
   bytes.
