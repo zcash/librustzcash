@@ -2451,6 +2451,7 @@ impl Bundle {
                         dummy_sk: action
                             .spend()
                             .dummy_sk()
+                            .as_ref()
                             .map(|dummy_sk| SecretKeyBytes::new(*dummy_sk.to_bytes())),
                         proprietary: spend.proprietary().clone(),
                     },
@@ -2508,7 +2509,7 @@ impl Bundle {
             bsk: bundle
                 .bsk()
                 .as_ref()
-                .map(|bsk| SecretKeyBytes::new(bsk.into())),
+                .map(|bsk| SecretKeyBytes::new(bsk.to_bytes())),
         }
     }
 }
