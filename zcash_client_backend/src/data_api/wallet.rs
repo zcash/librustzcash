@@ -1376,6 +1376,10 @@ struct StepResult<AccountId> {
 /// This consists of a [`UnifiedSpendingKey`], plus (if the `transparent-key-import` feature is
 /// enabled) a set of standalone transparent spending keys corresponding to inputs being spent in a
 /// transaction under construction.
+///
+/// When this value is dropped, the standalone transparent spending keys it holds are
+/// overwritten. Copies of those keys made elsewhere are not overwritten, because
+/// [`secp256k1::SecretKey`] is `Copy`.
 pub struct SpendingKeys {
     usk: UnifiedSpendingKey,
     #[cfg(feature = "transparent-key-import")]
@@ -1405,6 +1409,15 @@ impl SpendingKeys {
             usk,
             #[cfg(feature = "transparent-key-import")]
             standalone_transparent_keys: HashMap::new(),
+        }
+    }
+}
+
+#[cfg(feature = "transparent-key-import")]
+impl Drop for SpendingKeys {
+    fn drop(&mut self) {
+        for secret_key in self.standalone_transparent_keys.values_mut().flatten() {
+            secret_key.non_secure_erase();
         }
     }
 }
