@@ -6798,9 +6798,9 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         .circuit_version(),
     );
     let pczt_proven = Prover::new(pczt_updated)
-        .create_orchard_proof(orchard_pk)
+        .create_orchard_proof(UnwrapErr(SysRng), orchard_pk)
         .unwrap()
-        .create_sapling_proofs(&sapling_prover, &sapling_prover)
+        .create_sapling_proofs(UnwrapErr(SysRng), &sapling_prover, &sapling_prover)
         .unwrap()
         .finish();
 
@@ -8610,9 +8610,9 @@ where
         .circuit_version(),
     );
     let proven = Prover::new(authorized)
-        .create_orchard_proof(orchard_pk)
+        .create_orchard_proof(UnwrapErr(SysRng), orchard_pk)
         .unwrap()
-        .create_ironwood_proof(orchard_pk)
+        .create_ironwood_proof(UnwrapErr(SysRng), orchard_pk)
         .unwrap()
         .finish();
 

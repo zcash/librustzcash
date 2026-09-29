@@ -1278,9 +1278,10 @@ where
 
         let clock = self.clock.clone();
         create_proposed_transactions(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1531,9 +1532,10 @@ where
         let network = self.network().clone();
         let clock = self.clock.clone();
         create_proposed_transactions(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1566,9 +1568,10 @@ where
 
         let clock = self.clock.clone();
         create_pczt_from_proposal(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             spend_from_account,
             ovk_policy,
             proposal,
@@ -1594,8 +1597,9 @@ where
 
         let clock = self.clock.clone();
         extract_and_store_transaction_from_pczt(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &clock,
+            &mut self.rng,
             pczt,
             Some((&spend_vk, &output_vk)),
             None,
@@ -1625,9 +1629,10 @@ where
         let network = self.network().clone();
         let clock = self.clock.clone();
         shield_transparent_funds(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             input_selector,

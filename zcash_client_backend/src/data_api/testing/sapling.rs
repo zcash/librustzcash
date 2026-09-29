@@ -228,11 +228,13 @@ impl ShieldedPoolTester for SaplingPoolTester {
         signer: &mut pczt::roles::signer::Signer,
         usk: &UnifiedSpendingKey,
     ) -> Result<(), pczt::roles::signer::Error> {
+        use rand::{rand_core::UnwrapErr, rngs::SysRng};
+
         let extsk = Self::usk_to_sk(usk);
 
         // Figuring out which one is for us is hard. Let's just try signing all of them!
         for index in 0.. {
-            match signer.sign_sapling(index, extsk.expsk().ask()) {
+            match signer.sign_sapling(UnwrapErr(SysRng), index, extsk.expsk().ask()) {
                 // Loop termination.
                 Err(pczt::roles::signer::Error::InvalidIndex) => break,
                 // Ignore any errors due to using the wrong key.

@@ -20,6 +20,15 @@ workspace.
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
 
 ### Changed
+- `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
+  `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
+  create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
+  sign_ironwood, sign_sapling}`, and
+  `pczt::roles::tx_extractor::TransactionExtractor::extract` now take an `rng`
+  first argument that implements `rand_core::{Rng, CryptoRng}`, in place of
+  drawing randomness from the operating system. Pass
+  `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behavior.
+- The role features no longer depend on `getrandom`.
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
   `redjubjub 0.9`, and `zcash_note_encryption 0.5`,
   and to the `orchard` and `sapling-crypto` releases that use them.

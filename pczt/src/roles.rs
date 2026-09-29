@@ -38,7 +38,11 @@ pub mod tx_extractor;
 #[cfg(test)]
 mod tests {
     #[cfg(any(feature = "io-finalizer", feature = "tx-extractor"))]
-    use {crate::roles::creator::Creator, zcash_protocol::consensus::BranchId};
+    use {
+        crate::roles::creator::Creator,
+        rand::{rand_core::UnwrapErr, rngs::SysRng},
+        zcash_protocol::consensus::BranchId,
+    };
 
     #[cfg(feature = "io-finalizer")]
     use crate::roles::io_finalizer::{self, IoFinalizer};
@@ -63,7 +67,9 @@ mod tests {
         // Extraction fails because we haven't run the IO Finalizer.
         // Extraction fails in Sapling because we happen to extract it before Orchard.
         assert!(matches!(
-            TransactionExtractor::new(pczt).extract().unwrap_err(),
+            TransactionExtractor::new(pczt)
+                .extract(UnwrapErr(SysRng))
+                .unwrap_err(),
             tx_extractor::Error::Sapling(tx_extractor::SaplingError::Extract(
                 sapling::pczt::TxExtractorError::MissingBindingSignatureSigningKey
             )),
@@ -86,7 +92,9 @@ mod tests {
 
         // IO finalization fails on spends because we happen to check them first.
         assert!(matches!(
-            IoFinalizer::new(pczt).finalize_io().unwrap_err(),
+            IoFinalizer::new(pczt)
+                .finalize_io(UnwrapErr(SysRng))
+                .unwrap_err(),
             io_finalizer::Error::NoSpends,
         ));
     }
@@ -168,7 +176,7 @@ mod tests {
                 .unwrap();
 
             IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
-                .finalize_io()
+                .finalize_io(UnwrapErr(SysRng))
                 .unwrap()
         }
 

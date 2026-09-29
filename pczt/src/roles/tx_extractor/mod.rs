@@ -2,8 +2,8 @@
 //!
 //! - Creates bindingSig and extracts the final transaction.
 
-use core::marker::PhantomData;
-use rand::{rand_core::UnwrapErr, rngs::SysRng};
+use core::{cell::RefCell, marker::PhantomData};
+use rand_core::{CryptoRng, Rng};
 
 use zcash_primitives::transaction::{
     Authorization, Transaction,
@@ -69,7 +69,10 @@ impl<'a> TransactionExtractor<'a> {
     }
 
     /// Attempts to extract a valid transaction from the PCZT.
-    pub fn extract(self) -> Result<Transaction, Error> {
+    ///
+    /// `rng` provides the randomness for the binding signatures and for the batch
+    /// validation of the extracted transaction.
+    pub fn extract<R: Rng + CryptoRng>(self, mut rng: R) -> Result<Transaction, Error> {
         let Self {
             pczt,
             sapling_vk,
@@ -101,20 +104,28 @@ impl<'a> TransactionExtractor<'a> {
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
-        // Create the binding signatures.
+        // Create the binding signatures. The bundle mappers each need the RNG, and
+        // `try_map_bundles` calls them one at a time.
+        let binding_rng = RefCell::new(&mut rng);
         let tx_data = tx_data.try_map_bundles(
             |t| Ok(t.map(|t| t.map_authorization(transparent::RemoveInputInfo))),
             |s| {
                 s.map(|s| {
-                    s.apply_binding_signature(*shielded_sighash.as_ref(), UnwrapErr(SysRng))
-                        .ok_or(Error::SighashMismatch)
+                    s.apply_binding_signature(
+                        *shielded_sighash.as_ref(),
+                        &mut **binding_rng.borrow_mut(),
+                    )
+                    .ok_or(Error::SighashMismatch)
                 })
                 .transpose()
             },
             |o| {
                 o.map(|o| {
-                    o.apply_binding_signature(*shielded_sighash.as_ref(), UnwrapErr(SysRng))
-                        .ok_or(Error::SighashMismatch)
+                    o.apply_binding_signature(
+                        *shielded_sighash.as_ref(),
+                        &mut **binding_rng.borrow_mut(),
+                    )
+                    .ok_or(Error::SighashMismatch)
                 })
                 .transpose()
             },
@@ -126,15 +137,21 @@ impl<'a> TransactionExtractor<'a> {
         if let Some(bundle) = tx.sapling_bundle() {
             let (spend_vk, output_vk) = sapling_vk.ok_or(Error::SaplingRequired)?;
 
-            sapling::verify_bundle(bundle, spend_vk, output_vk, *shielded_sighash.as_ref())
-                .map_err(Error::Sapling)?;
+            sapling::verify_bundle(
+                &mut rng,
+                bundle,
+                spend_vk,
+                output_vk,
+                *shielded_sighash.as_ref(),
+            )
+            .map_err(Error::Sapling)?;
         }
         if let Some(bundle) = tx.orchard_bundle() {
-            orchard::verify_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
+            orchard::verify_bundle(&mut rng, bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Orchard)?;
         }
         if let Some(bundle) = tx.ironwood_bundle() {
-            orchard::verify_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
+            orchard::verify_bundle(&mut rng, bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Ironwood)?;
         }
 

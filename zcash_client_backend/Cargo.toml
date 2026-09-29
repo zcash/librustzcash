@@ -112,9 +112,6 @@ rust_decimal = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
-# - CSPRNG
-rand = { workspace = true, features = ["sys_rng"] }
-
 # - Documentation
 document-features.workspace = true
 
@@ -134,6 +131,7 @@ tower = { workspace = true, optional = true }
 # - HTTP through Tor
 http-body-util = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true, optional = true }
@@ -154,7 +152,7 @@ gumdrop = "0.8"
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 jubjub.workspace = true
 proptest.workspace = true
-rand.workspace = true
+rand = { workspace = true, features = ["sys_rng"] }
 rand_chacha.workspace = true
 redjubjub.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
@@ -262,7 +260,7 @@ tor = [
     "dep:http-body-util",
     "dep:hyper",
     "dep:hyper-util",
-    "rand/thread_rng",
+    "dep:rand",
     "dep:rust_decimal",
     "dep:serde",
     "dep:serde_json",
@@ -284,6 +282,8 @@ test-dependencies = [
     "dep:assert_matches",
     "dep:proptest",
     "dep:jubjub",
+    "dep:rand",
+    "rand/sys_rng",
     "dep:rand_chacha",
     "transparent/test-dependencies",
     "orchard/test-dependencies",

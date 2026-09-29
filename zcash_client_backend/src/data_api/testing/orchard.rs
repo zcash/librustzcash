@@ -231,11 +231,13 @@ impl ShieldedPoolTester for OrchardPoolTester {
         usk: &UnifiedSpendingKey,
     ) -> Result<(), pczt::roles::signer::Error> {
         let sk = Self::usk_to_sk(usk);
+        use rand::{rand_core::UnwrapErr, rngs::SysRng};
+
         let ask = orchard::keys::SpendAuthorizingKey::from(sk);
 
         // Figuring out which one is for us is hard. Let's just try signing all of them!
         for index in 0.. {
-            match signer.sign_orchard(index, &ask) {
+            match signer.sign_orchard(UnwrapErr(SysRng), index, &ask) {
                 // Loop termination.
                 Err(pczt::roles::signer::Error::InvalidIndex) => break,
                 // Ignore any errors due to using the wrong key.
