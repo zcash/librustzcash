@@ -25,6 +25,14 @@ workspace.
 - `zcash_transparent::zip48::P2shViewingKeyError`
 
 ### Changed
+- Migrated to `bip32 0.6`, `secp256k1 0.33`, and `zcash_script 0.6`.
+- `zcash_transparent::builder::TransparentSignatureContext` no longer has
+  lifetime or type parameters, and
+  `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`
+  no longer takes a `secp256k1::Secp256k1` context argument.
+- `zcash_transparent::pczt::Input::{sign, sign_with_sighash_policy,
+  append_signature, append_signature_with_sighash_policy}` no longer take a
+  `secp256k1::Secp256k1` context argument.
 - `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns
   `ShieldingOvks` instead of `(InternalOvk, ExternalOvk)`. Read each key from
   `ShieldingOvks::internal` or `ShieldingOvks::external` instead of by tuple

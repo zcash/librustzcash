@@ -22,7 +22,8 @@ workspace.
 
 ### Changed
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
-  `redjubjub 0.9`, and `zcash_note_encryption 0.5`,
+  `redjubjub 0.9`, `secp256k1 0.33`, `zcash_note_encryption 0.5`, and
+  `zcash_script 0.6`,
   and to the `orchard` and `sapling-crypto` releases that use them.
 - `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
   `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,

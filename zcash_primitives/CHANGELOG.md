@@ -17,7 +17,8 @@ workspace.
 
 ### Changed
 - Migrated to `ff 0.14`, `group 0.14`, `bls12_381 0.9`, `jubjub 0.11`,
-  `redjubjub 0.9`, `rand_core 0.10`, and `zcash_note_encryption 0.5`,
+  `redjubjub 0.9`, `rand_core 0.10`, `secp256k1 0.33`,
+  `zcash_note_encryption 0.5`, and `zcash_script 0.6`,
   and to the `orchard` and `sapling-crypto` releases that use them.
 - `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}`
   (and `mock_build`, behind `test-dependencies`) now require their `rng`

@@ -32,7 +32,8 @@ workspace.
 ### Changed
 - `zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`
   takes an additional `rng` first argument that implements `rand_core::{Rng, CryptoRng}`.
-- Migrated to `group 0.14`, `jubjub 0.11`, and `rand_core 0.10`,
+- Migrated to `bip32 0.6`, `group 0.14`, `jubjub 0.11`, `rand_core 0.10`,
+  `secp256k1 0.33`, and `zcash_script 0.6`,
   and to the `orchard` and `sapling-crypto` releases that use them.
 - The `R` parameter of `WalletDb` must now implement `rand_core::Rng` in place
   of `rand_core::RngCore` wherever it previously required the latter.

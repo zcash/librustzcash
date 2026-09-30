@@ -140,11 +140,11 @@ mod tests {
         const SIGHASH_ALL_ANYONECANPAY: u8 = SIGHASH_ALL | SIGHASH_ANYONECANPAY;
 
         fn secret_key() -> secp256k1::SecretKey {
-            secp256k1::SecretKey::from_slice(&[1; 32]).expect("valid")
+            secp256k1::SecretKey::from_secret_bytes([1; 32]).expect("valid")
         }
 
         fn public_key(sk: &secp256k1::SecretKey) -> secp256k1::PublicKey {
-            sk.public_key(&secp256k1::Secp256k1::signing_only())
+            sk.public_key()
         }
 
         /// The coin the victim is being asked to spend.
@@ -228,8 +228,8 @@ mod tests {
         /// sighash type would — and offers the signature to a Signer with the default
         /// policy.
         fn append(pczt: Pczt, sighash: [u8; 32]) -> Result<(), signer::Error> {
-            let sig = secp256k1::Secp256k1::new()
-                .sign_ecdsa(&secp256k1::Message::from_digest(sighash), &secret_key());
+            let sig =
+                secp256k1::ecdsa::sign(secp256k1::Message::from_digest(sighash), &secret_key());
             Signer::new(pczt)
                 .unwrap()
                 .append_transparent_signature(0, sig)
@@ -387,7 +387,8 @@ mod tests {
 
         /// The attacker's own coin, which they contribute to their own transaction.
         fn attacker_coin() -> (secp256k1::PublicKey, OutPoint, TxOut) {
-            let pubkey = public_key(&secp256k1::SecretKey::from_slice(&[2; 32]).expect("valid"));
+            let pubkey =
+                public_key(&secp256k1::SecretKey::from_secret_bytes([2; 32]).expect("valid"));
             let addr = TransparentAddress::from_pubkey(&pubkey);
             (
                 pubkey,
@@ -441,13 +442,12 @@ mod tests {
         fn authorizes(sig: &[u8], pczt: Pczt) -> bool {
             let sighash = unguarded_sighash(pczt);
 
-            secp256k1::Secp256k1::new()
-                .verify_ecdsa(
-                    &secp256k1::Message::from_digest(sighash),
-                    &secp256k1::ecdsa::Signature::from_der(sig).expect("DER-encoded"),
-                    &public_key(&secret_key()),
-                )
-                .is_ok()
+            secp256k1::ecdsa::verify(
+                &secp256k1::ecdsa::Signature::from_der(sig).expect("DER-encoded"),
+                secp256k1::Message::from_digest(sighash),
+                &public_key(&secret_key()),
+            )
+            .is_ok()
         }
 
         /// Why `SighashPolicy::ALL_ONLY` is the default: a signature the victim was
@@ -513,7 +513,7 @@ mod tests {
         /// `SIGHASH_ALL` signature over their own input.
         #[test]
         fn finalizer_accepts_mixed_sighash_types() {
-            let contributor_sk = secp256k1::SecretKey::from_slice(&[3; 32]).expect("valid");
+            let contributor_sk = secp256k1::SecretKey::from_secret_bytes([3; 32]).expect("valid");
             let contributor_pubkey = public_key(&contributor_sk);
             let contributor_utxo = OutPoint::new([3; 32], 0);
             let contributor_coin = TxOut::new(
