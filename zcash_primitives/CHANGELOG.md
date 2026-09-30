@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.31.0-pre.0] - 2026-09-30
+
+This release supports the NU7 upgrade on testnet.
+
 ### Added
 - Experimental `TxVersion::V7` and `TransactionData::from_parts_v7` support
   behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon and initially
@@ -25,7 +29,9 @@ workspace.
   (and `mock_build`, behind `test-dependencies`) now require their `rng`
   argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
 - `BranchId::Nu7` is available without a custom compiler configuration, with
-  consensus branch ID `0x77190AD9`.
+  consensus branch ID `0x77190AD9`. `TxVersion::suggested_for_branch` returns
+  `TxVersion::V6` for it, and `TxVersion::valid_in_branch` accepts `V5` and `V6`
+  transactions but not `V4` transactions under it (ZIP 2003).
 
 ## [0.30.1] - 2026-08-18
 
