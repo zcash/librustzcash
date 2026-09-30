@@ -39,9 +39,16 @@ use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
     core::convert::TryFrom,
     corez::io::{Read, Write},
+    secrecy::SecretVec,
     zcash_encoding::CompactSize,
     zcash_protocol::consensus::BranchId,
 };
+
+#[cfg(all(
+    feature = "unstable",
+    any(feature = "sapling", feature = "transparent-inputs")
+))]
+use secrecy::zeroize::Zeroizing;
 
 #[cfg(feature = "orchard")]
 use orchard::{self, keys::Scope};
@@ -238,6 +245,9 @@ impl Era {
 }
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
+///
+/// With the `zeroize` feature, the Sapling and Orchard spending keys are erased from
+/// memory when this key is dropped. The transparent spending key is not erased.
 #[derive(Clone)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
@@ -350,41 +360,40 @@ impl UnifiedSpendingKey {
     /// this form will necessarily be validated when the attempt is made to
     /// spend a note that they have authority for.
     #[cfg(feature = "unstable")]
-    pub fn to_bytes(&self, era: Era) -> Vec<u8> {
-        let mut result = vec![];
-        result.write_u32::<LittleEndian>(era.id()).unwrap();
-
-        #[cfg(feature = "orchard")]
-        {
-            let orchard_key = self.orchard();
-            CompactSize::write(&mut result, usize::try_from(Typecode::ORCHARD).unwrap()).unwrap();
-
-            let orchard_key_bytes = orchard_key.to_bytes();
-            CompactSize::write(&mut result, orchard_key_bytes.len()).unwrap();
-            result.write_all(orchard_key_bytes).unwrap();
-        }
-
+    pub fn to_bytes(&self, era: Era) -> SecretVec<u8> {
         #[cfg(feature = "sapling")]
-        {
-            let sapling_key = self.sapling();
-            CompactSize::write(&mut result, usize::try_from(Typecode::SAPLING).unwrap()).unwrap();
-
-            let sapling_key_bytes = sapling_key.to_bytes();
-            CompactSize::write(&mut result, sapling_key_bytes.len()).unwrap();
-            result.write_all(&sapling_key_bytes).unwrap();
-        }
-
+        let sapling_key_bytes = Zeroizing::new(self.sapling().to_bytes());
         #[cfg(feature = "transparent-inputs")]
-        {
-            let account_tkey = self.transparent();
-            CompactSize::write(&mut result, usize::try_from(Typecode::P2PKH).unwrap()).unwrap();
+        let transparent_key_bytes = Zeroizing::new(self.transparent().to_bytes());
 
-            let account_tkey_bytes = account_tkey.to_bytes();
-            CompactSize::write(&mut result, account_tkey_bytes.len()).unwrap();
-            result.write_all(&account_tkey_bytes).unwrap();
+        let items: Vec<(Typecode, &[u8])> = vec![
+            #[cfg(feature = "orchard")]
+            (Typecode::ORCHARD, &self.orchard().to_bytes()[..]),
+            #[cfg(feature = "sapling")]
+            (Typecode::SAPLING, &sapling_key_bytes[..]),
+            #[cfg(feature = "transparent-inputs")]
+            (Typecode::P2PKH, &transparent_key_bytes[..]),
+        ];
+
+        // Reserve the full length up front, so that growing the buffer does not leave
+        // copies of the key material in freed memory.
+        let encoded_len =
+            items
+                .iter()
+                .fold(core::mem::size_of::<u32>(), |len, (typecode, key_bytes)| {
+                    len + CompactSize::serialized_size(usize::try_from(*typecode).unwrap())
+                        + CompactSize::serialized_size(key_bytes.len())
+                        + key_bytes.len()
+                });
+        let mut result = Vec::with_capacity(encoded_len);
+        result.write_u32::<LittleEndian>(era.id()).unwrap();
+        for (typecode, key_bytes) in items {
+            CompactSize::write(&mut result, usize::try_from(typecode).unwrap()).unwrap();
+            CompactSize::write(&mut result, key_bytes.len()).unwrap();
+            result.write_all(key_bytes).unwrap();
         }
 
-        result
+        SecretVec::new(result)
     }
 
     /// Decodes a [`UnifiedSpendingKey`] value from its serialized representation.
@@ -2286,6 +2295,12 @@ mod tests {
     #[cfg(feature = "orchard")]
     use zip32::Scope;
 
+    #[cfg(feature = "unstable")]
+    use secrecy::ExposeSecret;
+
+    #[cfg(feature = "zeroize")]
+    use zeroize::ZeroizeOnDrop;
+
     #[cfg(feature = "sapling")]
     use super::sapling;
 
@@ -2664,6 +2679,7 @@ mod tests {
         #[cfg(feature = "unstable")]
         fn prop_usk_roundtrip(usk in arb_unified_spending_key(zcash_protocol::consensus::Network::MainNetwork)) {
             let encoded = usk.to_bytes(Era::Orchard);
+            let encoded = encoded.expose_secret();
 
             #[allow(clippy::let_and_return)]
             let encoded_len = {
@@ -2672,6 +2688,7 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 let len = len + 2 + 32;
 
+                #[cfg(feature = "sapling")]
                 let len = len + 2 + 169;
 
                 // Transparent part is an `xprv` transparent extended key deserialized
@@ -2684,12 +2701,13 @@ mod tests {
             };
             assert_eq!(encoded.len(), encoded_len);
 
-            let decoded = UnifiedSpendingKey::from_bytes(Era::Orchard, &encoded);
+            let decoded = UnifiedSpendingKey::from_bytes(Era::Orchard, encoded);
             let decoded = decoded.unwrap_or_else(|e| panic!("Error decoding USK: {:?}", e));
 
             #[cfg(feature = "orchard")]
             assert!(bool::from(decoded.orchard().ct_eq(usk.orchard())));
 
+            #[cfg(feature = "sapling")]
             assert_eq!(decoded.sapling(), usk.sapling());
 
             #[cfg(feature = "transparent-inputs")]
@@ -3276,5 +3294,17 @@ mod tests {
         // UFVKs from different seeds do not subsume each other.
         assert!(!ufvk0.subsumes_ufvk(&ufvk1));
         assert!(!ufvk1.subsumes_ufvk(&ufvk0));
+    }
+
+    /// Fails to compile unless the shielded spending keys held by a
+    /// `UnifiedSpendingKey` erase themselves on drop.
+    #[cfg(feature = "zeroize")]
+    #[test]
+    fn shielded_spending_keys_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+        #[cfg(feature = "sapling")]
+        assert_zeroize_on_drop::<::sapling::zip32::ExtendedSpendingKey>();
+        #[cfg(feature = "orchard")]
+        assert_zeroize_on_drop::<::orchard::keys::SpendingKey>();
     }
 }

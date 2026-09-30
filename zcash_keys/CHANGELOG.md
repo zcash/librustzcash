@@ -10,6 +10,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zeroize` feature, enabled by default, which erases the Sapling, Orchard,
+  and ZIP 32 secret key material held by `UnifiedSpendingKey` when it is dropped.
 - `zcash_keys::keys::DerivationError::Sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
 - `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`
@@ -38,6 +40,9 @@ workspace.
   - Automatic R2 revision selection when metadata items are present.
 
 ### Changed
+- `zcash_keys::keys::UnifiedSpendingKey::to_bytes` (behind `unstable`) now
+  returns `secrecy::SecretVec<u8>` in place of `Vec<u8>`; use
+  `ExposeSecret::expose_secret` to read the bytes.
 - Migrated to `bls12_381 0.9`, `group 0.14`, and `rand_core 0.10`,
   and to the `orchard` and `sapling-crypto` releases that use them.
 - `zcash_keys::keys::sapling::spending_key` now returns

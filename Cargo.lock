@@ -3101,7 +3101,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.15.5"
-source = "git+https://github.com/zcash/orchard.git?rev=3cc0781df0afa3b069bd02264b479e54c74fc3d8#3cc0781df0afa3b069bd02264b479e54c74fc3d8"
+source = "git+https://github.com/zcash/orchard.git?rev=b223d12e8e8dcfa4e242ed33a9cbf3512a8e6fb4#b223d12e8e8dcfa4e242ed33a9cbf3512a8e6fb4"
 dependencies = [
  "aes",
  "bitvec",
@@ -3131,6 +3131,7 @@ dependencies = [
  "visibility",
  "zcash_note_encryption",
  "zcash_spec",
+ "zeroize",
  "zip32",
 ]
 
@@ -3317,12 +3318,14 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "shardtree",
+ "subtle",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
+ "zeroize",
  "zip32",
 ]
 
@@ -4330,6 +4333,7 @@ dependencies = [
  "tracing",
  "zcash_note_encryption",
  "zcash_spec",
+ "zeroize",
  "zip32",
 ]
 
@@ -7723,6 +7727,7 @@ dependencies = [
  "memuse",
  "subtle",
  "zcash_spec",
+ "zeroize",
 ]
 
 [[package]]

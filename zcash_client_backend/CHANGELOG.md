@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
 - `zcash_client_backend::util` module, providing the `Clock` capability trait,
   `SystemClock`, and (behind the `test-dependencies` feature)
   `testing::FixedClock`. These were previously defined in
@@ -31,11 +32,13 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 
 ### Changed
-- `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
-  additional `rng: &mut impl Rng` first argument.
 - Migrated to `bls12_381 0.9`, `group 0.14`, `jubjub 0.11`, `pasta_curves 0.6`,
   `rand_core 0.10`, and `zcash_note_encryption 0.5`,
   and to the `orchard` and `sapling-crypto` releases that use them.
+- `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
+  additional `rng: &mut impl Rng` first argument.
+- `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
+  standalone transparent spending keys it holds when it is dropped.
 - `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
   `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,

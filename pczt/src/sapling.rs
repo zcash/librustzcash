@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::{Global, Zip32Derivation},
+    common::{Global, SecretKeyBytes, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -42,7 +42,7 @@ pub struct Bundle {
     ///
     /// - This is `None` until it is set by the IO Finalizer.
     /// - The Transaction Extractor uses this to produce the binding signature.
-    pub(crate) bsk: Option<[u8; 32]>,
+    pub(crate) bsk: Option<SecretKeyBytes>,
 }
 
 /// The canonical empty Sapling bundle: the form the Sapling bundle of a PCZT takes
@@ -166,7 +166,7 @@ pub struct Spend {
     /// - This is chosen by the Constructor.
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_ask` values.
-    pub(crate) dummy_ask: Option<[u8; 32]>,
+    pub(crate) dummy_ask: Option<SecretKeyBytes>,
 
     /// Proprietary fields related to the note being spent.
     #[getset(get = "pub")]
@@ -473,7 +473,7 @@ pub(crate) mod v1 {
         outputs: Vec<super::Output>,
         value_sum: i128,
         anchor: [u8; 32],
-        bsk: Option<[u8; 32]>,
+        bsk: Option<crate::common::SecretKeyBytes>,
     }
 
     impl TryFrom<super::Bundle> for Bundle {
@@ -579,7 +579,7 @@ impl Bundle {
                             )
                         })
                         .transpose()?,
-                    spend.dummy_ask,
+                    spend.dummy_ask.as_ref().map(|ask| *ask.expose_secret()),
                     spend.proprietary,
                 )
             })
@@ -616,8 +616,13 @@ impl Bundle {
             })
             .collect::<Result<_, _>>()?;
 
-        let bundle =
-            sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, anchor, self.bsk)?;
+        let bundle = sapling::pczt::Bundle::parse(
+            spends,
+            outputs,
+            self.value_sum,
+            anchor,
+            self.bsk.as_ref().map(|bsk| *bsk.expose_secret()),
+        )?;
 
         Ok(Parsed {
             bundle,
@@ -672,7 +677,7 @@ impl Bundle {
                     dummy_ask: spend
                         .dummy_ask()
                         .as_ref()
-                        .map(|dummy_ask| dummy_ask.to_bytes()),
+                        .map(|dummy_ask| SecretKeyBytes::new(dummy_ask.to_bytes())),
                     proprietary: spend.proprietary().clone(),
                 }
             })
@@ -707,7 +712,10 @@ impl Bundle {
             outputs,
             value_sum: bundle.value_sum().to_raw(),
             anchor: Some(bundle.anchor().to_bytes()),
-            bsk: bundle.bsk().as_ref().map(|bsk| bsk.to_bytes()),
+            bsk: bundle
+                .bsk()
+                .as_ref()
+                .map(|bsk| SecretKeyBytes::new(bsk.to_bytes())),
         }
     }
 }
