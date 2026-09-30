@@ -34,7 +34,8 @@ workspace.
   takes an additional `rng` first argument that implements `rand_core::{Rng, CryptoRng}`.
 - Migrated to `bip32 0.6`, `group 0.14`, `incrementalmerkletree 0.9`,
   `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`, `sapling-crypto 0.9`,
-  `secp256k1 0.33`, `shardtree 0.8`, `zcash_script 0.6`, and `zip32 0.3`.
+  `secp256k1 0.33`, `shardtree 0.8`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, and `zip32 0.3`.
 - The `R` parameter of `WalletDb` must now implement `rand_core::Rng` in place
   of `rand_core::RngCore` wherever it previously required the latter.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and

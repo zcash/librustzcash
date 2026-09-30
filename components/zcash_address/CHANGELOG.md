@@ -35,6 +35,7 @@ workspace.
     UFVKs and UIVKs, with structural validation of the policy payload.
 
 ### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.0`.
 - `zcash_address::unified::Typecode` now distinguishes data and metadata items
   via `Typecode::Data(DataTypecode)` and `Typecode::Metadata(MetadataTypecode)`.
 - `zcash_address::unified::Encoding::try_from_items` now takes a `Revision`

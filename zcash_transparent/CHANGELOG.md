@@ -25,8 +25,8 @@ workspace.
 - `zcash_transparent::zip48::P2shViewingKeyError`
 
 ### Changed
-- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_script 0.6`, and
-  `zip32 0.3`.
+- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, and `zip32 0.3`.
 - `zcash_transparent::builder::TransparentSignatureContext` no longer has
   lifetime or type parameters, and
   `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`

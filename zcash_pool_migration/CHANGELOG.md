@@ -15,7 +15,7 @@ and this library adheres to Rust's notion of
   `WalletMigrationProver::new` takes that RNG as an additional `rng` argument,
   following `wallet`. It implements `MigrationProver` when `R` implements `rand_core::{Rng, CryptoRng}`.
 - Migrated to `incrementalmerkletree 0.9`, `orchard 0.16`, `rand_core 0.10`,
-  `shardtree 0.8`, and `zip32 0.3`.
+  `shardtree 0.8`, `zcash_protocol 0.11.0-pre.0`, and `zip32 0.3`.
 - Public APIs that took an `RngCore` now require a `rand_core::Rng` in its
   place.
 

@@ -16,9 +16,10 @@ workspace.
   uses the V6 transaction body and digest structure.
 
 ### Changed
-- Migrated to `bls12_381 0.9`, `ff 0.14`, `group 0.14`, `incrementalmerkletree 0.9`,
-  `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`, `redjubjub 0.9`,
-  `sapling-crypto 0.9`, `secp256k1 0.33`, `zcash_note_encryption 0.5`,
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`,
+  `redjubjub 0.9`, `sapling-crypto 0.9`, `secp256k1 0.33`,
+  `zcash_note_encryption 0.5`, `zcash_protocol 0.11.0-pre.0`,
   `zcash_script 0.6`, and `zip32 0.3`.
 - `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}`
   (and `mock_build`, behind `test-dependencies`) now require their `rng`

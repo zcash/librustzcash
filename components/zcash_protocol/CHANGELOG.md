@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.0] - 2026-09-30
+
+This release sets the NU7 activation height to 4465026 on testnet.
+
 ### Added
 - `zcash_protocol::address` module.
 - `zcash_protocol::address::Revision`
@@ -21,9 +25,6 @@ workspace.
 - HRP constants for ZIP 316 Revision 2 unified encodings added to
   `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
   for transparent-including UAs have the `TI` suffix.
-- Experimental NuTachyon support behind `zcash_unstable="nutachyon"`, including
-  its network upgrade, consensus branch ID, local-consensus activation parameter,
-  and V7 transaction format constants.
 - `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
   `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
   without the `--cfg zcash_unstable="nu7"` configuration flag.
