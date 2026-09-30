@@ -493,7 +493,7 @@ pub(crate) mod private {
         MUST_UNDERSTAND_METADATA_MIN, MetadataItem, MetadataTypecode, PADDING_LEN, ParseError,
         Typecode, Uitem,
     };
-    use zcash_encoding::CompactSize;
+    use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
     use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
@@ -762,6 +762,14 @@ pub(crate) mod private {
                     Uitem::Data(d) => Typecode::Data(d.typecode()),
                     Uitem::Metadata(m) => m.combined_typecode(),
                 };
+                // A typecode is encoded as a CompactSize, so it cannot exceed the
+                // CompactSize bound.
+                if t.typecode_value() > MAX_COMPACT_SIZE {
+                    return Err(ParseError::InvalidTypecodeValue(u64::from(
+                        t.typecode_value(),
+                    )));
+                }
+
                 let t_code = Some(t.typecode_value());
 
                 if t_code < prev_code {

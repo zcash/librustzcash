@@ -38,7 +38,8 @@ workspace.
 - `zcash_address::unified::Typecode` now distinguishes data and metadata items
   via `Typecode::Data(DataTypecode)` and `Typecode::Metadata(MetadataTypecode)`.
 - `zcash_address::unified::Encoding::try_from_items` now takes a `Revision`
-  parameter.
+  parameter, and returns `ParseError::InvalidTypecodeValue` for an item whose
+  typecode exceeds `zcash_encoding::MAX_COMPACT_SIZE`.
 - `zcash_address::unified::Encoding::decode` now returns a 3-tuple
   `(NetworkType, Revision, Self)`.
 - `zcash_address::unified::Container::items_as_parsed` now returns
