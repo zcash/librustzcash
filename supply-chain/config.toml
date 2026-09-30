@@ -34,32 +34,16 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
-[policy.halo2_gadgets]
-audit-as-crates-io = false
-
-[policy.halo2_poseidon]
-audit-as-crates-io = false
-
-[policy.halo2_proofs]
-audit-as-crates-io = false
-
 [policy.incrementalmerkletree]
-audit-as-crates-io = false
 
 [policy.incrementalmerkletree-testing]
-audit-as-crates-io = false
 
 [policy.orchard]
-audit-as-crates-io = false
 
 [policy.pczt]
 audit-as-crates-io = true
 
-[policy.sapling-crypto]
-audit-as-crates-io = false
-
 [policy.shardtree]
-audit-as-crates-io = false
 
 [policy.zcash]
 audit-as-crates-io = true
@@ -100,9 +84,6 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.zewif]
-
-[policy.zip32]
-audit-as-crates-io = false
 
 [policy.zip321]
 audit-as-crates-io = true

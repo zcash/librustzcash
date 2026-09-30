@@ -32,10 +32,10 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 
 ### Changed
-- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`, `jubjub 0.11`,
-  `pasta_curves 0.6`, `rand_core 0.10`, `secp256k1 0.33`,
-  `zcash_note_encryption 0.5`, and `zcash_script 0.6`,
-  and to the `orchard` and `sapling-crypto` releases that use them.
+- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`, `pasta_curves 0.6`,
+  `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_note_encryption 0.5`, `zcash_script 0.6`, and `zip32 0.3`.
 - `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
   additional `rng: &mut impl Rng` first argument.
 - `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the

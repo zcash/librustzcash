@@ -46,7 +46,7 @@ zcash_pool_migration = { version = "0.1.0", path = "zcash_pool_migration" }
 zcash_protocol = { version = "0.10.6", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.9.0", path = "components/zip321" }
 
-zcash_note_encryption = "0.5"
+zcash_note_encryption = "0.5.1"
 zcash_primitives = { version = "0.30.1", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.30.0", path = "zcash_proofs", default-features = false }
 
@@ -57,8 +57,8 @@ bellman = { version = "0.15", default-features = false }
 groth16 = { version = "0.2", default-features = false }
 ff = { version = "0.14", default-features = false }
 group = "0.14"
-incrementalmerkletree = { version = "0.8.2", default-features = false }
-shardtree = "0.7"
+incrementalmerkletree = { version = "0.9", default-features = false }
+shardtree = "0.8"
 tempfile = "3.5.0"
 zcash_spec = "0.2"
 
@@ -69,10 +69,10 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.9"
 jubjub = "0.11"
 redjubjub = { version = "0.9", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.9", default-features = false }
 
 # - Orchard
-orchard = { version = "0.15.0", default-features = false }
+orchard = { version = "0.16", default-features = false }
 pasta_curves = "0.6"
 
 # - Transparent
@@ -169,7 +169,7 @@ criterion = "0.5"
 proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
 rand_chacha = "0.10"
 rand_xorshift = "0.5"
-incrementalmerkletree-testing = "0.3"
+incrementalmerkletree-testing = "0.4"
 
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
@@ -184,7 +184,7 @@ trait-variant = "0.1"
 
 # ZIP 32
 bip0039 = { version = "0.12" }
-zip32 = { version = "0.2", default-features = false }
+zip32 = { version = "0.3", default-features = false }
 
 # ZeWIF wallet interchange
 zewif = "1.0.0-rc.3"
@@ -231,14 +231,3 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nutachyon", "zip233"))',
   'cfg(live_network_tests)',
 ] }
-
-[patch.crates-io]
-halo2_gadgets = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
-halo2_poseidon = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
-halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "232496b154e6332c88924e4affa8351ff92408b4" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "b223d12e8e8dcfa4e242ed33a9cbf3512a8e6fb4" }
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "cc5353d3590b8defc5c4333d1528bc123b7ab0f8" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "af3cc3ce54daad90935c657e5d2ded3149c19a1d" }
-zip32 = { git = "https://github.com/zcash/zip32.git", rev = "0399cd62dae9b3abe5dc8d5e761b8ef11b57b12a" }

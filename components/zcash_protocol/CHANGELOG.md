@@ -29,6 +29,8 @@ workspace.
   without the `--cfg zcash_unstable="nu7"` configuration flag.
 
 ### Changed
+- Migrated to `incrementalmerkletree 0.9` and `incrementalmerkletree-testing 0.4`
+  (under the `test-dependencies` feature).
 - `BranchId::height_bounds` and `height_range` now match `for_height` for local
   schedules with skipped or out-of-order upgrades.
 - `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
