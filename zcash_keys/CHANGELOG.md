@@ -46,7 +46,7 @@ workspace.
 - Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`, `orchard 0.16`,
   `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
   `zcash_address 0.14.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, and `zip32 0.3`.
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
 - `zcash_keys::keys::sapling::spending_key` now returns
   `Option<ExtendedSpendingKey>`, and returns `None` if derivation produces an
   invalid Sapling spending key. `UnifiedSpendingKey::from_seed` returns

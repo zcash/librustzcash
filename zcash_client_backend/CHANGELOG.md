@@ -36,7 +36,8 @@ workspace.
   `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`,
   `pasta_curves 0.6`, `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
   `shardtree 0.8`, `zcash_address 0.14.0-pre.0`, `zcash_note_encryption 0.5`,
-  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and `zip32 0.3`.
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`,
+  `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
 - `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
   additional `rng: &mut impl Rng` first argument.
 - `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
