@@ -9,6 +9,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.17.0-pre.0] - 2026-10-01
+
+This release supports the NU7 upgrade on testnet.
+
 ### Added
 - `zeroize` feature, enabled by default, which erases the Sapling, Orchard,
   and ZIP 32 secret key material held by `UnifiedSpendingKey` when it is dropped.
@@ -52,10 +56,10 @@ workspace.
   invalid Sapling spending key. `UnifiedSpendingKey::from_seed` returns
   `DerivationError::Sapling` in that case.
 - `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
-  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent` are deprecated in favour of
-  `p2pkh`, and now both return `Option<&_>`. A unified viewing key carries at most one
-  transparent item, so a key that carries a P2SH viewing key item returns `None` from
-  `p2pkh`, and one that carries a P2PKH viewing key returns `None` from `p2sh`.
+  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent` now return
+  `Option<&_>`. A unified viewing key carries at most one transparent item, so a
+  key that carries a P2SH viewing key item returns `None` from `p2pkh`, and one
+  that carries a P2PKH viewing key returns `None` from `p2sh`.
 - Without the `transparent-inputs` feature, a P2SH viewing key item is retained as an
   unknown item instead of being parsed. A `UnifiedIncomingViewingKey` derived from a
   `UnifiedFullViewingKey` that carries one now records that it does not describe the
@@ -99,6 +103,11 @@ workspace.
   address, instead of returning a bare transparent address for that error.
 - `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
   renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
+
+### Deprecated
+- `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent`; use `p2pkh`
+  instead.
 
 ### Removed
 - `zcash_keys::keys::transparent::Key::{pubkey_with_context,
