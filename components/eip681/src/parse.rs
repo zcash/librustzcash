@@ -464,6 +464,32 @@ impl Number {
             .parse(i)
     }
 
+    /// Returns the plain decimal integer representation of `value`.
+    pub(crate) fn from_uint256(value: U256) -> Self {
+        const RADIX: u64 = 10;
+        let radix = U256::from(RADIX);
+
+        let mut places = vec![];
+        let mut rest = value;
+        loop {
+            let (quotient, digit) = rest.div_mod(radix);
+            // `digit` is less than `RADIX`, so it fits in a `u8`.
+            places.push(digit.low_u32() as u8);
+            if quotient.is_zero() {
+                break;
+            }
+            rest = quotient;
+        }
+        places.reverse();
+
+        Number {
+            signum: None,
+            integer: Digits { places },
+            decimal: None,
+            exponent: None,
+        }
+    }
+
     /// Returns `true` if this [`Number`] has at least one integer digit or a
     /// decimal part.
     ///
@@ -885,7 +911,7 @@ impl Value {
 // have the start of one on the branch `feat/eip-681-tx-req-parser-solidity-types`
 #[derive(Clone, Debug, PartialEq)]
 pub struct EthereumAbiTypeName {
-    name: String,
+    pub(crate) name: String,
 }
 
 impl core::fmt::Display for EthereumAbiTypeName {
@@ -1016,7 +1042,7 @@ impl Parameter {
 
 /// A collection of [`Parameter`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct Parameters(Vec<Parameter>);
+pub struct Parameters(pub(crate) Vec<Parameter>);
 
 impl core::fmt::Display for Parameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1168,8 +1194,8 @@ impl Parameters {
 /// prefix is what you expect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaPrefix {
-    prefix: String,
-    has_pay: bool,
+    pub(crate) prefix: String,
+    pub(crate) has_pay: bool,
 }
 
 impl core::fmt::Display for SchemaPrefix {

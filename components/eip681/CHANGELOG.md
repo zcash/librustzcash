@@ -14,6 +14,19 @@ workspace.
 ### Added
 - `error::ParseError::NumberMissingDigits` (non-exhaustive): emitted internally
   by `Value::parse` when a `Number` candidate has no mantissa digits.
+- `NativeRequest::from_parts`
+- `Erc20Request::from_parts`
+- `error::Error::AmbiguousEncoding`
+
+### Removed
+- `TransactionRequest::from_native_request_parts` and
+  `TransactionRequest::from_erc20_request_parts`. Use `NativeRequest::from_parts`
+  and `Erc20Request::from_parts` instead, wrapping the result in the
+  corresponding `TransactionRequest` variant where a `TransactionRequest` is
+  needed. The new constructors return an error for any part that is not
+  exactly one valid value of its kind, where the removed constructors could
+  return `Ok(TransactionRequest::Unrecognised(..))` or a request of the other
+  kind.
 
 ### Fixed
 - `Value::parse` no longer classifies inputs that lack any integer digits and
