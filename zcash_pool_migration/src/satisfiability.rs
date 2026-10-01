@@ -19,7 +19,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
@@ -716,7 +716,7 @@ impl Advance {
 /// [`prove_transfer`]: crate::engine::prove_transfer
 /// [`prove_preparation`]: crate::engine::prove_preparation
 /// [`rebuild_expired_transfer`]: crate::engine::rebuild_expired_transfer
-pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
+pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
     store: &mut St,
     state: &mut MigrationState,
     targets: DuenessTargets,

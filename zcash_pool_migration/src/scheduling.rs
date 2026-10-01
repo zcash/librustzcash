@@ -76,7 +76,7 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::num::NonZeroU32;
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 use zcash_protocol::consensus::BlockHeight;
 
 /// The block-height grid defining the BOUNDARY blocks that a transfer may anchor to.
@@ -146,14 +146,14 @@ impl DelayDistribution {
     ///
     /// Samples by inverse-CDF, `delay = round(-mean * ln(u))` for `u` uniform in `(0, 1]`,
     /// discarding and redrawing above [`Self::cap`].
-    pub fn draw<R: RngCore + CryptoRng>(&self, rng: &mut R) -> u32 {
+    pub fn draw<R: Rng + CryptoRng>(&self, rng: &mut R) -> u32 {
         self.draw_inner(rng)
     }
 
     /// The RNG-generic body of [`Self::draw`]. The public entry point bounds its `rng` as
     /// [`CryptoRng`] (the drawn delays are privacy-relevant observables); the tests exercise the
     /// distribution through the same code path.
-    fn draw_inner<R: RngCore>(&self, rng: &mut R) -> u32 {
+    fn draw_inner<R: Rng>(&self, rng: &mut R) -> u32 {
         loop {
             let u = draw_unit_left_open(rng);
             // ln(u) <= 0 for u in (0, 1], so -mean * ln(u) >= 0.
@@ -454,13 +454,13 @@ const U64_TO_MANTISSA_SHIFT: u32 = 11;
 /// Draw a uniform `f64` in the half-open interval `[0, 1)` from `rng`, quantized to the `2^53` evenly
 /// spaced 53-bit values. Keeps the top [`U64_TO_MANTISSA_SHIFT`] bits of a fresh `u64` and scales by
 /// [`UNIT_STEP`].
-fn draw_unit_half_open<R: RngCore>(rng: &mut R) -> f64 {
+fn draw_unit_half_open<R: Rng>(rng: &mut R) -> f64 {
     ((rng.next_u64() >> U64_TO_MANTISSA_SHIFT) as f64) * UNIT_STEP
 }
 
 /// Draw a uniform `f64` in `(0, 1]` from `rng`. Complements [`draw_unit_half_open`] by mapping
 /// `[0, 1)` to `(0, 1]` via `1 - u`, so `0` is excluded (keeping `ln` finite) and `1` is included.
-fn draw_unit_left_open<R: RngCore>(rng: &mut R) -> f64 {
+fn draw_unit_left_open<R: Rng>(rng: &mut R) -> f64 {
     1.0 - draw_unit_half_open(rng)
 }
 
@@ -476,7 +476,7 @@ fn round_nonneg_to_u32(x: f64) -> u32 {
 /// quantized parts so the broadcast ORDER of denominations is independent of the balance.
 ///
 /// Returns the identity for `n == 0` or `n == 1`.
-pub fn shuffle_indices<R: RngCore + CryptoRng>(n: usize, rng: &mut R) -> Vec<usize> {
+pub fn shuffle_indices<R: Rng + CryptoRng>(n: usize, rng: &mut R) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..n).collect();
     shuffle_in_place(&mut indices, rng);
     indices
@@ -485,7 +485,7 @@ pub fn shuffle_indices<R: RngCore + CryptoRng>(n: usize, rng: &mut R) -> Vec<usi
 /// In-place uniform Fisher-Yates shuffle of `slice` using `rng` (ZIP 318 SHUFFLE MUST). Iterates
 /// from the top, swapping each element with a uniformly chosen one at or below it, so every
 /// permutation is equally likely. Leaves the multiset of elements unchanged.
-pub fn shuffle_in_place<T, R: RngCore + CryptoRng>(slice: &mut [T], rng: &mut R) {
+pub fn shuffle_in_place<T, R: Rng + CryptoRng>(slice: &mut [T], rng: &mut R) {
     let len = slice.len();
     if len < 2 {
         return;
@@ -502,7 +502,7 @@ pub fn shuffle_in_place<T, R: RngCore + CryptoRng>(slice: &mut [T], rng: &mut R)
 /// Draw a uniform integer in `[0, bound)` from `rng` (`bound > 0`) using Lemire's unbiased
 /// widening-multiply method, so the shuffle is free of modulo bias. Reduces a fresh `u64` into the
 /// range by taking the high half of `value * bound`, rejecting the rare low remainder region.
-fn gen_index<R: RngCore>(rng: &mut R, bound: usize) -> usize {
+fn gen_index<R: Rng>(rng: &mut R, bound: usize) -> usize {
     debug_assert!(bound > 0);
     let bound = bound as u64;
     loop {
@@ -525,7 +525,7 @@ fn gen_index<R: RngCore>(rng: &mut R, bound: usize) -> usize {
 /// independently drawn delay for each of the `n` entries. The returned vector has length `n`, is
 /// non-decreasing, and every entry is `>= start`; heights saturate at `u32::MAX` rather than
 /// overflowing (`BlockHeight`'s delta addition saturates).
-fn cumulative_broadcast_heights<R: RngCore>(
+fn cumulative_broadcast_heights<R: Rng>(
     start: BlockHeight,
     n: usize,
     draw: impl Fn(&mut R) -> u32,
@@ -544,7 +544,7 @@ fn cumulative_broadcast_heights<R: RngCore>(
 /// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
 /// (ZIP 318 CUMULATIVE MUST). The returned vector has length `n_parts`, is non-decreasing, and every
 /// entry is `>= commit_height`. Heights saturate at `u32::MAX` rather than overflowing.
-pub fn schedule_broadcast_heights<R: RngCore + CryptoRng>(
+pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     commit_height: BlockHeight,
     n_parts: usize,
@@ -561,7 +561,7 @@ pub fn schedule_broadcast_heights<R: RngCore + CryptoRng>(
 /// later layer's `start` past the previous layer's last scheduled height plus a mining margin, so
 /// layers stay serialized while the transactions within and across layers remain temporally
 /// decoupled.
-pub fn schedule_prep_broadcast_heights<R: RngCore + CryptoRng>(
+pub fn schedule_prep_broadcast_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     start: BlockHeight,
     n_txs: usize,
@@ -615,7 +615,7 @@ pub use zcash_protocol::zip318::expiry_height;
 ///
 /// [`MigrationTransaction::anchor_boundary`]: crate::engine::MigrationTransaction::anchor_boundary
 /// [`advance_migration`]: crate::satisfiability::advance_migration
-pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
+pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
     params: &WakeupParams,
     current_tip: BlockHeight,
     transfers: &[(T, BlockHeight, BlockHeight)],
@@ -723,7 +723,7 @@ pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
 /// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
 /// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`]. Returns
 /// one [`Schedule`] per part, in the (already shuffled) part order the caller passes.
-pub fn schedule<R: RngCore + CryptoRng>(
+pub fn schedule<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     commit_height: BlockHeight,
     n_parts: usize,
@@ -749,7 +749,7 @@ pub fn schedule<R: RngCore + CryptoRng>(
 /// saw the wallet sync inside that narrow window can correlate the two by IP address. Ages `>= 1`
 /// keep the proving window at least one full boundary interval wide. See
 /// <https://github.com/zcash/zips/pull/1343#issuecomment-5124302101>.
-fn draw_anchor_age<R: RngCore>(rng: &mut R) -> u32 {
+fn draw_anchor_age<R: Rng>(rng: &mut R) -> u32 {
     let mut age: u32 = 1;
     loop {
         // Consume 64 fair coin flips per word; a set bit is "success" (stop).
@@ -781,7 +781,7 @@ fn draw_anchor_age<R: RngCore>(rng: &mut R) -> u32 {
 /// drawn (`Geometric(1/2)`) and the candidate is `most_recent - a * interval`; a draw exceeding
 /// [`ANCHOR_AGE_CAP`] or landing outside the candidate set is discarded and redrawn. Because age is
 /// always `>= 1`, the chosen boundary is always strictly below the most recent boundary.
-pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
+pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
     interval: AnchorBucketInterval,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
@@ -829,7 +829,7 @@ pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
 /// the caller keeps the prior boundary, which remains provable.
 ///
 /// [`prove_transfer`]: crate::engine::prove_transfer
-pub fn redraw_anchor_boundary<R: RngCore + CryptoRng>(
+pub fn redraw_anchor_boundary<R: Rng + CryptoRng>(
     interval: AnchorBucketInterval,
     prior_boundary: BlockHeight,
     broadcast_height: BlockHeight,
@@ -856,7 +856,7 @@ pub fn redraw_anchor_boundary<R: RngCore + CryptoRng>(
 /// lands in `[lowest, highest]`, and return that candidate. The caller guarantees
 /// `lowest <= highest` and `highest = most_recent - interval` (both grid boundaries), so age 1
 /// always yields `highest` and the loop terminates.
-fn sample_recency_weighted_boundary<R: RngCore>(
+fn sample_recency_weighted_boundary<R: Rng>(
     interval: AnchorBucketInterval,
     lowest: u32,
     highest: u32,

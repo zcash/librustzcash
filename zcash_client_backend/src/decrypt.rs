@@ -378,7 +378,7 @@ mod tests {
     use std::collections::HashMap;
 
     use rand_chacha::ChaChaRng;
-    use rand_core::{CryptoRng, RngCore, SeedableRng};
+    use rand_core::{CryptoRng, SeedableRng};
     use sapling::{
         note_encryption::sapling_note_encryption,
         util::generate_random_rseed,
@@ -479,7 +479,7 @@ mod tests {
     fn sapling_tx_paying(
         recipient: ::sapling::PaymentAddress,
         ovk: OutgoingViewingKey,
-        rng: &mut (impl RngCore + CryptoRng),
+        rng: &mut impl CryptoRng,
     ) -> Transaction {
         let enforcement =
             zip212_enforcement(&Network::TestNetwork, BlockHeight::from_u32(MINED_HEIGHT));
@@ -499,7 +499,7 @@ mod tests {
             cv,
             cmu,
             ephemeral_key,
-            enc_ciphertext,
+            enc_ciphertext.0,
             out_ciphertext,
             [0u8; core::mem::size_of::<::sapling::bundle::GrothProofBytes>()],
         );
@@ -592,7 +592,7 @@ mod tests {
     fn orchard_tx_paying(
         recipient: ::orchard::Address,
         ovk: OutgoingViewingKey,
-        rng: &mut (impl RngCore + CryptoRng),
+        rng: &mut impl CryptoRng,
     ) -> Transaction {
         use ::orchard::{
             Anchor, Proof,

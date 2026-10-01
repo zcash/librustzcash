@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
 - `zcash_client_backend::util` module, providing the `Clock` capability trait,
   `SystemClock`, and (behind the `test-dependencies` feature)
   `testing::FixedClock`. These were previously defined in
@@ -29,12 +30,33 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
   `TxOut::to_txout` (behind `transparent-inputs`)
+- `zcash_client_backend::sync::decryptor::Handle::{closed, is_closed}`, the only
+  reliable liveness test for the engine: a request that wins its queue slot
+  concurrently with shutdown is still accepted, and is then never dropped while
+  any `Handle` remains, so neither the queuing methods' `None` nor the returned
+  receiver reports shutdown (behind `sync-decryptor`)
 
 ### Changed
+- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`,
+  `pasta_curves 0.6`, `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
+  `shardtree 0.8`, `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
+  `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
+  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
+  additional `rng: &mut impl Rng` first argument.
+- `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
+  standalone transparent spending keys it holds when it is dropped.
+- `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
+  `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
-  transaction-creation timestamps and to enforce recipient address expiry.
+  transaction-creation timestamps and to enforce recipient address expiry, and an
+  `rng: &mut impl CryptoRng` argument, which supplies the randomness for
+  constructing, proving, and signing transactions in place of the operating
+  system's RNG.
 - `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
   create_pczt_from_proposal}` now enforce the ZIP 316 Revision 2 address
   expiration rules for every payment recipient: a payment to an address that is

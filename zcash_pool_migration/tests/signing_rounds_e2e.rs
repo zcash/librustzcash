@@ -76,7 +76,8 @@ fn sign_round_and_apply(
         // The wallet keeps the id to match the signed PCZT back; the bytes go to the signer.
         let (id, bytes) = unsigned_tx.into_parts();
         let unsigned = pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses");
-        let signed = sign_pczt(unsigned, ask).expect("the signer authorizes the transaction");
+        let signed = sign_pczt(ChaCha8Rng::seed_from_u64(0), unsigned, ask)
+            .expect("the signer authorizes the transaction");
         assert!(state.apply_signature(id, signed.serialize().expect("serializes the signed PCZT")));
     }
 }

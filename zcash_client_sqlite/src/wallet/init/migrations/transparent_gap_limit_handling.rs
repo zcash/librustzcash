@@ -1,7 +1,7 @@
 //! Add support for general transparent gap limit handling, and unify the `addresses` and
 //! `ephemeral_addresses` tables.
 
-use rand_core::RngCore;
+use rand_core::Rng;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -164,7 +164,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
     Ok(())
 }
 
-impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migration<P, C, R> {
+impl<P: consensus::Parameters, C: Clock, R: Rng> RusqliteMigration for Migration<P, C, R> {
     type Error = WalletMigrationError;
 
     fn up(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {

@@ -610,7 +610,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_536_500)),
             NetworkUpgrade::Nu6_2 => Some(BlockHeight(4_052_000)),
             NetworkUpgrade::Nu6_3 => Some(BlockHeight(4_134_000)),
-            NetworkUpgrade::Nu7 => None,
+            NetworkUpgrade::Nu7 => Some(BlockHeight(4_465_026)),
             #[cfg(zcash_unstable = "nutachyon")]
             NetworkUpgrade::NuTachyon => None,
         }
@@ -1102,7 +1102,8 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::{
-        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER,
+        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, TEST_NETWORK,
+        UPGRADES_IN_ORDER,
     };
 
     #[test]
@@ -1294,14 +1295,27 @@ mod tests {
     }
 
     #[test]
-    fn nu7_has_no_public_network_activation_height() {
-        use super::TEST_NETWORK;
+    fn nu7_activates_on_testnet_only() {
+        /// The height at which NU7 activates on Testnet.
+        const TESTNET_NU7_ACTIVATION: BlockHeight = BlockHeight(4_465_026);
 
         assert_eq!(MAIN_NETWORK.activation_height(NetworkUpgrade::Nu7), None);
-        assert_eq!(TEST_NETWORK.activation_height(NetworkUpgrade::Nu7), None);
         assert_eq!(
-            BranchId::for_height(&TEST_NETWORK, BlockHeight(u32::MAX)),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(u32::MAX)),
             BranchId::Nu6_3,
+        );
+
+        assert_eq!(
+            TEST_NETWORK.activation_height(NetworkUpgrade::Nu7),
+            Some(TESTNET_NU7_ACTIVATION),
+        );
+        assert_eq!(
+            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION - 1),
+            BranchId::Nu6_3,
+        );
+        assert_eq!(
+            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION),
+            BranchId::Nu7,
         );
     }
 }

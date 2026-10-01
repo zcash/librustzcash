@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use pczt::roles::{creator::Creator, io_finalizer::IoFinalizer, updater::Updater};
+use rand_core::{CryptoRng, Rng};
 use zcash_primitives::transaction::builder::PcztParts;
 use zcash_protocol::consensus::{NetworkConstants, Parameters};
 use zip32::fingerprint::SeedFingerprint;
@@ -125,7 +126,8 @@ impl From<&zcash_client_backend::data_api::Zip32Derivation> for AccountDerivatio
 /// exactly like the real spends. Without the derivation, a Signer that matches spends by
 /// derivation path correctly skips them as "not ours", nothing else can sign them, and extracting
 /// the transaction fails with a missing spend-auth signature.
-pub(crate) fn finalize_pczt<P: Parameters>(
+pub(crate) fn finalize_pczt<P: Parameters, R: Rng + CryptoRng>(
+    rng: R,
     params: &P,
     parts: PcztParts<P>,
     account_derivation: Option<&AccountDerivation>,
@@ -133,7 +135,7 @@ pub(crate) fn finalize_pczt<P: Parameters>(
     let created = Creator::build_from_parts(parts)
         .ok_or_else(|| BuildError::Build("pczt creation failed".into()))?;
     let finalized = IoFinalizer::new(created)
-        .finalize_io()
+        .finalize_io(rng)
         .map_err(|e| BuildError::Build(format!("io finalize: {e:?}")))?;
 
     let Some(derivation) = account_derivation else {

@@ -120,7 +120,7 @@
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
@@ -316,7 +316,7 @@ pub trait DenominationStrategy {
     /// note shape. `rng` is used by randomized strategies and ignored by deterministic ones; it is
     /// bound as [`CryptoRng`] because a randomized strategy's draws decide the on-chain crossing
     /// values, which are privacy-relevant.
-    fn plan<R: RngCore + CryptoRng>(
+    fn plan<R: Rng + CryptoRng>(
         &self,
         total_input: Zatoshis,
         spendable_note_count: usize,
@@ -350,7 +350,7 @@ pub fn plan_denominations<R>(
     rng: &mut R,
 ) -> DenominationPlan
 where
-    R: RngCore + CryptoRng,
+    R: Rng + CryptoRng,
 {
     CanonicalOneTwoFive::with_max_notes(max_notes, transfer_fee_buffer).plan(
         total_input,

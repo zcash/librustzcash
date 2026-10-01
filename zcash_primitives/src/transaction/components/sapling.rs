@@ -10,12 +10,12 @@ use ::sapling::{
         SpendDescription, SpendDescriptionV5,
     },
     note::ExtractedNoteCommitment,
-    note_encryption::Zip212Enforcement,
+    note_encryption::{ENC_CIPHERTEXT_SIZE, Zip212Enforcement},
     value::ValueCommitment,
 };
 use redjubjub::SpendAuth;
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_note_encryption::{ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
+use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
 use zcash_protocol::{
     consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
     value::ZatBalance,
@@ -179,7 +179,7 @@ pub fn read_base<R: Read>(mut reader: R, _field: &str) -> io::Result<jubjub::Bas
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
 ///   and SaplingVerificationContext::check_output() due to the need to parse this into a
-///   bellman::groth16::Proof.
+///   groth16::Proof.
 /// - Proof validity is enforced in SaplingVerificationContext::check_spend()
 ///   and SaplingVerificationContext::check_output()
 pub fn read_zkproof<R: Read>(mut reader: R) -> io::Result<GrothProofBytes> {
@@ -351,8 +351,8 @@ fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5
     let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
     reader.read_exact(&mut ephemeral_key.0)?;
 
-    let mut enc_ciphertext = [0u8; 580];
-    let mut out_ciphertext = [0u8; 80];
+    let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
+    let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
     reader.read_exact(&mut enc_ciphertext)?;
     reader.read_exact(&mut out_ciphertext)?;
 

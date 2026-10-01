@@ -38,7 +38,11 @@ pub mod tx_extractor;
 #[cfg(test)]
 mod tests {
     #[cfg(any(feature = "io-finalizer", feature = "tx-extractor"))]
-    use {crate::roles::creator::Creator, zcash_protocol::consensus::BranchId};
+    use {
+        crate::roles::creator::Creator,
+        rand::{rand_core::UnwrapErr, rngs::SysRng},
+        zcash_protocol::consensus::BranchId,
+    };
 
     #[cfg(feature = "io-finalizer")]
     use crate::roles::io_finalizer::{self, IoFinalizer};
@@ -63,7 +67,9 @@ mod tests {
         // Extraction fails because we haven't run the IO Finalizer.
         // Extraction fails in Sapling because we happen to extract it before Orchard.
         assert!(matches!(
-            TransactionExtractor::new(pczt).extract().unwrap_err(),
+            TransactionExtractor::new(pczt)
+                .extract(UnwrapErr(SysRng))
+                .unwrap_err(),
             tx_extractor::Error::Sapling(tx_extractor::SaplingError::Extract(
                 sapling::pczt::TxExtractorError::MissingBindingSignatureSigningKey
             )),
@@ -86,7 +92,9 @@ mod tests {
 
         // IO finalization fails on spends because we happen to check them first.
         assert!(matches!(
-            IoFinalizer::new(pczt).finalize_io().unwrap_err(),
+            IoFinalizer::new(pczt)
+                .finalize_io(UnwrapErr(SysRng))
+                .unwrap_err(),
             io_finalizer::Error::NoSpends,
         ));
     }
@@ -114,7 +122,7 @@ mod tests {
                 SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy,
             },
         };
-        use rand_core::OsRng;
+        use rand::{rand_core::UnwrapErr, rngs::SysRng};
         use zcash_primitives::transaction::{
             builder::{BuildConfig, Builder, BundlePadding, PcztResult},
             fees::zip317,
@@ -132,11 +140,11 @@ mod tests {
         const SIGHASH_ALL_ANYONECANPAY: u8 = SIGHASH_ALL | SIGHASH_ANYONECANPAY;
 
         fn secret_key() -> secp256k1::SecretKey {
-            secp256k1::SecretKey::from_slice(&[1; 32]).expect("valid")
+            secp256k1::SecretKey::from_secret_bytes([1; 32]).expect("valid")
         }
 
         fn public_key(sk: &secp256k1::SecretKey) -> secp256k1::PublicKey {
-            sk.public_key(&secp256k1::Secp256k1::signing_only())
+            sk.public_key()
         }
 
         /// The coin the victim is being asked to spend.
@@ -164,11 +172,11 @@ mod tests {
 
         fn finalize(builder: Builder<MainNetwork, ()>) -> Pczt {
             let PcztResult { pczt_parts, .. } = builder
-                .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+                .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
                 .unwrap();
 
             IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
-                .finalize_io()
+                .finalize_io(UnwrapErr(SysRng))
                 .unwrap()
         }
 
@@ -220,8 +228,8 @@ mod tests {
         /// sighash type would — and offers the signature to a Signer with the default
         /// policy.
         fn append(pczt: Pczt, sighash: [u8; 32]) -> Result<(), signer::Error> {
-            let sig = secp256k1::Secp256k1::new()
-                .sign_ecdsa(&secp256k1::Message::from_digest(sighash), &secret_key());
+            let sig =
+                secp256k1::ecdsa::sign(secp256k1::Message::from_digest(sighash), &secret_key());
             Signer::new(pczt)
                 .unwrap()
                 .append_transparent_signature(0, sig)
@@ -379,7 +387,8 @@ mod tests {
 
         /// The attacker's own coin, which they contribute to their own transaction.
         fn attacker_coin() -> (secp256k1::PublicKey, OutPoint, TxOut) {
-            let pubkey = public_key(&secp256k1::SecretKey::from_slice(&[2; 32]).expect("valid"));
+            let pubkey =
+                public_key(&secp256k1::SecretKey::from_secret_bytes([2; 32]).expect("valid"));
             let addr = TransparentAddress::from_pubkey(&pubkey);
             (
                 pubkey,
@@ -433,13 +442,12 @@ mod tests {
         fn authorizes(sig: &[u8], pczt: Pczt) -> bool {
             let sighash = unguarded_sighash(pczt);
 
-            secp256k1::Secp256k1::new()
-                .verify_ecdsa(
-                    &secp256k1::Message::from_digest(sighash),
-                    &secp256k1::ecdsa::Signature::from_der(sig).expect("DER-encoded"),
-                    &public_key(&secret_key()),
-                )
-                .is_ok()
+            secp256k1::ecdsa::verify(
+                &secp256k1::ecdsa::Signature::from_der(sig).expect("DER-encoded"),
+                secp256k1::Message::from_digest(sighash),
+                &public_key(&secret_key()),
+            )
+            .is_ok()
         }
 
         /// Why `SighashPolicy::ALL_ONLY` is the default: a signature the victim was
@@ -505,7 +513,7 @@ mod tests {
         /// `SIGHASH_ALL` signature over their own input.
         #[test]
         fn finalizer_accepts_mixed_sighash_types() {
-            let contributor_sk = secp256k1::SecretKey::from_slice(&[3; 32]).expect("valid");
+            let contributor_sk = secp256k1::SecretKey::from_secret_bytes([3; 32]).expect("valid");
             let contributor_pubkey = public_key(&contributor_sk);
             let contributor_utxo = OutPoint::new([3; 32], 0);
             let contributor_coin = TxOut::new(

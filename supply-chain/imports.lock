@@ -1,9 +1,30 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_protocol]]
-version = "0.10.6"
-audited_as = "0.10.5"
+[[unpublished.zcash_keys]]
+version = "0.17.0-pre.0"
+audited_as = "0.16.1"
+
+[[publisher.addchain]]
+version = "0.3.0"
+when = "2026-02-26"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
+
+[[publisher.bellman]]
+version = "0.15.0"
+when = "2026-09-26"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
+
+[[publisher.bls12_381]]
+version = "0.9.0"
+when = "2026-09-15"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -40,9 +61,58 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
+[[publisher.ff]]
+version = "0.12.0"
+when = "2022-05-04"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
+[[publisher.ff]]
+version = "0.14.0"
+when = "2026-05-30"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
+[[publisher.ff_derive]]
+version = "0.14.0"
+when = "2026-05-30"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
+[[publisher.fpe]]
+version = "0.7.0"
+when = "2026-09-30"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
+
+[[publisher.groth16]]
+version = "0.2.0"
+when = "2026-09-26"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
+
+[[publisher.group]]
+version = "0.12.0"
+when = "2022-05-04"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
+[[publisher.group]]
+version = "0.14.0"
+when = "2026-06-01"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
 [[publisher.halo2_gadgets]]
-version = "0.5.0"
-when = "2026-06-03"
+version = "0.6.0"
+when = "2026-09-29"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -55,32 +125,39 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.halo2_poseidon]]
-version = "0.1.0"
-when = "2024-12-16"
+version = "0.2.0"
+when = "2026-09-29"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.halo2_proofs]]
-version = "0.3.2"
-when = "2025-12-04"
+version = "0.4.0"
+when = "2026-09-29"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.incrementalmerkletree]]
-version = "0.8.2"
-when = "2025-02-01"
+version = "0.9.0"
+when = "2026-09-30"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.incrementalmerkletree-testing]]
-version = "0.3.0"
-when = "2025-01-31"
+version = "0.4.0"
+when = "2026-09-30"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
+
+[[publisher.jubjub]]
+version = "0.11.1"
+when = "2026-09-23"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.memuse]]
 version = "0.2.2"
@@ -90,11 +167,25 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.15.3"
-when = "2026-07-22"
-user-id = 1244
-user-login = "ebfull"
-user-name = "Sean Bowe"
+version = "0.16.0"
+when = "2026-09-30"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.pairing]]
+version = "0.24.0"
+when = "2026-09-15"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
+
+[[publisher.pasta_curves]]
+version = "0.6.0"
+when = "2026-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.pczt]]
 version = "0.9.3"
@@ -103,9 +194,23 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.reddsa]]
+version = "0.6.1"
+when = "2026-09-25"
+user-id = 159631
+user-login = "conradoplg"
+user-name = "Conrado"
+
+[[publisher.redjubjub]]
+version = "0.9.0"
+when = "2026-09-25"
+user-id = 159631
+user-login = "conradoplg"
+user-name = "Conrado"
+
 [[publisher.sapling-crypto]]
-version = "0.7.0"
-when = "2026-04-21"
+version = "0.9.0"
+when = "2026-09-30"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -125,15 +230,15 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.shardtree]]
-version = "0.7.0"
-when = "2026-07-09"
+version = "0.8.0"
+when = "2026-09-30"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.sinsemilla]]
-version = "0.1.0"
-when = "2024-12-14"
+version = "0.2.0"
+when = "2026-09-25"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -446,8 +551,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.13.0"
-when = "2026-07-09"
+version = "0.14.0-pre.0"
+when = "2026-10-01"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -462,13 +567,6 @@ user-name = "Kris Nuttycombe"
 [[publisher.zcash_client_sqlite]]
 version = "0.22.0"
 when = "2026-08-19"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
-[[publisher.zcash_encoding]]
-version = "0.4.0"
-when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -494,6 +592,13 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.zcash_note_encryption]]
+version = "0.5.1"
+when = "2026-09-30"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
 [[publisher.zcash_pool_migration]]
 version = "0.1.0"
 when = "2026-08-19"
@@ -502,32 +607,32 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.30.1"
-when = "2026-08-19"
+version = "0.31.0-pre.0"
+when = "2026-10-01"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.30.0"
-when = "2026-07-24"
+version = "0.31.0-pre.0"
+when = "2026-10-01"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.10.5"
-when = "2026-08-19"
+version = "0.11.0-pre.0"
+when = "2026-10-01"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_script]]
-version = "0.4.2"
-when = "2025-10-24"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.6.0"
+when = "2026-10-01"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_spec]]
 version = "0.2.1"
@@ -537,8 +642,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.10.0"
-when = "2026-07-24"
+version = "0.11.0-pre.0"
+when = "2026-10-01"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -551,8 +656,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip32]]
-version = "0.2.0"
-when = "2025-02-20"
+version = "0.3.0"
+when = "2026-09-29"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -874,6 +979,12 @@ notes = "Minor documentation updates an additions, nothing major."
 who = "Dan Gohman <dev@sunfishcode.online>"
 criteria = "safe-to-deploy"
 version = "0.1.2"
+
+[[audits.bytecode-alliance.audits.inout]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+version = "0.1.3"
+notes = "A part of RustCrypto/utils, this crate is designed to handle unsafe buffers and carefully documents the safety concerns throughout. Older versions of this tally up to ~130k daily downloads."
 
 [[audits.bytecode-alliance.audits.itertools]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
@@ -2431,6 +2542,11 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 version = "0.12.1"
 
+[[audits.isrg.audits.inout]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.1.4 -> 0.2.2"
+
 [[audits.isrg.audits.keccak]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -2515,6 +2631,16 @@ delta = "0.3.1 -> 0.9.0"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.6.4 -> 0.9.3"
+
+[[audits.isrg.audits.rand_distr]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.5.1"
+
+[[audits.isrg.audits.rand_distr]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.5.1 -> 0.6.0"
 
 [[audits.isrg.audits.rayon]]
 who = "Brandon Pitman <bran@bran.land>"
@@ -3788,10 +3914,34 @@ criteria = "safe-to-deploy"
 delta = "2.0.1 -> 2.0.2"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[[audits.zcash.audits.ff]]
+who = "Jack Grigg <jack@z.cash>"
+criteria = "safe-to-deploy"
+delta = "0.12.0 -> 0.12.1"
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
+[[audits.zcash.audits.ff]]
+who = "Sean Bowe <ewillbefull@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.13.0"
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
 [[audits.zcash.audits.futures-task]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.3.26 -> 0.3.27"
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
+[[audits.zcash.audits.group]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.12.0 -> 0.12.1"
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
+[[audits.zcash.audits.group]]
+who = "Sean Bowe <ewillbefull@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.13.0"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.hermit-abi]]
@@ -3801,11 +3951,10 @@ delta = "0.3.3 -> 0.3.9"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.inout]]
-who = "Daira Hopwood <daira@jacaranda.org>"
+who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
-version = "0.1.3"
-notes = "Reviewed in full."
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+delta = "0.1.3 -> 0.1.4"
+aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
 
 [[audits.zcash.audits.js-sys]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -4037,24 +4186,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-ch
 who = "Sean Bowe <ewillbefull@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.3.0"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.redjubjub]]
-who = "Daira Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-version = "0.7.0"
-notes = """
-This crate is a thin wrapper around the `reddsa` crate, which I did not review. I also
-did not review tests or verify test vectors.
-
-The comment on `batch::Verifier::verify` has an error in the batch verification equation,
-filed as https://github.com/ZcashFoundation/redjubjub/issues/163 . It does not affect the
-implementation which just delegates to `reddsa`. `reddsa` has the same comment bug filed as
-https://github.com/ZcashFoundation/reddsa/issues/52 , but its batch verification implementation
-is correct. (I checked the latter against https://zips.z.cash/protocol/protocol.pdf#reddsabatchvalidate
-which has had previous cryptographic review by NCC group; see finding NCC-Zcash2018-009 in
-https://research.nccgroup.com/wp-content/uploads/2020/07/NCC_Group_Zcash2018_Public_Report_2019-01-30_v1.3.pdf ).
-"""
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.redox_users]]

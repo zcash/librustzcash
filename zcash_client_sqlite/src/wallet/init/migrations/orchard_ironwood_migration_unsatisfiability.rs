@@ -599,7 +599,7 @@ mod tests {
         use orchard::note::{Note, NoteVersion, RandomSeed, Rho};
         use orchard::value::NoteValue;
         use rand_chacha::ChaCha8Rng;
-        use rand_core::{RngCore, SeedableRng};
+        use rand_core::{Rng, SeedableRng};
         use zcash_client_backend::data_api::testing::TestBuilder;
         use zcash_pool_migration::build::build_transfer_pczt;
         use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;

@@ -21,7 +21,7 @@
 //!
 //! [ZIP 374]: https://zips.z.cash/zip-0374
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use orchard::keys::{FullViewingKey, Scope};
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
@@ -65,8 +65,9 @@ const IRONWOOD_TRANSFER_PADDING: BundlePadding = BundlePadding {
 /// [`sign_pczt`](super::sign_pczt), which matches by key rather than by path) but not by a
 /// derivation-matching Signer.
 ///
-/// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
-/// pass a seeded one), keeping this builder pure.
+/// The caller supplies `rng`, which provides the randomness for building the transaction and for
+/// signing its dummy spends. It must be a cryptographically secure RNG in production; tests can
+/// pass a seeded one. This keeps the builder pure.
 ///
 /// # Errors
 ///
@@ -82,11 +83,11 @@ pub fn build_transfer_pczt<P, R>(
     note: orchard::note::Note,
     crossing_value: Zatoshis,
     account_derivation: Option<&AccountDerivation>,
-    rng: R,
+    mut rng: R,
 ) -> Result<pczt::Pczt, BuildError>
 where
     P: Parameters + Clone,
-    R: RngCore + CryptoRng,
+    R: Rng + CryptoRng,
 {
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),
@@ -116,10 +117,10 @@ where
         .map_err(|e| BuildError::Build(format!("transfer: add ironwood output: {e}")))?;
 
     let build_result = builder
-        .build_for_pczt(rng, &Zip317FeeRule::standard())
+        .build_for_pczt(&mut rng, &Zip317FeeRule::standard())
         .map_err(|e| BuildError::Build(format!("transfer: build: {e}")))?;
 
-    finalize_pczt(params, build_result.pczt_parts, account_derivation)
+    finalize_pczt(rng, params, build_result.pczt_parts, account_derivation)
 }
 
 #[cfg(test)]

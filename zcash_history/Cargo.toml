@@ -17,9 +17,7 @@ proptest.workspace = true
 primitive-types = { version = "0.12", default-features = false }
 blake2b_simd.workspace = true
 corez.workspace = true
-# Rides the breaking zcash_encoding 0.5 (see the note in the workspace Cargo.toml);
-# the rest of the stack stays on the published 0.4. Drop `path` when publishing.
-zcash_encoding = { version = "0.5", path = "../components/zcash_encoding", default-features = false }
+zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
 
 [features]

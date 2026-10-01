@@ -18,8 +18,33 @@ workspace.
 - `pczt::common::Global::{coin_type, fallback_lock_time, tx_modifiable}`
 - `pczt::roles::signer::Signer::with_transparent_sighash_policy`
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
+- `pczt::common::SecretKeyBytes`
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `incrementalmerkletree 0.9`,
+  `jubjub 0.11`, `orchard 0.16`, `pasta_curves 0.6`, `redjubjub 0.9`,
+  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
+  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
+  `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
+  create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
+  sign_ironwood, sign_sapling}`, and
+  `pczt::roles::tx_extractor::TransactionExtractor::extract` now take an `rng`
+  first argument that implements `rand_core::{Rng, CryptoRng}`, in place of
+  drawing randomness from the operating system. Pass
+  `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behavior.
+- The role features no longer depend on `getrandom`.
+- The `orchard` and `sapling` features now enable the `zeroize` features of
+  `orchard` and `sapling-crypto` respectively.
+- `pczt::orchard::Spend::dummy_sk` now returns `&Option<SecretKeyBytes>` in
+  place of `&Option<[u8; 32]>`; use `SecretKeyBytes::expose_secret` to read the
+  bytes.
+- The Orchard and Sapling binding signing keys, `pczt::orchard::Spend::dummy_sk`,
+  and the Sapling dummy spend authorizing key are now erased from memory when the
+  PCZT holding them is dropped or they are redacted, and are omitted from `Debug`
+  output. Their serialized encoding is unchanged.
 - `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
   transparent_sighash}` now check the consistency of the transparent input, and use only
   `SighashType::ALL`. Use `Signer::with_transparent_sighash_policy` to permit other

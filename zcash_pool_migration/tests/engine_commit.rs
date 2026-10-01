@@ -656,6 +656,7 @@ fn external_signing_batches_by_action_budget() {
         for unsigned_tx in session {
             let (id, bytes) = unsigned_tx.into_parts();
             let signed = sign_pczt(
+                &mut rng,
                 pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses"),
                 &ask,
             )
