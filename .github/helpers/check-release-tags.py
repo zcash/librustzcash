@@ -3,8 +3,8 @@
 
 A crate's `[package] version` changes only when it is released, so that bump is
 what a release IS — not the commit subject that happens to accompany it. For each
-`Cargo.toml` whose package version differs between the base and the head of the
-pull request, the tag `<name>-<new version>` must exist upstream and must name a
+`Cargo.toml` whose package version differs between the merge base and the head of
+the pull request, the tag `<name>-<new version>` must exist upstream and must name a
 commit the pull request introduces.
 
 Tagging therefore happens on the release branch before the merge. The merge
@@ -64,8 +64,16 @@ def package_version(manifest, ref):
 
 
 def released_crates(base, head):
-    """The (name, version) of each crate whose version this range bumps."""
-    changed = git("diff", "--name-only", f"{base}..{head}", "--", "*Cargo.toml").stdout
+    """The (name, version) of each crate whose version this range bumps.
+
+    Versions are compared against the merge base of `base` and `head`, so a
+    release that reached `base` after `head` branched is not attributed to
+    this range.
+    """
+    fork_point = git("merge-base", base, head).stdout.strip()
+    changed = git(
+        "diff", "--name-only", f"{fork_point}..{head}", "--", "*Cargo.toml"
+    ).stdout
     for path in changed.splitlines():
         head_manifest = manifest_at(head, path)
         if head_manifest is None:
@@ -76,10 +84,10 @@ def released_crates(base, head):
         new = package_version(head_manifest, head)
         if new is None:
             continue
-        base_manifest = manifest_at(base, path)
+        base_manifest = manifest_at(fork_point, path)
         if base_manifest is None:
             continue
-        if package_version(base_manifest, base) == new:
+        if package_version(base_manifest, fork_point) == new:
             continue
         name = package.get("name")
         if name:
