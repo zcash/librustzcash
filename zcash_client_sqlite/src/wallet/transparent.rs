@@ -3006,7 +3006,7 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     use {
         proptest::prelude::*,
-        secp256k1::{PublicKey, Secp256k1, SecretKey},
+        secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
         transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
@@ -4055,7 +4055,7 @@ mod tests {
             ProptestConfig::with_cases(16),
             |(
                 sk in any::<[u8; 32]>()
-                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()),
                 // Above the account's default external gap (10) so store_address_range actually
                 // inserts our receiver rather than skipping an already-derived index.
                 child_index in 16u32..0x8000_0000u32,
@@ -4069,7 +4069,7 @@ mod tests {
                 let network = *st.network();
 
                 // A real pubkey and the transparent receiver it hashes to.
-                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let pubkey = PublicKey::from_secret_key(&sk);
                 let taddr = TransparentAddress::from_pubkey(&pubkey);
                 let taddr_enc = taddr.encode(&network);
                 let child = NonHardenedChildIndex::from_index(child_index).unwrap();
@@ -4125,7 +4125,7 @@ mod tests {
         proptest!(
             ProptestConfig::with_cases(16),
             |(sk in any::<[u8; 32]>()
-                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()))| {
+                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()))| {
                 let st = TestBuilder::new()
                     .with_data_store_factory(TestDbFactory::default())
                     .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -4134,7 +4134,7 @@ mod tests {
                 let account_uuid = st.test_account().unwrap().id();
                 let network = *st.network();
 
-                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let pubkey = PublicKey::from_secret_key(&sk);
                 let taddr_enc = TransparentAddress::from_pubkey(&pubkey).encode(&network);
 
                 let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
@@ -4184,10 +4184,7 @@ mod tests {
             .build();
 
         let network = *st.network();
-        let pubkey = PublicKey::from_secret_key(
-            &Secp256k1::new(),
-            &SecretKey::from_slice(&[0x11; 32]).unwrap(),
-        );
+        let pubkey = PublicKey::from_secret_key(&SecretKey::from_secret_bytes([0x11; 32]).unwrap());
 
         // A uuid that matches no account in the wallet.
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
@@ -4211,7 +4208,7 @@ mod tests {
             ProptestConfig::with_cases(12),
             |(sks in proptest::collection::vec(
                 any::<[u8; 32]>()
-                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()),
                 1..8usize,
             ))| {
                 let st = TestBuilder::new()
@@ -4221,10 +4218,9 @@ mod tests {
 
                 let account_uuid = st.test_account().unwrap().id();
                 let network = *st.network();
-                let secp = Secp256k1::new();
 
                 let pubkeys: Vec<PublicKey> =
-                    sks.iter().map(|sk| PublicKey::from_secret_key(&secp, sk)).collect();
+                    sks.iter().map(PublicKey::from_secret_key).collect();
                 let distinct: HashSet<String> = pubkeys
                     .iter()
                     .map(|pk| TransparentAddress::from_pubkey(pk).encode(&network))
@@ -4279,10 +4275,7 @@ mod tests {
             .build();
 
         let network = *st.network();
-        let pubkey = PublicKey::from_secret_key(
-            &Secp256k1::new(),
-            &SecretKey::from_slice(&[0x22; 32]).unwrap(),
-        );
+        let pubkey = PublicKey::from_secret_key(&SecretKey::from_secret_bytes([0x22; 32]).unwrap());
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xfe; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();

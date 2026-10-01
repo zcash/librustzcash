@@ -10,13 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.31.0-pre.0] - 2026-09-30
+
 ### Changed
+- Migrated to `bellman 0.15`, `bls12_381 0.9`, `groth16 0.2`, `group 0.14`,
+  `jubjub 0.11`, `rand_core 0.10`, `sapling-crypto 0.9`, and
+  `zcash_primitives 0.31.0-pre.0`.
 - `zcash_proofs::sprout::create_proof` takes an additional `rng` first argument
   that implements `rand_core::{Rng, CryptoRng}`, in place of drawing randomness from
   the operating system.
-- Migrated to `bellman 0.15`, `groth16 0.2`, `bls12_381 0.9`, `group 0.14`,
-  `jubjub 0.11`, and `rand_core 0.10`, and to the `sapling-crypto` release that
-  uses them.
 - `ZcashParameters::sprout_vk` and `sprout::{create_proof, verify_proof}` now
   use the Groth16 types of the `groth16` crate in place of `bellman::groth16`.
 

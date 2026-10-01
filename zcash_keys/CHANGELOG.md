@@ -43,8 +43,10 @@ workspace.
 - `zcash_keys::keys::UnifiedSpendingKey::to_bytes` (behind `unstable`) now
   returns `secrecy::SecretVec<u8>` in place of `Vec<u8>`; use
   `ExposeSecret::expose_secret` to read the bytes.
-- Migrated to `bls12_381 0.9`, `group 0.14`, and `rand_core 0.10`,
-  and to the `orchard` and `sapling-crypto` releases that use them.
+- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`, `orchard 0.16`,
+  `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
+  `zcash_address 0.14.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
 - `zcash_keys::keys::sapling::spending_key` now returns
   `Option<ExtendedSpendingKey>`, and returns `None` if derivation produces an
   invalid Sapling spending key. `UnifiedSpendingKey::from_seed` returns
@@ -97,6 +99,10 @@ workspace.
   address, instead of returning a bare transparent address for that error.
 - `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
   renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
+
+### Removed
+- `zcash_keys::keys::transparent::Key::{pubkey_with_context,
+  der_encode_with_context}`. Use `Key::pubkey` and `Key::der_encode` instead.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer

@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.0] - 2026-09-30
+
+This release sets the NU7 activation height to 4465026 on testnet.
+
 ### Added
 - `zcash_protocol::address` module.
 - `zcash_protocol::address::Revision`
@@ -21,21 +25,19 @@ workspace.
 - HRP constants for ZIP 316 Revision 2 unified encodings added to
   `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
   for transparent-including UAs have the `TI` suffix.
-- Experimental NuTachyon support behind `zcash_unstable="nutachyon"`, including
-  its network upgrade, consensus branch ID, local-consensus activation parameter,
-  and V7 transaction format constants.
 - `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
   `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
-  without the `--cfg zcash_unstable="nu7"` configuration flag. Mainnet and
-  Testnet have no NU7 activation height, so `BranchId::for_height` returns
-  `BranchId::Nu7` only for a `LocalNetwork` or other `Parameters`
-  implementation that sets one.
+  without the `--cfg zcash_unstable="nu7"` configuration flag.
 
 ### Changed
+- Migrated to `incrementalmerkletree 0.9` and `incrementalmerkletree-testing 0.4`
+  (under the `test-dependencies` feature).
 - `BranchId::height_bounds` and `height_range` now match `for_height` for local
   schedules with skipped or out-of-order upgrades.
 - `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
   (was the placeholder `0xFFFFFFFF`).
+- `TestNetwork` now activates NU7 at height `4465026`. Mainnet has no NU7
+  activation height.
 
 ## [0.10.6] - 2026-09-04
 
