@@ -83,7 +83,7 @@ workspace.
 - `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
   no longer fail on wallets containing accounts imported by UIVK.
 - `WalletDb`'s implementation of
-  `zcash_client_backend::data_api::ll::LowLevelWalletRead::get_txs_spending_transparent_outputs_of`
+  `zcash_client_backend::data_api::ll::LowLevelWalletRead::get_unknown_fee_spenders_of`
   now returns only transactions that spend a transparent output of the given
   transaction. It previously returned every transaction with an unknown fee
   that spends any transparent output received by the wallet.

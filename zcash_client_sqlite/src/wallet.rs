@@ -5146,13 +5146,13 @@ pub(crate) fn put_block(
     Ok(())
 }
 
-pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
+/// Returns the transactions that spend a transparent output of the transaction `tx_ref`, for
+/// which the fee is unknown and the raw transaction data is stored.
+pub(crate) fn get_unknown_fee_spenders_of<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     tx_ref: TxRef,
 ) -> Result<Vec<(TxRef, Transaction)>, SqliteClientError> {
-    // For each transaction that spends a transparent output of this transaction and does not
-    // already have a known fee value.
     let mut spending_txs_stmt = conn.prepare(
         "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
@@ -6297,7 +6297,7 @@ mod tests {
 
     use super::{
         KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday, chain_tip_height,
-        flag_previously_received_change, get_transaction, get_txs_spending_transparent_outputs_of,
+        flag_previously_received_change, get_transaction, get_unknown_fee_spenders_of,
         min_shared_checkpoint_height, parse_tx, put_zip318_classification, queue_tx_retrieval,
         select_truncation_height,
     };
@@ -6849,7 +6849,7 @@ mod tests {
     }
 
     #[test]
-    fn get_txs_spending_transparent_outputs_of_ignores_spends_of_other_txs() {
+    fn get_unknown_fee_spenders_of_ignores_spends_of_other_txs() {
         const TARGET_TXID_BYTES: [u8; 32] = [1; 32];
         const OTHER_TXID_BYTES: [u8; 32] = [2; 32];
         const SPENDING_TXID_BYTES: [u8; 32] = [3; 32];
@@ -6919,7 +6919,7 @@ mod tests {
         .unwrap();
 
         let spenders_of = |tx_ref: TxRef| {
-            get_txs_spending_transparent_outputs_of(conn, st.network(), tx_ref)
+            get_unknown_fee_spenders_of(conn, st.network(), tx_ref)
                 .unwrap()
                 .into_iter()
                 .map(|(spender, _)| spender)
