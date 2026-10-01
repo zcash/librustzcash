@@ -2839,11 +2839,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
-    fn get_txs_spending_transparent_outputs_of(
+    fn get_unknown_fee_spenders_of(
         &self,
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error> {
-        wallet::get_txs_spending_transparent_outputs_of(self.conn.borrow(), &self.params, tx_ref)
+        wallet::get_unknown_fee_spenders_of(self.conn.borrow(), &self.params, tx_ref)
     }
 
     fn detect_sapling_spend(

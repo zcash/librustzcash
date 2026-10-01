@@ -109,6 +109,11 @@ workspace.
   the transparent spend map alongside the nullifier maps.
 - `zcash_client_backend::data_api::ll::wallet::NULLIFIER_MAP_RETENTION_BLOCKS` is
   renamed to `SPEND_MAP_RETENTION_BLOCKS`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletRead::get_txs_spending_transparent_outputs_of`
+  is renamed to `get_unknown_fee_spenders_of`. An implementation must return
+  only the transactions that spend a transparent output of the referenced
+  transaction, for which the fee is unknown and the raw transaction data is
+  available.
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` detects transparent
   outputs paying the wallet and spends of the wallet's transparent outputs,
   including spends observed before the block that created the spent output has
