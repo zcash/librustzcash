@@ -467,11 +467,15 @@ where
     /// [`MigrationState::mark_broadcast`] on success, or
     /// [`MigrationState::report_broadcast_failure`] on a rejection, then persists.
     ///
+    /// `rng` provides the randomness for the binding signatures and for verifying the extracted
+    /// transaction.
+    ///
     /// [`MigrationState::mark_broadcast`]: zcash_pool_migration::engine::MigrationState::mark_broadcast
     /// [`MigrationState::report_broadcast_failure`]:
     ///     zcash_pool_migration::engine::MigrationState::report_broadcast_failure
-    pub fn take_transaction_for_broadcast(
+    pub fn take_transaction_for_broadcast<R: rand_core::Rng + rand_core::CryptoRng>(
         &mut self,
+        rng: R,
         state: &MigrationState,
         proved: MigrationTransferId,
     ) -> Result<zcash_primitives::transaction::Transaction, Error> {
@@ -493,7 +497,7 @@ where
             .finalize_spends()
             .map_err(|e| Error::Finalize(FinalizeError::Spends(e)))?;
         let tx = ::pczt::roles::tx_extractor::TransactionExtractor::new(finalized)
-            .extract()
+            .extract(rng)
             .map_err(|e| Error::Finalize(FinalizeError::Extract(e)))?;
 
         // The fee is fully determined by the shielded value balances: a migration transaction has

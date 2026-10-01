@@ -327,7 +327,7 @@ pub trait BlockSource {
 ///        BlockHeight::from_u32(1)..BlockHeight::from_u32(3),
 ///        ScanPriority::Historic,
 ///    );
-/// #    let extsk = sapling::zip32::ExtendedSpendingKey::master(&[]);
+/// #    let extsk = sapling::zip32::ExtendedSpendingKey::master(&[]).expect("the derivation path yields a valid key");
 /// #    let dfvk = extsk.to_diversifiable_full_viewing_key();
 /// #    let compact_block1 = zcash_client_backend::scanning::testing::fake_compact_block(
 /// #        1u32.into(),

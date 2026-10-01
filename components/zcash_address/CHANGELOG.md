@@ -10,10 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.14.0-pre.0] - 2026-09-30
+
 ### Added
 - `zcash_address::unified::DataTypecode`
-- `zcash_address::unified::DataTypecode::preference_order`
+- `zcash_address::unified::DataTypecode::{is_transparent, preference_order}`
 - `zcash_address::unified::MetadataTypecode`
+- `zcash_address::unified::Typecode::{P2PKH, P2SH, SAPLING, ORCHARD}`
+- `zcash_address::unified::Typecode::{typecode_value, is_transparent_data}`
 - `zcash_address::unified::MetadataItem`
 - `zcash_address::unified::Uitem`
 - `zcash_address::unified::Revision` (re-exported from `zcash_protocol`)
@@ -21,7 +25,12 @@ workspace.
 - `zcash_address::unified::Ivk::P2sh`
 - `zcash_address::unified::P2shItemKind`
 - `zcash_address::unified::P2shItemError`
-- `zcash_address::unified::ParseError::InvalidP2shItem`
+- `zcash_address::unified::ParseError::{InvalidMetadataLength, InvalidP2shItem,
+  NoDataItems, NotUnderstood, TransparentReceiverInR2Address}`
+- `zcash_address::unified::testing::{arb_known_shielded_typecode,
+  arb_metadata_items, arb_r2_shielded_address,
+  arb_r2_transparent_including_address}` (behind the `test-dependencies`
+  feature)
 - ZIP 316 Revision 2 support:
   - Metadata item parsing and serialization (expiry height, expiry time).
   - Revision-aware encoding/decoding with distinct HRPs for R0 and R2.
@@ -35,10 +44,20 @@ workspace.
     UFVKs and UIVKs, with structural validation of the policy payload.
 
 ### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.0`.
 - `zcash_address::unified::Typecode` now distinguishes data and metadata items
   via `Typecode::Data(DataTypecode)` and `Typecode::Metadata(MetadataTypecode)`.
+  Its former `P2pkh`, `P2sh`, `Sapling`, `Orchard`, and `Unknown` variants are
+  now the corresponding `DataTypecode` variants; the known data typecodes are
+  also available as the `Typecode::{P2PKH, P2SH, SAPLING, ORCHARD}` constants.
+  `Typecode::preference_order` orders every metadata typecode after every data
+  typecode.
+- `zcash_address::unified::testing::{arb_transparent_typecode,
+  arb_shielded_typecode}` now generate `DataTypecode` values, and
+  `arb_typecodes` generates a `BTreeSet<DataTypecode>`.
 - `zcash_address::unified::Encoding::try_from_items` now takes a `Revision`
-  parameter.
+  parameter, and returns `ParseError::InvalidTypecodeValue` for an item whose
+  typecode exceeds `zcash_encoding::MAX_COMPACT_SIZE`.
 - `zcash_address::unified::Encoding::decode` now returns a 3-tuple
   `(NetworkType, Revision, Self)`.
 - `zcash_address::unified::Container::items_as_parsed` now returns
@@ -51,8 +70,6 @@ workspace.
 - `impl TryFrom<(u32, &[u8])>` for `zcash_address::unified::Receiver`,
   `zcash_address::unified::Fvk`, and `zcash_address::unified::Ivk`. These
   types are now parsed via the `SealedItem::parse` trait method instead.
-- `zcash_address::unified::Typecode::preference_order` has been removed
-  as preference order is only defined for data items.
 
 ## [0.13.0] - 2026-07-09
 

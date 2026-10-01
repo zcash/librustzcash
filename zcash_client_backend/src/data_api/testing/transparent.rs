@@ -37,7 +37,8 @@ use {
         },
         wallet::TransparentAddressSource,
     },
-    secp256k1::{Secp256k1, SecretKey},
+    rand::{rand_core::UnwrapErr, rngs::SysRng},
+    secp256k1::SecretKey,
     secrecy::Secret,
     std::collections::HashMap,
     zcash_protocol::consensus::{NetworkUpgrade, Parameters},
@@ -271,7 +272,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -430,7 +433,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -639,7 +644,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -725,7 +732,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1201,9 +1210,8 @@ where
 /// Builds a test 1-of-1 multisig redeem script from a single keypair.
 #[cfg(feature = "transparent-key-import")]
 fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     let redeem_script = script::Component(
         check_multisig(1, &[&pubkey.serialize()], false)
             .unwrap()
@@ -1229,9 +1237,8 @@ where
     let account_id = st.test_account().unwrap().id();
 
     // A P2PKH address, imported without its pubkey.
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key());
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_address(account_id, p2pkh_addr),
@@ -1274,9 +1281,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     assert_matches!(
         st.wallet_mut()
@@ -1316,9 +1322,8 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     assert_matches!(
         st.wallet_mut()
@@ -1367,9 +1372,8 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     // Import the address without its pubkey.
     st.wallet_mut()
@@ -1434,9 +1438,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     let p2pkh_addr = TransparentAddress::from_pubkey(&pubkey);
 
     let (redeem_script, _) = build_test_redeem_script();
@@ -1502,9 +1505,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_pubkey(account_id, pubkey),
@@ -1525,9 +1527,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // First import
     assert_matches!(
@@ -1580,9 +1581,8 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import to first account
     assert_matches!(
@@ -1631,9 +1631,8 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import the public key.
     st.wallet_mut()
@@ -1705,9 +1704,8 @@ where
     let account_id = account.id();
 
     // Create a keypair and derive the P2PKH address.
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import the public key.
     st.wallet_mut()
@@ -1718,7 +1716,9 @@ where
     let taddr = TransparentAddress::from_pubkey(&pubkey);
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1765,6 +1765,7 @@ where
         st.wallet_mut(),
         &network,
         &clock,
+        &mut UnwrapErr(SysRng),
         &prover,
         &prover,
         &input_selector,
@@ -2050,7 +2051,9 @@ where
     let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2097,6 +2100,7 @@ where
         st.wallet_mut(),
         &network,
         &clock,
+        &mut UnwrapErr(SysRng),
         &prover,
         &prover,
         &input_selector,
@@ -2967,7 +2971,9 @@ where
 
     // Seed the chain with notes that do not belong to us so that heights resolve while
     // the account remains without any shielded notes.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3127,7 +3133,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3166,6 +3174,7 @@ where
     // undershoots and a re-gather is required to actually satisfy the request.
     let network = *st.network();
     let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key()
         .default_address()
         .1;
@@ -3270,7 +3279,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3345,7 +3356,9 @@ where
     let account = st.test_account().cloned().unwrap();
 
     // Seed the chain with notes that do not belong to us so heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3456,7 +3469,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3593,7 +3608,9 @@ pub fn reserve_next_n_internal_addresses_gap_limit<DSF>(
 
     // Seed the chain so that a chain height is known; address reservation records the
     // exposure height of each reserved address.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);

@@ -920,7 +920,8 @@ mod tests {
             pallas,
         },
         proptest::prelude::*,
-        rand_core::{OsRng, RngCore},
+        rand::rngs::SysRng,
+        rand_core::{Rng, UnwrapErr},
         zcash_note_encryption::Domain,
         zcash_protocol::ShieldedPool,
     };
@@ -1059,7 +1060,7 @@ mod tests {
             let scanning_keys = ScanningKeys::from_account_ufvks([(account, ufvk)]);
 
             let scope = if internal { Scope::Internal } else { Scope::External };
-            let mut rng = OsRng;
+            let mut rng = UnwrapErr(SysRng);
             let recipient = orchard_fvk.address_at(diversifier_index, scope);
 
             // Build a version 3 (Ironwood) compact action. `rho` is derived from the revealed
@@ -1099,7 +1100,7 @@ mod tests {
                 nullifier: nf_old.to_bytes().to_vec(),
                 cmx: cmx.to_bytes().to_vec(),
                 ephemeral_key: ephemeral_key.0.to_vec(),
-                ciphertext: enc_ciphertext[..52].to_vec(),
+                ciphertext: enc_ciphertext.0[..::orchard::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
             };
 
             let mut ctx = CompactTx::default();

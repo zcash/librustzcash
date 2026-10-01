@@ -229,7 +229,7 @@ pub mod v1 {
             .unwrap()
             .build()
             .unwrap();
-            pczt.ironwood.bsk = Some([1; 32]);
+            pczt.ironwood.bsk = Some(crate::common::SecretKeyBytes::new([1; 32]));
             assert!(matches!(
                 super::Pczt::try_from(pczt),
                 Err(crate::EncodingError::UnsupportedTxVersion)
@@ -904,7 +904,7 @@ mod extraction_tests {
         .unwrap()
         .build()
         .unwrap();
-        pczt.ironwood.bsk = Some([1; 32]);
+        pczt.ironwood.bsk = Some(crate::common::SecretKeyBytes::new([1; 32]));
         assert!(matches!(
             pczt.into_effects(),
             Err(ExtractError::IronwoodNotSupported)
@@ -981,7 +981,7 @@ mod serialize_tests {
 
         // Non-canonical Ironwood data forces the v2 encoding.
         let mut with_ironwood = pczt.clone();
-        with_ironwood.ironwood.bsk = Some([1; 32]);
+        with_ironwood.ironwood.bsk = Some(crate::common::SecretKeyBytes::new([1; 32]));
         assert_eq!(
             encoding_version(&with_ironwood.serialize().unwrap()),
             crate::PCZT_VERSION_2,

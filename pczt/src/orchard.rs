@@ -16,19 +16,22 @@ use {
         Address, Note, ValuePool,
         bundle::BundleVersion,
         note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
-        note_encryption::{CompactAction, IronwoodDomain, OrchardDomain, OrchardNoteEncryption},
+        note_encryption::{
+            COMPACT_NOTE_SIZE, CompactAction, CompactNoteCiphertextBytes, IronwoodDomain,
+            NoteBytesData, NoteCiphertextBytes, OrchardDomain, OrchardNoteEncryption,
+        },
         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
     },
     ff::PrimeField,
     zcash_note_encryption::{
-        COMPACT_NOTE_SIZE, Domain, ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, ShieldedOutput,
+        Domain, EphemeralKeyBytes, ShieldedOutput, note_bytes::NoteBytes,
         try_output_recovery_with_pkd_esk,
     },
     zcash_protocol::consensus::{BranchId, OrchardProtocolRevision},
 };
 
 use crate::{
-    common::{Global, Zip32Derivation},
+    common::{Global, SecretKeyBytes, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -88,7 +91,7 @@ pub struct Bundle {
     ///
     /// - This is `None` until it is set by the IO Finalizer.
     /// - The Transaction Extractor uses this to produce the binding signature.
-    pub(crate) bsk: Option<[u8; 32]>,
+    pub(crate) bsk: Option<SecretKeyBytes>,
 }
 
 /// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
@@ -352,25 +355,37 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
     note_version: NoteVersion,
 ) -> Option<MemoPlaintext> {
     struct OutputRecoveryData {
-        cmx: [u8; 32],
+        cmx: ExtractedNoteCommitment,
         ephemeral_key: [u8; 32],
-        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+        enc_ciphertext: NoteCiphertextBytes,
     }
 
-    impl<D> ShieldedOutput<D, ENC_CIPHERTEXT_SIZE> for OutputRecoveryData
+    impl<D> ShieldedOutput<D> for OutputRecoveryData
     where
-        D: Domain<ExtractedCommitmentBytes = [u8; 32]>,
+        D: Domain<
+                ExtractedCommitment = ExtractedNoteCommitment,
+                NoteCiphertextBytes = NoteCiphertextBytes,
+                CompactNoteCiphertextBytes = CompactNoteCiphertextBytes,
+            >,
     {
         fn ephemeral_key(&self) -> EphemeralKeyBytes {
             EphemeralKeyBytes(self.ephemeral_key)
         }
 
-        fn cmstar_bytes(&self) -> [u8; 32] {
-            self.cmx
+        fn cmstar(&self) -> &ExtractedNoteCommitment {
+            &self.cmx
         }
 
-        fn enc_ciphertext(&self) -> &[u8; ENC_CIPHERTEXT_SIZE] {
-            &self.enc_ciphertext
+        fn enc_ciphertext(&self) -> Option<&NoteCiphertextBytes> {
+            Some(&self.enc_ciphertext)
+        }
+
+        fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes {
+            NoteBytesData(
+                self.enc_ciphertext.0[..COMPACT_NOTE_SIZE]
+                    .try_into()
+                    .expect("COMPACT_NOTE_SIZE <= ENC_CIPHERTEXT_SIZE"),
+            )
         }
     }
 
@@ -380,7 +395,13 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
         output: &OutputRecoveryData,
     ) -> Option<MemoPlaintext>
     where
-        D: Domain<Note = Note, Memo = [u8; MEMO_SIZE], ExtractedCommitmentBytes = [u8; 32]>,
+        D: Domain<
+                Note = Note,
+                Memo = [u8; MEMO_SIZE],
+                ExtractedCommitment = ExtractedNoteCommitment,
+                NoteCiphertextBytes = NoteCiphertextBytes,
+                CompactNoteCiphertextBytes = CompactNoteCiphertextBytes,
+            >,
     {
         let pk_d = D::get_pk_d(note);
         let esk = D::derive_esk(note)?;
@@ -390,7 +411,7 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
     }
 
     let enc_ciphertext = match &action.output.enc_ciphertext {
-        EncCiphertext::Encrypted(ciphertext) => ciphertext.as_slice().try_into().ok()?,
+        EncCiphertext::Encrypted(ciphertext) => NoteCiphertextBytes::from_slice(ciphertext)?,
         // we return None here to avoid excess sets or clone operations, as the caller need not do anything in this case.
         EncCiphertext::MemoPlaintext(_) => return None,
     };
@@ -410,10 +431,9 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
     let nullifier = Option::from(Nullifier::from_bytes(&action.spend.nullifier))?;
     // Memo recovery is best-effort and should not resolve redacted fields.
     // Callers that want redacted `cmx` restored should use `resolve_fields`.
-    let cmx_bytes = action.output.cmx?;
-    let cmx = Option::from(ExtractedNoteCommitment::from_bytes(&cmx_bytes))?;
+    let cmx = Option::from(ExtractedNoteCommitment::from_bytes(&action.output.cmx?))?;
     let output = OutputRecoveryData {
-        cmx: cmx_bytes,
+        cmx,
         ephemeral_key: action.output.ephemeral_key,
         enc_ciphertext,
     };
@@ -421,7 +441,9 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
         nullifier,
         cmx,
         EphemeralKeyBytes(action.output.ephemeral_key),
-        output.enc_ciphertext[..COMPACT_NOTE_SIZE].try_into().ok()?,
+        output.enc_ciphertext.0[..COMPACT_NOTE_SIZE]
+            .try_into()
+            .ok()?,
     );
 
     match note_version {
@@ -595,7 +617,7 @@ pub struct Spend {
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_sk` values.
     #[getset(get = "pub")]
-    pub(crate) dummy_sk: Option<[u8; 32]>,
+    pub(crate) dummy_sk: Option<SecretKeyBytes>,
 
     /// Proprietary fields related to the note being spent.
     #[getset(get = "pub")]
@@ -694,7 +716,7 @@ pub mod v1 {
         value_sum: (u64, bool),
         anchor: [u8; 32],
         zkproof: Option<Vec<u8>>,
-        bsk: Option<[u8; 32]>,
+        bsk: Option<crate::common::SecretKeyBytes>,
     }
 
     /// Information about an Orchard action within a transaction.
@@ -724,7 +746,7 @@ pub mod v1 {
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
         zip32_derivation: Option<Zip32Derivation>,
-        dummy_sk: Option<[u8; 32]>,
+        dummy_sk: Option<crate::common::SecretKeyBytes>,
         proprietary: BTreeMap<String, Vec<u8>>,
     }
 
@@ -957,7 +979,7 @@ pub(crate) mod v2 {
         anchor: Option<[u8; 32]>,
         note_version: SerializedNoteVersion,
         zkproof: Option<Vec<u8>>,
-        bsk: Option<[u8; 32]>,
+        bsk: Option<crate::common::SecretKeyBytes>,
     }
 
     /// Information about an Orchard action within a transaction.
@@ -989,7 +1011,7 @@ pub(crate) mod v2 {
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
         zip32_derivation: Option<crate::common::Zip32Derivation>,
-        dummy_sk: Option<[u8; 32]>,
+        dummy_sk: Option<crate::common::SecretKeyBytes>,
         proprietary: BTreeMap<String, Vec<u8>>,
     }
 
@@ -1361,7 +1383,7 @@ pub(crate) mod v2 {
                     cmx: Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes()),
                     ephemeral_key: OrchardDomain::epk_bytes(encryptor.epk()).0,
                     enc_ciphertext: EncCiphertext::Encrypted(
-                        encryptor.encrypt_note_plaintext().to_vec(),
+                        encryptor.encrypt_note_plaintext().0.to_vec(),
                     ),
                     out_ciphertext: Vec::new(),
                     recipient: Some(recipient.to_raw_address_bytes()),
@@ -1410,7 +1432,7 @@ pub(crate) mod v2 {
             // Only the ephemeral key is taken from the encryptor; the ciphertext itself
             // is replaced with bytes that trial-decryption cannot recover a note from.
             let encryptor = OrchardNoteEncryption::new(None, note, [0; MEMO_SIZE]);
-            let mut enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
+            let mut enc_ciphertext = encryptor.encrypt_note_plaintext().0.to_vec();
             enc_ciphertext.fill(0xab);
 
             LogicalAction {
@@ -2107,7 +2129,7 @@ impl Output {
         .ok_or(orchard::pczt::ParseError::InvalidEncCiphertext)?;
         let encryptor = OrchardNoteEncryption::new(None, note, memo);
         let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0;
-        let enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
+        let enc_ciphertext = encryptor.encrypt_note_plaintext().0.to_vec();
 
         if ephemeral_key != self.ephemeral_key {
             return Err(orchard::pczt::ParseError::InvalidEncCiphertext);
@@ -2283,7 +2305,7 @@ impl Bundle {
                     action.spend.witness,
                     action.spend.alpha,
                     spend_zip32_derivation,
-                    action.spend.dummy_sk,
+                    action.spend.dummy_sk.as_ref().map(|sk| *sk.expose_secret()),
                     note_version,
                     action.spend.proprietary,
                 )
@@ -2300,7 +2322,7 @@ impl Bundle {
                     action.spend.witness,
                     action.spend.alpha,
                     spend_zip32_derivation,
-                    action.spend.dummy_sk,
+                    action.spend.dummy_sk.as_ref().map(|sk| *sk.expose_secret()),
                     note_version,
                     action.spend.proprietary,
                 )
@@ -2360,7 +2382,7 @@ impl Bundle {
             self.value_sum,
             anchor,
             self.zkproof,
-            self.bsk,
+            self.bsk.as_ref().map(|bsk| *bsk.expose_secret()),
         )?;
 
         Ok(Parsed {
@@ -2429,14 +2451,15 @@ impl Bundle {
                         dummy_sk: action
                             .spend()
                             .dummy_sk()
-                            .map(|dummy_sk| *dummy_sk.to_bytes()),
+                            .as_ref()
+                            .map(|dummy_sk| SecretKeyBytes::new(*dummy_sk.to_bytes())),
                         proprietary: spend.proprietary().clone(),
                     },
                     output: Output {
                         cmx: Some(output.cmx().to_bytes()),
                         ephemeral_key: output.encrypted_note().epk_bytes,
                         enc_ciphertext: EncCiphertext::Encrypted(
-                            output.encrypted_note().enc_ciphertext.to_vec(),
+                            output.encrypted_note().enc_ciphertext.0.to_vec(),
                         ),
                         out_ciphertext: output.encrypted_note().out_ciphertext.to_vec(),
                         recipient: action
@@ -2483,7 +2506,10 @@ impl Bundle {
                 .zkproof()
                 .as_ref()
                 .map(|zkproof| zkproof.as_ref().to_vec()),
-            bsk: bundle.bsk().as_ref().map(|bsk| bsk.into()),
+            bsk: bundle
+                .bsk()
+                .as_ref()
+                .map(|bsk| SecretKeyBytes::new(bsk.to_bytes())),
         }
     }
 }

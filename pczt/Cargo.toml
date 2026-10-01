@@ -47,6 +47,10 @@ pasta_curves = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Secret management
+subtle.workspace = true
+zeroize.workspace = true
+
 # - Boilerplate
 getset.workspace = true
 
@@ -57,6 +61,7 @@ document-features = { workspace = true, optional = true }
 hex.workspace = true
 incrementalmerkletree.workspace = true
 proptest.workspace = true
+rand = { workspace = true, features = ["sys_rng"] }
 rand_chacha.workspace = true
 ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
@@ -81,6 +86,7 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
+    "orchard/zeroize",
     "dep:zcash_note_encryption",
 ]
 
@@ -92,6 +98,7 @@ sapling = [
     "dep:redjubjub",
     "dep:sapling",
     "dep:zcash_note_encryption",
+    "sapling/zeroize",
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.
@@ -114,7 +121,6 @@ zcp-builder = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
 io-finalizer = [
     "dep:blake2b_simd",
     "dep:rand_core",
-    "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
     "sapling",
@@ -124,7 +130,6 @@ io-finalizer = [
 ## Enables the Prover role.
 prover = [
     "dep:rand_core",
-    "rand_core/getrandom",
     "orchard?/circuit",
     "sapling?/circuit",
     "sapling?/temporary-zcashd",
@@ -134,7 +139,6 @@ prover = [
 signer = [
     "dep:blake2b_simd",
     "dep:rand_core",
-    "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
     "sapling",
@@ -148,7 +152,6 @@ spend-finalizer = ["transparent"]
 tx-extractor = [
     "dep:blake2b_simd",
     "dep:rand_core",
-    "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
     "orchard/circuit",

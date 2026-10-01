@@ -141,7 +141,7 @@ impl LockOwner {
     /// Generates a fresh random `LockOwner`.
     pub fn random<R>(rng: &mut R) -> Self
     where
-        R: rand_core::RngCore,
+        R: rand_core::Rng,
     {
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);

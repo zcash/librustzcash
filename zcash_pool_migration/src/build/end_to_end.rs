@@ -129,7 +129,8 @@ fn migration_pipeline_end_to_end() {
         u64::from(expected_prep_fee),
         "the built preparation transaction pays exactly the canonical fee"
     );
-    sign_pczt(prep_pczt, &ask).expect("pre-signing the preparation transaction");
+    sign_pczt(ChaCha8Rng::seed_from_u64(seed + 2), prep_pczt, &ask)
+        .expect("pre-signing the preparation transaction");
 
     // 4. Build + pre-sign a pool-crossing transfer for one funding note (witnessed directly here, as
     //    it would be once the preparation transaction is mined). It sends exactly the canonical
@@ -197,7 +198,8 @@ fn migration_pipeline_end_to_end() {
         u64::from(expected_transfer_fee),
         "the built transfer pays exactly the canonical fee"
     );
-    sign_pczt(transfer_pczt, &ask).expect("pre-signing the transfer");
+    sign_pczt(ChaCha8Rng::seed_from_u64(seed + 4), transfer_pczt, &ask)
+        .expect("pre-signing the transfer");
 }
 
 /// The total output value a PCZT bundle carries (padded dummy outputs hold zero). Spend values are

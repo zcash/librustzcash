@@ -10,7 +10,7 @@
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::zip318::largest_one_two_five;
@@ -159,7 +159,7 @@ impl CanonicalOneTwoFive {
 }
 
 impl DenominationStrategy for CanonicalOneTwoFive {
-    fn plan<R: RngCore + CryptoRng>(
+    fn plan<R: Rng + CryptoRng>(
         &self,
         total_input: Zatoshis,
         spendable_note_count: usize,

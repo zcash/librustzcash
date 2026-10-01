@@ -339,6 +339,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use assert_matches::assert_matches;
+    use zcash_encoding::MAX_COMPACT_SIZE;
     use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
@@ -754,6 +755,23 @@ mod tests {
         assert_eq!(net, NetworkType::Main);
         assert_eq!(rev, Revision::R2);
         assert_eq!(decoded, ua);
+    }
+
+    #[test]
+    fn rejects_typecode_above_compact_size_bound() {
+        // A typecode is encoded as a CompactSize, so a container holding a typecode
+        // above the CompactSize bound has no valid encoding.
+        let oversized_typecode = MAX_COMPACT_SIZE + 1;
+        let items = vec![Uitem::Data(Receiver::Unknown {
+            typecode: oversized_typecode,
+            data: vec![0; 32],
+        })];
+        assert_eq!(
+            Address::try_from_items(Revision::R2, items),
+            Err(ParseError::InvalidTypecodeValue(u64::from(
+                oversized_typecode
+            )))
+        );
     }
 
     #[test]
