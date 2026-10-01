@@ -1962,6 +1962,12 @@ user-id = 1244 # Sean Bowe (ebfull)
 start = "2019-10-08"
 end = "2027-09-26"
 
+[[trusted.fpe]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2019-07-22"
+end = "2027-10-01"
+
 [[trusted.groth16]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1996,7 +2002,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-12-13"
-end = "2025-12-16"
+end = "2027-10-01"
 
 [[trusted.halo2_proofs]]
 criteria = "safe-to-deploy"
@@ -2026,13 +2032,13 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2023-02-28"
-end = "2025-04-22"
+end = "2027-10-01"
 
 [[trusted.incrementalmerkletree-testing]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-09-25"
-end = "2025-10-02"
+end = "2027-10-01"
 
 [[trusted.jubjub]]
 criteria = "safe-to-deploy"
@@ -2472,6 +2478,12 @@ user-id = 159631 # Conrado (conradoplg)
 start = "2022-08-31"
 end = "2026-09-19"
 
+[[trusted.zcash_script]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-10-01"
+end = "2027-10-01"
+
 [[trusted.zcash_spec]]
 criteria = "safe-to-deploy"
 user-id = 199950 # Daira-Emma Hopwood (daira)
@@ -2512,7 +2524,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2025-02-20"
-end = "2026-02-21"
+end = "2027-10-01"
 
 [[trusted.zip321]]
 criteria = "safe-to-deploy"
