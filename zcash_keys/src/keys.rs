@@ -3130,8 +3130,6 @@ mod tests {
         assert!(ufvk.p2sh().is_none());
     }
 
-    /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
-    /// interpreted, so it is retained as an unknown item and recorded as unconverted in
     /// A P2SH account has no seed to derive a unified key from, so the constructor is the
     /// only way to reach one. What it builds has to survive the encoding, or an account
     /// registered from a cosigner set is not the account read back from the wallet.
@@ -3175,6 +3173,8 @@ mod tests {
         );
     }
 
+    /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
+    /// interpreted, so it is retained as an unknown item and recorded as unconverted in
     /// the derived incoming viewing key. Otherwise that derived key describes the account
     /// as having no transparent receiving capability at all.
     #[test]
