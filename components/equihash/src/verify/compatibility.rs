@@ -283,7 +283,7 @@ fn bounded_parameter_matrix_matches_upstream() {
             if k >= n || n % (k + 1) != 0 || !(8..=24).contains(&(n / (k + 1))) {
                 continue;
             }
-            let solution_bytes = ((1usize << k) * (n / (k + 1) + 1) as usize) / 8;
+            let params = Params::new(n, k).unwrap();
             for _ in 0..16 {
                 let mut vector = TestVector {
                     n,
@@ -291,7 +291,7 @@ fn bounded_parameter_matrix_matches_upstream() {
                     valid: false,
                     input: vec![0; HEADER_BYTES],
                     nonce: vec![0; NONCE_BYTES],
-                    solution: vec![0; solution_bytes],
+                    solution: vec![0; params.solution_bytes().unwrap()],
                 };
                 rng.fill_bytes(&mut vector.input);
                 rng.fill_bytes(&mut vector.nonce);

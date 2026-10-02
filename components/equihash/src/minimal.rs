@@ -140,8 +140,7 @@ fn read_u32_be(csr: &mut Cursor<Vec<u8>>) -> corez::io::Result<u32> {
 /// Returns `None` if the parameters are invalid for this minimal encoding.
 pub(super) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>> {
     let c_bit_len = p.collision_bit_length();
-    // Division is exact because k >= 3.
-    if minimal.len() != ((1 << p.k) * (c_bit_len + 1)) / 8 {
+    if minimal.len() != p.solution_bytes()? {
         return None;
     }
 
@@ -166,6 +165,14 @@ mod tests {
     use crate::minimal::minimal_from_indices;
 
     use super::{Params, compress_array, expand_array, indices_from_minimal};
+
+    #[test]
+    fn solution_length_overflow_is_rejected() {
+        let p = Params::new(512, 63).unwrap();
+        assert!(p.solution_bytes().is_none());
+        assert!(indices_from_minimal(p, &[]).is_none());
+        assert!(indices_from_minimal(p, &[0]).is_none());
+    }
 
     #[test]
     fn array_compression_and_expansion() {
