@@ -18,7 +18,7 @@ default = ["std"]
 std = ["document-features"]
 
 ## Experimental Tromp solver support, implemented in Rust.
-solver = ["std"]
+solver = ["dep:libc", "std"]
 
 [dependencies]
 corez.workspace = true
@@ -28,6 +28,10 @@ blake2b_simd.workspace = true
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
 document-features = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Huge pages are an optional hint for the solver's anonymous mappings.
+libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
