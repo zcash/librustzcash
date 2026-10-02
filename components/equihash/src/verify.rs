@@ -12,6 +12,9 @@ use crate::{
     params::Params,
 };
 
+#[cfg(all(test, feature = "std"))]
+mod compatibility;
+
 #[derive(Clone)]
 struct Node {
     hash: Vec<u8>,
@@ -218,7 +221,7 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<N
     }
 }
 
-fn is_valid_solution_recursive(
+pub(crate) fn is_valid_solution_recursive(
     p: Params,
     input: &[u8],
     nonce: &[u8],
@@ -284,6 +287,42 @@ mod tests {
                     .0,
                 tv.error
             );
+        }
+    }
+
+    #[test]
+    fn zcash_block_headers() {
+        use crate::test_vectors::{
+            MAINNET_415000_HEADER, MAINNET_415000_NONCE, MAINNET_415000_SOLUTION,
+            REGTEST_GENESIS_HEADER, REGTEST_GENESIS_NONCE, REGTEST_GENESIS_SOLUTION,
+        };
+        for (n, k, header, nonce, solution) in [
+            (
+                200,
+                9,
+                MAINNET_415000_HEADER,
+                MAINNET_415000_NONCE,
+                MAINNET_415000_SOLUTION,
+            ),
+            (
+                48,
+                5,
+                REGTEST_GENESIS_HEADER,
+                REGTEST_GENESIS_NONCE,
+                REGTEST_GENESIS_SOLUTION,
+            ),
+        ] {
+            let header = hex::decode(header).unwrap();
+            let nonce = hex::decode(nonce).unwrap();
+            let solution = hex::decode(solution).unwrap();
+            is_valid_solution(n, k, &header, &nonce, &solution).unwrap();
+            let prefix = [&header[..], &nonce[..]].concat();
+            is_valid_solution(n, k, &prefix, &[], &solution).unwrap();
+            for i in 0..solution.len() * 8 {
+                let mut mutated = solution.clone();
+                mutated[i / 8] ^= 1 << (i % 8);
+                is_valid_solution(n, k, &header, &nonce, &mutated).unwrap_err();
+            }
         }
     }
 

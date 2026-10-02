@@ -1597,8 +1597,10 @@ dependencies = [
  "blake2b_simd",
  "cc",
  "corez",
+ "criterion 0.5.1",
  "document-features",
  "hex",
+ "rand 0.8.5",
 ]
 
 [[package]]

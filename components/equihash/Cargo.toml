@@ -33,10 +33,21 @@ document-features = { workspace = true, optional = true }
 cc = { version = "1", optional = true }
 
 [dev-dependencies]
+criterion.workspace = true
 hex = "0.4"
+rand = { workspace = true, features = ["std", "std_rng"] }
 
 [lib]
 bench = false
+
+[[bench]]
+name = "solver"
+harness = false
+required-features = ["solver"]
+
+[[bench]]
+name = "verify"
+harness = false
 
 [lints]
 workspace = true
