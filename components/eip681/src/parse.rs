@@ -1315,6 +1315,8 @@ mod test {
     use prop::strategy::Union;
     use proptest::prelude::*;
 
+    use crate::testing::arb_u256;
+
     #[test]
     fn digits_sanity() {
         assert_eq!(
@@ -1326,6 +1328,34 @@ mod test {
             .unwrap()
         );
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
+    }
+
+    #[test]
+    fn number_from_uint256_edges() {
+        for v in [
+            U256::zero(),
+            U256::one(),
+            U256::from(9u64),
+            U256::from(10u64),
+            U256::MAX,
+        ] {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.to_string(), v.to_string());
+            assert_eq!(n.as_uint256(), Ok(v));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn number_from_uint256_roundtrip(v in arb_u256()) {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.as_uint256(), Ok(v));
+
+            let s = n.to_string();
+            let (rest, parsed) = Number::parse(&s).unwrap();
+            assert!(rest.is_empty(), "unparsed input: {rest:?}");
+            assert_eq!(parsed, n);
+        }
     }
 
     #[test]

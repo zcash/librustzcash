@@ -718,6 +718,8 @@ mod test {
 
     use proptest::prelude::*;
 
+    use crate::testing::arb_u256;
+
     /// Valid ERC-55 addresses for use in proptests.
     const ERC55_ADDRESSES: &[&str] = &[
         "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
@@ -732,11 +734,6 @@ mod test {
 
     fn arb_schema_prefix() -> impl Strategy<Value = &'static str> {
         prop::sample::select(&["ethereum", "chaos_emerald"][..])
-    }
-
-    fn arb_u256() -> impl Strategy<Value = U256> {
-        (any::<u128>(), any::<u128>())
-            .prop_map(|(upper, lower)| (U256::from(upper) << 128) | U256::from(lower))
     }
 
     fn arb_opt_u256() -> impl Strategy<Value = Option<U256>> {

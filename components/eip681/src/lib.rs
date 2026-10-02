@@ -64,3 +64,6 @@ pub mod parse;
 
 mod request;
 pub use request::{Erc20Request, NativeRequest, TransactionRequest};
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing;

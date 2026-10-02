@@ -17,6 +17,7 @@ workspace.
 - `NativeRequest::from_parts`
 - `Erc20Request::from_parts`
 - `error::Error::AmbiguousEncoding`
+- `testing::arb_u256` (behind the `test-dependencies` feature)
 
 ### Removed
 - `TransactionRequest::from_native_request_parts` and
