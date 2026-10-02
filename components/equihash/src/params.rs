@@ -30,7 +30,9 @@ impl Params {
     pub(crate) fn collision_byte_length(&self) -> usize {
         self.collision_bit_length().div_ceil(8)
     }
-    #[cfg(test)]
+    pub(crate) fn solution_indices(&self) -> Option<usize> {
+        1usize.checked_shl(self.k)
+    }
     pub(crate) fn hash_length(&self) -> usize {
         ((self.k as usize) + 1) * self.collision_byte_length()
     }

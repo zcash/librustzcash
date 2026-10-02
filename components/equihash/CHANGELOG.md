@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Improved the performance of `equihash::is_valid_solution`.
+
 ## [0.3.0] - 2026-04-23
 
 ### Changed
