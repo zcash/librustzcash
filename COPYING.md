@@ -21,4 +21,6 @@ these crates or other sources, are preserved below and grouped by crate. For
 precise attributions, see the commits introducing the code.
 
 - equihash:
+  - Copyright (c) 2016 John Tromp, The Zcash developers
+  - Copyright (c) 2020-2022 The Zcash developers
   - Copyright (c) The Zakura Contributors

@@ -17,8 +17,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["std"]
 std = ["document-features"]
 
-## Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
-solver = ["dep:cc", "std"]
+## Experimental Tromp solver support, implemented in Rust.
+solver = ["std"]
 
 [dependencies]
 corez.workspace = true
@@ -28,9 +28,6 @@ blake2b_simd.workspace = true
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
 document-features = { workspace = true, optional = true }
-
-[build-dependencies]
-cc = { version = "1", optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
