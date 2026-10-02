@@ -240,13 +240,16 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 ) -> io::Result<MerklePath<Node, DEPTH>> {
     // Skip the first byte, which should be DEPTH to signify the length of
     // the following vector of Pedersen hashes.
-    if witness[0] != DEPTH {
+    let (&depth, rest) = witness
+        .split_first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "witness is empty"))?;
+    if depth != DEPTH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "depth is not as expected",
         ));
     }
-    witness = &witness[1..];
+    witness = rest;
 
     // Begin to construct the authentication path
     let (chunks, remainder) = witness.as_chunks::<33>();
@@ -434,6 +437,14 @@ mod tests {
         assert_eq!(
             hex::encode(tmp),
             "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e"
+        );
+    }
+
+    #[test]
+    fn merkle_path_from_empty_slice() {
+        assert_matches!(
+            merkle_path_from_slice::<Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(&[]),
+            Err(_)
         );
     }
 

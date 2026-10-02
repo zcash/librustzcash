@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
+  for an empty slice instead of panicking.
+
 ## [0.31.0-pre.0] - 2026-09-30
 
 This release supports the NU7 upgrade on testnet.
