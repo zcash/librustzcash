@@ -19,6 +19,7 @@ workspace.
 - `pczt::roles::signer::Signer::with_transparent_sighash_policy`
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
 - `pczt::common::SecretKeyBytes`
+- `pczt::roles::combiner::Error::AnchorRequiredForV5`
 
 ### Changed
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `incrementalmerkletree 0.9`,
@@ -56,6 +57,17 @@ workspace.
   consensus branch ID `0x77190AD9`, and the `pczt::roles::updater::Updater`
   anchor setters accept a PCZT with that branch ID. Neither needs the
   `--cfg zcash_unstable="nu7"` configuration flag any more.
+- `pczt::roles::combiner::Combiner::combine` now returns
+  `Error::AnchorRequiredForV5` when combining v5 PCZTs would add Sapling spends
+  or outputs, or Orchard actions, to a bundle whose anchor is absent. The anchors
+  of a v5 PCZT cannot be set after it is created, so such a PCZT could not be
+  proven or extracted.
+
+### Removed
+- `pczt::roles::creator::Error::AnchorRequiredForV5`. `Creator::build` could
+  never return it, as the bundles of a newly created PCZT are always empty. A v5
+  PCZT may be created without the anchor of a pool that will not gain spends or
+  outputs; the Combiner now enforces this.
 
 ## [0.9.3] - 2026-08-07
 

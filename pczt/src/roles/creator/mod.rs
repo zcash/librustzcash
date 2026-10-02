@@ -38,10 +38,6 @@ const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
 /// Errors that can occur when creating a PCZT.
 #[derive(Debug)]
 pub enum Error {
-    /// A v5 transaction's shielded bundle anchors must be set by the Creator,
-    /// because they are transaction effecting data and cannot subsequently
-    /// change.
-    AnchorRequiredForV5,
     /// The transaction version implied by the consensus branch ID does not carry an
     /// Ironwood bundle.
     IronwoodNotSupported,
@@ -89,9 +85,13 @@ impl Creator {
     ///
     /// The transaction version is implied by the consensus branch ID: the v6
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
-    /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
-    /// [`Option::Some`]. For V6 and later transactions, either anchor may be
+    /// For v5 transactions, the anchors are transaction effecting data and cannot be
+    /// set after the PCZT is created, so an anchor may only be [`Option::None`] if no
+    /// spends or outputs will be added to that pool; the [`Combiner`] rejects such
+    /// additions. For V6 and later transactions, either anchor may be
     /// [`Option::None`] and restored later.
+    ///
+    /// [`Combiner`]: crate::roles::combiner::Combiner
     ///
     /// # Errors
     ///
@@ -226,12 +226,6 @@ impl Creator {
     }
 
     /// Builds the initial PCZT.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::AnchorRequiredForV5`] if this Creator describes a v5
-    /// transaction and either the Sapling anchor is missing from a bundle with
-    /// spends, or the Orchard anchor is missing from a bundle with actions.
     pub fn build(self) -> Result<Pczt, Error> {
         let sapling = crate::sapling::Bundle {
             spends: vec![],
@@ -256,13 +250,6 @@ impl Creator {
             zkproof: None,
             bsk: None,
         };
-
-        if self.tx_version == V5_TX_VERSION
-            && ((sapling.anchor.is_none() && !sapling.spends.is_empty())
-                || (orchard.anchor.is_none() && !orchard.actions.is_empty()))
-        {
-            return Err(Error::AnchorRequiredForV5);
-        }
 
         Ok(Pczt {
             global: crate::common::Global {
