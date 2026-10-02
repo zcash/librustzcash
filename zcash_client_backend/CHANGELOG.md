@@ -12,6 +12,10 @@ workspace.
 
 ### Added
 - `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
+- `zcash_client_backend::data_api::Zip48Derivation`, recording this wallet's cosigner
+  key and position in a ZIP 48 multisig account.
+- `zcash_client_backend::data_api::Account::zip48_derivation`, which reports it. The
+  default implementation returns `None`, so existing backends are unaffected.
 - `zcash_client_backend::util` module, providing the `Clock` capability trait,
   `SystemClock`, and (behind the `test-dependencies` feature)
   `testing::FixedClock`. These were previously defined in
@@ -50,6 +54,9 @@ workspace.
   standalone transparent spending keys it holds when it is dropped.
 - `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
   `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
+- `zcash_client_backend::data_api::WalletWrite::import_account_ufvk` takes a new
+  `zip48_derivation` argument. Pass `None` for every account that is not a ZIP 48
+  multisig account in which the importing wallet holds a cosigner key.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for

@@ -61,6 +61,7 @@ use zcash_client_backend::{
         OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
         ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
         WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        Zip48Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -731,7 +732,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     ///         &birthday,
     ///         AccountPurpose::ViewOnly,
     ///         None,
-    ///     )?;
+    ///     , None)?;
     ///     ext.execute(
     ///         "INSERT INTO ext_myapp_accounts (account_uuid, label) VALUES (?1, ?2)",
     ///         (account.id().expose_uuid(), "external account"),
@@ -1896,9 +1897,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
+        zip48_derivation: Option<&Zip48Derivation>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| {
-            wdb.import_account_ufvk(account_name, ufvk, birthday, purpose, key_source)
+            wdb.import_account_ufvk(
+                account_name,
+                ufvk,
+                birthday,
+                purpose,
+                key_source,
+                zip48_derivation,
+            )
         })
     }
 
@@ -2223,6 +2232,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             },
             wallet::ViewingKey::Full(Box::new(ufvk)),
             birthday,
+            None,
             #[cfg(feature = "transparent-inputs")]
             &self.gap_limits,
         )?;
@@ -2264,6 +2274,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             },
             wallet::ViewingKey::Full(Box::new(ufvk)),
             birthday,
+            None,
             #[cfg(feature = "transparent-inputs")]
             &self.gap_limits,
         )?;
@@ -2278,6 +2289,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
+        zip48_derivation: Option<&Zip48Derivation>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         wallet::add_account(
             self.conn.0,
@@ -2289,6 +2301,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             },
             wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
             birthday,
+            zip48_derivation,
             #[cfg(feature = "transparent-inputs")]
             &self.gap_limits,
         )
@@ -4531,7 +4544,7 @@ mod tests {
         // it should produce an AccountCollision error.
         assert_matches!(
             st.wallet_mut()
-                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
+                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None, None),
             Err(e) if is_account_collision(&e)
         );
 
@@ -4554,7 +4567,8 @@ mod tests {
                     birthday,
                     AccountPurpose::Spending { derivation: None },
                     None,
-                ),
+                None,
+            ),
                 Err(e) if is_account_collision(&e)
             );
         }
@@ -4577,7 +4591,8 @@ mod tests {
                     birthday,
                     AccountPurpose::Spending { derivation: None },
                     None,
-                ),
+                None,
+            ),
                 Err(e) if is_account_collision(&e)
             );
         }
@@ -4615,6 +4630,71 @@ mod tests {
         );
     }
 
+    /// A ZIP 48 account's stored form carries no key origin, so which cosigner a wallet is
+    /// cannot be recovered from it. That makes this round trip the only thing standing
+    /// between the wallet and being unable to say whether it can sign.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn zip48_derivation_round_trips() {
+        use ::transparent::zip48::{P2shFullViewingKey, P2shKey};
+        use core::num::NonZeroU8;
+        use secp256k1::{PublicKey, SecretKey};
+        use zcash_client_backend::data_api::Zip48Derivation;
+        use zip32::fingerprint::SeedFingerprint;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let key_info = [1u8, 2, 3]
+            .iter()
+            .map(|i| {
+                let sk = SecretKey::from_secret_bytes([*i; 32]).expect("valid secret key");
+                P2shKey::new([*i; 32], PublicKey::from_secret_key(&sk))
+            })
+            .collect::<Vec<_>>();
+        let item = P2shFullViewingKey::new(NonZeroU8::new(2).unwrap(), key_info)
+            .expect("valid cosigner set");
+        let ufvk = UnifiedFullViewingKey::from_p2sh(item).expect("constructible");
+
+        let derivation = Zip48Derivation::new(
+            SeedFingerprint::from_bytes([7; 32]),
+            zip32::AccountId::try_from(3).unwrap(),
+            1,
+        );
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "multisig",
+                &ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+                Some(&derivation),
+            )
+            .unwrap();
+
+        assert_eq!(account.zip48_derivation(), Some(&derivation));
+
+        // Re-read it from the database rather than trusting the value the import returned.
+        let reloaded = st
+            .wallet()
+            .get_account(account.id())
+            .unwrap()
+            .expect("the account exists");
+        assert_eq!(reloaded.zip48_derivation(), Some(&derivation));
+        assert_eq!(
+            reloaded.zip48_derivation().map(|d| d.cosigner_index()),
+            Some(1),
+        );
+    }
+
     #[test]
     pub(crate) fn import_account_ufvk_then_conflicts() {
         let mut st = TestBuilder::new()
@@ -4639,6 +4719,7 @@ mod tests {
                 &ufvk,
                 &birthday,
                 AccountPurpose::Spending { derivation: None },
+                None,
                 None,
             )
             .unwrap();
@@ -4703,6 +4784,7 @@ mod tests {
                 &ufvk,
                 &birthday,
                 AccountPurpose::ViewOnly,
+                None,
                 None,
             )
             .expect("a transparent-only UFVK can be imported");
@@ -4891,6 +4973,7 @@ mod tests {
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
                     &birthday,
+                    None,
                     #[cfg(feature = "transparent-inputs")]
                     &crate::GapLimits::default(),
                 )
@@ -4910,6 +4993,7 @@ mod tests {
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
                     &birthday,
+                    None,
                     #[cfg(feature = "transparent-inputs")]
                     &crate::GapLimits::default(),
                 )
@@ -4925,6 +5009,7 @@ mod tests {
                 &ufvk,
                 &birthday,
                 AccountPurpose::Spending { derivation: None },
+                None,
                 None,
             )
             .unwrap();
@@ -4949,6 +5034,7 @@ mod tests {
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
                     &birthday,
+                    None,
                     #[cfg(feature = "transparent-inputs")]
                     &crate::GapLimits::default(),
                 )
@@ -5006,6 +5092,7 @@ mod tests {
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk)),
                     &birthday,
+                    None,
                     #[cfg(feature = "transparent-inputs")]
                     &crate::GapLimits::default(),
                 )
@@ -5027,6 +5114,7 @@ mod tests {
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
                     &birthday,
+                    None,
                     #[cfg(feature = "transparent-inputs")]
                     &crate::GapLimits::default(),
                 )
