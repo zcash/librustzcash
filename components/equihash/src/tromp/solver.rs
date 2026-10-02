@@ -100,7 +100,23 @@ fn attributes(round: usize, bucket: usize) -> usize {
     bucket * SLOTS * TABLE_WORDS[round & 1] + (round / 2) * SLOTS
 }
 
+// Prefetch only addresses inside a live table. On other architectures the
+// ordinary reads and writes retain the same behavior.
+#[allow(unsafe_code)]
 fn prefetch(table: &[u32], index: usize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        debug_assert!(index < table.len());
+        // SAFETY: callers derive this index from a bounded bucket and slot,
+        // and the reserved tree/hash widths fit in the allocated table.
+        unsafe {
+            core::arch::x86_64::_mm_prefetch(
+                table.as_ptr().add(index).cast(),
+                core::arch::x86_64::_MM_HINT_T0,
+            );
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
     let _ = (table, index);
 }
 

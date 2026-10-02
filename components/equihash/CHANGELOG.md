@@ -16,6 +16,7 @@ and this library adheres to Rust's notion of
 - Improved the performance of `equihash::is_valid_solution`.
 - Improved the performance of `equihash::tromp::solve_200_9`. It also no longer
   requires a C/C++ compiler.
+- Improved the performance of `equihash::tromp::solve_200_9` on x86-64 and Linux.
 
 ## [0.3.0] - 2026-04-23
 
