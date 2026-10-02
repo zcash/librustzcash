@@ -39,18 +39,18 @@ categories = ["cryptography::cryptocurrencies"]
 eip681 = { version = "0.1.0", path = "components/eip681" }
 equihash = { version = "0.3", path = "components/equihash", default-features = false }
 zcash_address = { version = "=0.14.0-pre.0", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.24.0", path = "zcash_client_backend", default-features = false }
+zcash_client_backend = { version = "=0.25.0-pre.0", path = "zcash_client_backend", default-features = false }
 zcash_encoding = { version = "0.5", path = "components/zcash_encoding", default-features = false }
 zcash_keys = { version = "=0.17.0-pre.0", path = "zcash_keys", default-features = false  }
-zcash_pool_migration = { version = "0.1.0", path = "zcash_pool_migration" }
+zcash_pool_migration = { version = "=0.2.0-pre.0", path = "zcash_pool_migration" }
 zcash_protocol = { version = "=0.11.0-pre.0", path = "components/zcash_protocol", default-features = false }
-zip321 = { version = "0.9.0", path = "components/zip321" }
+zip321 = { version = "=0.10.0-pre.0", path = "components/zip321" }
 
 zcash_note_encryption = "0.5.1"
 zcash_primitives = { version = "=0.31.0-pre.0", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "=0.31.0-pre.0", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.9.3", path = "pczt", default-features = false }
+pczt = { version = "=0.10.0-pre.0", path = "pczt", default-features = false }
 
 # Shielded protocols
 bellman = { version = "0.15", default-features = false }

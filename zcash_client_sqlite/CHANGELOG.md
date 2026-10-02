@@ -10,38 +10,32 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.0-pre.0] - 2026-10-02
+
 ### Added
-- `WalletDb` implements
-  `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
-- `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
-  transactions deferred to the post-import rescan because the wallet had no
-  view of the chain tip against which to store them; such transactions were
-  previously conflated with `transactions_without_wallet_relevance`.
-- `WalletSnapshot` and `WalletDb::get_wallet_snapshot`, which return wallet
-  balances, heights, and subtree indices without computing
-  [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
-  use this to avoid the `subtree_scan_progress` aggregates.
-  `WalletRead::get_wallet_summary` is unchanged and still computes progress.
-- The `v_tx_outputs` view now emits the `diversifier_index_be` column that its
-  documentation has described since the receiving-address columns were added:
-  the big-endian diversifier index of the receiving address, `NULL` for outputs
-  not received at one of the wallet's diversified addresses. The column was
-  previously computed internally but omitted from the view's output, so any
-  query naming it failed with "no such column".
+- `WalletDb` implements the storage-trait methods newly added to
+  `zcash_client_backend`: `WalletWrite::queue_rescan` and, behind
+  `transparent-inputs`, `WalletRead::{get_unspent_transparent_outpoints,
+  get_transparent_receiver_accounts}` and
+  `ll::LowLevelWalletWrite::track_block_transparent_spends`.
+- `WalletSnapshot` and `WalletDb::get_wallet_snapshot`.
+- `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`
 
 ### Changed
+- Migrated to `bip32 0.6`, `group 0.14`, `incrementalmerkletree 0.9`,
+  `jubjub 0.11`, `orchard 0.16`, `pczt 0.10.0-pre.0`, `rand_core 0.10`,
+  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_address 0.14.0-pre.0`, `zcash_client_backend 0.25.0-pre.0`,
+  `zcash_keys 0.17.0-pre.0`, `zcash_pool_migration 0.2.0-pre.0`,
+  `zcash_primitives 0.31.0-pre.0`, `zcash_proofs 0.31.0-pre.0`,
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`,
+  `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
 - `SqliteClientError` has a new variant `DivergedCheckpoints { pool, height }`.
   When a pool's note commitment tree has checkpoints above and below the
   truncation height but none at it, truncating or rewinding the wallet now
   fails with this variant instead of `SqliteClientError::CorruptedData`.
 - `zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`
   takes an additional `rng` first argument that implements `rand_core::{Rng, CryptoRng}`.
-- Migrated to `bip32 0.6`, `group 0.14`, `incrementalmerkletree 0.9`,
-  `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`, `sapling-crypto 0.9`,
-  `secp256k1 0.33`, `shardtree 0.8`, `zcash_address 0.14.0-pre.0`,
-  `zcash_keys 0.17.0-pre.0`, `zcash_primitives 0.31.0-pre.0`,
-  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
 - The `R` parameter of `WalletDb` must now implement `rand_core::Rng` in place
   of `rand_core::RngCore` wherever it previously required the latter.
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
@@ -52,40 +46,31 @@ workspace.
   `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
   default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
   Address.
-- Block scanning records transparent outputs paying the wallet and spends of the
-  wallet's transparent outputs, for both compact and full blocks. A spend
-  observed before the block that created the spent output has been scanned is
-  resolved when that output is discovered.
+- `WalletDb::put_blocks` records the transparent outputs that pay a wallet
+  account and the spends of the wallet's transparent outputs, for blocks
+  scanned from both compact and full block data. A spend observed before the
+  output it spends has been discovered is resolved when that output is
+  discovered.
+- `zewif::ZewifImportReport::transactions_without_wallet_relevance` no longer
+  counts transactions deferred to the post-import rescan for lack of a chain
+  tip; these are counted by `transactions_deferred_no_chain_tip`.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
-  accounts_new.zcashd_legacy_address_index`. In such a database every account
-  that existed at that time has a NULL `accounts.zcashd_legacy_address_index`;
-  the migration that rebuilds the `accounts` table now maps those to the
-  sentinel value that column has carried since, and gives the database the
-  `hd_account` uniqueness index over `(hd_seed_fingerprint, hd_account_index,
-  zcashd_legacy_address_index)`.
+  accounts_new.zcashd_legacy_address_index`.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
-  no longer fails with a "Consensus branch ID not known" error. When neither a
-  mined height nor a nonzero expiry height is available, the consensus branch
-  ID (which does not affect parsing) is now selected using a fallback height
-  supplied from the wallet's view of the chain tip; the error remains only
-  when the chain tip is also unknown.
+  no longer fails with a "Consensus branch ID not known" error when the wallet
+  has a view of the chain tip.
 - `zewif::import_wallet` now establishes the wallet's view of the chain tip
   from the document (the maximum of its export height and its transactions'
   mined heights, clamped to the wallet birthday) whenever at least one account
-  was imported and account import itself did not establish one. Previously a
-  document whose accounts all had birthdays at or below Sapling activation —
-  a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
-  transaction was silently deferred to the post-import rescan and counted
-  under `transactions_without_wallet_relevance`.
-- `WalletDb::put_blocks` records the transparent outputs of each scanned
-  transaction that pay a wallet account, and queues each such outpoint for
-  transparent spend detection. Transparent outputs detected by
-  `zcash_client_backend::scanning::full::scan_block` were previously discarded
-  when the scanned blocks were persisted.
+  was imported and account import itself did not establish one. A document
+  whose accounts all had birthdays at or below Sapling activation previously
+  had every transaction deferred to the post-import rescan.
+- The `v_tx_outputs` view now includes its documented `diversifier_index_be`
+  column; queries naming it previously failed with "no such column".
 - The `v_transactions` and `v_transactions_with_pending_migrations` views no
   longer multiply a sending account's row by the number of distinct groups the
   transaction's outputs were received into, where a group is an account of the
