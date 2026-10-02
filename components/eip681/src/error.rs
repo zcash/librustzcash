@@ -249,6 +249,10 @@ pub enum Error {
     /// The request is not a valid native transfer.
     #[snafu(display("Not a native transfer request: {source}"))]
     NotNativeTransfer { source: NativeTransferError },
+
+    /// The request parts have no EIP-681 encoding that parses back to the same parts.
+    #[snafu(display("The request parts do not have an unambiguous encoding; saw '{uri}'"))]
+    AmbiguousEncoding { uri: String },
 }
 
 impl From<ValidationError> for Error {
