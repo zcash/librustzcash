@@ -471,7 +471,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             (ViewingKey::Full(new_ufvk), _) => {
                 // FVK import over an existing account. The upgrade function
                 // validates that the new FVK strictly adds capability.
-                return upgrade_account_ufvk(conn, params, &existing_account, new_ufvk);
+                upgrade_account_ufvk(conn, params, &existing_account, new_ufvk)?;
             }
             (ViewingKey::Incoming(_), Some(_)) => {
                 // IVK-over-FVK: the existing account already has full viewing
@@ -481,9 +481,23 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             (ViewingKey::Incoming(_), None) => {
                 // IVK-over-IVK: the upgrade function validates that the new
                 // UIVK strictly adds capability.
-                return upgrade_account_uivk(conn, params, &existing_account, &uivk);
+                upgrade_account_uivk(conn, params, &existing_account, &uivk)?;
             }
         }
+
+        // A wider viewing key may recognize notes in blocks already scanned with
+        // the old key. Requeue that history before returning the upgraded account.
+        rewind_for_account_viewing_key(
+            conn,
+            params,
+            birthday,
+            existing_account.id(),
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
+        )?;
+        return get_account(conn, params, existing_account.id())?.ok_or_else(|| {
+            SqliteClientError::CorruptedData("Upgraded account disappeared during rewind".into())
+        });
     }
 
     let account_uuid = AccountUuid(Uuid::new_v4());
@@ -610,34 +624,14 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     //   - The scan queue above `birthday.height() - 1` is overwritten with a `Historic`
     //     rescan range so that blocks that must be re-scanned for the new account's notes
     //     are queued.
-    match rewind_to_chain_state(
+    rewind_for_account_viewing_key(
         conn,
         params,
+        birthday,
+        account_uuid,
         #[cfg(feature = "transparent-inputs")]
         gap_limits,
-        birthday.prior_chain_state(),
-        std::iter::once(account_uuid).collect(),
-    ) {
-        Ok(()) => {}
-        Err(RewindError::DataSource(e)) => return Err(e),
-        Err(RewindError::RewindBeyondBirthdays(_)) => {
-            // Cannot occur: `reset_account_birthdays` is non-empty (it contains the new
-            // account), so `rewind_to_chain_state`'s contract specifies that this variant is
-            // not returned.
-            unreachable!(
-                "rewind_to_chain_state cannot return RewindBeyondBirthdays with a non-empty \
-                 reset_account_birthdays set"
-            );
-        }
-        // `RewindError` is `#[non_exhaustive]`, so a variant introduced by a future
-        // `zcash_client_backend` release has no specific handling here until this crate is
-        // updated. Fail the account addition rather than proceeding on an unknown outcome.
-        Err(e) => {
-            return Err(SqliteClientError::BackendError(BackendError::Rewind(
-                Box::new(e),
-            )));
-        }
-    }
+    )?;
 
     // The ignored range always starts at Sapling activation
     let sapling_activation_height = params
@@ -709,6 +703,38 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     Ok(account)
+}
+
+/// Requeues history after an account gains viewing capability, whether by insertion or upgrade.
+fn rewind_for_account_viewing_key<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    birthday: &AccountBirthday,
+    account_uuid: AccountUuid,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+) -> Result<(), SqliteClientError> {
+    match rewind_to_chain_state(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        birthday.prior_chain_state(),
+        std::iter::once(account_uuid).collect(),
+    ) {
+        Ok(()) => Ok(()),
+        Err(RewindError::DataSource(e)) => Err(e),
+        Err(RewindError::RewindBeyondBirthdays(_)) => {
+            // The account is included in the birthday-reset set, so this case is impossible.
+            unreachable!(
+                "rewind_to_chain_state cannot return RewindBeyondBirthdays with a non-empty \
+                 reset_account_birthdays set"
+            );
+        }
+        // Fail the import if a future backend adds an error variant we do not handle yet.
+        Err(e) => Err(SqliteClientError::BackendError(BackendError::Rewind(
+            Box::new(e),
+        ))),
+    }
 }
 
 pub(crate) fn delete_account(
