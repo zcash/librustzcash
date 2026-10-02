@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.0-pre.0] - 2026-10-02
+
 ### Added
 - Experimental support for creating and extracting V7 PCZTs under NuTachyon,
   behind `zcash_unstable="nutachyon"`, using the V6 transaction body.
@@ -21,12 +23,11 @@ workspace.
 - `pczt::common::SecretKeyBytes`
 
 ### Changed
-- Migrated to `bls12_381 0.9`, `ff 0.14`, `incrementalmerkletree 0.9`,
-  `jubjub 0.11`, `orchard 0.16`, `pasta_curves 0.6`, `redjubjub 0.9`,
-  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
-  `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
-  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `orchard 0.16`,
+  `pasta_curves 0.6`, `rand_core 0.10`, `redjubjub 0.9`, `sapling-crypto 0.9`,
+  `secp256k1 0.33`, `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and
+  `zcash_transparent 0.11.0-pre.0`.
 - `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
   `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
   create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
@@ -46,15 +47,17 @@ workspace.
   PCZT holding them is dropped or they are redacted, and are omitted from `Debug`
   output. Their serialized encoding is unchanged.
 - `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
-  transparent_sighash}` now check the consistency of the transparent input, and use only
-  `SighashType::ALL`. Use `Signer::with_transparent_sighash_policy` to permit other
-  sighash types.
+  transparent_sighash}` now check the consistency of the transparent input, and return
+  an error for an input whose sighash type is not `SighashType::ALL`. Use
+  `Signer::with_transparent_sighash_policy` to permit other sighash types.
 - `pczt::roles::spend_finalizer::SpendFinalizer::finalize_spends` now finalizes only
   `SighashType::ALL` signatures that match their input's `sighash_type`; use
   `SpendFinalizer::with_sighash_policy` to permit other sighash types.
 - `pczt::roles::creator::Creator::new` creates a v6 PCZT for the NU7
-  consensus branch ID `0x77190AD9`, and the `pczt::roles::updater::Updater`
-  anchor setters accept a PCZT with that branch ID. Neither needs the
+  consensus branch ID `0x77190AD9`, the `pczt::roles::updater::Updater`
+  anchor setters accept a PCZT with that branch ID, and `pczt::Pczt::into_effects`
+  and `pczt::roles::tx_extractor::TransactionExtractor::extract` extract it as a
+  v6 transaction without a ZIP 233 amount. None of these needs the
   `--cfg zcash_unstable="nu7"` configuration flag any more.
 
 ## [0.9.3] - 2026-08-07

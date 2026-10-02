@@ -39,8 +39,9 @@ workspace.
 ### Changed
 - Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
   `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`,
-  `pasta_curves 0.6`, `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
-  `shardtree 0.8`, `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
+  `pasta_curves 0.6`, `pczt 0.10.0-pre.0`, `rand_core 0.10`,
+  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
   `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
   `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
   `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, `zip32 0.3`, and
