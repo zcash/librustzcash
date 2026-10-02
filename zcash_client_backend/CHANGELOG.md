@@ -43,7 +43,8 @@ workspace.
   `shardtree 0.8`, `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
   `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
   `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, `zip32 0.3`, and
+  `zip321 0.10.0-pre.0`.
 - `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
   additional `rng: &mut impl Rng` first argument.
 - `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
