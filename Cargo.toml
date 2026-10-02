@@ -42,7 +42,7 @@ zcash_address = { version = "=0.14.0-pre.0", path = "components/zcash_address", 
 zcash_client_backend = { version = "=0.25.0-pre.0", path = "zcash_client_backend", default-features = false }
 zcash_encoding = { version = "0.5", path = "components/zcash_encoding", default-features = false }
 zcash_keys = { version = "=0.17.0-pre.0", path = "zcash_keys", default-features = false  }
-zcash_pool_migration = { version = "0.1.0", path = "zcash_pool_migration" }
+zcash_pool_migration = { version = "=0.2.0-pre.0", path = "zcash_pool_migration" }
 zcash_protocol = { version = "=0.11.0-pre.0", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "=0.10.0-pre.0", path = "components/zip321" }
 
