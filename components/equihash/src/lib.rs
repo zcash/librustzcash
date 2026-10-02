@@ -32,6 +32,7 @@ extern crate std;
 #[macro_use]
 extern crate alloc;
 
+mod leaf_hash;
 mod minimal;
 mod params;
 mod verify;

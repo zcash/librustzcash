@@ -262,6 +262,11 @@ pub fn is_valid_solution(
     let p = Params::new(n, k).ok_or(Error(Kind::InvalidParams))?;
     let indices = indices_from_minimal(p, soln).ok_or(Error(Kind::InvalidParams))?;
 
+    if let Some(hasher) = crate::leaf_hash::LeafHasher::new(&p, input, nonce) {
+        return tree::validate_tree(&p, &indices, |blocks, digests| hasher.hash(blocks, digests))
+            .map_err(Error);
+    }
+
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
     state.update(nonce);
