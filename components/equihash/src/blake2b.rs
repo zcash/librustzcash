@@ -8,26 +8,26 @@ use blake2b_simd::State;
 
 use crate::params::Params;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
 mod native;
 
 /// Owns the reference state and an optional cache for solver hash batches.
 pub(super) struct SolverHashState {
     reference: State,
     hash_len: usize,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
     native: Option<native::Context>,
 }
 
 impl SolverHashState {
     /// The owned state must already include `input` and `nonce` with `params`.
     pub(super) fn new(reference: State, input: &[u8], nonce: &[u8], params: Params) -> Self {
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(all(feature = "unsafe-solver", target_arch = "x86_64")))]
         let _ = (input, nonce, params);
         Self {
             reference,
             hash_len: params.hash_output() as usize,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
             native: native::Context::new(
                 input,
                 nonce,
@@ -75,7 +75,7 @@ impl SolverHashState {
                     .checked_add(u32::try_from(count - 1).unwrap())
                     .is_some()
         );
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
         if let Some(native) = &self.native {
             native.generate(first_index, output);
             return;
@@ -109,7 +109,7 @@ mod tests {
             SolverHashState {
                 reference: state.clone(),
                 hash_len: hash_len as usize,
-                #[cfg(target_arch = "x86_64")]
+                #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
                 native: None,
             },
             SolverHashState::new(state, &header, &[0x5a; 32], PARAMS),
@@ -182,7 +182,7 @@ mod tests {
             let fallback = SolverHashState {
                 reference: reference.clone(),
                 hash_len: PARAMS.hash_output() as usize,
-                #[cfg(target_arch = "x86_64")]
+                #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
                 native: None,
             };
             for state in [cached, fallback] {

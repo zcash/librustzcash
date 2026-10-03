@@ -2,25 +2,25 @@
 
 use core::ops::{Deref, DerefMut};
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(feature = "unsafe-solver", target_os = "linux")))]
 use alloc::vec::Vec;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
 use core::{mem::size_of, ptr::NonNull, slice};
 
 /// A table with an optional huge-page hint on Linux.
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
 pub(super) struct Table {
     pointer: NonNull<u32>,
     length: usize,
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(feature = "unsafe-solver", target_os = "linux")))]
 pub(super) struct Table(Vec<u32>);
 
 impl Table {
     pub(super) fn new_zeroed(length: usize) -> Self {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
         {
             let layout = alloc::alloc::Layout::array::<u32>(length)
                 .expect("solver table length exceeds the allocation limit");
@@ -50,7 +50,7 @@ impl Table {
             }
             Self { pointer, length }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(feature = "unsafe-solver", target_os = "linux")))]
         {
             Self(vec![0; length])
         }
@@ -61,13 +61,13 @@ impl Deref for Table {
     type Target = [u32];
 
     fn deref(&self) -> &Self::Target {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
         {
             // SAFETY: the mapping is aligned, initialized and lives until
             // this owner is dropped. The shared borrow prevents mutation.
             unsafe { slice::from_raw_parts(self.pointer.as_ptr(), self.length) }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(feature = "unsafe-solver", target_os = "linux")))]
         {
             &self.0
         }
@@ -76,20 +76,20 @@ impl Deref for Table {
 
 impl DerefMut for Table {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
         {
             // SAFETY: this exclusive borrow owns the complete live mapping;
             // no other reference can access it during the returned borrow.
             unsafe { slice::from_raw_parts_mut(self.pointer.as_ptr(), self.length) }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(feature = "unsafe-solver", target_os = "linux")))]
         {
             &mut self.0
         }
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "unsafe-solver", target_os = "linux"))]
 impl Drop for Table {
     fn drop(&mut self) {
         // SAFETY: this is the original mapping address and length. The owner

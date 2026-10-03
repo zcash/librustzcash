@@ -104,7 +104,7 @@ fn attributes(round: usize, bucket: usize) -> usize {
 // ordinary reads and writes retain the same behavior.
 #[allow(unsafe_code)]
 fn prefetch(table: &[u32], index: usize) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
     {
         debug_assert!(index < table.len());
         // SAFETY: callers derive this index from a bounded bucket and slot,
@@ -116,7 +116,7 @@ fn prefetch(table: &[u32], index: usize) {
             );
         }
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(all(feature = "unsafe-solver", target_arch = "x86_64")))]
     let _ = (table, index);
 }
 

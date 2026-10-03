@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `unsafe-solver` feature flag, which improves the performance of
+  `equihash::tromp::solve_200_9` on x86-64 and Linux using `unsafe` Rust
+  to access platform-specific intrinsics.
+
 ### Fixed
 - `equihash::is_valid_solution` now returns an error for parameters whose
   required solution size overflows the platform's size limits, instead of
@@ -16,7 +21,6 @@ and this library adheres to Rust's notion of
 - Improved the performance of `equihash::is_valid_solution`.
 - Improved the performance of `equihash::tromp::solve_200_9`. It also no longer
   requires a C/C++ compiler.
-- Improved the performance of `equihash::tromp::solve_200_9` on x86-64 and Linux.
 
 ## [0.3.0] - 2026-04-23
 
