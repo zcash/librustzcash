@@ -18,9 +18,13 @@ use std::{collections::BTreeSet, env, process::Command};
 
 use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 
-use crate::{minimal::indices_from_minimal, params::Params};
+use crate::{
+    leaf_hash::{Kernel, LeafHasher},
+    minimal::indices_from_minimal,
+    params::Params,
+};
 
-use super::{Error, Kind, is_valid_solution_recursive};
+use super::{Error, Kind, is_valid_solution_recursive, validate_tree};
 
 const HEADER_BYTES: usize = 108;
 const NONCE_BYTES: usize = 32;
@@ -123,6 +127,19 @@ impl TestVector {
             hex::encode(nonce),
             hex::encode(solution),
         );
+        let params = Params::new(self.n, self.k).unwrap();
+        if let Some(indices) = indices_from_minimal(params, solution) {
+            for kernel in Kernel::supported() {
+                if let Some(hasher) = LeafHasher::with_kernel(&params, input, nonce, kernel) {
+                    let actual = validate_tree(&params, &indices, |blocks, digests| {
+                        hasher.hash(blocks, digests);
+                    })
+                    .map_err(Error)
+                    .map_err(|error| error.to_string());
+                    assert_eq!(actual, expected, "{kernel:?} ({}, {})", self.n, self.k);
+                }
+            }
+        }
         expected
     }
 
