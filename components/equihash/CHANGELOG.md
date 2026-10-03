@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `equihash::is_valid_solution` now returns an error for parameters whose
+  required solution size overflows the platform's size limits, instead of
+  panicking or using an incorrect solution size.
+
+### Changed
+- Improved the performance of `equihash::is_valid_solution`.
+- Improved the performance of `equihash::tromp::solve_200_9`. It also no longer
+  requires a C/C++ compiler.
+
 ## [0.3.0] - 2026-04-23
 
 ### Changed

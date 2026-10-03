@@ -1,205 +1,53 @@
-//! Rust interface to the tromp equihash solver.
+//! Tromp's Equihash solver implemented in Rust.
 
-use std::marker::{PhantomData, PhantomPinned};
-use std::slice;
 use std::vec::Vec;
 
-use blake2b_simd::State;
+use crate::{blake2b::SolverHashState, minimal::minimal_from_indices, params::Params, verify};
 
-use crate::{blake2b, minimal::minimal_from_indices, params::Params, verify};
+mod solver;
 
-#[repr(C)]
-struct CEqui {
-    _f: [u8; 0],
-    _m: PhantomData<(*mut u8, PhantomPinned)>,
-}
+const SOLVER_PARAMS: Params = Params { n: 200, k: 9 };
 
-#[link(name = "equitromp")]
-unsafe extern "C" {
-    #[allow(improper_ctypes)]
-    fn equi_new(
-        blake2b_clone: extern "C" fn(state: *const State) -> *mut State,
-        blake2b_free: extern "C" fn(state: *mut State),
-        blake2b_update: extern "C" fn(state: *mut State, input: *const u8, input_len: usize),
-        blake2b_finalize: extern "C" fn(state: *mut State, output: *mut u8, output_len: usize),
-    ) -> *mut CEqui;
-    fn equi_free(eq: *mut CEqui);
-    #[allow(improper_ctypes)]
-    fn equi_setstate(eq: *mut CEqui, ctx: *const State);
-    fn equi_clearslots(eq: *mut CEqui);
-    fn equi_digit0(eq: *mut CEqui, id: u32);
-    fn equi_digitodd(eq: *mut CEqui, r: u32, id: u32);
-    fn equi_digiteven(eq: *mut CEqui, r: u32, id: u32);
-    fn equi_digitK(eq: *mut CEqui, id: u32);
-    fn equi_nsols(eq: *const CEqui) -> usize;
-    /// Returns `equi_nsols()` solutions of length `2^K`, in a single memory allocation.
-    fn equi_sols(eq: *const CEqui) -> *const u32;
-}
-
-/// Performs a single equihash solver run with equihash parameters `p` and hash state `curr_state`.
-/// Returns zero or more unique solutions.
-///
-/// # SAFETY
-///
-/// The parameters to this function must match the hard-coded parameters in the C++ code.
-///
-/// This function uses unsafe code for FFI into the tromp solver.
-#[allow(unsafe_code)]
-#[allow(clippy::print_stdout)]
-unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>> {
-    // SAFETY: caller must supply a valid `eq` instance.
-    //
-    // Review Note: nsols is set to zero in C++ here
-    unsafe { equi_setstate(eq, curr_state) };
-
-    // Initialization done, start algo driver.
-    unsafe { equi_digit0(eq, 0) };
-    unsafe { equi_clearslots(eq) };
-    // SAFETY: caller must supply a `p` instance that matches the hard-coded values in the C code.
-    for r in 1..p.k {
-        if (r & 1) != 0 {
-            unsafe { equi_digitodd(eq, r, 0) }
-        } else {
-            unsafe { equi_digiteven(eq, r, 0) }
-        };
-        unsafe { equi_clearslots(eq) };
-    }
-    // Review Note: nsols is increased here, but only if the solution passes the strictly ordered check.
-    // With 256 nonces, we get to around 6/9 digits strictly ordered.
-    unsafe { equi_digitK(eq, 0) };
-
-    {
-        let nsols = unsafe { equi_nsols(eq) };
-        let sols = unsafe { equi_sols(eq) };
-        let solution_len = 1 << p.k;
-        //println!("{nsols} solutions of length {solution_len} at {sols:?}");
-
-        // SAFETY:
-        // - caller must supply a `p` instance that matches the hard-coded values in the C code.
-        // - `sols` is a single allocation containing at least `nsols` solutions.
-        // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
-        let solutions: &[u32] = unsafe { slice::from_raw_parts(sols, nsols * solution_len) };
-
-        /*
-        println!(
-            "{nsols} solutions of length {solution_len} as a slice of length {:?}",
-            solutions.len()
-        );
-        */
-
-        let mut chunks = solutions.chunks_exact(solution_len);
-
-        // SAFETY:
-        // - caller must supply a `p` instance that matches the hard-coded values in the C code.
-        // - each solution contains `solution_len` u32 values.
-        // - the temporary slices are shared refs to a valid `eq` instance supplied by the caller.
-        // - the bytes in the shared ref are copied before they are returned.
-        // - dropping `solutions: &[u32]` does not drop the underlying memory owned by `eq`.
-        let mut solutions = (&mut chunks)
-            .map(|solution| solution.to_vec())
-            .collect::<Vec<_>>();
-
-        assert_eq!(chunks.remainder().len(), 0);
-
-        // Sometimes the solver returns identical solutions.
-        solutions.sort();
-        solutions.dedup();
-
-        /*
-        println!(
-            "{} solutions as cloned vectors of length {:?}",
-            solutions.len(),
-            solutions
-                .iter()
-                .map(|solution| solution.len())
-                .collect::<Vec<_>>()
-        );
-        */
-
-        solutions
-    }
-}
-
-/// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
-/// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
-/// `next_nonce` function.
-///
-/// Returns zero or more unique solutions.
+/// Runs the solver until the nonce source ends or a nonce produces solutions.
 fn solve_200_9_uncompressed<const N: usize>(
     input: &[u8],
     mut next_nonce: impl FnMut() -> Option<[u8; N]>,
 ) -> Vec<Vec<u32>> {
-    let p = Params::new(200, 9).expect("should be valid");
+    let p = SOLVER_PARAMS;
     let mut state = verify::initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
+    let mut solver = solver::Solver::new();
 
-    // Create solver and initialize it.
-    //
-    // # SAFETY
-    // - the parameters 200,9 match the hard-coded parameters in the C++ code.
-    // - tromp is compiled without multi-threading support, so each instance can only support 1 thread.
-    // - the blake2b functions are in the correct order in Rust and C++ initializers.
-    #[allow(unsafe_code)]
-    let eq = unsafe {
-        equi_new(
-            blake2b::blake2b_clone,
-            blake2b::blake2b_free,
-            blake2b::blake2b_update,
-            blake2b::blake2b_finalize,
-        )
-    };
-
-    let solutions = loop {
-        let nonce = match next_nonce() {
-            Some(nonce) => nonce,
-            None => break vec![],
-        };
-
+    while let Some(nonce) = next_nonce() {
         let mut curr_state = state.clone();
-        // Review Note: these hashes are changing when the nonce changes
         curr_state.update(&nonce);
-
-        // SAFETY:
-        // - the parameters 200,9 match the hard-coded parameters in the C++ code.
-        // - the eq instance is initilized above.
-        #[allow(unsafe_code)]
-        let solutions = unsafe { worker(eq, p, &curr_state) };
+        let curr_state = SolverHashState::new(curr_state, input, &nonce, p);
+        let solutions = solver.run(&curr_state);
         if !solutions.is_empty() {
-            break solutions;
+            return solutions;
         }
-    };
-
-    // SAFETY:
-    // - the eq instance is initilized above, and not used after this point.
-    #[allow(unsafe_code)]
-    unsafe {
-        equi_free(eq)
-    };
-
-    solutions
+    }
+    Vec::new()
 }
 
-/// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
-/// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
-/// `next_nonce` function.
+/// Performs multiple Equihash solver runs with parameters `200, 9`,
+/// initializing the hash with the supplied partial `input`. Between each run,
+/// generates a new nonce of length `N` using `next_nonce`.
 ///
 /// Returns zero or more unique compressed solutions.
+///
+/// The solver accepts any `input` and nonce length.
 pub fn solve_200_9<const N: usize>(
     input: &[u8],
     next_nonce: impl FnMut() -> Option<[u8; N]>,
 ) -> Vec<Vec<u8>> {
-    let p = Params::new(200, 9).expect("should be valid");
     let solutions = solve_200_9_uncompressed(input, next_nonce);
-
     let mut solutions: Vec<Vec<u8>> = solutions
         .iter()
-        .map(|solution| minimal_from_indices(p, solution))
+        .map(|solution| minimal_from_indices(SOLVER_PARAMS, solution))
         .collect();
-
-    // Just in case the solver returns solutions that become the same when compressed.
     solutions.sort();
     solutions.dedup();
-
     solutions
 }
 
@@ -208,6 +56,45 @@ mod tests {
     use std::println;
 
     use super::solve_200_9;
+
+    #[test]
+    fn fixed_nonce_solutions_match_c_solver() {
+        let input = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
+        // These counts and BLAKE2b-512 fingerprints were recorded from the C
+        // solver before this port. Fingerprints include sorted compressed
+        // proofs, so this checks both the returned set and canonical ordering.
+        let expected = [
+            (
+                0,
+                "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
+            ),
+            (
+                3,
+                "b0a21dbaf77016d42e955c7306b2bc3e7856d16b85eca54df3fea09b7d3544ac4314793d465a16cee7cd168b23a60b9eac4dc5b696a1e67b9f984f04ba5f50e9",
+            ),
+            (
+                2,
+                "c255f85d1b9f08a44ac6e2600dcf4627fbbd2f934173b39c68399f4e94b8fb0601b69f8690fc71b980e3c1413ca3d41c5d45160ff898a0afa1ea5e7403819596",
+            ),
+            (
+                0,
+                "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
+            ),
+        ];
+        for (index, (count, fingerprint)) in expected.into_iter().enumerate() {
+            let mut nonce = [0; 32];
+            nonce[..4].copy_from_slice(&(index as u32).to_le_bytes());
+            let mut next_nonce = Some(nonce);
+            let solutions = solve_200_9(input, || next_nonce.take());
+            assert_eq!(solutions.len(), count);
+            let mut hash = blake2b_simd::State::new();
+            for solution in solutions {
+                crate::is_valid_solution(200, 9, input, &nonce, &solution).unwrap();
+                hash.update(&solution);
+            }
+            assert_eq!(hex::encode(hash.finalize().as_bytes()), fingerprint);
+        }
+    }
 
     #[test]
     #[allow(clippy::print_stdout)]
@@ -222,7 +109,7 @@ mod tests {
 
         let solutions = solve_200_9(input, || {
             let variable_nonce = nonces.next()?;
-            println!("Using variable nonce [0..4] of {}", variable_nonce);
+            println!("Using variable nonce [0..4] of {variable_nonce}");
 
             let variable_nonce = variable_nonce.to_le_bytes();
             nonce[0] = variable_nonce[0];
@@ -244,10 +131,10 @@ mod tests {
                 crate::is_valid_solution(200, 9, input, &nonce, solution).unwrap_or_else(|error| {
                     panic!(
                         "unexpected invalid equihash 200, 9 solution:\n\
-                             error: {error:?}\n\
-                             input: {input:?}\n\
-                             nonce: {nonce:?}\n\
-                             solution: {solution:?}"
+                         error: {error:?}\n\
+                         input: {input:?}\n\
+                         nonce: {nonce:?}\n\
+                         solution: {solution:?}"
                     )
                 });
                 println!("Solution {sol_num} is valid!\n");

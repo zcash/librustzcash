@@ -14,3 +14,13 @@ submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
 
+# Third party contributions
+
+Copyright notices for third-party contributions, ported or adapted from forks of
+these crates or other sources, are preserved below and grouped by crate. For
+precise attributions, see the commits introducing the code.
+
+- equihash:
+  - Copyright (c) 2016 John Tromp, The Zcash developers
+  - Copyright (c) 2020-2022 The Zcash developers
+  - Copyright (c) The Zakura Contributors
