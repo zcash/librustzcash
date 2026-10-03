@@ -1599,6 +1599,7 @@ dependencies = [
  "criterion 0.5.1",
  "document-features",
  "hex",
+ "libc",
  "rand 0.8.5",
 ]
 
