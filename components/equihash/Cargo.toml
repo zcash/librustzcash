@@ -17,8 +17,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["std"]
 std = ["document-features"]
 
-## Experimental Tromp solver support, implemented in Rust.
+## Tromp solver support, implemented in Rust.
 solver = ["dep:libc", "std"]
+
+## Solver optimisations using `unsafe` Rust.
+unsafe-solver = ["solver"]
 
 [dependencies]
 corez.workspace = true
