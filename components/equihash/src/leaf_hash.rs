@@ -14,9 +14,13 @@ use blake2b_simd::BLOCKBYTES;
 
 use crate::params::Params;
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(
+    feature = "unsafe-verifier",
+    target_arch = "aarch64",
+    target_feature = "neon"
+))]
 mod aarch64;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
 mod x86_64;
 
 /// A BLAKE2b digest of up to 64 bytes. Bytes past the digest length are zero.
@@ -283,11 +287,19 @@ impl Midstate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kernel {
     Portable,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
     Avx2,
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(
+        feature = "unsafe-verifier",
+        target_arch = "aarch64",
+        target_feature = "neon"
+    ))]
     Neon,
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(
+        feature = "unsafe-verifier",
+        target_arch = "aarch64",
+        target_feature = "neon"
+    ))]
     NeonSha3,
 }
 
@@ -296,22 +308,38 @@ impl Kernel {
     #[cfg(test)]
     const ALL: &[Kernel] = &[
         Kernel::Portable,
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
         Kernel::Avx2,
-        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        #[cfg(all(
+            feature = "unsafe-verifier",
+            target_arch = "aarch64",
+            target_feature = "neon"
+        ))]
         Kernel::Neon,
-        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        #[cfg(all(
+            feature = "unsafe-verifier",
+            target_arch = "aarch64",
+            target_feature = "neon"
+        ))]
         Kernel::NeonSha3,
     ];
 
     /// Every kernel the running CPU supports, fastest first.
     pub(crate) fn supported() -> impl Iterator<Item = Kernel> {
         [
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
             (Kernel::Avx2, x86_64::has_avx2()),
-            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
             (Kernel::NeonSha3, aarch64::has_sha3()),
-            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
             (Kernel::Neon, true),
             (Kernel::Portable, true),
         ]
@@ -326,9 +354,13 @@ impl Kernel {
     fn lanes(self) -> usize {
         match self {
             Kernel::Portable => 1,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
             Kernel::Avx2 => 4,
-            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
             Kernel::Neon | Kernel::NeonSha3 => 4,
         }
     }
@@ -381,11 +413,19 @@ impl LeafHasher {
             // `kernel.lanes()` entries.
             match kernel {
                 Kernel::Portable => midstate.compress_portable(blocks, out),
-                #[cfg(target_arch = "x86_64")]
+                #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
                 Kernel::Avx2 => unsafe { x86_64::compress_avx2(midstate, blocks, out) },
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                #[cfg(all(
+                    feature = "unsafe-verifier",
+                    target_arch = "aarch64",
+                    target_feature = "neon"
+                ))]
                 Kernel::Neon => unsafe { aarch64::compress_neon(midstate, blocks, out) },
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                #[cfg(all(
+                    feature = "unsafe-verifier",
+                    target_arch = "aarch64",
+                    target_feature = "neon"
+                ))]
                 Kernel::NeonSha3 => unsafe { aarch64::compress_neon_sha3(midstate, blocks, out) },
             }
         }
