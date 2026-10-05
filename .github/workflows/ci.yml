@@ -719,7 +719,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
-        uses: supplypike/setup-bin@8365380a806a88e7a0f0d07059b175ca2f5418d7 # v5.0.1
+        uses: supplypike/setup-bin@73f5356f4d8a8588c525365fad26435ee1de4eaa # v5.0.2
         with:
           uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
           name: 'protoc'
