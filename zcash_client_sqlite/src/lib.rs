@@ -4642,10 +4642,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(
-            ufvk.encode(st.network()),
-            account.ufvk().unwrap().encode(st.network())
-        );
+        assert!(ufvk.is_equivalent_to(account.ufvk().unwrap()));
 
         assert_matches!(
             account.source(),
@@ -4707,18 +4704,17 @@ mod tests {
             )
             .expect("a transparent-only UFVK can be imported");
 
-        // The account was persisted with its (Revision 2-encoded) UFVK.
+        // The account was persisted with its UFVK.
         let stored = st
             .wallet()
             .get_account(account.id())
             .unwrap()
             .expect("the account was persisted");
-        assert_eq!(
+        assert!(
             stored
                 .ufvk()
                 .expect("the account has a UFVK")
-                .encode(&network),
-            ufvk.encode(&network),
+                .is_equivalent_to(&ufvk)
         );
 
         // The account's default address was stored, and is a transparent-only Revision 2
@@ -4876,7 +4872,6 @@ mod tests {
         );
 
         // Import the sapling-only IVK as an IVK-only account.
-        let network = *st.network();
         let ivk_account = st
             .wallet_mut()
             .db_mut()
@@ -4931,10 +4926,7 @@ mod tests {
         // Should return the same account, now with the UFVK.
         assert_eq!(ufvk_upgraded.id(), ivk_account.id());
         assert!(ufvk_upgraded.ufvk().is_some());
-        assert_eq!(
-            ufvk_upgraded.ufvk().unwrap().encode(&network),
-            ufvk.encode(&network),
-        );
+        assert!(ufvk_upgraded.ufvk().unwrap().is_equivalent_to(&ufvk));
 
         // (c) IVK import over an account that now has a UFVK should fail.
         assert_matches!(
@@ -4977,7 +4969,6 @@ mod tests {
             UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let full_uivk = ufvk.to_unified_incoming_viewing_key();
-        let network = *st.network();
 
         // Create a UIVK with only Sapling (a strict subset of the full UIVK).
         let sapling_only_uivk = UnifiedIncomingViewingKey::new(
@@ -5035,7 +5026,9 @@ mod tests {
 
         assert_eq!(upgraded.id(), ivk_account.id());
         assert!(upgraded.ufvk().is_none());
-        assert!(upgraded.uivk().encode(&network) != ivk_account.uivk().encode(&network));
+        // The upgraded UIVK strictly extends the original.
+        assert!(upgraded.uivk().subsumes(&ivk_account.uivk()));
+        assert!(!ivk_account.uivk().subsumes(&upgraded.uivk()));
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -5198,14 +5191,10 @@ mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_address_matches_revision_0_stored_address() {
-        // A wallet created before Revision 2 support stores its addresses in the
-        // Revision 0 encoding, and no migration re-encodes them. Address lookup must
-        // still resolve such a row, even though the query encodes the address it is
-        // given as Revision 2.
-        use zcash_address::unified::{Address as UnifiedEncoding, Encoding, Receiver, Uitem};
-        use zcash_protocol::{address::Revision, consensus::Parameters};
-
+    fn find_account_for_address_matches_address_stored_at_any_revision() {
+        // The wallet stores each address in its most compatible encoding, but earlier
+        // releases stored addresses at a fixed revision, and no migration re-encodes them.
+        // Address lookup must resolve a row whatever revision its address was stored at.
         let mut state = create_test_wallet_with_one_account();
         let account = state.test_account().cloned().unwrap();
         state
@@ -5214,54 +5203,35 @@ mod tests {
             .unwrap();
 
         let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
-
-        // Rebuild the address in the Revision 0 encoding a pre-migration wallet held.
-        let mut items = vec![];
-        #[cfg(feature = "orchard")]
-        if let Some(orchard) = ua.orchard() {
-            items.push(Uitem::Data(Receiver::Orchard(
-                orchard.to_raw_address_bytes(),
-            )));
-        }
-        if let Some(sapling) = ua.sapling() {
-            items.push(Uitem::Data(Receiver::Sapling(sapling.to_bytes())));
-        }
-        if let Some(taddr) = ua.transparent() {
-            items.push(Uitem::Data(match taddr {
-                ::transparent::address::TransparentAddress::PublicKeyHash(data) => {
-                    Receiver::P2pkh(*data)
-                }
-                ::transparent::address::TransparentAddress::ScriptHash(data) => {
-                    Receiver::P2sh(*data)
-                }
-            }));
-        }
-        let revision_0 = UnifiedEncoding::try_from_items(Revision::R0, items)
-            .expect("the generated address is a valid Revision 0 address")
-            .encode(&state.network().network_type());
-
         let address = Address::Unified(Box::new(ua));
-        let revision_2 = address.encode_receiver_preserving(state.network());
-        assert_ne!(revision_0, revision_2);
+        let mut stored = address.encode_receiver_preserving(state.network());
 
-        let updated = state
-            .wallet_mut()
-            .conn_mut()
-            .execute(
-                "UPDATE addresses SET address = :revision_0 WHERE address = :revision_2",
-                named_params![":revision_0": revision_0, ":revision_2": revision_2],
-            )
-            .unwrap();
-        assert_eq!(updated, 1);
-
-        // Both encodings of the same address must resolve to the same account.
-        assert_eq!(
+        for revision in [
+            zcash_protocol::address::Revision::R2,
+            zcash_protocol::address::Revision::R0,
+        ] {
+            let encoded = address
+                .encode_receiver_preserving_revision(state.network(), revision)
+                .unwrap();
             state
-                .wallet()
-                .find_account_for_address(state.network(), &address)
-                .unwrap(),
-            Some(account.id())
-        );
+                .wallet_mut()
+                .conn_mut()
+                .execute(
+                    "UPDATE addresses SET address = :encoded WHERE address = :stored",
+                    named_params![":encoded": encoded, ":stored": stored],
+                )
+                .unwrap();
+            stored = encoded;
+
+            assert_eq!(
+                state
+                    .wallet()
+                    .find_account_for_address(state.network(), &address)
+                    .unwrap(),
+                Some(account.id()),
+                "lookup failed for an address stored at {revision:?}",
+            );
+        }
     }
 
     #[test]

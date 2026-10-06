@@ -1945,6 +1945,12 @@ start = "2025-02-21"
 end = "2027-04-24"
 
 [[trusted.f4jumble]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-10-06"
+end = "2027-10-06"
+
+[[trusted.f4jumble]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-09-22"

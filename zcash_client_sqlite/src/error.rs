@@ -20,6 +20,7 @@ use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_client_backend::wallet::OutputRef;
 use zcash_keys::address::UnifiedAddress;
+use zcash_keys::encoding::UnifiedEncodingError;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{PoolType, ShieldedPool, TxId, consensus::BlockHeight, value::BalanceError};
 use zip32::DiversifierIndex;
@@ -104,6 +105,9 @@ pub enum SqliteClientError {
 
     /// An error occurred in generating a Zcash address.
     AddressGeneration(AddressGenerationError),
+
+    /// A unified address or viewing key could not be encoded for storage.
+    UnifiedEncoding(UnifiedEncodingError),
 
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown,
@@ -304,6 +308,7 @@ impl error::Error for SqliteClientError {
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
             SqliteClientError::AddressGeneration(e) => Some(e),
+            SqliteClientError::UnifiedEncoding(e) => Some(e),
             #[cfg(feature = "orchard")]
             SqliteClientError::HistoricalFrontierInvalid(e) => Some(e),
             #[cfg(feature = "transparent-inputs")]
@@ -366,6 +371,7 @@ impl fmt::Display for SqliteClientError {
                 "`put_blocks` requires that the provided block range be sequential"
             ),
             SqliteClientError::AddressGeneration(e) => write!(f, "{e}"),
+            SqliteClientError::UnifiedEncoding(e) => write!(f, "{e}"),
             SqliteClientError::AccountUnknown => write!(
                 f,
                 "The account with the given ID does not belong to this wallet."
@@ -553,6 +559,12 @@ impl From<ShardTreeError<commitment_tree::Error>> for SqliteClientError {
 impl From<BalanceError> for SqliteClientError {
     fn from(e: BalanceError) -> Self {
         SqliteClientError::BalanceError(e)
+    }
+}
+
+impl From<UnifiedEncodingError> for SqliteClientError {
+    fn from(e: UnifiedEncodingError) -> Self {
+        SqliteClientError::UnifiedEncoding(e)
     }
 }
 

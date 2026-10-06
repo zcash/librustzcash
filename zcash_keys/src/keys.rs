@@ -1,9 +1,5 @@
 //! Helper functions for managing light client key material.
-use alloc::{
-    collections::BTreeSet,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{collections::BTreeSet, string::String, vec::Vec};
 use core::fmt::{self, Display};
 use nonempty::NonEmpty;
 #[cfg(feature = "transparent-inputs")]
@@ -12,11 +8,14 @@ use {
     core::convert::TryInto,
 };
 
-use zcash_address::unified::{self, Container, Encoding, MetadataItem, Typecode, Uitem};
+use zcash_address::unified::{self, Container, Encoding, MetadataItem, Revision, Typecode, Uitem};
 use zcash_protocol::{PoolType, consensus};
 use zip32::{AccountId, DiversifierIndex};
 
-use crate::address::UnifiedAddress;
+use crate::{
+    address::UnifiedAddress,
+    encoding::{UnifiedDecodingError, UnifiedEncodingError},
+};
 
 // The requirement combinators and the `ReceiverRequirements` constants below name these
 // variants bare.
@@ -1107,25 +1106,47 @@ impl UnifiedFullViewingKey {
         })
     }
 
-    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
+    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding at any
+    /// revision.
+    ///
+    /// # Errors
+    ///
+    /// - [`UnifiedDecodingError::Parse`] if the string is not a valid UFVK.
+    /// - [`UnifiedDecodingError::NetworkMismatch`] if the key is for a network other than
+    ///   that of `params`.
+    /// - [`UnifiedDecodingError::InvalidItem`] if an item's data is not a valid key of its
+    ///   type.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
-        let (net, _revision, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
-        let expected_net = params.network_type();
-        if net != expected_net {
-            return Err(format!(
-                "UFVK is for network {net:?} but we expected {expected_net:?}",
-            ));
+    pub fn decode<P: consensus::Parameters>(
+        params: &P,
+        encoding: &str,
+    ) -> Result<Self, UnifiedDecodingError> {
+        let (actual, _revision, ufvk) =
+            unified::Ufvk::decode(encoding).map_err(UnifiedDecodingError::Parse)?;
+        let expected = params.network_type();
+        if actual != expected {
+            return Err(UnifiedDecodingError::NetworkMismatch { expected, actual });
         }
 
-        Self::parse(&ufvk).map_err(|e| e.to_string())
+        Self::from_container(&ufvk).map_err(UnifiedDecodingError::InvalidItem)
     }
 
-    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
+    /// Constructs a `UnifiedFullViewingKey` from a parsed [ZIP 316] unified container.
+    ///
+    /// Returns [`DecodingError::KeyDataInvalid`] if an item's data is not a valid key of
+    /// its type.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn parse(ufvk: &unified::Ufvk) -> Result<Self, DecodingError> {
+        Self::from_container(ufvk).map_err(DecodingError::KeyDataInvalid)
+    }
+
+    /// Constructs a `UnifiedFullViewingKey` from a parsed unified container.
+    ///
+    /// On error, returns the typecode of the first item whose data is not a valid key of
+    /// its type.
+    fn from_container(ufvk: &unified::Ufvk) -> Result<Self, Typecode> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -1144,7 +1165,7 @@ impl UnifiedFullViewingKey {
                     {
                         orchard = Some(
                             orchard::keys::FullViewingKey::from_bytes(data)
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
+                                .ok_or(Typecode::ORCHARD)?,
                         );
                     }
                     #[cfg(not(feature = "orchard"))]
@@ -1155,7 +1176,7 @@ impl UnifiedFullViewingKey {
                     {
                         sapling = Some(
                             sapling::DiversifiableFullViewingKey::from_bytes(data)
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
+                                .ok_or(Typecode::SAPLING)?,
                         );
                     }
                     #[cfg(not(feature = "sapling"))]
@@ -1166,7 +1187,7 @@ impl UnifiedFullViewingKey {
                     {
                         transparent = Some(TransparentFvk::P2pkh(
                             ::transparent::keys::AccountPubKey::deserialize(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
+                                .map_err(|_| Typecode::P2PKH)?,
                         ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -1176,8 +1197,7 @@ impl UnifiedFullViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(TransparentFvk::P2sh(
-                            P2shFullViewingKey::parse(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2SH))?,
+                            P2shFullViewingKey::parse(data).map_err(|_| Typecode::P2SH)?,
                         ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -1198,6 +1218,15 @@ impl UnifiedFullViewingKey {
             }
         }
 
+        // Only the derivation of the transparent item's incoming viewing key can fail.
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_typecode = match transparent {
+            Some(TransparentFvk::P2sh(_)) => Typecode::P2SH,
+            _ => Typecode::P2PKH,
+        };
+        #[cfg(not(feature = "transparent-inputs"))]
+        let transparent_typecode = Typecode::P2PKH;
+
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent,
@@ -1210,20 +1239,45 @@ impl UnifiedFullViewingKey {
             expiry_time,
             unknown_metadata,
         )
-        .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))
+        .map_err(|_| transparent_typecode)
     }
 
-    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
-    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_ufvk().encode(&params.network_type())
+    /// Returns the [ZIP 316] string encoding of this `UnifiedFullViewingKey` for the given
+    /// network at the given revision.
+    ///
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this key has no encoding at
+    /// `revision`: [`Revision::R0`] cannot encode expiry metadata, a P2SH viewing key
+    /// item, or a key whose only data items are transparent.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode_revision<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        revision: Revision,
+    ) -> Result<String, UnifiedEncodingError> {
+        self.to_ufvk(revision)
+            .map(|ufvk| ufvk.encode(&params.network_type()))
     }
 
-    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
-    fn to_ufvk(&self) -> unified::Ufvk {
-        // ZIP 316 recommends that producers upgrade to Revision 2 as soon as
-        // possible. We use R2 unconditionally here.
-        let revision = unified::Revision::R2;
+    /// Returns the [ZIP 316] string encoding of this `UnifiedFullViewingKey` for the given
+    /// network at the most widely supported revision that can represent it:
+    /// [`Revision::R0`] if possible, and [`Revision::R2`] otherwise. Use
+    /// [`encode_revision`](Self::encode_revision) to encode at a specific revision.
+    ///
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this key has no encoding at
+    /// either revision.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<String, UnifiedEncodingError> {
+        self.encode_revision(params, Revision::R0)
+            .or_else(|_| self.encode_revision(params, Revision::R2))
+    }
 
+    /// Converts this key to a unified container at the given revision.
+    fn to_ufvk(&self, revision: Revision) -> Result<unified::Ufvk, UnifiedEncodingError> {
         let data_items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Fvk::Unknown {
                 typecode: *typecode,
@@ -1272,7 +1326,7 @@ impl UnifiedFullViewingKey {
                 .chain(meta_items.map(Uitem::Metadata))
                 .collect(),
         )
-        .expect("UnifiedFullViewingKey should only be constructed safely")
+        .map_err(|cause| UnifiedEncodingError::NotRepresentable { revision, cause })
     }
 
     /// Derives a Unified Incoming Viewing Key from this Unified Full Viewing Key.
@@ -1423,6 +1477,12 @@ impl UnifiedFullViewingKey {
         }
 
         true
+    }
+
+    /// Returns `true` if this UFVK and `other` carry the same viewing capability: each
+    /// [subsumes](Self::subsumes_ufvk) the other. Metadata items are not compared.
+    pub fn is_equivalent_to(&self, other: &UnifiedFullViewingKey) -> bool {
+        self.subsumes_ufvk(other) && other.subsumes_ufvk(self)
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
@@ -1637,23 +1697,37 @@ impl UnifiedIncomingViewingKey {
         }
     }
 
-    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
+    /// Parses a `UnifiedIncomingViewingKey` from its [ZIP 316] string encoding at any
+    /// revision.
+    ///
+    /// # Errors
+    ///
+    /// - [`UnifiedDecodingError::Parse`] if the string is not a valid UIVK.
+    /// - [`UnifiedDecodingError::NetworkMismatch`] if the key is for a network other than
+    ///   that of `params`.
+    /// - [`UnifiedDecodingError::InvalidItem`] if an item's data is not a valid key of its
+    ///   type.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
-        let (net, _revision, uivk) = unified::Uivk::decode(encoding).map_err(|e| e.to_string())?;
-        let expected_net = params.network_type();
-        if net != expected_net {
-            return Err(format!(
-                "UIVK is for network {net:?} but we expected {expected_net:?}",
-            ));
+    pub fn decode<P: consensus::Parameters>(
+        params: &P,
+        encoding: &str,
+    ) -> Result<Self, UnifiedDecodingError> {
+        let (actual, _revision, uivk) =
+            unified::Uivk::decode(encoding).map_err(UnifiedDecodingError::Parse)?;
+        let expected = params.network_type();
+        if actual != expected {
+            return Err(UnifiedDecodingError::NetworkMismatch { expected, actual });
         }
 
-        Self::parse(&uivk).map_err(|e| e.to_string())
+        Self::from_container(&uivk).map_err(UnifiedDecodingError::InvalidItem)
     }
 
-    /// Constructs a unified incoming viewing key from a parsed unified encoding.
-    fn parse(uivk: &unified::Uivk) -> Result<Self, DecodingError> {
+    /// Constructs a `UnifiedIncomingViewingKey` from a parsed unified container.
+    ///
+    /// On error, returns the typecode of the first item whose data is not a valid key of
+    /// its type.
+    fn from_container(uivk: &unified::Uivk) -> Result<Self, Typecode> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -1672,7 +1746,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
+                                .ok_or(Typecode::ORCHARD)?,
                         );
                     }
                     #[cfg(not(feature = "orchard"))]
@@ -1683,7 +1757,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         sapling = Some(
                             Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
+                                .ok_or(Typecode::SAPLING)?,
                         );
                     }
                     #[cfg(not(feature = "sapling"))]
@@ -1694,7 +1768,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         transparent = Some(TransparentIvk::P2pkh(
                             ::transparent::keys::ExternalIvk::deserialize(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
+                                .map_err(|_| Typecode::P2PKH)?,
                         ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -1704,8 +1778,7 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(TransparentIvk::P2sh(
-                            P2shIncomingViewingKey::parse(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2SH))?,
+                            P2shIncomingViewingKey::parse(data).map_err(|_| Typecode::P2SH)?,
                         ));
                     }
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -1743,17 +1816,43 @@ impl UnifiedIncomingViewingKey {
         })
     }
 
-    /// Returns the string encoding of this `UnifiedIncomingViewingKey` for the given network.
-    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.render().encode(&params.network_type())
+    /// Returns the [ZIP 316] string encoding of this `UnifiedIncomingViewingKey` for the
+    /// given network at the given revision.
+    ///
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this key has no encoding at
+    /// `revision`: [`Revision::R0`] cannot encode expiry metadata, a P2SH viewing key
+    /// item, or a key whose only data items are transparent.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode_revision<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        revision: Revision,
+    ) -> Result<String, UnifiedEncodingError> {
+        self.render(revision)
+            .map(|uivk| uivk.encode(&params.network_type()))
     }
 
-    /// Converts this unified incoming viewing key to a unified encoding.
-    fn render(&self) -> unified::Uivk {
-        // ZIP 316 recommends that producers upgrade to Revision 2 as soon as
-        // possible. We use R2 unconditionally here.
-        let revision = unified::Revision::R2;
+    /// Returns the [ZIP 316] string encoding of this `UnifiedIncomingViewingKey` for the
+    /// given network at the most widely supported revision that can represent it:
+    /// [`Revision::R0`] if possible, and [`Revision::R2`] otherwise. Use
+    /// [`encode_revision`](Self::encode_revision) to encode at a specific revision.
+    ///
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this key has no encoding at
+    /// either revision.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<String, UnifiedEncodingError> {
+        self.encode_revision(params, Revision::R0)
+            .or_else(|_| self.encode_revision(params, Revision::R2))
+    }
 
+    /// Converts this unified incoming viewing key to a unified container at the given
+    /// revision.
+    fn render(&self, revision: Revision) -> Result<unified::Uivk, UnifiedEncodingError> {
         let data_items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Ivk::Unknown {
                 typecode: *typecode,
@@ -1802,7 +1901,7 @@ impl UnifiedIncomingViewingKey {
                 .chain(meta_items.map(Uitem::Metadata))
                 .collect(),
         )
-        .expect("UnifiedIncomingViewingKey should only be constructed safely.")
+        .map_err(|cause| UnifiedEncodingError::NotRepresentable { revision, cause })
     }
 
     /// Returns whether this uivk has a transparent key item.
@@ -2274,6 +2373,7 @@ mod tests {
         crate::encoding::AddressCodec,
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
         alloc::{string::ToString, vec::Vec},
+        zcash_address::unified::Revision,
     };
 
     use zcash_protocol::consensus::MAIN_NETWORK;
@@ -2288,8 +2388,13 @@ mod tests {
         feature = "transparent-inputs"
     ))]
     use {
-        crate::address::UnifiedAddress,
+        crate::{
+            address::UnifiedAddress,
+            encoding::{UnifiedDecodingError, UnifiedEncodingError},
+        },
+        assert_matches::assert_matches,
         zcash_address::unified::{self, Encoding},
+        zcash_protocol::consensus::{NetworkConstants, NetworkType, TEST_NETWORK},
     };
 
     #[cfg(feature = "orchard")]
@@ -2348,6 +2453,140 @@ mod tests {
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn viewing_key_decode_reports_structured_errors() {
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
+
+        let tv = &TEST_VECTORS[0];
+        let mismatch = Err(UnifiedDecodingError::NetworkMismatch {
+            expected: NetworkType::Test,
+            actual: NetworkType::Main,
+        });
+        assert_eq!(
+            UnifiedFullViewingKey::decode(&TEST_NETWORK, tv.unified_fvk).map(|_| ()),
+            mismatch
+        );
+        assert_eq!(
+            UnifiedIncomingViewingKey::decode(&TEST_NETWORK, tv.unified_ivk).map(|_| ()),
+            mismatch
+        );
+
+        assert_matches!(
+            UnifiedFullViewingKey::decode(&MAIN_NETWORK, "not a key"),
+            Err(UnifiedDecodingError::Parse(_))
+        );
+        assert_matches!(
+            UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, "not a key"),
+            Err(UnifiedDecodingError::Parse(_))
+        );
+    }
+
+    /// Re-encoding a key at another revision yields an equivalent key, and a key that lacks
+    /// one of another key's items is not equivalent to it.
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn ufvk_equivalence_is_mutual_subsumption() {
+        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
+            .expect("the seed yields a valid spending key");
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        for revision in [Revision::R0, Revision::R2] {
+            let reencoded = ufvk.encode_revision(&MAIN_NETWORK, revision).unwrap();
+            let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &reencoded).unwrap();
+            assert!(decoded.is_equivalent_to(&ufvk));
+            assert!(ufvk.is_equivalent_to(&decoded));
+        }
+
+        let sapling_only = UnifiedFullViewingKey::new(None, ufvk.sapling().cloned(), None).unwrap();
+        assert!(ufvk.subsumes_ufvk(&sapling_only));
+        assert!(!ufvk.is_equivalent_to(&sapling_only));
+        assert!(!sapling_only.is_equivalent_to(&ufvk));
+    }
+
+    /// A viewing key has a Revision 0 encoding exactly when it has a shielded item and no
+    /// item that Revision 0 does not define (expiry metadata or a P2SH viewing key item).
+    /// That encoding decodes to the same key, and is the compatible encoding; otherwise
+    /// the compatible encoding is the Revision 2 encoding.
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn viewing_keys_encode_at_r0_iff_representable() {
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
+
+        let mut representable = 0;
+        let mut unrepresentable = 0;
+        for tv in TEST_VECTORS {
+            let r0_representable = tv.expiry_height.is_none()
+                && tv.expiry_time.is_none()
+                && tv.p2sh_fvk_bytes.is_none()
+                && (tv.sapling_fvk_bytes.is_some() || tv.orchard_fvk_bytes.is_some());
+
+            let ufvk = UnifiedFullViewingKey::decode(&MAIN_NETWORK, tv.unified_fvk).unwrap();
+            let uivk = UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, tv.unified_ivk).unwrap();
+            let ufvk_r0 = ufvk.encode_revision(&MAIN_NETWORK, Revision::R0);
+            let uivk_r0 = uivk.encode_revision(&MAIN_NETWORK, Revision::R0);
+            let ufvk_compatible = ufvk.encode(&MAIN_NETWORK).unwrap();
+            let uivk_compatible = uivk.encode(&MAIN_NETWORK).unwrap();
+
+            if r0_representable {
+                representable += 1;
+
+                let ufvk_r0 = ufvk_r0.unwrap();
+                assert_eq!(ufvk_compatible, ufvk_r0);
+                assert!(ufvk_r0.starts_with(MAIN_NETWORK.hrp_unified_fvk()));
+                assert_eq!(
+                    UnifiedFullViewingKey::decode(&MAIN_NETWORK, &ufvk_r0)
+                        .unwrap()
+                        .encode_revision(&MAIN_NETWORK, Revision::R2)
+                        .as_deref(),
+                    Ok(tv.unified_fvk),
+                );
+
+                let uivk_r0 = uivk_r0.unwrap();
+                assert_eq!(uivk_compatible, uivk_r0);
+                assert!(uivk_r0.starts_with(MAIN_NETWORK.hrp_unified_ivk()));
+                assert_eq!(
+                    UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, &uivk_r0)
+                        .unwrap()
+                        .encode_revision(&MAIN_NETWORK, Revision::R2)
+                        .as_deref(),
+                    Ok(tv.unified_ivk),
+                );
+            } else {
+                unrepresentable += 1;
+                assert_eq!(ufvk_compatible, tv.unified_fvk);
+                assert_eq!(uivk_compatible, tv.unified_ivk);
+                assert_matches!(
+                    ufvk_r0,
+                    Err(UnifiedEncodingError::NotRepresentable {
+                        revision: Revision::R0,
+                        ..
+                    })
+                );
+                assert_matches!(
+                    uivk_r0,
+                    Err(UnifiedEncodingError::NotRepresentable {
+                        revision: Revision::R0,
+                        ..
+                    })
+                );
+            }
+        }
+        assert!(representable > 0 && unrepresentable > 0);
+    }
+
     /// Tests UFVK encoding round-trip and verification against R2 test vectors from
     /// https://github.com/zcash/zcash-test-vectors/blob/667c92954acd7defc6e60e25b022fedf8831dfb3/test-vectors/rust/unified_viewing_keys_r2.rs
     #[test]
@@ -2365,9 +2604,10 @@ mod tests {
                     panic!("Failed to decode UFVK for account {}: {e}", tv.account)
                 });
 
-            let reencoded = ufvk.encode(&MAIN_NETWORK);
+            let reencoded = ufvk.encode_revision(&MAIN_NETWORK, Revision::R2);
             assert_eq!(
-                reencoded, tv.unified_fvk,
+                reencoded.as_deref(),
+                Ok(tv.unified_fvk),
                 "UFVK round-trip failed for account {}",
                 tv.account
             );
@@ -2516,15 +2756,17 @@ mod tests {
         use zcash_protocol::consensus::NetworkType;
 
         for tv in TEST_VECTORS {
-            let decoded =
-                UnifiedIncomingViewingKey::parse(&unified::Uivk::decode(tv.unified_ivk).unwrap().2)
-                    .unwrap_or_else(|e| {
-                        panic!("Failed to decode UIVK for account {}: {e}", tv.account)
-                    });
+            let decoded = UnifiedIncomingViewingKey::from_container(
+                &unified::Uivk::decode(tv.unified_ivk).unwrap().2,
+            )
+            .unwrap_or_else(|e| panic!("Failed to decode UIVK for account {}: {e:?}", tv.account));
 
-            let reencoded = decoded.render().encode(&NetworkType::Main);
+            let reencoded = decoded
+                .render(Revision::R2)
+                .map(|uivk| uivk.encode(&NetworkType::Main));
             assert_eq!(
-                reencoded, tv.unified_ivk,
+                reencoded.as_deref(),
+                Ok(tv.unified_ivk),
                 "UIVK round-trip failed for account {}",
                 tv.account
             );
@@ -2557,8 +2799,9 @@ mod tests {
                     panic!("UA derivation failed for account {}: {e:?}", tv.account)
                 });
             assert_eq!(
-                ua.encode_receiver_preserving(&MAIN_NETWORK),
-                tv.derived_ua,
+                ua.encode_receiver_preserving_revision(&MAIN_NETWORK, Revision::R2)
+                    .as_deref(),
+                Ok(tv.derived_ua),
                 "derived UA mismatch for account {}",
                 tv.account
             );
@@ -2834,7 +3077,9 @@ mod tests {
 
         // The address is encoded using the Revision 2 transparent-including HRP, and
         // round-trips through that encoding.
-        let encoded = ufvk_addr.encode(&MAIN_NETWORK);
+        let encoded = ufvk_addr
+            .encode_revision(&MAIN_NETWORK, Revision::R2)
+            .expect("every address has a Revision 2 encoding");
         assert!(
             encoded.starts_with(MAIN_NETWORK.hrp_unified_address_r2_ti()),
             "{encoded} is not a transparent-including Revision 2 Unified Address",
@@ -2967,8 +3212,8 @@ mod tests {
 
             // The Orchard item is still part of the key: it re-encodes byte-identically.
             assert_eq!(
-                ufvk.encode(&MAIN_NETWORK),
-                tv.unified_fvk,
+                ufvk.encode_revision(&MAIN_NETWORK, Revision::R2).as_deref(),
+                Ok(tv.unified_fvk),
                 "UFVK round-trip failed for account {}",
                 tv.account
             );

@@ -348,7 +348,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk, birthday_height) VALUES (0, ?, ?)",
-                params![ufvk0.encode(&db_data.params), u32::from(height)],
+                params![ufvk0.encode(&db_data.params).unwrap(), u32::from(height)],
             )
             .unwrap();
         let sapling_dfvk = ufvk0.sapling().unwrap();

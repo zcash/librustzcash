@@ -176,7 +176,7 @@ mod tests {
         secrecy::Secret,
         tempfile::NamedTempFile,
         zcash_keys::keys::UnifiedSpendingKey,
-        zcash_protocol::consensus::Network,
+        zcash_protocol::{consensus::Network},
     };
 
     #[test]
@@ -224,8 +224,8 @@ mod tests {
                     )
                     .unwrap();
                     let ufvk = usk.to_unified_full_viewing_key();
-                    let ufvk_str = ufvk.encode(&network);
-                    let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
+                    let ufvk_str = ufvk.encode(&network).unwrap();
+                    let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network).unwrap();
                     db_data
                         .conn
                         .execute(

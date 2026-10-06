@@ -11,7 +11,7 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
 use zcash_client_backend::data_api::{SeedRelevance, WalletRead};
-use zcash_keys::keys::AddressGenerationError;
+use zcash_keys::{encoding::UnifiedEncodingError, keys::AddressGenerationError};
 use zcash_protocol::{consensus, value::BalanceError};
 
 use self::migrations::verify_network_compatibility;
@@ -85,6 +85,12 @@ impl From<BalanceError> for WalletMigrationError {
 impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
     fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
         WalletMigrationError::CommitmentTree(Box::new(e))
+    }
+}
+
+impl From<UnifiedEncodingError> for WalletMigrationError {
+    fn from(e: UnifiedEncodingError) -> Self {
+        WalletMigrationError::Other(Box::new(SqliteClientError::UnifiedEncoding(e)))
     }
 }
 
@@ -189,6 +195,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::Io(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::InvalidMemo(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::AddressGeneration(e) => WalletMigrationError::AddressGeneration(e),
+        SqliteClientError::UnifiedEncoding(e) => {
+            WalletMigrationError::Other(Box::new(SqliteClientError::UnifiedEncoding(e)))
+        }
         SqliteClientError::BadAccountData(e) => WalletMigrationError::CorruptedData(e),
         SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(Box::new(e)),
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
@@ -1458,7 +1467,7 @@ mod tests {
                 [],
             )?;
 
-            let ufvk_str = ufvk.encode(&wdb.params);
+            let ufvk_str = ufvk.encode(&wdb.params).unwrap();
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
@@ -1608,8 +1617,8 @@ mod tests {
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
                 assert_eq!(
+                    ua.encode_receiver_preserving(&Network::MainNetwork),
                     tv.unified_addr,
-                    ua.encode_receiver_preserving(&Network::MainNetwork)
                 );
 
                 db_data

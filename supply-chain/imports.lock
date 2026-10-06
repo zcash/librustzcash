@@ -1,10 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.f4jumble]]
-version = "0.1.2"
-audited_as = "0.1.1"
-
 [[publisher.addchain]]
 version = "0.3.0"
 when = "2026-02-26"
@@ -55,11 +51,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.f4jumble]]
-version = "0.1.1"
-when = "2024-12-13"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.1.2"
+when = "2026-10-06"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.ff]]
 version = "0.12.0"
