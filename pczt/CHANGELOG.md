@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `zcash_transparent 0.11.0-pre.1`.
+
 ## [0.10.0-pre.0] - 2026-10-02
 
 ### Added

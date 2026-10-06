@@ -5,6 +5,10 @@
 version = "0.14.0-pre.1"
 audited_as = "0.14.0-pre.0"
 
+[[unpublished.zcash_transparent]]
+version = "0.11.0-pre.1"
+audited_as = "0.11.0-pre.0"
+
 [[unpublished.zip321]]
 version = "0.10.0-pre.1"
 audited_as = "0.10.0-pre.0"
