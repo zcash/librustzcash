@@ -10,10 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.0-pre.1] - 2026-10-06
+
 ### Added
 - `zcash_client_sqlite::error::SqliteClientError::UnifiedEncoding`
 
 ### Changed
+- Migrated to `pczt 0.10.0-pre.1`, `zcash_address 0.14.0-pre.1`,
+  `zcash_client_backend 0.25.0-pre.1`, `zcash_keys 0.17.0-pre.1`,
+  `zcash_pool_migration 0.2.0-pre.1`, `zcash_primitives 0.31.0-pre.1`, and
+  `zcash_transparent 0.11.0-pre.1`.
 - Unified addresses and viewing keys written to the wallet database are encoded
   at ZIP 316 Revision 0 when Revision 0 can represent them, and at Revision 2
   otherwise. Previously they were always encoded at Revision 2. Rows written

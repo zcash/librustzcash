@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
+
+### Fixed
+- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
+  is not less than its end now yields no indices. It previously yielded the
+  start index.
+
 ## [0.11.0-pre.0] - 2026-09-30
 
 ### Added
@@ -59,11 +69,6 @@ workspace.
   - `SpendFinalizerError` has added variants:
     - `DisallowedSighashType`
     - `MismatchedSighashType`
-
-### Fixed
-- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
-  is not less than its end now yields no indices. It previously yielded the
-  start index.
 
 ## [0.10.0] - 2026-07-23
 

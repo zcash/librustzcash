@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.31.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_transparent 0.11.0-pre.1`.
+
 ### Fixed
 - `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
   for an empty slice instead of panicking.
