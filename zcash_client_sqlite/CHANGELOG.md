@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.0-pre.1] - 2026-10-06
+
 ### Added
 - `zcash_client_sqlite::error::SqliteClientError::UnifiedEncoding`
 
