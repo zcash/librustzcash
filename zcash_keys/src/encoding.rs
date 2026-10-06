@@ -3,20 +3,16 @@
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
 //! [zcash_protocol::constants] module.
 
-use crate::address::UnifiedAddress;
-use alloc::{
-    borrow::ToOwned,
-    string::{String, ToString},
-};
+use alloc::string::{String, ToString};
 use bs58::{self, decode::Error as Bs58Error};
 use core::fmt;
 
 use transparent::address::TransparentAddress;
-use zcash_address::unified::{self, Encoding};
+use zcash_address::unified::{self, Revision};
 use zcash_protocol::consensus::{self, NetworkConstants};
 #[cfg(feature = "sapling")]
 use {
-    alloc::vec::Vec,
+    alloc::{borrow::ToOwned, vec::Vec},
     bech32::{
         Bech32, Hrp,
         primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
@@ -119,6 +115,79 @@ where
     fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
 }
 
+/// An error that prevents encoding a unified address or viewing key at a requested
+/// [ZIP 316] revision.
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnifiedEncodingError {
+    /// The value has no valid encoding at `revision`. For example, Revision 0 cannot
+    /// encode expiry metadata, a P2SH viewing key item, or a container whose only data
+    /// items are transparent.
+    NotRepresentable {
+        revision: Revision,
+        cause: unified::ParseError,
+    },
+}
+
+impl fmt::Display for UnifiedEncodingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnifiedEncodingError::NotRepresentable { revision, cause } => {
+                write!(f, "Cannot encode at unified revision {revision:?}: {cause}")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnifiedEncodingError {}
+
+/// An error that prevents decoding a [ZIP 316] unified address or viewing key.
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnifiedDecodingError {
+    /// The string is not a valid unified container of the expected kind.
+    Parse(unified::ParseError),
+    /// The value is for a network other than the expected one.
+    NetworkMismatch {
+        expected: consensus::NetworkType,
+        actual: consensus::NetworkType,
+    },
+    /// The data of the item with this typecode is not a valid item of its type.
+    InvalidItem(unified::Typecode),
+}
+
+impl fmt::Display for UnifiedDecodingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnifiedDecodingError::Parse(e) => write!(f, "{e}"),
+            UnifiedDecodingError::NetworkMismatch { expected, actual } => write!(
+                f,
+                "Unified encoding is for network {actual:?} but {expected:?} was expected"
+            ),
+            UnifiedDecodingError::InvalidItem(typecode) => write!(
+                f,
+                "Unified encoding contains invalid data for typecode {}",
+                typecode.typecode_value()
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnifiedDecodingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            UnifiedDecodingError::Parse(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TransparentCodecError {
     UnsupportedAddressType(String),
@@ -174,28 +243,6 @@ impl<P: consensus::Parameters> AddressCodec<P> for sapling::PaymentAddress {
 
     fn decode(params: &P, address: &str) -> Result<Self, Bech32DecodeError> {
         decode_payment_address(params.hrp_sapling_payment_address(), address)
-    }
-}
-
-impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
-    type Error = String;
-
-    fn encode(&self, params: &P) -> String {
-        self.encode(params)
-    }
-
-    fn decode(params: &P, address: &str) -> Result<Self, String> {
-        unified::Address::decode(address)
-            .map_err(|e| format!("{e}"))
-            .and_then(|(network, _revision, addr)| {
-                if params.network_type() == network {
-                    UnifiedAddress::try_from(addr).map_err(|e: &str| e.to_owned())
-                } else {
-                    Err(format!(
-                        "Address {address} is for a different network: {network:?}"
-                    ))
-                }
-            })
     }
 }
 

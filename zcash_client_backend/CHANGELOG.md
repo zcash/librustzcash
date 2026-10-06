@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Unified addresses that `zcash_client_backend` constructs (the recipient of
+  `data_api::wallet::propose_standard_transfer_to_address`, and the
+  `wallet::Recipient::External` address recorded for an output to a receiver
+  with no stored address) are encoded at ZIP 316 Revision 0 when Revision 0 can
+  represent them, and at Revision 2 otherwise. Previously they were always
+  encoded at Revision 2.
+
 ## [0.25.0-pre.0] - 2026-10-02
 
 ### Added

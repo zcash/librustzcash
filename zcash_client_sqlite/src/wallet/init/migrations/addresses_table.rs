@@ -9,7 +9,7 @@ use zcash_keys::{
     encoding::AddressCodec,
     keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey},
 };
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::{UA_TRANSPARENT, wallet::init::WalletMigrationError};
@@ -73,7 +73,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
-                .map_err(WalletMigrationError::CorruptedData)?;
+                .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
 
             // Verify that the address column contains the expected value.
             let address: String = row.get(2)?;
@@ -155,7 +155,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                  VALUES (:account, :ufvk)",
                 named_params![
                     ":account": u32::from(account),
-                    ":ufvk": ufvk.encode(&self.params),
+                    ":ufvk": ufvk.encode(&self.params)?,
                 ],
             )?;
 
@@ -187,7 +187,7 @@ fn insert_address<P: consensus::Parameters>(
     account: AccountId,
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
-) -> Result<(), rusqlite::Error> {
+) -> Result<(), WalletMigrationError> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
             account,

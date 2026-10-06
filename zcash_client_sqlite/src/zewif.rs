@@ -1489,10 +1489,10 @@ where
         match account.viewing_key() {
             ::zewif::AccountViewingKey::Ufvk(ufvk) => {
                 let decoded =
-                    UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
+                    UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|e| {
                         ZewifImportError::UfvkDecoding {
                             account_name: account.name().to_owned(),
-                            message,
+                            message: e.to_string(),
                         }
                     })?;
                 let purpose = account_purpose(
@@ -1643,10 +1643,10 @@ fn verify_hd_derivation<P: Parameters, S>(
     seed: &SecretVec<u8>,
     account_index: zip32::AccountId,
 ) -> Result<(), ZewifImportError<S>> {
-    let recorded = UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
+    let recorded = UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|e| {
         ZewifImportError::UfvkDecoding {
             account_name: account_name.to_owned(),
-            message,
+            message: e.to_string(),
         }
     })?;
     let derived = UnifiedSpendingKey::from_seed(params, seed.expose_secret(), account_index)
@@ -1970,7 +1970,7 @@ mod tests {
         let ts = test_seed(0);
 
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("viewing");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
@@ -2025,7 +2025,7 @@ mod tests {
         store.add_seed(seed_entry(&ts));
 
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("derived");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
@@ -2070,9 +2070,10 @@ mod tests {
         }
         // The account's UFVK is re-derived from the seed and matches the
         // document's record of it.
-        assert_eq!(
-            imported.ufvk().map(|k| k.encode(&TEST_NETWORK)),
-            Some(ts.ufvk.encode(&TEST_NETWORK)),
+        assert!(
+            imported
+                .ufvk()
+                .is_some_and(|k| k.is_equivalent_to(&ts.ufvk))
         );
     }
 
@@ -2375,7 +2376,7 @@ mod tests {
         account_index: u32,
     ) -> ::zewif::Account {
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("hd");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
@@ -2450,12 +2451,12 @@ mod tests {
         // imported as spending rather than view-only.
         let mut store = ::zewif::SecretStore::new();
         store.add_unified_key(::zewif::UnifiedKeyEntry::new(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
             ::zewif::UnifiedSpendingKey::new("usk1testspendingkey"),
         ));
 
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("spending");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
@@ -2815,7 +2816,9 @@ mod tests {
         ));
 
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(usk.to_unified_full_viewing_key().encode(&params)),
+            ::zewif::UnifiedFullViewingKey::new(
+                usk.to_unified_full_viewing_key().encode(&params).unwrap(),
+            ),
         ));
         account.set_name("pre-sapling");
         // A birthday at Sapling activation (height 1 on regtest) writes no
@@ -2869,7 +2872,7 @@ mod tests {
         // aborts the import; the whole import must roll back, leaving nothing
         // committed.
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("viewing");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));

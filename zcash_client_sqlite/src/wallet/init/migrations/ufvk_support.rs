@@ -10,7 +10,7 @@ use zcash_keys::{
     address::Address,
     keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
 };
-use zcash_protocol::{PoolType, consensus};
+use zcash_protocol::{{PoolType, consensus}};
 use zip32::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
@@ -158,7 +158,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 // We made it past one derived account, so the seed must be relevant.
                 seed_is_relevant = true;
 
-                let ufvk_str: String = ufvk.encode(&self.params);
+                let ufvk_str: String = ufvk.encode(&self.params)?;
                 let address_str: String = ufvk
                     .default_address(ua_request)?
                     .0

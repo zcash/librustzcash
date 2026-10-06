@@ -9,6 +9,43 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::address::UnifiedAddress::decode`
+- `zcash_keys::address::UnifiedAddress::{to_zcash_address_revision,
+  encode_revision, to_receiver_preserving_zcash_address_revision,
+  encode_receiver_preserving_revision,
+  to_transparent_including_zcash_address_revision,
+  encode_transparent_including_revision}`
+- `zcash_keys::address::Address::{to_zcash_address_revision, encode_revision,
+  to_receiver_preserving_zcash_address_revision,
+  encode_receiver_preserving_revision}`
+- `zcash_keys::address::Receiver::to_zcash_address_revision`
+- `zcash_keys::encoding::{UnifiedDecodingError, UnifiedEncodingError}`
+- `zcash_keys::keys::UnifiedFullViewingKey::{encode_revision, is_equivalent_to}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::encode_revision`
+
+### Changed
+- Unified addresses and viewing keys are now encoded at ZIP 316 Revision 0 when
+  Revision 0 can represent them, and at Revision 2 otherwise. Previously they
+  were always encoded at Revision 2. Use the `_revision` variants to encode at a
+  specific revision. This affects:
+  - `zcash_keys::address::UnifiedAddress::{to_zcash_address, encode,
+    to_receiver_preserving_zcash_address, encode_receiver_preserving,
+    to_transparent_including_zcash_address, encode_transparent_including}`
+  - `zcash_keys::address::Address::{to_zcash_address, encode,
+    to_receiver_preserving_zcash_address, encode_receiver_preserving}`
+  - `zcash_keys::address::Receiver::to_zcash_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::encode` and
+    `zcash_keys::keys::UnifiedIncomingViewingKey::encode`, which now return
+    `Result<String, UnifiedEncodingError>`.
+- `zcash_keys::keys::UnifiedFullViewingKey::decode` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::decode` now return
+  `Result<Self, UnifiedDecodingError>` in place of `Result<Self, String>`.
+
+### Removed
+- `impl AddressCodec<P> for zcash_keys::address::UnifiedAddress`. Use
+  `UnifiedAddress::decode` and `UnifiedAddress::encode` instead.
+
 ## [0.17.0-pre.0] - 2026-10-01
 
 This release supports the NU7 upgrade on testnet.

@@ -1158,7 +1158,7 @@ pub(crate) mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk, birthday_height) VALUES (0, :ufvk, 0)",
-                named_params![":ufvk": ufvk.encode(&Network::TestNetwork)],
+                named_params![":ufvk": ufvk.encode(&Network::TestNetwork).unwrap()],
             )
             .unwrap();
 
@@ -1198,7 +1198,7 @@ pub(crate) mod tests {
                 ":name": "uivk-only",
                 ":uuid": &uuid[..],
                 ":account_kind": 1,
-                ":uivk": uivk.encode(uivk_network),
+                ":uivk": uivk.encode(uivk_network).unwrap(),
                 ":birthday_height": u32::from(birthday_height),
             ],
             |row| row.get(0),

@@ -517,7 +517,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     #[cfg(not(feature = "zcashd-compat"))]
     let zcashd_legacy_address_index: i64 = LEGACY_ADDRESS_INDEX_NULL;
 
-    let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
+    let ufvk_encoded = viewing_key
+        .ufvk()
+        .map(|ufvk| ufvk.encode(params))
+        .transpose()?;
     let account_id = conn
         .query_row(
             r#"
@@ -556,7 +559,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":zcashd_legacy_address_index": zcashd_legacy_address_index,
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
-                ":uivk": uivk.encode(params),
+                ":uivk": uivk.encode(params)?,
                 ":orchard_ivk_item_cache": ivk_cache.orchard,
                 ":sapling_ivk_item_cache": ivk_cache.sapling,
                 ":p2pkh_ivk_item_cache": ivk_cache.p2pkh,
@@ -870,7 +873,7 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
     // inferred from a zero-row INSERT below.
     let account_id = get_account_ref(conn, account_uuid)?;
 
-    let addr_str = Address::Transparent(address).encode(params);
+    let addr_str = address.encode(params);
 
     // The only identity an address-only import carries is the address itself, so the
     // cross-account conflict check is on the receiver address of existing standalone imports
@@ -1009,7 +1012,7 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
         }
     }
 
-    let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
+    let addr_str = TransparentAddress::from_pubkey(&pubkey).encode(params);
 
     // If the receiver was previously imported into this account by its address alone (a
     // Foreign-scope row with no key material), upgrade the existing row in place with the
@@ -1126,7 +1129,7 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
         }
     }
 
-    let addr_str = Address::Transparent(addr).encode(params);
+    let addr_str = addr.encode(params);
 
     // If the receiver was previously imported into this account by its address alone (a
     // Foreign-scope row with no key material), upgrade the existing row in place with the
@@ -1397,9 +1400,7 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     // column only ever holds transparent addresses, so a Sapling query against it simply
     // never matches).
     let taddr_str = match address {
-        Address::Unified(ua) => ua
-            .transparent()
-            .map(|t| Address::Transparent(*t).encode(params)),
+        Address::Unified(ua) => ua.transparent().map(|t| t.encode(params)),
         _ => Some(addr_str.clone()),
     };
 
@@ -1639,7 +1640,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             .flatten()
             .map(|addr_str| UnifiedAddress::decode(params, &addr_str))
             .transpose()
-            .map_err(SqliteClientError::CorruptedData)?;
+            .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?;
 
         match previously_exposed_as {
             Some(addr) if &addr != address => {
@@ -1771,7 +1772,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
         let ufvk_str: Option<String> = row.get(1)?;
         if let Some(ufvk_str) = ufvk_str {
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-                .map_err(SqliteClientError::CorruptedData);
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()));
             Ok(Some((AccountUuid(row.get(0)?), ufvk)))
         } else {
             Ok(None)
@@ -1964,9 +1965,9 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     }
 
     let account_id = existing_account.internal_id();
-    let ufvk_encoded = ufvk.encode(params);
+    let ufvk_encoded = ufvk.encode(params)?;
     let uivk = ufvk.to_unified_incoming_viewing_key();
-    let uivk_encoded = uivk.encode(params);
+    let uivk_encoded = uivk.encode(params)?;
     let ivk_cache = IvkItemCache::from_uivk(&uivk);
 
     conn.execute(
@@ -2020,7 +2021,7 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     }
 
     let account_id = existing_account.internal_id();
-    let uivk_encoded = uivk.encode(params);
+    let uivk_encoded = uivk.encode(params)?;
 
     let ivk_cache = IvkItemCache::from_uivk(uivk);
 
@@ -5272,7 +5273,7 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
                  FROM addresses
                  WHERE cached_transparent_receiver_address = :taddr",
                 named_params! {
-                    ":taddr": Address::Transparent(*taddr).encode(_params)
+                    ":taddr": taddr.encode(_params)
                 },
                 |row| row.get::<_, String>(0),
             )
