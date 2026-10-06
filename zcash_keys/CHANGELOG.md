@@ -9,6 +9,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.17.0-pre.1] - 2026-10-06
+
 ### Added
 - `zcash_keys::address::UnifiedAddress::decode`
 - `zcash_keys::address::UnifiedAddress::{to_zcash_address_revision,
