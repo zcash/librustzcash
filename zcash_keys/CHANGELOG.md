@@ -25,6 +25,7 @@ workspace.
 - `zcash_keys::keys::UnifiedIncomingViewingKey::encode_revision`
 
 ### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
 - Unified addresses and viewing keys are now encoded at ZIP 316 Revision 0 when
   Revision 0 can represent them, and at Revision 2 otherwise. Previously they
   were always encoded at Revision 2. Use the `_revision` variants to encode at a

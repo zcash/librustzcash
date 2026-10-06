@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.14.0-pre.1] - 2026-10-06
+
 ### Added
 - `zcash_address::unified::ParseError::{InvalidEncodedLength, NotDefinedInRevision}`
 

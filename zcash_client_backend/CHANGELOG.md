@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
 - Unified addresses that `zcash_client_backend` constructs (the recipient of
   `data_api::wallet::propose_standard_transfer_to_address`, and the
   `wallet::Recipient::External` address recorded for an output to a receiver
