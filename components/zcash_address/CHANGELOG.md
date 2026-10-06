@@ -10,6 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::unified::ParseError::{InvalidEncodedLength, NotDefinedInRevision}`
+
+### Changed
+- `zcash_address::unified::Encoding::try_from_items` now rejects the items that
+  decoding the resulting container would reject:
+  - At `Revision::R0`, an expiry height or expiry time metadata item, and a P2SH
+    viewing key item, return `ParseError::NotDefinedInRevision`.
+  - At any revision, an unknown metadata item with a MUST-understand typecode
+    returns `ParseError::NotUnderstood`.
+  - A container whose raw encoding plus padding is outside
+    `f4jumble::VALID_LENGTH` returns `ParseError::InvalidEncodedLength`.
+    Encoding such a container previously panicked.
+
 ## [0.14.0-pre.0] - 2026-09-30
 
 ### Added
