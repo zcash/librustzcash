@@ -216,7 +216,7 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
 
     if let Some(uvk_str) = ufvk_str {
         let ufvk = UnifiedFullViewingKey::decode(params, &uvk_str)
-            .map_err(SqliteClientError::CorruptedData)?;
+            .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?;
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
         ufvk.p2pkh()

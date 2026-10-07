@@ -16,7 +16,7 @@ use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
-use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand::{CryptoRng, Rng, RngExt, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{
@@ -35,7 +35,11 @@ use {
         },
     },
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
+    ::transparent::{
+        address::{Script, TransparentAddress},
+        bundle::OutPoint,
+        keys::TransparentKeyScope,
+    },
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -748,6 +752,72 @@ where
         (height, res, nfs)
     }
 
+    /// Adds a block at the next height containing a single transparent-only transaction that
+    /// spends `vin` and creates an output of each `(address, value)` in `vout`, and inserts it
+    /// into the cache.
+    ///
+    /// The transaction is placed at index 1 within the block, behind a placeholder occupying the
+    /// coinbase position, so that the outputs it creates are not subject to the coinbase maturity
+    /// rule. Returns the height of the block and the id of the transparent transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn generate_next_block_transparent(
+        &mut self,
+        vin: &[OutPoint],
+        vout: &[(TransparentAddress, Zatoshis)],
+    ) -> (BlockHeight, Cache::InsertResult, TxId) {
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self
+            .latest_cached_block()
+            .unwrap_or(&pre_activation_block)
+            .clone();
+        let height = prior_cached_block.height() + 1;
+
+        let mut coinbase = fake_compact_tx(&mut self.rng);
+        coinbase.index = 0;
+
+        let mut ctx = fake_compact_tx(&mut self.rng);
+        ctx.index = 1;
+        ctx.vin = vin
+            .iter()
+            .map(|outpoint| compact_formats::CompactTxIn {
+                prevout_txid: outpoint.hash().to_vec(),
+                prevout_index: outpoint.n(),
+            })
+            .collect();
+        ctx.vout = vout
+            .iter()
+            .map(|(addr, value)| compact_formats::TxOut {
+                value: value.into_u64(),
+                script_pub_key: Script::from(addr.script()).0.0,
+            })
+            .collect();
+        let txid = TxId::from_bytes(ctx.txid[..].try_into().expect("txid is 32 bytes"));
+
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                self.rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash
+            .extend_from_slice(&prior_cached_block.chain_state.block_hash().0);
+        cb.vtx.push(coinbase);
+        cb.vtx.push(ctx);
+        cb.chain_metadata = Some(compact_formats::ChainMetadata {
+            sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
+            orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
+            ironwood_commitment_tree_size: prior_cached_block.ironwood_end_size,
+        });
+
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(height);
+
+        (height, res, txid)
+    }
+
     /// Adds an empty block to the cache, advancing the simulated chain height.
     pub fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
         let new_hash = {
@@ -1208,9 +1278,10 @@ where
 
         let clock = self.clock.clone();
         create_proposed_transactions(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1461,9 +1532,10 @@ where
         let network = self.network().clone();
         let clock = self.clock.clone();
         create_proposed_transactions(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
@@ -1496,9 +1568,10 @@ where
 
         let clock = self.clock.clone();
         create_pczt_from_proposal(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             spend_from_account,
             ovk_policy,
             proposal,
@@ -1524,8 +1597,9 @@ where
 
         let clock = self.clock.clone();
         extract_and_store_transaction_from_pczt(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &clock,
+            &mut self.rng,
             pczt,
             Some((&spend_vk, &output_vk)),
             None,
@@ -1555,9 +1629,10 @@ where
         let network = self.network().clone();
         let clock = self.clock.clone();
         shield_transparent_funds(
-            self.wallet_mut(),
+            &mut self.wallet_data,
             &network,
             &clock,
+            &mut self.rng,
             &MockSpendProver,
             &MockOutputProver,
             input_selector,
@@ -2189,12 +2264,7 @@ pub trait TestFvk: Clone {
 
     /// Adds a single spend to the given [`CompactTx`] of a note previously received by
     /// this full viewing key.
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        rng: &mut R,
-    );
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, rng: &mut R);
 
     /// Adds a single output to the given [`CompactTx`], where the output will be discovered when
     /// scanning with an incoming viewing key corresponding to this FVK. Its outputs will also be
@@ -2206,7 +2276,7 @@ pub trait TestFvk: Clone {
     /// Returns the nullifier of the newly created note, so that tests can readily have it on hand
     /// for the purpose of spending that note.
     #[allow(clippy::too_many_arguments)]
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2234,7 +2304,7 @@ pub trait TestFvk: Clone {
     /// Returns the nullifier full the newly created note which will need to be revealed when that
     /// note is later spent.
     #[allow(clippy::too_many_arguments)]
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2262,16 +2332,11 @@ impl<A: TestFvk> TestFvk for &A {
         (*self).ovk_bytes(scope)
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        rng: &mut R,
-    ) {
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, rng: &mut R) {
         (*self).add_spend(ctx, nf, rng)
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2296,7 +2361,7 @@ impl<A: TestFvk> TestFvk for &A {
         )
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2336,17 +2401,12 @@ impl TestFvk for DiversifiableFullViewingKey {
         self.to_ovk(scope).0
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
-        &self,
-        ctx: &mut CompactTx,
-        nf: Self::Nullifier,
-        _: &mut R,
-    ) {
+    fn add_spend<R: Rng + CryptoRng>(&self, ctx: &mut CompactTx, nf: Self::Nullifier, _: &mut R) {
         let cspend = CompactSaplingSpend { nf: nf.to_vec() };
         ctx.spends.push(cspend);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2369,11 +2429,11 @@ impl TestFvk for DiversifiableFullViewingKey {
             compact_sapling_output(params, height, recipient, value, sender_ovk.copied(), rng);
         ctx.outputs.push(cout);
 
-        note.nf(&self.fvk().vk.nk, u64::from(position))
+        note.nf(self.fvk().vk.nk(), u64::from(position))
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -2412,7 +2472,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         *self.to_ovk(scope).as_ref()
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
+    fn add_spend<R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         nullifier_to_reveal: Self::Nullifier,
@@ -2435,7 +2495,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         ctx.actions.push(cact);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2469,7 +2529,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         note.nullifier(self)
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2522,7 +2582,7 @@ impl TestFvk for IronwoodFvk {
         *self.0.to_ovk(scope).as_ref()
     }
 
-    fn add_spend<R: RngCore + CryptoRng>(
+    fn add_spend<R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         nullifier_to_reveal: Self::Nullifier,
@@ -2545,7 +2605,7 @@ impl TestFvk for IronwoodFvk {
         ctx.ironwood_actions.push(cact);
     }
 
-    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2579,7 +2639,7 @@ impl TestFvk for IronwoodFvk {
         note.nullifier(&self.0)
     }
 
-    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_logical_action<P: consensus::Parameters, R: Rng + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
@@ -2632,7 +2692,7 @@ pub enum AddressType {
 /// Creates a `CompactSaplingOutput` at the given height paying the given recipient.
 ///
 /// Returns the `CompactSaplingOutput` and the new note.
-fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+fn compact_sapling_output<P: consensus::Parameters, R: Rng + CryptoRng>(
     params: &P,
     height: BlockHeight,
     recipient: ::sapling::PaymentAddress,
@@ -2660,7 +2720,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..::sapling::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
         },
         note,
     )
@@ -2670,7 +2730,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
 ///
 /// Returns the `CompactOrchardAction` and the new note.
 #[cfg(feature = "orchard")]
-fn compact_orchard_action<R: RngCore + CryptoRng>(
+fn compact_orchard_action<R: Rng + CryptoRng>(
     nf_old: ::orchard::note::Nullifier,
     recipient: ::orchard::Address,
     value: Zatoshis,
@@ -2690,16 +2750,17 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key:
-                ShieldedOutput::<::orchard::note_encryption::OrchardDomain, 52>::ephemeral_key(
+                ShieldedOutput::<::orchard::note_encryption::OrchardDomain>::ephemeral_key(
                     &compact_action,
                 )
                 .0
                 .to_vec(),
             ciphertext:
-                ShieldedOutput::<::orchard::note_encryption::OrchardDomain, 52>::enc_ciphertext(
+                ShieldedOutput::<::orchard::note_encryption::OrchardDomain>::enc_ciphertext_compact(
                     &compact_action,
-                )[..52]
-                    .to_vec(),
+                )
+                .0
+                .to_vec(),
         },
         note,
     )
@@ -2710,7 +2771,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
 /// `CompactOrchardAction` and the note. This mirrors [`compact_orchard_action`], but constructs the
 /// action directly because the orchard crate's `fake_compact_action` only produces version 2 notes.
 #[cfg(feature = "orchard")]
-fn compact_ironwood_action<R: RngCore + CryptoRng>(
+fn compact_ironwood_action<R: Rng + CryptoRng>(
     nf_old: ::orchard::note::Nullifier,
     recipient: ::orchard::Address,
     value: Zatoshis,
@@ -2746,14 +2807,14 @@ fn compact_ironwood_action<R: RngCore + CryptoRng>(
             nullifier: nf_old.to_bytes().to_vec(),
             cmx: cmx.to_bytes().to_vec(),
             ephemeral_key: ephemeral_key.0.to_vec(),
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..::orchard::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
         },
         note,
     )
 }
 
 /// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
-fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
+fn fake_compact_tx<R: Rng + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
     rng.fill_bytes(&mut txid);
@@ -2786,11 +2847,11 @@ impl<Fvk> FakeCompactOutput<Fvk> {
 
     /// Constructs a new random fake external output to the given FVK with a value in the range
     /// 10000..1000000 ZAT.
-    pub fn random<R: RngCore>(rng: &mut R, recipient_fvk: Fvk) -> Self {
+    pub fn random<R: Rng>(rng: &mut R, recipient_fvk: Fvk) -> Self {
         Self {
             recipient_fvk,
             recipient_address_type: AddressType::DefaultExternal,
-            value: Zatoshis::const_from_u64(rng.gen_range(10000..1000000)),
+            value: Zatoshis::const_from_u64(rng.random_range(10000..1000000)),
         }
     }
 }
@@ -2809,7 +2870,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore + CryptoRng,
+    mut rng: impl CryptoRng,
 ) -> (CompactBlock, Vec<Fvk::Nullifier>) {
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
@@ -2851,7 +2912,7 @@ fn fake_compact_block_from_tx(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    rng: impl RngCore,
+    rng: impl Rng,
 ) -> CompactBlock {
     // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
@@ -2908,7 +2969,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore + CryptoRng,
+    mut rng: impl CryptoRng,
 ) -> CompactBlock {
     let mut ctx = fake_compact_tx(&mut rng);
 
@@ -3006,7 +3067,7 @@ fn fake_compact_block_from_compact_tx(
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     initial_ironwood_tree_size: u32,
-    mut rng: impl RngCore,
+    mut rng: impl Rng,
 ) -> CompactBlock {
     let mut cb = CompactBlock {
         hash: {
@@ -3410,6 +3471,23 @@ impl WalletRead for MockWalletDb {
         _query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
         Ok(Vec::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        Ok(HashMap::new())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receiver_accounts(
+        &self,
+    ) -> Result<
+        HashMap<TransparentAddress, (Self::AccountId, Option<TransparentKeyScope>)>,
+        Self::Error,
+    > {
+        Ok(HashMap::new())
     }
 
     #[cfg(feature = "transparent-inputs")]

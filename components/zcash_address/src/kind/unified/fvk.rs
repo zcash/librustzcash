@@ -602,6 +602,24 @@ mod tests {
     }
 
     #[test]
+    fn r0_construction_rejects_p2sh_item() {
+        // Revision 0 assigns no meaning to a P2SH viewing key item.
+        let p2sh = p2sh_item_payload("sh(sortedmulti(2,@0/**,@1/**,@2/**))", 3);
+        let items = vec![
+            Uitem::Data(Fvk::Sapling([0; 128])),
+            Uitem::Data(Fvk::P2sh(p2sh)),
+        ];
+        assert_eq!(
+            Ufvk::try_from_items(Revision::R0, items.clone()),
+            Err(ParseError::NotDefinedInRevision {
+                typecode: Typecode::P2SH,
+                revision: Revision::R0,
+            })
+        );
+        assert!(Ufvk::try_from_items(Revision::R2, items).is_ok());
+    }
+
+    #[test]
     fn p2sh_fvk_item_parsing() {
         use crate::kind::unified::{P2shItemError, ParseError, private::SealedItem};
 

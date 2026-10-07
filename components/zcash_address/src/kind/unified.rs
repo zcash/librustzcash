@@ -432,6 +432,14 @@ pub enum ParseError {
     },
     /// A P2SH viewing key item is structurally invalid.
     InvalidP2shItem(P2shItemError),
+    /// An item has a typecode that the container's revision does not define.
+    NotDefinedInRevision {
+        typecode: Typecode,
+        revision: Revision,
+    },
+    /// The raw encoding of the container plus its 16 bytes of padding has this length in
+    /// bytes, which is outside the range [`f4jumble::VALID_LENGTH`] that F4Jumble accepts.
+    InvalidEncodedLength(usize),
 }
 
 impl fmt::Display for ParseError {
@@ -475,6 +483,21 @@ impl fmt::Display for ParseError {
             ParseError::InvalidP2shItem(e) => {
                 write!(f, "Invalid P2SH viewing key item: {e}")
             }
+            ParseError::InvalidEncodedLength(length) => {
+                write!(
+                    f,
+                    "Padded unified encoding of {length} bytes is outside the range {}..={} that F4Jumble accepts",
+                    f4jumble::VALID_LENGTH.start(),
+                    f4jumble::VALID_LENGTH.end()
+                )
+            }
+            ParseError::NotDefinedInRevision { typecode, revision } => {
+                write!(
+                    f,
+                    "Typecode 0x{:02X} is not defined in unified container revision {revision:?}",
+                    typecode.typecode_value()
+                )
+            }
         }
     }
 }
@@ -493,7 +516,7 @@ pub(crate) mod private {
         MUST_UNDERSTAND_METADATA_MIN, MetadataItem, MetadataTypecode, PADDING_LEN, ParseError,
         Typecode, Uitem,
     };
-    use zcash_encoding::CompactSize;
+    use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
     use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
@@ -653,8 +676,10 @@ pub(crate) mod private {
                 .write_all(&padding)
                 .expect("writing to a Vec cannot fail");
 
+            // `try_from_items_internal` rejects every container whose padded encoding is
+            // outside `f4jumble::VALID_LENGTH`.
             f4jumble::f4jumble(&padded)
-                .unwrap_or_else(|e| panic!("f4jumble failed on {:?}: {}", padded, e))
+                .expect("the padded encoding of a unified container has a valid F4Jumble length")
         }
 
         /// Parse the items of the unified container, returning both data and metadata items.
@@ -762,7 +787,47 @@ pub(crate) mod private {
                     Uitem::Data(d) => Typecode::Data(d.typecode()),
                     Uitem::Metadata(m) => m.combined_typecode(),
                 };
+                // A typecode is encoded as a CompactSize, so it cannot exceed the
+                // CompactSize bound.
+                if t.typecode_value() > MAX_COMPACT_SIZE {
+                    return Err(ParseError::InvalidTypecodeValue(u64::from(
+                        t.typecode_value(),
+                    )));
+                }
+
                 let t_code = Some(t.typecode_value());
+
+                match item {
+                    Uitem::Data(d) => {
+                        // Revision 0 assigns no meaning to a P2SH viewing key item.
+                        if revision == Revision::R0
+                            && !Self::IS_ADDRESS
+                            && d.typecode() == super::DataTypecode::P2sh
+                        {
+                            return Err(ParseError::NotDefinedInRevision {
+                                typecode: t,
+                                revision,
+                            });
+                        }
+                    }
+                    Uitem::Metadata(m) => match m.typecode() {
+                        // No revision permits a MUST-understand item that this
+                        // implementation does not recognize.
+                        MetadataTypecode::Unknown(tc) if tc >= MUST_UNDERSTAND_METADATA_MIN => {
+                            return Err(ParseError::NotUnderstood(tc));
+                        }
+                        // Revision 0 defines no MUST-understand metadata items.
+                        _ if revision == Revision::R0
+                            && t.typecode_value() >= MUST_UNDERSTAND_METADATA_MIN =>
+                        {
+                            return Err(ParseError::NotDefinedInRevision {
+                                typecode: t,
+                                revision,
+                            });
+                        }
+                        _ => {}
+                    },
+                }
 
                 if t_code < prev_code {
                     return Err(ParseError::InvalidTypecodeOrder);
@@ -801,7 +866,20 @@ pub(crate) mod private {
                 return Err(ParseError::OnlyTransparent);
             }
 
-            Ok(Self::from_inner(revision, items))
+            let container = Self::from_inner(revision, items);
+
+            // F4Jumble accepts only inputs in `VALID_LENGTH`, and its input is the raw
+            // encoding followed by the padding.
+            let mut raw = Vec::new();
+            container
+                .write_raw_encoding(&mut raw)
+                .expect("writing to a Vec cannot fail");
+            let padded_length = raw.len() + PADDING_LEN;
+            if !f4jumble::VALID_LENGTH.contains(&padded_length) {
+                return Err(ParseError::InvalidEncodedLength(padded_length));
+            }
+
+            Ok(container)
         }
 
         fn parse_internal<T: Into<Vec<u8>>>(

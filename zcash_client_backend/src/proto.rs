@@ -17,7 +17,7 @@ use self::proposal::proposed_input::Value::*;
 use self::proposal::{PriorStepChange, PriorStepOutput, ReceivedOutput};
 
 use sapling::{self, Node, note::ExtractedNoteCommitment};
-use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
+use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,
@@ -180,7 +180,8 @@ impl<Proof> From<&sapling::bundle::OutputDescription<Proof>>
         compact_formats::CompactSaplingOutput {
             cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
-            ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: out.enc_ciphertext()[..sapling::note_encryption::COMPACT_NOTE_SIZE]
+                .to_vec(),
         }
     }
 }
@@ -217,6 +218,39 @@ impl compact_formats::CompactSaplingSpend {
     /// A convenience method that parses [`field@Self::nf`].
     pub fn nf(&self) -> Result<sapling::Nullifier, CompactFormatError> {
         sapling::Nullifier::from_slice(&self.nf).map_err(CompactFormatError::InvalidLength)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl compact_formats::CompactTxIn {
+    /// Returns the outpoint of the transparent output that this input spends.
+    ///
+    /// A convenience method that parses [`field@Self::prevout_txid`] and
+    /// [`field@Self::prevout_index`].
+    pub fn prevout(&self) -> Result<transparent::bundle::OutPoint, CompactFormatError> {
+        Ok(transparent::bundle::OutPoint::new(
+            self.prevout_txid[..]
+                .try_into()
+                .map_err(CompactFormatError::InvalidLength)?,
+            self.prevout_index,
+        ))
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl compact_formats::TxOut {
+    /// Returns the transparent output that this message describes.
+    ///
+    /// A convenience method that parses [`field@Self::value`] and [`field@Self::script_pub_key`].
+    ///
+    /// # Errors
+    /// Returns [`CompactFormatError::InvalidValue`] if the value is not a valid amount of
+    /// zatoshis.
+    pub fn to_txout(&self) -> Result<transparent::bundle::TxOut, CompactFormatError> {
+        Ok(transparent::bundle::TxOut::new(
+            Zatoshis::from_u64(self.value).map_err(|_| CompactFormatError::InvalidValue)?,
+            transparent::address::Script(zcash_script::script::Code(self.script_pub_key.clone())),
+        ))
     }
 }
 
@@ -289,7 +323,9 @@ impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOr
             nullifier: action.nullifier().to_bytes().to_vec(),
             cmx: action.cmx().to_bytes().to_vec(),
             ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
-            ciphertext: action.encrypted_note().enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: action.encrypted_note().enc_ciphertext.0
+                [..orchard::note_encryption::COMPACT_NOTE_SIZE]
+                .to_vec(),
         }
     }
 }

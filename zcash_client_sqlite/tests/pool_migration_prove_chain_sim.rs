@@ -32,6 +32,7 @@
 use std::collections::BTreeSet;
 use std::convert::Infallible;
 
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 
@@ -411,8 +412,12 @@ impl Run {
             let params = *self.st.network();
             let scanned_tip = self.target_height() - 1;
             let mut redraw_rng = ChaCha8Rng::seed_from_u64(97);
-            let mut prover =
-                WalletMigrationProver::new(self.st.wallet_mut(), self.account_id, self.fvk.clone());
+            let mut prover = WalletMigrationProver::new(
+                self.st.wallet_mut(),
+                UnwrapErr(SysRng),
+                self.account_id,
+                self.fvk.clone(),
+            );
             match anchor {
                 Some(anchor) => engine::prove_preparation(&mut prover, state, id, anchor)
                     .expect("the prover answers for the preparation transaction"),
@@ -464,7 +469,7 @@ impl Run {
             .txid();
         let tx = self
             .store()
-            .take_transaction_for_broadcast(state, id)
+            .take_transaction_for_broadcast(UnwrapErr(SysRng), state, id)
             .expect("finalizes and records the broadcastable transaction");
         // The id the engine derived from the PCZT when it BUILT this transaction, against the id
         // the real extracted transaction actually has. This is the claim the stored txid rests
@@ -1162,8 +1167,12 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
         let params = *run.st.network();
         let scanned_tip = run.fully_scanned_height();
         let mut redraw_rng = ChaCha8Rng::seed_from_u64(29);
-        let mut prover =
-            WalletMigrationProver::new(run.st.wallet_mut(), run.account_id, run.fvk.clone());
+        let mut prover = WalletMigrationProver::new(
+            run.st.wallet_mut(),
+            UnwrapErr(SysRng),
+            run.account_id,
+            run.fvk.clone(),
+        );
         engine::prove_transfer(
             &params,
             &mut prover,
@@ -1226,7 +1235,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
         .expect("hides the sent-notes table");
     assert!(
         run.store()
-            .take_transaction_for_broadcast(&committed.state, transfer_id)
+            .take_transaction_for_broadcast(UnwrapErr(SysRng), &committed.state, transfer_id)
             .is_err(),
         "the wallet-side write cannot succeed without its table",
     );
@@ -1247,7 +1256,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     // SUCCESS SIDE: one atomic step records the wallet-side half and returns the transaction.
     let extracted = run
         .store()
-        .take_transaction_for_broadcast(&committed.state, transfer_id)
+        .take_transaction_for_broadcast(UnwrapErr(SysRng), &committed.state, transfer_id)
         .expect("finalizes, records, and returns the broadcastable transaction");
     assert_eq!(extracted.txid(), txid);
 
@@ -1328,7 +1337,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     let recorded_outputs = sent_note_count(&mut run);
     let re_extracted = run
         .store()
-        .take_transaction_for_broadcast(&committed.state, transfer_id)
+        .take_transaction_for_broadcast(UnwrapErr(SysRng), &committed.state, transfer_id)
         .expect("re-entering after a crashed submission returns the transaction again");
     assert_eq!(re_extracted.txid(), txid);
     assert_eq!(
@@ -1478,7 +1487,7 @@ fn broadcast_persists_a_preparations_zip318_classification() {
     // opens: recorded, but not yet submitted and so still UNMINED.
     let tx = run
         .store()
-        .take_transaction_for_broadcast(&committed.state, prep_id)
+        .take_transaction_for_broadcast(UnwrapErr(SysRng), &committed.state, prep_id)
         .expect("finalizes and records the broadcastable preparation");
 
     let (zip318_kind, mined_height) = stored_classification(&mut run);
@@ -1632,7 +1641,12 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
         let anchor = highest_rooted_orchard_checkpoint(st.wallet_mut(), tip)
             .expect("a rooted Orchard checkpoint exists");
         {
-            let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+            let mut prover = WalletMigrationProver::new(
+                st.wallet_mut(),
+                UnwrapErr(SysRng),
+                account_id,
+                fvk.clone(),
+            );
             match engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
                 .expect("proves the preparation transaction")
             {
@@ -1650,7 +1664,7 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
         let tx = TransactionExtractor::new(
             pczt::Pczt::parse(proven.pczt()).expect("parses the proven preparation PCZT"),
         )
-        .extract()
+        .extract(UnwrapErr(SysRng))
         .expect("extracts the preparation transaction");
         let (prep_height, _) = st.generate_next_block_from_tx(1, &tx);
         st.scan_cached_blocks(prep_height, 1);
@@ -1690,7 +1704,8 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
             .expect("reads the chain height")
             .expect("the wallet has a chain tip");
         let mut redraw_rng = ChaCha8Rng::seed_from_u64(11);
-        let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+        let mut prover =
+            WalletMigrationProver::new(st.wallet_mut(), UnwrapErr(SysRng), account_id, fvk.clone());
         let outcome = engine::prove_transfer(
             &params,
             &mut prover,
@@ -1799,8 +1814,12 @@ fn proving_locks_the_spent_notes_without_taking_them_from_the_user() {
             .expect("a rooted Orchard checkpoint exists")
     };
     let outcome = {
-        let mut prover =
-            WalletMigrationProver::new(run.st.wallet_mut(), account_id, run.fvk.clone());
+        let mut prover = WalletMigrationProver::new(
+            run.st.wallet_mut(),
+            UnwrapErr(SysRng),
+            account_id,
+            run.fvk.clone(),
+        );
         engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
             .expect("proves the preparation transaction")
     };
@@ -1949,8 +1968,12 @@ fn proving_refuses_to_take_a_note_another_flow_has_reserved() {
         .expect("the rival flow reserves the notes first");
 
     let result = {
-        let mut prover =
-            WalletMigrationProver::new(run.st.wallet_mut(), account_id, run.fvk.clone());
+        let mut prover = WalletMigrationProver::new(
+            run.st.wallet_mut(),
+            UnwrapErr(SysRng),
+            account_id,
+            run.fvk.clone(),
+        );
         engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
     };
     assert!(
@@ -2013,8 +2036,12 @@ fn cancel_returns_the_balance_and_retains_the_record() {
             .expect("a rooted Orchard checkpoint exists")
     };
     let outcome = {
-        let mut prover =
-            WalletMigrationProver::new(run.st.wallet_mut(), account_id, run.fvk.clone());
+        let mut prover = WalletMigrationProver::new(
+            run.st.wallet_mut(),
+            UnwrapErr(SysRng),
+            account_id,
+            run.fvk.clone(),
+        );
         engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
             .expect("proves the preparation transaction")
     };
@@ -2175,8 +2202,12 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     let outcome = {
         let params = *run.st.network();
         let mut redraw_rng = ChaCha8Rng::seed_from_u64(13);
-        let mut prover =
-            WalletMigrationProver::new(run.st.wallet_mut(), run.account_id, run.fvk.clone());
+        let mut prover = WalletMigrationProver::new(
+            run.st.wallet_mut(),
+            UnwrapErr(SysRng),
+            run.account_id,
+            run.fvk.clone(),
+        );
         engine::prove_transfer(
             &params,
             &mut prover,
@@ -2528,7 +2559,7 @@ fn extract_proven(state: &MigrationState, id: MigrationTransferId) -> Transactio
         .find(|t| t.id() == id)
         .expect("the transaction is present");
     TransactionExtractor::new(pczt::Pczt::parse(proven.pczt()).expect("parses the proven PCZT"))
-        .extract()
+        .extract(UnwrapErr(SysRng))
         .expect("extracts and verifies the transaction's proofs")
 }
 

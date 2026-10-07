@@ -279,6 +279,26 @@ impl<AccountId, IvkTag> Handle<AccountId, IvkTag> {
             Err(_) => None,
         }
     }
+
+    /// Returns `true` if the batch decryptor has shut down.
+    ///
+    /// This is the only reliable liveness test for the engine. The queuing methods
+    /// cannot serve as one: a request that wins its queue slot concurrently with the
+    /// engine shutting down is still accepted, so `Some` does not imply the request
+    /// will ever be served. Such a request is also never dropped while any `Handle`
+    /// remains, so its receiver resolves neither to a value nor to an error.
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
+    /// Completes when the batch decryptor has shut down.
+    ///
+    /// Use this to wait on shutdown, or to race it against a queued request's receiver
+    /// so that a request stranded by a concurrent shutdown does not wait forever. See
+    /// [`Handle::is_closed`] for why the queuing methods cannot report liveness.
+    pub async fn closed(&self) {
+        self.handle.closed().await
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -454,5 +474,38 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Engine, Handle};
+
+    fn build() -> (Handle<u32, u32>, Engine<u32, u32>) {
+        super::new().build()
+    }
+
+    #[tokio::test]
+    async fn a_live_engine_is_not_reported_as_closed() {
+        let (handle, _engine) = build();
+        assert!(!handle.is_closed());
+    }
+
+    #[tokio::test]
+    async fn dropping_the_engine_closes_every_handle() {
+        let (handle, engine) = build();
+        let clone = handle.clone();
+        drop(engine);
+
+        handle.closed().await;
+        assert!(handle.is_closed());
+        assert!(clone.is_closed());
+    }
+
+    #[tokio::test]
+    async fn a_closed_handle_serves_no_further_requests() {
+        let (handle, engine) = build();
+        drop(engine);
+        assert!(handle.reload_keys().await.is_none());
     }
 }

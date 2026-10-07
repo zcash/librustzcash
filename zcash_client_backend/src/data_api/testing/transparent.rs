@@ -37,7 +37,8 @@ use {
         },
         wallet::TransparentAddressSource,
     },
-    secp256k1::{Secp256k1, SecretKey},
+    rand::{rand_core::UnwrapErr, rngs::SysRng},
+    secp256k1::SecretKey,
     secrecy::Secret,
     std::collections::HashMap,
     zcash_protocol::consensus::{NetworkUpgrade, Parameters},
@@ -64,7 +65,7 @@ use crate::{
     },
     fees::{ChangeValue, StandardFeeRule, TransparentChangePolicy},
     scanning::{
-        Nullifiers, ScanningKeys,
+        ScanningKeys, SpendIdentifiers,
         full::{decrypt_block, scan_block},
     },
     wallet::{Exposure, OvkPolicy, WalletTransparentOutput},
@@ -271,7 +272,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -430,7 +433,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -639,7 +644,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -725,7 +732,9 @@ where
     let taddr = uaddr.transparent().unwrap();
 
     // Initialize the wallet with chain data that has no shielded notes for us.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1201,9 +1210,8 @@ where
 /// Builds a test 1-of-1 multisig redeem script from a single keypair.
 #[cfg(feature = "transparent-key-import")]
 fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     let redeem_script = script::Component(
         check_multisig(1, &[&pubkey.serialize()], false)
             .unwrap()
@@ -1229,9 +1237,8 @@ where
     let account_id = st.test_account().unwrap().id();
 
     // A P2PKH address, imported without its pubkey.
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key());
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_address(account_id, p2pkh_addr),
@@ -1274,9 +1281,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     assert_matches!(
         st.wallet_mut()
@@ -1316,9 +1322,8 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     assert_matches!(
         st.wallet_mut()
@@ -1367,9 +1372,8 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
 
     // Import the address without its pubkey.
     st.wallet_mut()
@@ -1434,9 +1438,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     let p2pkh_addr = TransparentAddress::from_pubkey(&pubkey);
 
     let (redeem_script, _) = build_test_redeem_script();
@@ -1502,9 +1505,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_pubkey(account_id, pubkey),
@@ -1525,9 +1527,8 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // First import
     assert_matches!(
@@ -1580,9 +1581,8 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import to first account
     assert_matches!(
@@ -1631,9 +1631,8 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import the public key.
     st.wallet_mut()
@@ -1705,9 +1704,8 @@ where
     let account_id = account.id();
 
     // Create a keypair and derive the P2PKH address.
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key(&secp);
+    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key();
 
     // Import the public key.
     st.wallet_mut()
@@ -1718,7 +1716,9 @@ where
     let taddr = TransparentAddress::from_pubkey(&pubkey);
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1765,6 +1765,7 @@ where
         st.wallet_mut(),
         &network,
         &clock,
+        &mut UnwrapErr(SysRng),
         &prover,
         &prover,
         &input_selector,
@@ -2050,7 +2051,9 @@ where
     let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
 
     // Initialize chain data with blocks (needed for shielding transaction creation).
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2097,6 +2100,7 @@ where
         st.wallet_mut(),
         &network,
         &clock,
+        &mut UnwrapErr(SysRng),
         &prover,
         &prover,
         &input_selector,
@@ -2334,18 +2338,25 @@ where
     );
 }
 
-/// Constructs a fake transparent-only transaction paying `value` to `taddr`.
+/// Constructs a fake transparent-only transaction spending `vin` and paying `value` to `taddr`.
 ///
-/// The transaction spends an arbitrary outpoint, so it is not structurally a coinbase
-/// transaction. The `lock_time` parameter has no consensus meaning here; distinct values may be
-/// used to give otherwise-identical transactions distinct txids.
+/// When `vin` is empty the transaction spends one arbitrary outpoint, so that it is never
+/// structurally a coinbase transaction. The `lock_time` parameter has no consensus meaning here;
+/// distinct values may be used to give otherwise-identical transactions distinct txids.
 fn fake_transparent_payment_tx(
     lock_time: u32,
+    vin: &[OutPoint],
     value: Zatoshis,
     taddr: &TransparentAddress,
 ) -> Transaction {
     let bundle = Bundle {
-        vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
+        vin: if vin.is_empty() {
+            vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)]
+        } else {
+            vin.iter()
+                .map(|outpoint| TxIn::from_parts(outpoint.clone(), Script::default(), 0))
+                .collect()
+        },
         vout: vec![TxOut::new(value, taddr.script().into())],
         authorization: Authorized,
     };
@@ -2362,6 +2373,156 @@ fn fake_transparent_payment_tx(
     )
     .freeze()
     .unwrap()
+}
+
+/// Scans a block that spends a wallet transparent output *before* scanning the block that created
+/// it, and verifies that the spend is recognized once the output is discovered.
+///
+/// This is the out-of-order case the transparent spend map exists for: at the time the spending
+/// block is scanned the wallet does not know it holds the output, so the spend cannot be matched
+/// against anything. The spending transaction is recorded against the outpoint, and the spend must
+/// be resolved when the earlier block brings the output into the wallet.
+pub fn scan_detects_out_of_order_transparent_spend<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+
+    // The block that pays the wallet, followed by the block that spends what it paid.
+    let (received_height, _, received_txid) =
+        st.generate_next_block_transparent(&[], &[(taddr, value)]);
+    let funded_outpoint = OutPoint::new(received_txid.into(), 0);
+    let (spend_height, _, spend_txid) =
+        st.generate_next_block_transparent(std::slice::from_ref(&funded_outpoint), &[]);
+
+    st.scan_cached_blocks(spend_height, 1);
+
+    // The wallet cannot recognize a spend of an output it has never seen, so at this point it
+    // holds no record of the output at all.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(None),
+        "the wallet must not know of the output before the block creating it is scanned",
+    );
+
+    // Scanning the earlier block brings the output into the wallet, at which point the
+    // already-observed spend must be attached to it.
+    st.scan_cached_blocks(received_height, 1);
+
+    let target_height = TargetHeight::from(spend_height + 1);
+
+    // The output is now known to the wallet. Asserting this separately is what keeps the
+    // "not unspent" assertions below from being satisfied by an output that was never recorded
+    // at all, which is indistinguishable from a spent one in every query that filters on
+    // spendability.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must have been recorded when the block creating it was scanned",
+    );
+
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, target_height),
+        Ok(None),
+        "the spend observed before the output was discovered must have been resolved",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                &taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+            )
+            .as_deref(),
+        Ok(&[])
+    );
+    assert_matches!(
+        st.wallet()
+            .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN),
+        Ok(balances) if balances.get(&taddr).map(|(_, b)| b.total()) == Some(Zatoshis::ZERO)
+            || balances.is_empty()
+    );
+
+    // The spend must be attributed to the transaction that actually effected it, which the wallet
+    // had no other reason to store.
+    let spending_txids = st
+        .wallet()
+        .get_tx_history()
+        .unwrap()
+        .into_iter()
+        .map(|tx| tx.txid())
+        .collect::<Vec<_>>();
+    assert!(
+        spending_txids.contains(&spend_txid),
+        "the spending transaction {spend_txid} should have been recorded; history holds {spending_txids:?}",
+    );
+}
+
+/// Scans a block that pays a wallet transparent address, then the block that spends the output,
+/// and verifies that the spend is recognized directly during the scan of the later block.
+///
+/// This is the in-order counterpart of [`scan_detects_out_of_order_transparent_spend`]: here the
+/// wallet already tracks the outpoint when the spending block is scanned, so the spend is matched
+/// without consulting the spend map.
+pub fn scan_detects_transparent_spend<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+
+    let (received_height, _, received_txid) =
+        st.generate_next_block_transparent(&[], &[(taddr, value)]);
+    let funded_outpoint = OutPoint::new(received_txid.into(), 0);
+
+    st.scan_cached_blocks(received_height, 1);
+
+    // The scan of the paying block must have recorded the output as a wallet UTXO.
+    assert_matches!(
+        st.wallet().get_unspent_transparent_output(
+            &funded_outpoint,
+            TargetHeight::from(received_height + 1),
+        ),
+        Ok(Some(utxo)) if utxo.txout().value() == value
+    );
+
+    let (spend_height, _, _) =
+        st.generate_next_block_transparent(std::slice::from_ref(&funded_outpoint), &[]);
+    st.scan_cached_blocks(spend_height, 1);
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(_)),
+        "the output must remain known to the wallet after being spent",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(spend_height + 1)),
+        Ok(None),
+        "the output must be recorded as spent once its spend has been scanned",
+    );
 }
 
 /// Returns the default external transparent receiver of the given account.
@@ -2385,12 +2546,17 @@ where
 /// Placing the payment behind the coinbase keeps the output it creates out of the coinbase
 /// maturity rule. `lock_time` has no consensus meaning here; distinct values give the payment
 /// transactions of otherwise-identical blocks distinct txids.
+///
+/// The scan is performed against the wallet's current tracked spend identifiers, as
+/// `scan_cached_blocks` does, so that a spend of an output the wallet already holds is detected.
+#[allow(clippy::too_many_arguments)]
 fn scan_transparent_payment_block<DbT>(
     wallet: &DbT,
     network: &LocalNetwork,
     account_id: <DbT as WalletRead>::AccountId,
     height: BlockHeight,
     lock_time: u32,
+    vin: &[OutPoint],
     value: Zatoshis,
     taddr: &TransparentAddress,
 ) -> (ScannedBlock<<DbT as WalletRead>::AccountId>, OutPoint)
@@ -2405,7 +2571,7 @@ where
     const MINER_REWARD: Zatoshis = Zatoshis::const_from_u64(625_000_000);
     const MINER_ADDR: TransparentAddress = TransparentAddress::PublicKeyHash([0xf5; 20]);
 
-    let payment = fake_transparent_payment_tx(lock_time, value, taddr);
+    let payment = fake_transparent_payment_tx(lock_time, vin, value, taddr);
     let outpoint = OutPoint::new(payment.txid().into(), 0);
     let block = Block::from_parts(
         BlockHeaderData {
@@ -2449,7 +2615,7 @@ where
         &header,
         vtx,
         &scanning_keys,
-        &Nullifiers::empty(),
+        &SpendIdentifiers::unspent(wallet).unwrap(),
         Some(&prior_block_metadata),
         |addr| {
             wallet
@@ -2507,7 +2673,7 @@ where
     let value = Zatoshis::const_from_u64(100000);
     let network = *st.network();
     let (scanned, outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, value, &taddr);
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
 
     st.wallet_mut()
         .put_blocks(&ChainState::empty(h - 1, BlockHash([0; 32])), vec![scanned])
@@ -2541,6 +2707,168 @@ where
     );
 }
 
+/// Scans a full block that pays a wallet transparent address, then a full block that spends the
+/// resulting output, and verifies that the spend is detected.
+///
+/// The wallet already tracks the outpoint when the spending block is scanned, so the spend is
+/// matched directly against its tracked outputs rather than resolved through the spend map.
+pub fn scan_full_block_detects_transparent_spend<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().unwrap();
+    let account_id = account.id();
+    let h = account.birthday().height() + 1;
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+    let network = *st.network();
+
+    st.wallet_mut().update_chain_tip(h + 1).unwrap();
+
+    let (received, funded_outpoint) =
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+    st.wallet_mut()
+        .put_blocks(
+            &ChainState::empty(h - 1, BlockHash([0; 32])),
+            vec![received],
+        )
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must be recorded when the block creating it is scanned",
+    );
+
+    // Scanning the spending block must now detect the spend directly.
+    let (spending, _) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 1,
+        2,
+        std::slice::from_ref(&funded_outpoint),
+        value,
+        &taddr,
+    );
+    assert_matches!(
+        spending
+            .transactions()
+            .iter()
+            .flat_map(|wtx| wtx.transparent_spends())
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [spend] if spend.outpoint() == &funded_outpoint,
+        "the scanner must report the spend of the wallet's output",
+    );
+
+    st.wallet_mut()
+        .put_blocks(&ChainState::empty(h, BlockHash([0; 32])), vec![spending])
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(_)),
+        "the output must remain known to the wallet after being spent",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(h + 2)),
+        Ok(None),
+        "the output must be recorded as spent once its spend has been scanned",
+    );
+}
+
+/// Scans a full block that spends a wallet transparent output *before* the block that created it,
+/// and verifies that the spend is resolved once the output is discovered.
+///
+/// This is the out-of-order case: at the time the spending block is scanned the wallet does not
+/// know it holds the output, so the spend must be recorded against the outpoint and applied when
+/// the earlier block brings the output into the wallet.
+pub fn scan_full_block_detects_out_of_order_transparent_spend<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletRead>::AccountId:
+        ConditionallySelectable + Default + Ord + std::hash::Hash + Send + Sync + 'static,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().unwrap();
+    let account_id = account.id();
+    let h = account.birthday().height() + 1;
+    let taddr = wallet_taddr(st.wallet(), account_id);
+    let value = Zatoshis::const_from_u64(100000);
+    let network = *st.network();
+
+    st.wallet_mut().update_chain_tip(h + 1).unwrap();
+
+    // Build the paying block first so that its outpoint is known, but do not scan it yet.
+    let (received, funded_outpoint) =
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+
+    // Scan and persist the block that spends it. The wallet cannot recognize the spend: it does
+    // not yet know that it holds the output being spent.
+    let (spending, _) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 1,
+        2,
+        std::slice::from_ref(&funded_outpoint),
+        value,
+        &taddr,
+    );
+    assert!(
+        spending
+            .transactions()
+            .iter()
+            .all(|wtx| wtx.transparent_spends().is_empty()),
+        "the scanner cannot match a spend of an output the wallet has not yet seen",
+    );
+    st.wallet_mut()
+        .put_blocks(&ChainState::empty(h, BlockHash([0; 32])), vec![spending])
+        .unwrap();
+
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(None),
+        "the wallet must not know of the output before the block creating it is scanned",
+    );
+
+    // Persisting the earlier block brings the output into the wallet, at which point the
+    // already-recorded spend must be applied to it.
+    st.wallet_mut()
+        .put_blocks(
+            &ChainState::empty(h - 1, BlockHash([0; 32])),
+            vec![received],
+        )
+        .unwrap();
+
+    // As in the compact-block case, asserting that the output is known is what keeps the
+    // "not unspent" assertion below from being satisfied by an output never recorded at all.
+    assert_matches!(
+        st.wallet().get_transparent_output(&funded_outpoint, None),
+        Ok(Some(utxo)) if utxo.txout().value() == value,
+        "the output must have been recorded when the block creating it was scanned",
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&funded_outpoint, TargetHeight::from(h + 2)),
+        Ok(None),
+        "the spend observed before the output was discovered must have been resolved",
+    );
+}
+
 /// Verifies that the transparent outputs written while persisting a batch of scanned blocks are
 /// rolled back along with the rest of the batch when a later block in the batch is rejected.
 ///
@@ -2567,9 +2895,17 @@ where
     let value = Zatoshis::const_from_u64(100000);
     let network = *st.network();
     let (first, first_outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, value, &taddr);
-    let (discontinuous, discontinuous_outpoint) =
-        scan_transparent_payment_block(st.wallet(), &network, account_id, h + 2, 2, value, &taddr);
+        scan_transparent_payment_block(st.wallet(), &network, account_id, h, 1, &[], value, &taddr);
+    let (discontinuous, discontinuous_outpoint) = scan_transparent_payment_block(
+        st.wallet(),
+        &network,
+        account_id,
+        h + 2,
+        2,
+        &[],
+        value,
+        &taddr,
+    );
 
     assert_matches!(
         st.wallet_mut().put_blocks(
@@ -2635,7 +2971,9 @@ where
 
     // Seed the chain with notes that do not belong to us so that heights resolve while
     // the account remains without any shielded notes.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2795,7 +3133,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2834,6 +3174,7 @@ where
     // undershoots and a re-gather is required to actually satisfy the request.
     let network = *st.network();
     let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .expect("the derivation path yields a valid key")
         .to_diversifiable_full_viewing_key()
         .default_address()
         .1;
@@ -2938,7 +3279,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3013,7 +3356,9 @@ where
     let account = st.test_account().cloned().unwrap();
 
     // Seed the chain with notes that do not belong to us so heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3124,7 +3469,9 @@ where
     let taddr = *uaddr.transparent().unwrap();
 
     // Seed the chain with notes that do not belong to us so that heights resolve.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10_000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -3261,7 +3608,9 @@ pub fn reserve_next_n_internal_addresses_gap_limit<DSF>(
 
     // Seed the chain so that a chain height is known; address reservation records the
     // exposure height of each reserved address.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);

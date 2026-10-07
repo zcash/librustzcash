@@ -3,20 +3,16 @@
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
 //! [zcash_protocol::constants] module.
 
-use crate::address::UnifiedAddress;
-use alloc::{
-    borrow::ToOwned,
-    string::{String, ToString},
-};
+use alloc::string::{String, ToString};
 use bs58::{self, decode::Error as Bs58Error};
 use core::fmt;
 
 use transparent::address::TransparentAddress;
-use zcash_address::unified::{self, Encoding};
+use zcash_address::unified::{self, Revision};
 use zcash_protocol::consensus::{self, NetworkConstants};
 #[cfg(feature = "sapling")]
 use {
-    alloc::vec::Vec,
+    alloc::{borrow::ToOwned, vec::Vec},
     bech32::{
         Bech32, Hrp,
         primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
@@ -119,6 +115,79 @@ where
     fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
 }
 
+/// An error that prevents encoding a unified address or viewing key at a requested
+/// [ZIP 316] revision.
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnifiedEncodingError {
+    /// The value has no valid encoding at `revision`. For example, Revision 0 cannot
+    /// encode expiry metadata, a P2SH viewing key item, or a container whose only data
+    /// items are transparent.
+    NotRepresentable {
+        revision: Revision,
+        cause: unified::ParseError,
+    },
+}
+
+impl fmt::Display for UnifiedEncodingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnifiedEncodingError::NotRepresentable { revision, cause } => {
+                write!(f, "Cannot encode at unified revision {revision:?}: {cause}")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnifiedEncodingError {}
+
+/// An error that prevents decoding a [ZIP 316] unified address or viewing key.
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnifiedDecodingError {
+    /// The string is not a valid unified container of the expected kind.
+    Parse(unified::ParseError),
+    /// The value is for a network other than the expected one.
+    NetworkMismatch {
+        expected: consensus::NetworkType,
+        actual: consensus::NetworkType,
+    },
+    /// The data of the item with this typecode is not a valid item of its type.
+    InvalidItem(unified::Typecode),
+}
+
+impl fmt::Display for UnifiedDecodingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnifiedDecodingError::Parse(e) => write!(f, "{e}"),
+            UnifiedDecodingError::NetworkMismatch { expected, actual } => write!(
+                f,
+                "Unified encoding is for network {actual:?} but {expected:?} was expected"
+            ),
+            UnifiedDecodingError::InvalidItem(typecode) => write!(
+                f,
+                "Unified encoding contains invalid data for typecode {}",
+                typecode.typecode_value()
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnifiedDecodingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            UnifiedDecodingError::Parse(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TransparentCodecError {
     UnsupportedAddressType(String),
@@ -177,28 +246,6 @@ impl<P: consensus::Parameters> AddressCodec<P> for sapling::PaymentAddress {
     }
 }
 
-impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
-    type Error = String;
-
-    fn encode(&self, params: &P) -> String {
-        self.encode(params)
-    }
-
-    fn decode(params: &P, address: &str) -> Result<Self, String> {
-        unified::Address::decode(address)
-            .map_err(|e| format!("{e}"))
-            .and_then(|(network, _revision, addr)| {
-                if params.network_type() == network {
-                    UnifiedAddress::try_from(addr).map_err(|e: &str| e.to_owned())
-                } else {
-                    Err(format!(
-                        "Address {address} is for a different network: {network:?}"
-                    ))
-                }
-            })
-    }
-}
-
 /// Writes an [`ExtendedSpendingKey`] as a Bech32-encoded string.
 ///
 /// # Examples
@@ -212,7 +259,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO).expect("the derivation path yields a valid key");
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
 /// [`ExtendedSpendingKey`]: sapling::zip32::ExtendedSpendingKey
@@ -245,7 +292,7 @@ pub fn decode_extended_spending_key(
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO).expect("the derivation path yields a valid key");
 /// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
@@ -506,7 +553,8 @@ mod tests_sapling {
 
     #[test]
     fn extended_spending_key() {
-        let extsk = ExtendedSpendingKey::master(&[0; 32][..]);
+        let extsk = ExtendedSpendingKey::master(&[0; 32][..])
+            .expect("the derivation path yields a valid key");
 
         let encoded_main = "secret-extended-key-main1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qysqws3xh6qmha7gna72fs2n4clnc9zgyd22s658f65pex4exe56qjk5pqj9vfdq7dfdhjc2rs9jdwq0zl99uwycyrxzp86705rk687spn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs87qvlj";
         let encoded_test = "secret-extended-key-test1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qysqws3xh6qmha7gna72fs2n4clnc9zgyd22s658f65pex4exe56qjk5pqj9vfdq7dfdhjc2rs9jdwq0zl99uwycyrxzp86705rk687spn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsvzyw8j";
@@ -547,7 +595,9 @@ mod tests_sapling {
     #[test]
     #[allow(deprecated)]
     fn extended_full_viewing_key() {
-        let extfvk = ExtendedSpendingKey::master(&[0; 32][..]).to_extended_full_viewing_key();
+        let extfvk = ExtendedSpendingKey::master(&[0; 32][..])
+            .expect("the derivation path yields a valid key")
+            .to_extended_full_viewing_key();
 
         let encoded_main = "zxviews1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsxmansf";
         let encoded_test = "zxviewtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs8evfkz";

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use zcash_keys::keys::{
     ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
 };
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 
 use super::orchard_received_notes;
 use crate::{UA_ORCHARD, UA_TRANSPARENT, wallet::init::WalletMigrationError};
@@ -97,7 +97,7 @@ mod tests {
         address::Address,
         keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
     };
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
 
     use crate::{
         UA_ORCHARD, UA_TRANSPARENT, WalletDb,
@@ -142,7 +142,7 @@ mod tests {
                 "INSERT INTO accounts (account, ufvk) VALUES (:account_id, :ufvk)",
                 named_params![
                     ":account_id": account_id,
-                    ":ufvk": ufvk.encode(&db_data.params)
+                    ":ufvk": ufvk.encode(&db_data.params).unwrap()
                 ],
             )
             .unwrap();

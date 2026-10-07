@@ -81,7 +81,7 @@ mod tests {
     use secrecy::Secret;
     use tempfile::NamedTempFile;
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
     use zip32::AccountId;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
@@ -107,7 +107,7 @@ mod tests {
 
         let usk =
             UnifiedSpendingKey::from_seed(&network, &seed_bytes[..], AccountId::ZERO).unwrap();
-        let ufvk_str = usk.to_unified_full_viewing_key().encode(&network);
+        let ufvk_str = usk.to_unified_full_viewing_key().encode(&network).unwrap();
 
         db_data
             .conn

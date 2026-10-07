@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.30.0"
+version = "0.31.0-pre.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -23,6 +23,7 @@ zcash_primitives = { workspace = true, features = ["circuits"] }
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 bellman.workspace = true
+groth16.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 jubjub.workspace = true
@@ -64,7 +65,7 @@ download-params = ["dep:minreq", "directories"]
 local-prover = ["directories"]
 
 ## Enables multithreading support for creating proofs.
-multicore = ["bellman/multicore", "zcash_primitives/multicore"]
+multicore = ["bellman/multicore", "groth16/multicore", "zcash_primitives/multicore"]
 
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []

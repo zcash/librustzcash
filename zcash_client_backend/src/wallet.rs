@@ -174,6 +174,7 @@ pub enum Recipient<AccountId> {
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: TxIndex,
+    transparent_spends: Vec<WalletTransparentSpend<AccountId>>,
     transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
@@ -193,6 +194,7 @@ impl<AccountId> WalletTx<AccountId> {
     pub fn new(
         txid: TxId,
         block_index: TxIndex,
+        transparent_spends: Vec<WalletTransparentSpend<AccountId>>,
         transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
@@ -208,6 +210,7 @@ impl<AccountId> WalletTx<AccountId> {
         Self {
             txid,
             block_index,
+            transparent_spends,
             transparent_outputs,
             sapling_spends,
             sapling_outputs,
@@ -232,6 +235,12 @@ impl<AccountId> WalletTx<AccountId> {
     /// Returns the index of the transaction in the containing block.
     pub fn block_index(&self) -> TxIndex {
         self.block_index
+    }
+
+    /// Returns a record for each transparent output belonging to the wallet that was spent in
+    /// the transaction.
+    pub fn transparent_spends(&self) -> &[WalletTransparentSpend<AccountId>] {
+        &self.transparent_spends
     }
 
     /// Returns a record for each transparent coin received or produced by the wallet.
@@ -539,6 +548,45 @@ pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, A
 /// is a distinct pool from Orchard.
 #[cfg(feature = "orchard")]
 pub type WalletIronwoodSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
+
+/// A reference to a transparent output belonging to the wallet that is spent within a
+/// transaction.
+///
+/// This is the transparent counterpart of [`WalletSpend`]. A transparent output is identified by
+/// the [`OutPoint`] that names it rather than by a nullifier, so unlike a shielded spend it can be
+/// recognized only by a wallet that already knows of the output being spent.
+#[derive(Clone, Debug)]
+pub struct WalletTransparentSpend<AccountId> {
+    index: usize,
+    outpoint: OutPoint,
+    account_id: AccountId,
+}
+
+impl<AccountId> WalletTransparentSpend<AccountId> {
+    /// Constructs a `WalletTransparentSpend` from its constituent parts.
+    pub fn from_parts(index: usize, outpoint: OutPoint, account_id: AccountId) -> Self {
+        Self {
+            index,
+            outpoint,
+            account_id,
+        }
+    }
+
+    /// Returns the index of the transparent input within the spending transaction.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Returns the outpoint of the output being spent.
+    pub fn outpoint(&self) -> &OutPoint {
+        &self.outpoint
+    }
+
+    /// Returns the identifier for the account to which the spent output belonged.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+}
 
 /// An output that was successfully decrypted in the process of wallet scanning.
 #[derive(Clone)]

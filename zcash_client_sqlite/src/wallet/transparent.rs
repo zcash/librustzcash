@@ -9,7 +9,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use rand::RngCore;
+use rand::Rng;
 use rand_distr::Distribution;
 use rusqlite::{Connection, OptionalExtension, Row, ToSql, named_params, types::Value};
 use tracing::{debug, warn};
@@ -119,6 +119,39 @@ pub(crate) fn detect_spending_accounts<'a>(
     }
 
     Ok(acc)
+}
+
+/// Returns the outpoints of the wallet's transparent outputs that are not known to have been
+/// spent in a mined transaction, each mapped to the account that received it.
+///
+/// An output whose only recorded spend is by a transaction that has not been mined is included:
+/// such a transaction may yet be replaced or expire, so the wallet must keep watching the
+/// outpoint for a spend that does reach the chain.
+pub(crate) fn get_unspent_outpoints(
+    conn: &Connection,
+) -> Result<HashMap<OutPoint, AccountUuid>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, tro.output_index, accounts.uuid
+         FROM transparent_received_outputs tro
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         JOIN accounts ON accounts.id = tro.account_id
+         WHERE tro.id NOT IN (
+             SELECT tros.transparent_received_output_id
+             FROM transparent_received_output_spends tros
+             JOIN transactions stx ON stx.id_tx = tros.transaction_id
+             WHERE stx.mined_height IS NOT NULL
+         )",
+    )?;
+
+    let rows = stmt.query_and_then([], |row| {
+        let txid: [u8; 32] = row.get("txid")?;
+        Ok::<_, SqliteClientError>((
+            OutPoint::new(txid, row.get("output_index")?),
+            AccountUuid(row.get("uuid")?),
+        ))
+    })?;
+
+    rows.collect()
 }
 
 /// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
@@ -2189,7 +2222,7 @@ impl From<TryFromIntError> for SchedulingError {
 
 /// Sample a random timestamp from an exponential distribution such that the expected value of the
 /// generated timestamp is `check_interval_seconds` after the provided `from_event` time.
-pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
+pub(crate) fn next_check_time<R: Rng, D: DerefMut<Target = R>>(
     mut rng: D,
     from_event: SystemTime,
     check_interval_seconds: u32,
@@ -2202,7 +2235,7 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     Ok(from_event + Duration::new(event_delay, 0))
 }
 
-pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore>(
+pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: Rng>(
     conn: &rusqlite::Transaction,
     params: &P,
     clock: C,
@@ -2672,6 +2705,49 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     Ok(None)
 }
 
+/// Returns every transparent receiver the wallet knows of, mapped to the account that controls
+/// it and the key scope under which it was derived.
+///
+/// This is the wallet-wide counterpart of [`find_account_uuid_for_transparent_address`] and
+/// searches the same locations: the `addresses` table, which holds the receivers of unified
+/// addresses, ephemeral receivers and imported standalone addresses; and the legacy transparent
+/// address (BIP 44 address index 0) of each account, which may have no `addresses` row. Where
+/// both name the same receiver, the `addresses` row takes precedence.
+pub(crate) fn get_receiver_accounts<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+) -> Result<
+    HashMap<TransparentAddress, (AccountUuid, Option<TransparentKeyScope>)>,
+    SqliteClientError,
+> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT addresses.cached_transparent_receiver_address, accounts.uuid, addresses.key_scope
+         FROM addresses
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE addresses.cached_transparent_receiver_address IS NOT NULL",
+    )?;
+
+    let mut receivers = stmt
+        .query_and_then([], |row| {
+            let address_str: String = row.get(0)?;
+            let address = TransparentAddress::decode(params, &address_str)?;
+            let account_id = AccountUuid(row.get(1)?);
+            let key_scope = KeyScope::decode(row.get(2)?)?;
+            Ok::<_, SqliteClientError>((address, (account_id, key_scope.as_transparent())))
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+
+    for account_id in get_account_ids(conn)? {
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
+            receivers
+                .entry(legacy_taddr)
+                .or_insert((account_id, KeyScope::EXTERNAL.as_transparent()));
+        }
+    }
+
+    Ok(receivers)
+}
+
 /// Add a transparent output relevant to this wallet to the database.
 ///
 /// `output_height` may be None if this is an ephemeral output from a
@@ -2827,7 +2903,9 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
 
     // If we have a record of the output already having been spent, then mark it as spent using the
-    // stored reference to the spending transaction.
+    // stored reference to the spending transaction. The spend may have been recorded by either
+    // route: against a transaction the wallet stores, or -- for a spend observed while scanning a
+    // block, whose spending transaction the wallet has no other reason to store -- by locator.
     let spending_tx_ref = conn
         .query_row(
             "SELECT ts.spending_transaction_id
@@ -2842,7 +2920,12 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
             ],
             |row| row.get::<_, i64>(0).map(TxRef),
         )
-        .optional()?;
+        .optional()?
+        .map(Ok)
+        .or_else(|| {
+            super::find_or_create_spending_tx_for_outpoint(conn, output.outpoint()).transpose()
+        })
+        .transpose()?;
 
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
@@ -2923,7 +3006,7 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     use {
         proptest::prelude::*,
-        secp256k1::{PublicKey, Secp256k1, SecretKey},
+        secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
         transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
@@ -2949,6 +3032,36 @@ mod tests {
     fn put_blocks_rolls_back_transparent_outputs() {
         zcash_client_backend::data_api::testing::transparent::put_blocks_rolls_back_transparent_outputs(
             TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_full_block_detects_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_detects_transparent_spend(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_full_block_detects_out_of_order_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_detects_out_of_order_transparent_spend(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_detects_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_detects_transparent_spend(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn scan_detects_out_of_order_transparent_spend() {
+        zcash_client_backend::data_api::testing::transparent::scan_detects_out_of_order_transparent_spend(
+            TestDbFactory::default(),
+            BlockCache::new(),
         );
     }
 
@@ -3942,7 +4055,7 @@ mod tests {
             ProptestConfig::with_cases(16),
             |(
                 sk in any::<[u8; 32]>()
-                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()),
                 // Above the account's default external gap (10) so store_address_range actually
                 // inserts our receiver rather than skipping an already-derived index.
                 child_index in 16u32..0x8000_0000u32,
@@ -3956,7 +4069,7 @@ mod tests {
                 let network = *st.network();
 
                 // A real pubkey and the transparent receiver it hashes to.
-                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let pubkey = PublicKey::from_secret_key(&sk);
                 let taddr = TransparentAddress::from_pubkey(&pubkey);
                 let taddr_enc = taddr.encode(&network);
                 let child = NonHardenedChildIndex::from_index(child_index).unwrap();
@@ -4012,7 +4125,7 @@ mod tests {
         proptest!(
             ProptestConfig::with_cases(16),
             |(sk in any::<[u8; 32]>()
-                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()))| {
+                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()))| {
                 let st = TestBuilder::new()
                     .with_data_store_factory(TestDbFactory::default())
                     .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -4021,7 +4134,7 @@ mod tests {
                 let account_uuid = st.test_account().unwrap().id();
                 let network = *st.network();
 
-                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let pubkey = PublicKey::from_secret_key(&sk);
                 let taddr_enc = TransparentAddress::from_pubkey(&pubkey).encode(&network);
 
                 let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
@@ -4071,10 +4184,7 @@ mod tests {
             .build();
 
         let network = *st.network();
-        let pubkey = PublicKey::from_secret_key(
-            &Secp256k1::new(),
-            &SecretKey::from_slice(&[0x11; 32]).unwrap(),
-        );
+        let pubkey = PublicKey::from_secret_key(&SecretKey::from_secret_bytes([0x11; 32]).unwrap());
 
         // A uuid that matches no account in the wallet.
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
@@ -4098,7 +4208,7 @@ mod tests {
             ProptestConfig::with_cases(12),
             |(sks in proptest::collection::vec(
                 any::<[u8; 32]>()
-                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_secret_bytes(b).ok()),
                 1..8usize,
             ))| {
                 let st = TestBuilder::new()
@@ -4108,10 +4218,9 @@ mod tests {
 
                 let account_uuid = st.test_account().unwrap().id();
                 let network = *st.network();
-                let secp = Secp256k1::new();
 
                 let pubkeys: Vec<PublicKey> =
-                    sks.iter().map(|sk| PublicKey::from_secret_key(&secp, sk)).collect();
+                    sks.iter().map(PublicKey::from_secret_key).collect();
                 let distinct: HashSet<String> = pubkeys
                     .iter()
                     .map(|pk| TransparentAddress::from_pubkey(pk).encode(&network))
@@ -4166,10 +4275,7 @@ mod tests {
             .build();
 
         let network = *st.network();
-        let pubkey = PublicKey::from_secret_key(
-            &Secp256k1::new(),
-            &SecretKey::from_slice(&[0x22; 32]).unwrap(),
-        );
+        let pubkey = PublicKey::from_secret_key(&SecretKey::from_secret_bytes([0x22; 32]).unwrap());
         let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xfe; 16]));
 
         let tx = st.wallet().db().conn.unchecked_transaction().unwrap();

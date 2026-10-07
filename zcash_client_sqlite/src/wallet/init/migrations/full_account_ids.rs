@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
 use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 use zip32::fingerprint::SeedFingerprint;
 
 use super::{
@@ -159,7 +159,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         }
                     })?;
                     let expected_ufvk = usk.to_unified_full_viewing_key();
-                    if ufvk != expected_ufvk.encode(&self.params) {
+                    if !ufvk_parsed.is_equivalent_to(&expected_ufvk) {
                         return Err(if seed_is_relevant {
                             WalletMigrationError::CorruptedData(
                                 "UFVK does not match expected value.".to_string(),
@@ -174,7 +174,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                     let uivk = ufvk_parsed
                         .to_unified_incoming_viewing_key()
-                        .encode(&self.params);
+                        .encode(&self.params)?;
 
                     #[cfg(feature = "orchard")]
                     let orchard_item = ufvk_parsed.orchard().map(|k| k.to_bytes());

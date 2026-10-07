@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
-use rand_core::OsRng;
+use rand_core::{CryptoRng, Rng};
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
 use zcash_primitives::transaction::{
@@ -168,7 +168,6 @@ pub struct Signer {
     tx_data: TransactionData<EffectsOnly>,
     txid_parts: TxDigests<Blake2bHash>,
     shielded_sighash: [u8; 32],
-    secp: secp256k1::Secp256k1<secp256k1::All>,
     transparent_sighash_policy: SighashPolicy,
 }
 
@@ -213,7 +212,6 @@ impl Signer {
             tx_data,
             txid_parts,
             shielded_sighash,
-            secp: secp256k1::Secp256k1::new(),
             transparent_sighash_policy: SighashPolicy::ALL_ONLY,
         })
     }
@@ -280,12 +278,11 @@ impl Signer {
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts, secp| {
+        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts| {
             input.sign_with_sighash_policy(
                 index,
                 |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
                 sk,
-                secp,
                 sighash_policy,
             )
         })
@@ -302,12 +299,11 @@ impl Signer {
         signature: secp256k1::ecdsa::Signature,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts, secp| {
+        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts| {
             input.append_signature_with_sighash_policy(
                 index,
                 |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
                 signature,
-                secp,
                 sighash_policy,
             )
         })
@@ -323,7 +319,6 @@ impl Signer {
             &mut transparent::pczt::Input,
             &TransactionData<EffectsOnly>,
             &TxDigests<Blake2bHash>,
-            &secp256k1::Secp256k1<secp256k1::All>,
         ) -> Result<(), transparent::pczt::SignerError>,
     {
         let input = self
@@ -338,7 +333,7 @@ impl Signer {
         // out the transparent bundle and calls those methods directly.
 
         // Generate or apply the signature.
-        f(input, &self.tx_data, &self.txid_parts, &self.secp).map_err(Error::TransparentSign)?;
+        f(input, &self.tx_data, &self.txid_parts).map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:
         // - If the Signer added a signature that does not use `SIGHASH_ANYONECANPAY`, the
@@ -373,13 +368,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_sapling(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_sapling<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &sapling::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -439,13 +437,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_orchard(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_orchard<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -530,13 +531,16 @@ impl Signer {
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
-    pub fn sign_ironwood(
+    ///
+    /// `rng` provides the randomness for the signature.
+    pub fn sign_ironwood<R: Rng + CryptoRng>(
         &mut self,
+        rng: R,
         index: usize,
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         self.generate_or_apply_ironwood_signature(index, |spend, shielded_sighash| {
-            spend.sign(shielded_sighash, ask, OsRng)
+            spend.sign(shielded_sighash, ask, rng)
         })
     }
 
@@ -602,7 +606,6 @@ impl Signer {
             tx_data: _,
             txid_parts: _,
             shielded_sighash: _,
-            secp: _,
             transparent_sighash_policy: _,
         } = self;
 
@@ -640,6 +643,7 @@ impl From<crate::ExtractError> for Error {
 mod tests {
     use ff::{Field, PrimeField};
     use pasta_curves::pallas;
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
     use zcash_protocol::consensus::BranchId;
 
     use super::Signer;
@@ -660,7 +664,7 @@ mod tests {
         Action {
             spend: Spend {
                 alpha: Some(alpha.to_repr()),
-                dummy_sk: Some(*sk.to_bytes()),
+                dummy_sk: Some(crate::common::SecretKeyBytes::new(*sk.to_bytes())),
                 ..base.spend
             },
             rcv: Some([3; 32]),
@@ -688,7 +692,9 @@ mod tests {
 
         assert!(pczt.ironwood.anchor.is_none());
 
-        let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
         assert!(pczt.ironwood.anchor.is_none());
         assert!(pczt.ironwood.bsk.is_some());
         // The IO Finalizer signs and clears the dummy spending key.
@@ -756,7 +762,7 @@ mod tests {
         // Only the ephemeral key comes from the encryptor; the ciphertext is replaced
         // with bytes that trial-decryption cannot recover a note from.
         let encryptor = OrchardNoteEncryption::new(None, note, [0; 512]);
-        let mut randomized_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
+        let mut randomized_ciphertext = encryptor.encrypt_note_plaintext().0.to_vec();
         randomized_ciphertext.fill(0xab);
 
         action.output.cmx = Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes());
@@ -778,7 +784,9 @@ mod tests {
             .unwrap();
         pczt.ironwood.actions.push(action);
 
-        let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
         let pczt = Signer::new(pczt).unwrap().finish();
 
         assert_eq!(

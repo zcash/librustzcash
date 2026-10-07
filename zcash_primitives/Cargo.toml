@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.30.1"
+version = "0.31.0-pre.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -53,8 +53,6 @@ proptest = { workspace = true, optional = true }
 transparent.workspace = true
 
 # - Transparent inputs
-block-buffer.workspace = true # remove after edition2024 upgrade
-crypto-common.workspace = true # remove after edition2024 upgrade
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
@@ -83,6 +81,7 @@ criterion.workspace = true
 incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 proptest.workspace = true
 assert_matches.workspace = true
+rand = { workspace = true, features = ["sys_rng"] }
 rand_xorshift.workspace = true
 transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }

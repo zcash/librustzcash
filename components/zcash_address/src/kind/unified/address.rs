@@ -339,6 +339,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use assert_matches::assert_matches;
+    use zcash_encoding::MAX_COMPACT_SIZE;
     use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
@@ -757,6 +758,23 @@ mod tests {
     }
 
     #[test]
+    fn rejects_typecode_above_compact_size_bound() {
+        // A typecode is encoded as a CompactSize, so a container holding a typecode
+        // above the CompactSize bound has no valid encoding.
+        let oversized_typecode = MAX_COMPACT_SIZE + 1;
+        let items = vec![Uitem::Data(Receiver::Unknown {
+            typecode: oversized_typecode,
+            data: vec![0; 32],
+        })];
+        assert_eq!(
+            Address::try_from_items(Revision::R2, items),
+            Err(ParseError::InvalidTypecodeValue(u64::from(
+                oversized_typecode
+            )))
+        );
+    }
+
+    #[test]
     fn r0_rejects_must_understand_metadata() {
         // Construct an R0 address encoding that contains a MUST-understand metadata item.
         // We build the raw bytes manually: Orchard receiver + ExpiryHeight metadata.
@@ -796,6 +814,105 @@ mod tests {
         assert_matches!(
             Address::parse_internal(Address::MAINNET_R2, &encoded[..], Revision::R2),
             Err(ParseError::NotUnderstood(0xE5))
+        );
+    }
+
+    #[test]
+    fn r0_construction_rejects_must_understand_metadata() {
+        // Revision 0 defines no MUST-understand metadata, so an R0 container holding an
+        // expiry item has no encoding that an R0 decoder accepts.
+        use crate::kind::unified::MetadataTypecode;
+
+        const EXPIRY_HEIGHT: u32 = 100;
+        const EXPIRY_TIME: u64 = 1_700_000_000;
+
+        for (meta, typecode) in [
+            (
+                MetadataItem::ExpiryHeight(EXPIRY_HEIGHT),
+                MetadataTypecode::ExpiryHeight,
+            ),
+            (
+                MetadataItem::ExpiryTime(EXPIRY_TIME),
+                MetadataTypecode::ExpiryTime,
+            ),
+        ] {
+            let items = vec![
+                Uitem::Data(Receiver::Orchard([1; 43])),
+                Uitem::Metadata(meta.clone()),
+            ];
+            assert_eq!(
+                Address::try_from_items(Revision::R0, items.clone()),
+                Err(ParseError::NotDefinedInRevision {
+                    typecode: Typecode::Metadata(typecode),
+                    revision: Revision::R0,
+                })
+            );
+            assert!(Address::try_from_items(Revision::R2, items).is_ok());
+        }
+    }
+
+    #[test]
+    fn construction_rejects_unknown_must_understand_metadata() {
+        // A MUST-understand metadata typecode that no revision assigns a meaning to.
+        const UNKNOWN_MUST_UNDERSTAND_TYPECODE: u32 = 0xE5;
+
+        for revision in [Revision::R0, Revision::R2] {
+            let items = vec![
+                Uitem::Data(Receiver::Orchard([1; 43])),
+                Uitem::Metadata(MetadataItem::Unknown {
+                    typecode: UNKNOWN_MUST_UNDERSTAND_TYPECODE,
+                    data: vec![0; 4],
+                }),
+            ];
+            assert_eq!(
+                Address::try_from_items(revision, items),
+                Err(ParseError::NotUnderstood(UNKNOWN_MUST_UNDERSTAND_TYPECODE))
+            );
+        }
+    }
+
+    #[test]
+    fn construction_rejects_encodings_outside_f4jumble_range() {
+        // A data typecode from the range ZIP 316 reserves for experiments
+        // (`0xFFFA..=0xFFFF`), which no revision assigns a meaning to.
+        const EXPERIMENTAL_TYPECODE: u32 = 0xFFFA;
+
+        // The 3-byte typecode, the 1-byte length, and the 16 bytes of padding are below
+        // F4Jumble's minimum input length.
+        let too_short = vec![Uitem::Data(Receiver::Unknown {
+            typecode: EXPERIMENTAL_TYPECODE,
+            data: vec![],
+        })];
+        assert_matches!(
+            Address::try_from_items(Revision::R2, too_short),
+            Err(ParseError::InvalidEncodedLength(length))
+                if length < *f4jumble::VALID_LENGTH.start()
+        );
+
+        let too_long = vec![Uitem::Data(Receiver::Unknown {
+            typecode: EXPERIMENTAL_TYPECODE,
+            data: vec![0; *f4jumble::VALID_LENGTH.end()],
+        })];
+        assert_matches!(
+            Address::try_from_items(Revision::R2, too_long),
+            Err(ParseError::InvalidEncodedLength(length))
+                if length > *f4jumble::VALID_LENGTH.end()
+        );
+    }
+
+    #[test]
+    fn transparent_only_r2_address_round_trips() {
+        // A lone P2PKH receiver has the shortest encoding that F4Jumble accepts.
+        let ua = Address::try_from_items(Revision::R2, vec![Uitem::Data(Receiver::P2pkh([1; 20]))])
+            .expect("a P2PKH receiver alone is a valid Revision 2 address");
+        let encoded = ua.encode(&NetworkType::Main);
+        assert!(
+            encoded.starts_with("tu1"),
+            "expected a tu address: {encoded}"
+        );
+        assert_eq!(
+            Address::decode(&encoded),
+            Ok((NetworkType::Main, Revision::R2, ua))
         );
     }
 }

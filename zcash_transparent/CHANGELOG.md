@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
+
+### Fixed
+- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
+  is not less than its end now yields no indices. It previously yielded the
+  start index.
+
+## [0.11.0-pre.0] - 2026-09-30
+
 ### Added
 - `zcash_transparent::keys::ShieldingOvks`
 - `zcash_transparent::sighash::SighashPolicy`
@@ -25,22 +37,25 @@ workspace.
 - `zcash_transparent::zip48::P2shViewingKeyError`
 
 ### Changed
+- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_address 0.14.0-pre.0`,
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and `zip32 0.3`.
+- `zcash_transparent::builder::TransparentSignatureContext` no longer has
+  lifetime or type parameters, and
+  `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`
+  no longer takes a `secp256k1::Secp256k1` context argument.
 - `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns
   `ShieldingOvks` instead of `(InternalOvk, ExternalOvk)`. Read each key from
   `ShieldingOvks::internal` or `ShieldingOvks::external` instead of by tuple
   position.
 - `zcash_transparent::pczt`:
-  - `Input::sign` and `Input::append_signature` now verify the consistency of the
-    input before signing it, and sign only for `SighashType::ALL`. Previously the
-    `redeem_script` was used unchecked (both to locate the pubkey to sign with and
-    as the `script_code` committed to by the signature), and the sighash type was
-    taken verbatim from the PCZT. Use `Input::sign_with_sighash_policy` or
+  - `Input::sign` and `Input::append_signature` no longer take a
+    `secp256k1::Secp256k1` context argument.
+  - `Input::sign` and `Input::append_signature` now check that the input's
+    `redeem_script` is the script its `script_pubkey` commits to before signing,
+    and sign only for `SighashType::ALL`. Use `Input::sign_with_sighash_policy` or
     `Input::append_signature_with_sighash_policy` to permit other sighash types.
   - `Input::with_signable_input` now applies those same checks, and returns
-    `Result<T, SignerError>` instead of `T`. Whoever signs the sighash it prepares
-    is authorizing whatever that sighash commits to, so preparing one over an
-    unverified `script_code`, or for a counterparty's chosen sighash type, was
-    equivalent to signing over it. Use
+    `Result<T, SignerError>` instead of `T`. Use
     `Input::with_signable_input_with_sighash_policy` to permit other sighash types.
   - `Bundle::finalize_spends` now requires every partial signature it uses to end
     in a sighash-type byte matching its input's `sighash_type`, and finalizes only

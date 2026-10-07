@@ -464,6 +464,32 @@ impl Number {
             .parse(i)
     }
 
+    /// Returns the plain decimal integer representation of `value`.
+    pub(crate) fn from_uint256(value: U256) -> Self {
+        const RADIX: u64 = 10;
+        let radix = U256::from(RADIX);
+
+        let mut places = vec![];
+        let mut rest = value;
+        loop {
+            let (quotient, digit) = rest.div_mod(radix);
+            // `digit` is less than `RADIX`, so it fits in a `u8`.
+            places.push(digit.low_u32() as u8);
+            if quotient.is_zero() {
+                break;
+            }
+            rest = quotient;
+        }
+        places.reverse();
+
+        Number {
+            signum: None,
+            integer: Digits { places },
+            decimal: None,
+            exponent: None,
+        }
+    }
+
     /// Returns `true` if this [`Number`] has at least one integer digit or a
     /// decimal part.
     ///
@@ -735,21 +761,16 @@ impl AddressOrEnsName {
     /// Returns the ERC-55 validated string representation of the address, or the ENS name, if possible.
     pub fn to_erc55_validated_string(&self) -> Result<String, ValidationError> {
         match self {
-            AddressOrEnsName::Address(hex_digits) => {
-                if let Err(ValidationError::Erc55Validation { reason }) =
-                    hex_digits.validate_erc55()
-                {
-                    match reason {
+            AddressOrEnsName::Address(hex_digits) => match hex_digits.validate_erc55() {
+                Ok(()) => Ok(format!("0x{hex_digits}")),
+                // An all-lowercase or all-uppercase address carries no checksum to verify.
+                Err(ValidationError::Erc55Validation {
+                    reason:
                         Erc55ValidationFailureReason::AllLowercase
-                        | Erc55ValidationFailureReason::AllUppercase => {
-                            Ok(format!("0x{hex_digits}"))
-                        }
-                        e => Erc55ValidationSnafu { reason: e }.fail(),
-                    }
-                } else {
-                    Ok(format!("0x{hex_digits}"))
-                }
-            }
+                        | Erc55ValidationFailureReason::AllUppercase,
+                }) => Ok(format!("0x{hex_digits}")),
+                Err(e) => Err(e),
+            },
             AddressOrEnsName::Name(ens_name) => Ok(ens_name.to_string()),
         }
     }
@@ -890,7 +911,7 @@ impl Value {
 // have the start of one on the branch `feat/eip-681-tx-req-parser-solidity-types`
 #[derive(Clone, Debug, PartialEq)]
 pub struct EthereumAbiTypeName {
-    name: String,
+    pub(crate) name: String,
 }
 
 impl core::fmt::Display for EthereumAbiTypeName {
@@ -1021,7 +1042,7 @@ impl Parameter {
 
 /// A collection of [`Parameter`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct Parameters(Vec<Parameter>);
+pub struct Parameters(pub(crate) Vec<Parameter>);
 
 impl core::fmt::Display for Parameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1173,8 +1194,8 @@ impl Parameters {
 /// prefix is what you expect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaPrefix {
-    prefix: String,
-    has_pay: bool,
+    pub(crate) prefix: String,
+    pub(crate) has_pay: bool,
 }
 
 impl core::fmt::Display for SchemaPrefix {
@@ -1294,6 +1315,8 @@ mod test {
     use prop::strategy::Union;
     use proptest::prelude::*;
 
+    use crate::testing::arb_u256;
+
     #[test]
     fn digits_sanity() {
         assert_eq!(
@@ -1305,6 +1328,34 @@ mod test {
             .unwrap()
         );
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
+    }
+
+    #[test]
+    fn number_from_uint256_edges() {
+        for v in [
+            U256::zero(),
+            U256::one(),
+            U256::from(9u64),
+            U256::from(10u64),
+            U256::MAX,
+        ] {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.to_string(), v.to_string());
+            assert_eq!(n.as_uint256(), Ok(v));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn number_from_uint256_roundtrip(v in arb_u256()) {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.as_uint256(), Ok(v));
+
+            let s = n.to_string();
+            let (rest, parsed) = Number::parse(&s).unwrap();
+            assert!(rest.is_empty(), "unparsed input: {rest:?}");
+            assert_eq!(parsed, n);
+        }
     }
 
     #[test]

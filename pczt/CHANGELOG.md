@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_primitives 0.31.0-pre.1` and
+  `zcash_transparent 0.11.0-pre.1`.
+
+## [0.10.0-pre.0] - 2026-10-02
+
 ### Added
 - Experimental support for creating and extracting V7 PCZTs under NuTachyon,
   behind `zcash_unstable="nutachyon"`, using the V6 transaction body.
@@ -18,18 +26,44 @@ workspace.
 - `pczt::common::Global::{coin_type, fallback_lock_time, tx_modifiable}`
 - `pczt::roles::signer::Signer::with_transparent_sighash_policy`
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
+- `pczt::common::SecretKeyBytes`
 
 ### Changed
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `orchard 0.16`,
+  `pasta_curves 0.6`, `rand_core 0.10`, `redjubjub 0.9`, `sapling-crypto 0.9`,
+  `secp256k1 0.33`, `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and
+  `zcash_transparent 0.11.0-pre.0`.
+- `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
+  `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
+  create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
+  sign_ironwood, sign_sapling}`, and
+  `pczt::roles::tx_extractor::TransactionExtractor::extract` now take an `rng`
+  first argument that implements `rand_core::{Rng, CryptoRng}`, in place of
+  drawing randomness from the operating system. Pass
+  `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behavior.
+- The role features no longer depend on `getrandom`.
+- The `orchard` and `sapling` features now enable the `zeroize` features of
+  `orchard` and `sapling-crypto` respectively.
+- `pczt::orchard::Spend::dummy_sk` now returns `&Option<SecretKeyBytes>` in
+  place of `&Option<[u8; 32]>`; use `SecretKeyBytes::expose_secret` to read the
+  bytes.
+- The Orchard and Sapling binding signing keys, `pczt::orchard::Spend::dummy_sk`,
+  and the Sapling dummy spend authorizing key are now erased from memory when the
+  PCZT holding them is dropped or they are redacted, and are omitted from `Debug`
+  output. Their serialized encoding is unchanged.
 - `pczt::roles::signer::Signer::{sign_transparent, append_transparent_signature,
-  transparent_sighash}` now check the consistency of the transparent input, and use only
-  `SighashType::ALL`. Use `Signer::with_transparent_sighash_policy` to permit other
-  sighash types.
+  transparent_sighash}` now check the consistency of the transparent input, and return
+  an error for an input whose sighash type is not `SighashType::ALL`. Use
+  `Signer::with_transparent_sighash_policy` to permit other sighash types.
 - `pczt::roles::spend_finalizer::SpendFinalizer::finalize_spends` now finalizes only
   `SighashType::ALL` signatures that match their input's `sighash_type`; use
   `SpendFinalizer::with_sighash_policy` to permit other sighash types.
 - `pczt::roles::creator::Creator::new` creates a v6 PCZT for the NU7
-  consensus branch ID `0x77190AD9`, and the `pczt::roles::updater::Updater`
-  anchor setters accept a PCZT with that branch ID. Neither needs the
+  consensus branch ID `0x77190AD9`, the `pczt::roles::updater::Updater`
+  anchor setters accept a PCZT with that branch ID, and `pczt::Pczt::into_effects`
+  and `pczt::roles::tx_extractor::TransactionExtractor::extract` extract it as a
+  v6 transaction without a ZIP 233 amount. None of these needs the
   `--cfg zcash_unstable="nu7"` configuration flag any more.
 
 ## [0.9.3] - 2026-08-07
