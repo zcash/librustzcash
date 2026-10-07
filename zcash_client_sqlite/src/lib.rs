@@ -5207,8 +5207,8 @@ mod tests {
         let mut stored = address.encode_receiver_preserving(state.network());
 
         for revision in [
-            zcash_protocol::address::Revision::R2,
-            zcash_protocol::address::Revision::R0,
+            zcash_address::unified::Revision::R2,
+            zcash_address::unified::Revision::R0,
         ] {
             let encoded = address
                 .encode_receiver_preserving_revision(state.network(), revision)

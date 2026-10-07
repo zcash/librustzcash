@@ -1,12 +1,11 @@
 use alloc::vec::Vec;
 use core::{convert::TryInto, fmt};
-use zcash_protocol::address::Revision;
-use zcash_protocol::constants;
 
 use super::{
     Container, DataTypecode, Encoding, P2shItemKind, ParseError, Uitem,
     private::{SealedContainer, SealedItem, validate_p2sh_item},
 };
+use crate::{constants, unified::Revision};
 
 /// The set of known FVKs for Unified FVKs.
 #[derive(Clone, PartialEq, Eq, Hash)]

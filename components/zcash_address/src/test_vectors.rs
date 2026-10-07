@@ -6,13 +6,13 @@ use {
     crate::{
         ToAddress, ZcashAddress,
         unified::{
-            self, Uitem,
+            self, Revision, Uitem,
             address::{Receiver, test_vectors::TEST_VECTORS},
         },
     },
     alloc::string::ToString,
     core::iter,
-    zcash_protocol::{address::Revision, consensus::NetworkType},
+    zcash_protocol::consensus::NetworkType,
 };
 
 #[test]
