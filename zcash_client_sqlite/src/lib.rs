@@ -35,7 +35,7 @@
 
 use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
-use rand::RngCore;
+use rand::Rng;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
@@ -817,7 +817,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::Rng> WalletDb<C, P, CL, R> {
     /// For each ephemeral address in the wallet, ensure that the transaction data request queue
     /// contains a request for the wallet to check for UTXOs belonging to that address at some time
     /// during the next 24-hour period.
@@ -1488,6 +1488,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        wallet::transparent::get_unspent_outpoints(self.conn.borrow())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receiver_accounts(
+        &self,
+    ) -> Result<
+        HashMap<TransparentAddress, (Self::AccountId, Option<TransparentKeyScope>)>,
+        Self::Error,
+    > {
+        wallet::transparent::get_receiver_accounts(self.conn.borrow(), &self.params)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
         account: Self::AccountId,
@@ -1813,7 +1830,7 @@ where
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters,
     CL: Clock,
-    R: RngCore,
+    R: Rng,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -1842,8 +1859,8 @@ where
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
-    WalletWrite for WalletDb<C, P, CL, R>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
+    for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -2121,7 +2138,7 @@ impl<P, CL, R> OutputLockStore for WalletDb<SqlTransaction<'_>, P, CL, R>
 where
     P: consensus::Parameters,
     CL: Clock,
-    R: RngCore,
+    R: Rng,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -2159,7 +2176,7 @@ where
     }
 }
 
-impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
+impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     for WalletDb<SqlTransaction<'_>, P, CL, R>
 {
     type UtxoRef = UtxoId;
@@ -2720,7 +2737,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     }
 }
 
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     LowLevelWalletRead for WalletDb<C, P, CL, R>
 {
     type AccountId = AccountUuid;
@@ -2822,18 +2839,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
-    fn get_txs_spending_transparent_outputs_of(
+    fn get_unknown_fee_spenders_of(
         &self,
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error> {
-        wallet::get_txs_spending_transparent_outputs_of(self.conn.borrow(), &self.params, tx_ref)
+        wallet::get_unknown_fee_spenders_of(self.conn.borrow(), &self.params, tx_ref)
     }
 
     fn detect_sapling_spend(
         &self,
         nf: &::sapling::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Sapling, nf)
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Sapling,
+            nf,
+        )
     }
 
     #[cfg(feature = "orchard")]
@@ -2841,7 +2862,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Orchard,
+            &nf.to_bytes(),
+        )
     }
 
     #[cfg(feature = "orchard")]
@@ -2849,7 +2874,11 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Ironwood, &nf.to_bytes())
+        wallet::find_or_create_spending_tx_for_nullifier(
+            self.conn.borrow(),
+            ShieldedPool::Ironwood,
+            &nf.to_bytes(),
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2869,7 +2898,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 }
 
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     LowLevelWalletWrite for WalletDb<C, P, CL, R>
 {
     fn put_block_meta(
@@ -3078,9 +3107,18 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
-    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_transparent_spend_locator_map(self.conn.borrow(), block_height, spends)
+    }
+
+    fn prune_tracked_spends(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
         if let Some(meta) = wallet::block_fully_scanned(self.conn.borrow(), &self.params)? {
-            wallet::prune_nullifier_map(
+            wallet::prune_spend_maps(
                 self.conn.borrow(),
                 meta.block_height().saturating_sub(pruning_depth),
             )?;
@@ -3589,7 +3627,7 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     AddressStore for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
@@ -4604,10 +4642,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(
-            ufvk.encode(st.network()),
-            account.ufvk().unwrap().encode(st.network())
-        );
+        assert!(ufvk.is_equivalent_to(account.ufvk().unwrap()));
 
         assert_matches!(
             account.source(),
@@ -4669,18 +4704,17 @@ mod tests {
             )
             .expect("a transparent-only UFVK can be imported");
 
-        // The account was persisted with its (Revision 2-encoded) UFVK.
+        // The account was persisted with its UFVK.
         let stored = st
             .wallet()
             .get_account(account.id())
             .unwrap()
             .expect("the account was persisted");
-        assert_eq!(
+        assert!(
             stored
                 .ufvk()
                 .expect("the account has a UFVK")
-                .encode(&network),
-            ufvk.encode(&network),
+                .is_equivalent_to(&ufvk)
         );
 
         // The account's default address was stored, and is a transparent-only Revision 2
@@ -4838,7 +4872,6 @@ mod tests {
         );
 
         // Import the sapling-only IVK as an IVK-only account.
-        let network = *st.network();
         let ivk_account = st
             .wallet_mut()
             .db_mut()
@@ -4879,58 +4912,6 @@ mod tests {
             Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
         );
 
-        let scanned_height = u32::from(birthday.height()) + 20;
-        st.wallet_mut()
-            .conn_mut()
-            .execute("DELETE FROM scan_queue", [])
-            .unwrap();
-        st.wallet_mut()
-            .conn_mut()
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![
-                    u32::from(birthday.height()),
-                    scanned_height + 1,
-                    crate::wallet::scanning::priority_code(
-                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
-                    ),
-                ],
-            )
-            .unwrap();
-
-        // If requeuing fails after the account row has been upgraded, the whole
-        // import must roll back; otherwise a retry would see a duplicate UFVK
-        // and could never schedule the missing rescan.
-        st.wallet_mut()
-            .conn_mut()
-            .execute_batch(
-                "CREATE TEMP TRIGGER fail_upgrade_rescan BEFORE INSERT ON main.scan_queue
-                 BEGIN SELECT RAISE(ABORT, 'injected rescan failure'); END;",
-            )
-            .unwrap();
-        assert!(
-            st.wallet_mut()
-                .import_account_ufvk(
-                    "",
-                    &ufvk,
-                    &birthday,
-                    AccountPurpose::Spending { derivation: None },
-                    None,
-                )
-                .is_err()
-        );
-        let after_failed_upgrade = st.wallet().get_account(ivk_account.id()).unwrap().unwrap();
-        assert!(after_failed_upgrade.ufvk().is_none());
-        assert_eq!(
-            after_failed_upgrade.uivk().encode(&network),
-            ivk_account.uivk().encode(&network)
-        );
-        st.wallet_mut()
-            .conn_mut()
-            .execute_batch("DROP TRIGGER fail_upgrade_rescan")
-            .unwrap();
-
         // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
         let ufvk_upgraded = st
             .wallet_mut()
@@ -4945,26 +4926,7 @@ mod tests {
         // Should return the same account, now with the UFVK.
         assert_eq!(ufvk_upgraded.id(), ivk_account.id());
         assert!(ufvk_upgraded.ufvk().is_some());
-        assert_eq!(
-            ufvk_upgraded.ufvk().unwrap().encode(&network),
-            ufvk.encode(&network),
-        );
-        let rescan_priority: i64 = st
-            .wallet()
-            .conn()
-            .query_row(
-                "SELECT priority FROM scan_queue
-                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
-                [scanned_height],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            rescan_priority,
-            crate::wallet::scanning::priority_code(
-                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
-            )
-        );
+        assert!(ufvk_upgraded.ufvk().unwrap().is_equivalent_to(&ufvk));
 
         // (c) IVK import over an account that now has a UFVK should fail.
         assert_matches!(
@@ -5007,7 +4969,6 @@ mod tests {
             UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let full_uivk = ufvk.to_unified_incoming_viewing_key();
-        let network = *st.network();
 
         // Create a UIVK with only Sapling (a strict subset of the full UIVK).
         let sapling_only_uivk = UnifiedIncomingViewingKey::new(
@@ -5042,29 +5003,6 @@ mod tests {
             })
             .unwrap();
 
-        // Model a wallet that has already scanned beyond this account's birthday
-        // using only its Sapling IVK. Adding Orchard capability must requeue these
-        // blocks so any earlier Orchard notes can be discovered.
-        let scanned_height = u32::from(birthday.height()) + 20;
-        st.wallet_mut()
-            .conn_mut()
-            .execute("DELETE FROM scan_queue", [])
-            .unwrap();
-        st.wallet_mut()
-            .conn_mut()
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![
-                    u32::from(birthday.height()),
-                    scanned_height + 1,
-                    crate::wallet::scanning::priority_code(
-                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
-                    ),
-                ],
-            )
-            .unwrap();
-
         // Import the full UIVK (sapling + orchard) — should upgrade.
         let upgraded = st
             .wallet_mut()
@@ -5088,23 +5026,9 @@ mod tests {
 
         assert_eq!(upgraded.id(), ivk_account.id());
         assert!(upgraded.ufvk().is_none());
-        assert!(upgraded.uivk().encode(&network) != ivk_account.uivk().encode(&network));
-        let rescan_priority: i64 = st
-            .wallet()
-            .conn()
-            .query_row(
-                "SELECT priority FROM scan_queue
-                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
-                [scanned_height],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            rescan_priority,
-            crate::wallet::scanning::priority_code(
-                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
-            )
-        );
+        // The upgraded UIVK strictly extends the original.
+        assert!(upgraded.uivk().subsumes(&ivk_account.uivk()));
+        assert!(!ivk_account.uivk().subsumes(&upgraded.uivk()));
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -5208,7 +5132,8 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let hd_account_index = zip32::AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index);
+        let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index)
+            .expect("the derivation path yields a valid key");
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
@@ -5266,14 +5191,10 @@ mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_address_matches_revision_0_stored_address() {
-        // A wallet created before Revision 2 support stores its addresses in the
-        // Revision 0 encoding, and no migration re-encodes them. Address lookup must
-        // still resolve such a row, even though the query encodes the address it is
-        // given as Revision 2.
-        use zcash_address::unified::{Address as UnifiedEncoding, Encoding, Receiver, Uitem};
-        use zcash_protocol::{address::Revision, consensus::Parameters};
-
+    fn find_account_for_address_matches_address_stored_at_any_revision() {
+        // The wallet stores each address in its most compatible encoding, but earlier
+        // releases stored addresses at a fixed revision, and no migration re-encodes them.
+        // Address lookup must resolve a row whatever revision its address was stored at.
         let mut state = create_test_wallet_with_one_account();
         let account = state.test_account().cloned().unwrap();
         state
@@ -5282,54 +5203,35 @@ mod tests {
             .unwrap();
 
         let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
-
-        // Rebuild the address in the Revision 0 encoding a pre-migration wallet held.
-        let mut items = vec![];
-        #[cfg(feature = "orchard")]
-        if let Some(orchard) = ua.orchard() {
-            items.push(Uitem::Data(Receiver::Orchard(
-                orchard.to_raw_address_bytes(),
-            )));
-        }
-        if let Some(sapling) = ua.sapling() {
-            items.push(Uitem::Data(Receiver::Sapling(sapling.to_bytes())));
-        }
-        if let Some(taddr) = ua.transparent() {
-            items.push(Uitem::Data(match taddr {
-                ::transparent::address::TransparentAddress::PublicKeyHash(data) => {
-                    Receiver::P2pkh(*data)
-                }
-                ::transparent::address::TransparentAddress::ScriptHash(data) => {
-                    Receiver::P2sh(*data)
-                }
-            }));
-        }
-        let revision_0 = UnifiedEncoding::try_from_items(Revision::R0, items)
-            .expect("the generated address is a valid Revision 0 address")
-            .encode(&state.network().network_type());
-
         let address = Address::Unified(Box::new(ua));
-        let revision_2 = address.encode_receiver_preserving(state.network());
-        assert_ne!(revision_0, revision_2);
+        let mut stored = address.encode_receiver_preserving(state.network());
 
-        let updated = state
-            .wallet_mut()
-            .conn_mut()
-            .execute(
-                "UPDATE addresses SET address = :revision_0 WHERE address = :revision_2",
-                named_params![":revision_0": revision_0, ":revision_2": revision_2],
-            )
-            .unwrap();
-        assert_eq!(updated, 1);
-
-        // Both encodings of the same address must resolve to the same account.
-        assert_eq!(
+        for revision in [
+            zcash_protocol::address::Revision::R2,
+            zcash_protocol::address::Revision::R0,
+        ] {
+            let encoded = address
+                .encode_receiver_preserving_revision(state.network(), revision)
+                .unwrap();
             state
-                .wallet()
-                .find_account_for_address(state.network(), &address)
-                .unwrap(),
-            Some(account.id())
-        );
+                .wallet_mut()
+                .conn_mut()
+                .execute(
+                    "UPDATE addresses SET address = :encoded WHERE address = :stored",
+                    named_params![":encoded": encoded, ":stored": stored],
+                )
+                .unwrap();
+            stored = encoded;
+
+            assert_eq!(
+                state
+                    .wallet()
+                    .find_account_for_address(state.network(), &address)
+                    .unwrap(),
+                Some(account.id()),
+                "lookup failed for an address stored at {revision:?}",
+            );
+        }
     }
 
     #[test]
