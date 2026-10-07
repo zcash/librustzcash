@@ -82,7 +82,7 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    crate::data_api::wallet::propose_transfer,
     std::collections::BTreeMap,
     zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
@@ -99,10 +99,17 @@ use zcash_address::{
 #[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
 use crate::proposal::ProposalError;
 
+// `SpendPolicy` is used only by scenarios behind one of these two features.
+#[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
+use crate::data_api::wallet::input_selection::SpendPolicy;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{CoinbaseFilter, OutputOfSentTx, TransactionDataRequest, TransactionStatus},
+        data_api::{
+            CoinbaseFilter, OutputOfSentTx, TransactionDataRequest, TransactionStatus,
+            wallet::input_selection::TransparentSpendPolicy,
+        },
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::{Exposure, TransparentAddressSource, WalletTransparentOutput},
@@ -2032,6 +2039,78 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 
     let ending_balance = st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN);
     assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
+}
+
+/// Tests that the `InsufficientFunds` error of a transfer permitted to spend the account's
+/// transparent outputs reports the value of those outputs as available, alongside the notes.
+///
+/// The test:
+/// - Adds a shielded note and a transparent UTXO to the account.
+/// - Proposes a transfer exceeding their combined value, permitting transparent spends.
+/// - Verifies that `available` is the sum of the note and the UTXO, and that `required` is
+///   the payment plus the fee for spending both.
+#[cfg(feature = "transparent-inputs")]
+pub fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let note_value = Zatoshis::const_from_u64(50_000);
+    let (h, _, _) = st.add_a_single_note_checking_balance(note_value);
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    let utxo_value = Zatoshis::const_from_u64(30_000);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(utxo_value, taddr.script().into()),
+        Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(100_000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    // The transaction would spend the transparent input and the note, paying the recipient
+    // and a change output in the note's pool: one transparent logical action plus two
+    // shielded ones.
+    let expected_required = (amount + (MARGINAL_FEE * 3u64).unwrap()).unwrap();
+    let expected_available = (note_value + utxo_value).unwrap();
+
+    assert_matches!(
+        st.propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
+        ),
+        Err(Error::InsufficientFunds { available, required })
+            if available == expected_available && required == expected_required
+    );
 }
 
 pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(

@@ -1484,9 +1484,17 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
             let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available && !transparent_inputs_changed {
+                // `amount_required` was computed over the transparent inputs as well as the
+                // notes, so the value reported against it must count both.
+                let transparent_available = transparent_inputs
+                    .iter()
+                    .map(|input| input.value())
+                    .sum::<Option<Zatoshis>>()
+                    .ok_or(BalanceError::Overflow)?;
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
-                    available: new_available,
+                    available: (new_available + transparent_available)
+                        .ok_or(BalanceError::Overflow)?,
                 });
             } else {
                 // If the set of selected shielded notes has grown, or the transparent

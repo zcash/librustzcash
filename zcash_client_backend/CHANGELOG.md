@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now counts the value of the selected transparent inputs in the `available`
+  field of the `InsufficientFunds` error it returns. Previously that field
+  reported the value of the selected shielded notes alone.
+
 ## [0.25.0-pre.1] - 2026-10-06
 
 ### Changed

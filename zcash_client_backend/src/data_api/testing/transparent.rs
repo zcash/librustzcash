@@ -3331,12 +3331,18 @@ where
         &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
     );
 
+    // The gather stops at `CAP` inputs, whose value the error reports as available; the
+    // request needs the payment plus one logical action per gathered input.
+    let expected_available = Zatoshis::const_from_u64(DUST_VALUE * (CAP as u64));
+    let expected_required =
+        (payment_amount + (zip317::MARGINAL_FEE * (CAP as u64)).unwrap()).unwrap();
     assert_matches!(
         result,
-        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        Err(crate::data_api::error::Error::InsufficientFunds { available, required })
+            if available == expected_available && required == expected_required,
         "the transparent gather should stop at the input cap rather than consuming every \
-         eligible dust UTXO, so the request should fail rather than succeed with an \
-         uncapped number of inputs",
+         eligible dust UTXO, so the request should fail with the capped inputs reported as \
+         available rather than succeed with an uncapped number of inputs",
     );
 }
 
