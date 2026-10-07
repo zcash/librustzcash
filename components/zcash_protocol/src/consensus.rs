@@ -225,6 +225,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 32].
     ///
     /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_keys::constants::hrp_sapling_extended_spending_key` instead."
+    )]
     fn hrp_sapling_extended_spending_key(&self) -> &'static str;
 
     /// Returns the human-readable prefix for Bech32-encoded Sapling extended full
@@ -233,6 +237,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 32].
     ///
     /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_keys::constants::hrp_sapling_extended_full_viewing_key` instead."
+    )]
     fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str;
 
     /// Returns the Bech32-encoded human-readable prefix for Sapling payment addresses
@@ -241,6 +249,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
     ///
     /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::hrp_sapling_payment_address` instead."
+    )]
     fn hrp_sapling_payment_address(&self) -> &'static str;
 
     /// Returns the human-readable prefix for Base58Check-encoded Sprout
@@ -250,19 +262,35 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in the [Zcash Protocol Specification section 5.6.3][sproutpaymentaddrencoding].
     ///
     /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::b58_sprout_address_prefix` instead."
+    )]
     fn b58_sprout_address_prefix(&self) -> [u8; 2];
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network to which this NetworkConstants value
     /// applies.
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::b58_pubkey_address_prefix` instead."
+    )]
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent secret key for the
     /// network to which this NetworkConstants value applies.
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_keys::constants::b58_secret_key_prefix` instead."
+    )]
     fn b58_secret_key_prefix(&self) -> [u8; 1];
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network to which this NetworkConstants value applies.
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::b58_script_address_prefix` instead."
+    )]
     fn b58_script_address_prefix(&self) -> [u8; 2];
 
     /// Returns the Bech32-encoded human-readable prefix for TEX addresses, for the
@@ -271,6 +299,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 320].
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::hrp_tex_address` instead."
+    )]
     fn hrp_tex_address(&self) -> &'static str;
 
     /// The HRP for a Bech32m-encoded mainnet Unified Address.
@@ -278,6 +310,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::hrp_unified_address` instead."
+    )]
     fn hrp_unified_address(&self) -> &'static str;
 
     /// The HRP for a Bech32m-encoded mainnet Unified FVK.
@@ -285,6 +321,10 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::hrp_unified_fvk` instead."
+    )]
     fn hrp_unified_fvk(&self) -> &'static str;
 
     /// The HRP for a Bech32m-encoded mainnet Unified IVK.
@@ -292,39 +332,16 @@ pub trait NetworkConstants: private::Sealed + Clone {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
+    #[deprecated(
+        since = "0.11.0",
+        note = "Use `zcash_address::constants::hrp_unified_ivk` instead."
+    )]
     fn hrp_unified_ivk(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded shielded-only Revision 2 Unified Address.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_address_r2(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded transparent-including Revision 2 Unified Address.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_address_r2_ti(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded Revision 2 Unified FVK.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_fvk_r2(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded Revision 2 Unified IVK.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_ivk_r2(&self) -> &'static str;
 }
 
 impl private::Sealed for NetworkType {}
 
+#[allow(deprecated)]
 impl NetworkConstants for NetworkType {
     fn coin_type(&self) -> u32 {
         match self {
@@ -421,38 +438,6 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
         }
     }
-
-    fn hrp_unified_address_r2(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2,
-            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2,
-        }
-    }
-
-    fn hrp_unified_address_r2_ti(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2_TI,
-            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2_TI,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2_TI,
-        }
-    }
-
-    fn hrp_unified_fvk_r2(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_FVK_R2,
-            NetworkType::Test => testnet::HRP_UNIFIED_FVK_R2,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK_R2,
-        }
-    }
-
-    fn hrp_unified_ivk_r2(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_IVK_R2,
-            NetworkType::Test => testnet::HRP_UNIFIED_IVK_R2,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK_R2,
-        }
-    }
 }
 
 /// Zcash consensus parameters.
@@ -483,6 +468,7 @@ impl<P: Parameters> Parameters for &P {
 
 impl<P: Parameters> private::Sealed for P {}
 
+#[allow(deprecated)]
 impl<P: Parameters> NetworkConstants for P {
     fn coin_type(&self) -> u32 {
         self.network_type().coin_type()
@@ -530,22 +516,6 @@ impl<P: Parameters> NetworkConstants for P {
 
     fn hrp_unified_ivk(&self) -> &'static str {
         self.network_type().hrp_unified_ivk()
-    }
-
-    fn hrp_unified_address_r2(&self) -> &'static str {
-        self.network_type().hrp_unified_address_r2()
-    }
-
-    fn hrp_unified_address_r2_ti(&self) -> &'static str {
-        self.network_type().hrp_unified_address_r2_ti()
-    }
-
-    fn hrp_unified_fvk_r2(&self) -> &'static str {
-        self.network_type().hrp_unified_fvk_r2()
-    }
-
-    fn hrp_unified_ivk_r2(&self) -> &'static str {
-        self.network_type().hrp_unified_ivk_r2()
     }
 }
 

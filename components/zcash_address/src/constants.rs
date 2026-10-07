@@ -385,6 +385,7 @@ mod tests {
     /// The `zcash_protocol` copies of these prefixes must not drift from the definitions
     /// here while both exist.
     #[test]
+    #[allow(deprecated)]
     fn zcash_protocol_copies_match() {
         for net in NETWORKS {
             assert_eq!(
