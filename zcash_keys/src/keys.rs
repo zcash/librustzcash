@@ -2394,7 +2394,7 @@ mod tests {
         },
         assert_matches::assert_matches,
         zcash_address::unified::{self, Encoding},
-        zcash_protocol::consensus::{NetworkConstants, NetworkType, TEST_NETWORK},
+        zcash_protocol::consensus::{NetworkType, TEST_NETWORK},
     };
 
     #[cfg(feature = "orchard")]
@@ -2545,7 +2545,10 @@ mod tests {
 
                 let ufvk_r0 = ufvk_r0.unwrap();
                 assert_eq!(ufvk_compatible, ufvk_r0);
-                assert!(ufvk_r0.starts_with(MAIN_NETWORK.hrp_unified_fvk()));
+                assert!(
+                    ufvk_r0
+                        .starts_with(zcash_address::constants::hrp_unified_fvk(NetworkType::Main))
+                );
                 assert_eq!(
                     UnifiedFullViewingKey::decode(&MAIN_NETWORK, &ufvk_r0)
                         .unwrap()
@@ -2556,7 +2559,10 @@ mod tests {
 
                 let uivk_r0 = uivk_r0.unwrap();
                 assert_eq!(uivk_compatible, uivk_r0);
-                assert!(uivk_r0.starts_with(MAIN_NETWORK.hrp_unified_ivk()));
+                assert!(
+                    uivk_r0
+                        .starts_with(zcash_address::constants::hrp_unified_ivk(NetworkType::Main))
+                );
                 assert_eq!(
                     UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, &uivk_r0)
                         .unwrap()
@@ -3035,7 +3041,6 @@ mod tests {
             UnifiedAddressRequest,
         };
         use crate::address::UnifiedAddress;
-        use zcash_protocol::consensus::NetworkConstants;
 
         let account_pubkey = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
             .unwrap()
@@ -3081,7 +3086,9 @@ mod tests {
             .encode_revision(&MAIN_NETWORK, Revision::R2)
             .expect("every address has a Revision 2 encoding");
         assert!(
-            encoded.starts_with(MAIN_NETWORK.hrp_unified_address_r2_ti()),
+            encoded.starts_with(zcash_address::constants::hrp_unified_address_r2_ti(
+                zcash_protocol::consensus::NetworkType::Main
+            )),
             "{encoded} is not a transparent-including Revision 2 Unified Address",
         );
         assert_eq!(

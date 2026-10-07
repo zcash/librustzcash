@@ -12,7 +12,7 @@ use {
     core::array::TryFromSliceError,
     secp256k1::{PublicKey, SecretKey},
     secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize, zeroize::ZeroizeOnDrop},
-    zcash_protocol::consensus::NetworkConstants,
+    zcash_protocol::consensus::NetworkType,
 };
 
 /// An error indicating that a DER-encoded secret key could not be decoded.
@@ -90,16 +90,13 @@ impl Key {
     /// Decodes a base58-encoded secret key.
     ///
     /// This corresponds to <https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L282>
-    pub fn decode_base58<N: NetworkConstants>(
-        network: &N,
-        encoded: &SecretString,
-    ) -> Result<Self, ParseError> {
+    pub fn decode_base58(network: NetworkType, encoded: &SecretString) -> Result<Self, ParseError> {
         let decoded = SecretVec::new(
             bs58::decode(encoded.expose_secret())
                 .with_check(None)
                 .into_vec()?,
         );
-        let prefix = network.b58_secret_key_prefix();
+        let prefix = crate::constants::b58_secret_key_prefix(network);
         let decoded_len = decoded.expose_secret().len();
         let compressed =
             decoded_len == (33 + prefix.len()) && decoded.expose_secret().last() == Some(&1);
@@ -120,10 +117,9 @@ impl Key {
     /// Encodes a base58-encoded secret key.
     ///
     /// This corresponds to <https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298>
-    pub fn encode_base58<N: NetworkConstants>(&self, network: &N) -> SecretString {
+    pub fn encode_base58(&self, network: NetworkType) -> SecretString {
         let input = SecretVec::new(
-            network
-                .b58_secret_key_prefix()
+            crate::constants::b58_secret_key_prefix(network)
                 .iter()
                 .chain(self.secret.to_secret_bytes().iter())
                 .chain(self.compressed.then_some(&1))
@@ -405,7 +401,7 @@ mod tests {
                 VectorKind::Privkey { is_compressed } => {
                     // Must be valid private key
                     let secret = &SecretString::new(v.base58_encoding.into());
-                    let privkey = Key::decode_base58(&v.network, secret).unwrap();
+                    let privkey = Key::decode_base58(v.network, secret).unwrap();
                     assert_eq!(privkey.compressed, is_compressed);
                     assert_eq!(
                         hex::encode(privkey.secret.to_secret_bytes()),
@@ -430,11 +426,8 @@ mod tests {
 
                     // Public key must be invalid private key
                     assert!(
-                        Key::decode_base58(
-                            &v.network,
-                            &SecretString::new(v.base58_encoding.into())
-                        )
-                        .is_err()
+                        Key::decode_base58(v.network, &SecretString::new(v.base58_encoding.into()))
+                            .is_err()
                     );
                 }
             }
@@ -446,7 +439,7 @@ mod tests {
     fn base58_keys_invalid() {
         for &encoded in INVALID {
             assert!(
-                Key::decode_base58(&NetworkType::Main, &SecretString::new(encoded.into())).is_err()
+                Key::decode_base58(NetworkType::Main, &SecretString::new(encoded.into())).is_err()
             );
             assert_eq!(
                 zcash_address::ZcashAddress::try_from_encoded(encoded),
