@@ -1142,11 +1142,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                zcash_address::constants::hrp_sapling_payment_address(wdb.params.network_type()),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                zcash_keys::constants::hrp_sapling_extended_full_viewing_key(
+                    wdb.params.network_type(),
+                ),
                 extfvk,
             );
             wdb.conn.execute(
@@ -1287,11 +1289,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                zcash_address::constants::hrp_sapling_payment_address(wdb.params.network_type()),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                zcash_keys::constants::hrp_sapling_extended_full_viewing_key(
+                    wdb.params.network_type(),
+                ),
                 extfvk,
             );
             wdb.conn.execute(
