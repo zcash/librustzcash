@@ -869,6 +869,169 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn fee_included_exact_balance_empties_the_account() {
+        testing::pool::fee_included_exact_balance_empties_the_account::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_amount_below_balance_returns_change() {
+        testing::pool::fee_included_amount_below_balance_returns_change::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_dust_band_leaves_the_residual_as_change() {
+        testing::pool::fee_included_dust_band_leaves_the_residual_as_change::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_dust_band_adds_a_second_note() {
+        testing::pool::fee_included_dust_band_adds_a_second_note::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_fee_consumes_the_amount() {
+        testing::pool::fee_included_fee_consumes_the_amount::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_balance_at_the_fee_finds_no_payment() {
+        testing::pool::fee_included_balance_at_the_fee_finds_no_payment::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_no_fitting_payment_reports_the_smallest_debit() {
+        testing::pool::fee_included_no_fitting_payment_reports_the_smallest_debit::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    fn fee_included_pays_one_zatoshi_at_the_boundary() {
+        testing::pool::fee_included_pays_one_zatoshi_at_the_boundary::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_balance_below_amount_is_an_error() {
+        testing::pool::fee_included_balance_below_amount_is_an_error::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_splits_change_when_the_strategy_asks() {
+        testing::pool::fee_included_splits_change_when_the_strategy_asks::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_spends_several_notes() {
+        testing::pool::fee_included_spends_several_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_bisects_to_an_exact_debit() {
+        testing::pool::fee_included_bisects_to_an_exact_debit::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_finds_a_payment_below_a_consuming_fee() {
+        testing::pool::fee_included_finds_a_payment_below_a_consuming_fee::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_keeps_a_selection_below_the_amount() {
+        testing::pool::fee_included_keeps_a_selection_below_the_amount::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_finds_no_payment_at_the_selection_limit() {
+        testing::pool::fee_included_finds_no_payment_at_the_selection_limit::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_returns_the_candidate_at_the_selection_limit() {
+        testing::pool::fee_included_returns_the_candidate_at_the_selection_limit::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    fn fee_included_stops_at_a_report_without_shortfall() {
+        testing::pool::fee_included_stops_at_a_report_without_shortfall::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_report_without_shortfall_below_the_amount_is_a_balance_error() {
+        testing::pool::fee_included_report_without_shortfall_below_the_amount_is_a_balance_error::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
+    fn fee_included_report_without_shortfall_finds_no_payment() {
+        testing::pool::fee_included_report_without_shortfall_finds_no_payment::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fee_included_to_transparent_recipient() {
+        testing::pool::fee_included_to_transparent_recipient::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fee_included_with_transparent_source() {
+        testing::pool::fee_included_with_transparent_source::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fee_included_transparent_inputs_to_transparent_recipient() {
+        testing::pool::fee_included_transparent_inputs_to_transparent_recipient::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    fn fee_included_across_pools() {
+        testing::pool::fee_included_across_pools::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_dust_band_across_pools() {
+        testing::pool::fee_included_dust_band_across_pools::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_dust_band_with_a_small_note_across_pools() {
+        testing::pool::fee_included_dust_band_with_a_small_note_across_pools::<
+            OrchardPoolTester,
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    fn fee_included_locks_only_the_returned_proposal_inputs() {
+        testing::pool::fee_included_locks_only_the_returned_proposal_inputs::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn fee_included_v5_to_orchard_receiver_requires_ironwood() {
+        testing::pool::fee_included_v5_to_orchard_receiver_requires_ironwood()
+    }
+
+    #[test]
+    fn fee_included_after_nu6_3_pays_through_ironwood() {
+        testing::pool::fee_included_after_nu6_3_pays_through_ironwood()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fee_included_to_tex_recipient() {
+        testing::pool::fee_included_to_tex_recipient::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn fee_included_to_tex_fails_without_transparent_inputs() {
+        testing::pool::fee_included_to_tex_fails_without_transparent_inputs::<OrchardPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn spend_everything_multi_step_single_note_proposed_transfer() {
         testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<OrchardPoolTester>(
