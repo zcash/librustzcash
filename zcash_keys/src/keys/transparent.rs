@@ -357,7 +357,6 @@ mod tests {
     use rand_chacha::ChaChaRng;
     use secp256k1::SecretKey;
     use secrecy::SecretString;
-    use transparent::address::TransparentAddress;
     use zcash_protocol::consensus::NetworkType;
     use zcash_script::script::Evaluable;
 
@@ -365,6 +364,7 @@ mod tests {
         Key,
         test_vectors::{INVALID, VALID, VectorKind},
     };
+    use crate::address::Address;
 
     /// Generates a uniformly random secp256k1 secret key.
     fn random_secret_key(rng: &mut impl Rng) -> SecretKey {
@@ -416,11 +416,15 @@ mod tests {
                 }
                 VectorKind::Pubkey => {
                     // Must be valid public key
-                    let destination: TransparentAddress =
-                        zcash_address::ZcashAddress::try_from_encoded(v.base58_encoding)
+                    let destination =
+                        match zcash_address::ZcashAddress::try_from_encoded(v.base58_encoding)
                             .unwrap()
-                            .convert_if_network(v.network)
-                            .unwrap();
+                            .convert_if_network::<Address>(v.network)
+                            .unwrap()
+                        {
+                            Address::Transparent(addr) => addr,
+                            _ => panic!("{} is not a transparent address", v.base58_encoding),
+                        };
                     let script = destination.script();
                     assert_eq!(hex::encode(script.to_bytes()), v.raw_bytes_hex);
 
