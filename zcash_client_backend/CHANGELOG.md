@@ -11,6 +11,12 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::error::Error::NoPaymentWithinAmount`
+- `zcash_client_backend::data_api::wallet::propose_fee_included_transfer`
+- `zcash_client_backend::data_api::testing::TestState::propose_fee_included_transfer`
+  (behind `test-dependencies`)
+- `zcash_client_backend::data_api::testing::pool::dsl::TestScenario::propose_fee_included_to`
+  (behind `test-dependencies`)
 - `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
 - `zcash_client_backend::data_api::PutBlocksError`
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
