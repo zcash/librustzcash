@@ -15,6 +15,9 @@ workspace.
   now counts the value of the selected transparent inputs in the `available`
   field of the `InsufficientFunds` error it returns. Previously that field
   reported the value of the selected shielded notes alone.
+- `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
+  matches on the transparent receiver of a unified `address` that also has a
+  shielded receiver.
 
 ## [0.25.0-pre.1] - 2026-10-06
 

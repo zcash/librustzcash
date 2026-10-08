@@ -257,256 +257,42 @@ impl UnifiedAddress {
         Self::from_container(ua).map_err(UnifiedDecodingError::InvalidItem)
     }
 
-    /// Serializes this [`UnifiedAddress`] for sharing as a [`ZcashAddress`] for the given
-    /// network.
+    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network.
     ///
-    /// The encoding omits the transparent receiver when the address has a shielded
-    /// receiver, and includes it otherwise. The address is encoded at [ZIP 316]
-    /// [`Revision::R0`] if that revision can represent it, and at [`Revision::R2`]
-    /// otherwise. At [`Revision::R2`], an address without a transparent receiver uses the
-    /// shielded-only (`zu`) form, and an address whose only receiver is transparent uses
-    /// the transparent-including (`tu`) form.
+    /// The encoding contains every receiver and metadata item of this address. It uses
+    /// [ZIP 316] [`Revision::R0`] if that revision can represent the address, and
+    /// [`Revision::R2`] otherwise. At [`Revision::R2`], an address with a transparent
+    /// receiver uses the transparent-including (`tu`) form, and an address without one
+    /// uses the shielded-only (`zu`) form.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
-        self.to_compatible_zcash_address_with_transparent(net, self.sharing_transparent())
+        self.to_zcash_address_revision(net, Revision::R0)
+            .or_else(|_| self.to_zcash_address_revision(net, Revision::R2))
+            // Every `UnifiedAddress` has at least one data item, and every unknown item
+            // or metadata item it holds was accepted by a decoder, so Revision 2 can
+            // always encode it.
+            .expect("Revision 2 can encode every UnifiedAddress")
     }
 
-    /// Serializes this [`UnifiedAddress`] for sharing as a [`ZcashAddress`] for the given
-    /// network at the given [ZIP 316] revision.
+    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network at
+    /// the given [ZIP 316] revision.
     ///
-    /// The encoding omits the transparent receiver when the address has a shielded
-    /// receiver, and includes it otherwise. At [`Revision::R2`], an address without a
-    /// transparent receiver uses the shielded-only (`zu`) form, and an address whose only
-    /// receiver is transparent uses the transparent-including (`tu`) form.
+    /// The encoding contains every receiver and metadata item of this address. At
+    /// [`Revision::R2`], an address with a transparent receiver uses the
+    /// transparent-including (`tu`) form, and an address without one uses the
+    /// shielded-only (`zu`) form.
     ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding
-    /// at `revision`. [`Revision::R0`] cannot encode expiry metadata or an address
-    /// whose only receiver is transparent; every address has a [`Revision::R2`]
-    /// encoding.
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if `revision` cannot encode
+    /// every receiver and metadata item of this address. [`Revision::R0`] cannot encode
+    /// expiry metadata or an address whose only receiver is transparent; every address
+    /// has a [`Revision::R2`] encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn to_zcash_address_revision(
         &self,
         net: NetworkType,
         revision: Revision,
-    ) -> Result<ZcashAddress, UnifiedEncodingError> {
-        self.to_zcash_address_with_transparent(net, revision, self.sharing_transparent())
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for sharing on the given
-    /// network.
-    ///
-    /// The encoding omits the transparent receiver when the address has a shielded
-    /// receiver, and includes it otherwise. The address is encoded at [ZIP 316]
-    /// [`Revision::R0`] if that revision can represent it, and at [`Revision::R2`]
-    /// otherwise. At [`Revision::R2`], an address without a transparent receiver uses the
-    /// shielded-only (`zu`) form, and an address whose only receiver is transparent uses
-    /// the transparent-including (`tu`) form.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_zcash_address(params.network_type()).to_string()
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for sharing on the given
-    /// network at the given [ZIP 316] revision.
-    ///
-    /// The encoding omits the transparent receiver when the address has a shielded
-    /// receiver, and includes it otherwise. At [`Revision::R2`], an address without a
-    /// transparent receiver uses the shielded-only (`zu`) form, and an address whose only
-    /// receiver is transparent uses the transparent-including (`tu`) form.
-    ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding
-    /// at `revision`. [`Revision::R0`] cannot encode expiry metadata or an address
-    /// whose only receiver is transparent; every address has a [`Revision::R2`]
-    /// encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_revision<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        revision: Revision,
-    ) -> Result<String, UnifiedEncodingError> {
-        self.to_zcash_address_revision(params.network_type(), revision)
-            .map(|addr| addr.to_string())
-    }
-
-    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network,
-    /// including every receiver.
-    ///
-    /// The address is encoded at [ZIP 316] [`Revision::R0`] if that revision can represent
-    /// it, and at [`Revision::R2`] otherwise. At [`Revision::R2`], an address with a
-    /// transparent receiver uses the transparent-including (`tu`) form, and an address
-    /// without one uses the shielded-only (`zu`) form.
-    ///
-    /// Use this when persisting an address that must round-trip through its string
-    /// encoding. When sharing an address, use [`to_zcash_address`](Self::to_zcash_address),
-    /// which omits the transparent receiver of an address that has a shielded receiver.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_receiver_preserving_zcash_address(&self, net: NetworkType) -> ZcashAddress {
-        self.to_compatible_zcash_address_with_transparent(net, self.transparent.as_ref())
-    }
-
-    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network at
-    /// the given [ZIP 316] revision, including every receiver.
-    ///
-    /// At [`Revision::R2`], an address with a transparent receiver uses the
-    /// transparent-including (`tu`) form, and an address without one uses the
-    /// shielded-only (`zu`) form.
-    ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding
-    /// at `revision`. [`Revision::R0`] cannot encode expiry metadata or an address
-    /// whose only receiver is transparent; every address has a [`Revision::R2`]
-    /// encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_receiver_preserving_zcash_address_revision(
-        &self,
-        net: NetworkType,
-        revision: Revision,
-    ) -> Result<ZcashAddress, UnifiedEncodingError> {
-        self.to_zcash_address_with_transparent(net, revision, self.transparent.as_ref())
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for the given network,
-    /// including every receiver.
-    ///
-    /// The address is encoded at [ZIP 316] [`Revision::R0`] if that revision can represent
-    /// it, and at [`Revision::R2`] otherwise. At [`Revision::R2`], an address with a
-    /// transparent receiver uses the transparent-including (`tu`) form, and an address
-    /// without one uses the shielded-only (`zu`) form.
-    ///
-    /// Use this when persisting an address that must round-trip through its string
-    /// encoding. When sharing an address, use [`encode`](Self::encode), which omits the
-    /// transparent receiver of an address that has a shielded receiver.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_receiver_preserving<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_receiver_preserving_zcash_address(params.network_type())
-            .to_string()
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for the given network at the
-    /// given [ZIP 316] revision, including every receiver.
-    ///
-    /// At [`Revision::R2`], an address with a transparent receiver uses the
-    /// transparent-including (`tu`) form, and an address without one uses the
-    /// shielded-only (`zu`) form.
-    ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding
-    /// at `revision`. [`Revision::R0`] cannot encode expiry metadata or an address
-    /// whose only receiver is transparent; every address has a [`Revision::R2`]
-    /// encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_receiver_preserving_revision<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        revision: Revision,
-    ) -> Result<String, UnifiedEncodingError> {
-        self.to_receiver_preserving_zcash_address_revision(params.network_type(), revision)
-            .map(|addr| addr.to_string())
-    }
-
-    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network,
-    /// including its transparent receiver.
-    ///
-    /// The address is encoded at [ZIP 316] [`Revision::R0`] if that revision can represent
-    /// it, and at [`Revision::R2`] otherwise; at [`Revision::R2`] it uses the
-    /// transparent-including (`tu`) form. The resulting address exposes a transparent
-    /// receiver.
-    ///
-    /// Returns `None` if this address has no transparent receiver.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_transparent_including_zcash_address(&self, net: NetworkType) -> Option<ZcashAddress> {
-        self.transparent
-            .as_ref()
-            .map(|taddr| self.to_compatible_zcash_address_with_transparent(net, Some(taddr)))
-    }
-
-    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network at
-    /// the given [ZIP 316] revision, including its transparent receiver.
-    ///
-    /// At [`Revision::R2`] the address uses the transparent-including (`tu`) form. The
-    /// resulting address exposes a transparent receiver.
-    ///
-    /// Returns `Ok(None)` if this address has no transparent receiver. Returns
-    /// [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding at
-    /// `revision`; [`Revision::R0`] cannot encode expiry metadata or an address whose only
-    /// receiver is transparent.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_transparent_including_zcash_address_revision(
-        &self,
-        net: NetworkType,
-        revision: Revision,
-    ) -> Result<Option<ZcashAddress>, UnifiedEncodingError> {
-        self.transparent
-            .as_ref()
-            .map(|taddr| self.to_zcash_address_with_transparent(net, revision, Some(taddr)))
-            .transpose()
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for the given network,
-    /// including its transparent receiver.
-    ///
-    /// The address is encoded at [ZIP 316] [`Revision::R0`] if that revision can represent
-    /// it, and at [`Revision::R2`] otherwise; at [`Revision::R2`] it uses the
-    /// transparent-including (`tu`) form. The resulting address exposes a transparent
-    /// receiver.
-    ///
-    /// Returns `None` if this address has no transparent receiver.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_transparent_including<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> Option<String> {
-        self.to_transparent_including_zcash_address(params.network_type())
-            .map(|addr| addr.to_string())
-    }
-
-    /// Returns the string encoding of this [`UnifiedAddress`] for the given network at the
-    /// given [ZIP 316] revision, including its transparent receiver.
-    ///
-    /// At [`Revision::R2`] the address uses the transparent-including (`tu`) form. The
-    /// resulting address exposes a transparent receiver.
-    ///
-    /// Returns `Ok(None)` if this address has no transparent receiver. Returns
-    /// [`UnifiedEncodingError::NotRepresentable`] if this address has no encoding at
-    /// `revision`; [`Revision::R0`] cannot encode expiry metadata or an address whose only
-    /// receiver is transparent.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_transparent_including_revision<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        revision: Revision,
-    ) -> Result<Option<String>, UnifiedEncodingError> {
-        self.to_transparent_including_zcash_address_revision(params.network_type(), revision)
-            .map(|addr| addr.map(|addr| addr.to_string()))
-    }
-
-    /// Returns the transparent receiver that the sharing form of this address includes:
-    /// none when a shielded receiver is present, and the transparent receiver otherwise.
-    fn sharing_transparent(&self) -> Option<&TransparentAddress> {
-        if self.has_sapling() || self.has_orchard() {
-            None
-        } else {
-            self.transparent.as_ref()
-        }
-    }
-
-    /// Encodes this address at `revision` with the given transparent receiver (if any)
-    /// along with its shielded receivers, unknown items, and metadata.
-    fn to_zcash_address_with_transparent(
-        &self,
-        net: NetworkType,
-        revision: Revision,
-        transparent: Option<&TransparentAddress>,
     ) -> Result<ZcashAddress, UnifiedEncodingError> {
         let items: Vec<Uitem<unified::Receiver>> = core::iter::empty()
             .chain(self.unknown.iter().map(|(typecode, data)| {
@@ -543,7 +329,7 @@ impl UnifiedAddress {
                     core::iter::empty()
                 }
             })
-            .chain(transparent.map(|taddr| match taddr {
+            .chain(self.transparent.as_ref().map(|taddr| match taddr {
                 TransparentAddress::PublicKeyHash(data) => {
                     Uitem::Data(unified::Receiver::P2pkh(*data))
                 }
@@ -570,20 +356,40 @@ impl UnifiedAddress {
             .map_err(|cause| UnifiedEncodingError::NotRepresentable { revision, cause })
     }
 
-    /// Encodes this address with the given transparent receiver (if any) at
-    /// [`Revision::R0`] when that revision can represent it, and at [`Revision::R2`]
-    /// otherwise.
-    fn to_compatible_zcash_address_with_transparent(
+    /// Returns the string encoding of this [`UnifiedAddress`] for the given network.
+    ///
+    /// The encoding contains every receiver and metadata item of this address. It uses
+    /// [ZIP 316] [`Revision::R0`] if that revision can represent the address, and
+    /// [`Revision::R2`] otherwise. At [`Revision::R2`], an address with a transparent
+    /// receiver uses the transparent-including (`tu`) form, and an address without one
+    /// uses the shielded-only (`zu`) form.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.to_zcash_address(params.network_type()).to_string()
+    }
+
+    /// Returns the string encoding of this [`UnifiedAddress`] for the given network at the
+    /// given [ZIP 316] revision.
+    ///
+    /// The encoding contains every receiver and metadata item of this address. At
+    /// [`Revision::R2`], an address with a transparent receiver uses the
+    /// transparent-including (`tu`) form, and an address without one uses the
+    /// shielded-only (`zu`) form.
+    ///
+    /// Returns [`UnifiedEncodingError::NotRepresentable`] if `revision` cannot encode
+    /// every receiver and metadata item of this address. [`Revision::R0`] cannot encode
+    /// expiry metadata or an address whose only receiver is transparent; every address
+    /// has a [`Revision::R2`] encoding.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn encode_revision<P: consensus::Parameters>(
         &self,
-        net: NetworkType,
-        transparent: Option<&TransparentAddress>,
-    ) -> ZcashAddress {
-        self.to_zcash_address_with_transparent(net, Revision::R0, transparent)
-            .or_else(|_| self.to_zcash_address_with_transparent(net, Revision::R2, transparent))
-            // Every `UnifiedAddress` has at least one data item, and every unknown item
-            // or metadata item it holds was accepted by a decoder, so Revision 2 can
-            // always encode it.
-            .expect("Revision 2 can encode every UnifiedAddress")
+        params: &P,
+        revision: Revision,
+    ) -> Result<String, UnifiedEncodingError> {
+        self.to_zcash_address_revision(params.network_type(), revision)
+            .map(|addr| addr.to_string())
     }
 
     /// Returns the set of receiver typecodes.
@@ -797,17 +603,15 @@ impl Address {
         zaddr.convert_if_network(params.network_type())
     }
 
-    /// Converts this [`Address`] to a [`ZcashAddress`] for sharing.
+    /// Converts this [`Address`] to a [`ZcashAddress`].
     ///
-    /// A unified address omits its transparent receiver when it has a shielded receiver,
-    /// and includes it otherwise.
-    ///
-    /// A unified address is encoded at the given [ZIP 316] revision. Sapling,
-    /// transparent, and TEX addresses have a single encoding and ignore `ua_revision`.
+    /// A unified address is encoded with every receiver and metadata item, at the given
+    /// [ZIP 316] revision. Sapling, transparent, and TEX addresses have a single encoding
+    /// and ignore `ua_revision`.
     ///
     /// Returns [`UnifiedEncodingError::NotRepresentable`] if this is a unified address
-    /// with no encoding at `ua_revision`. [`Revision::R0`] cannot encode expiry metadata
-    /// or an address whose only receiver is transparent; every address has a
+    /// that `ua_revision` cannot encode in full. [`Revision::R0`] cannot encode expiry
+    /// metadata or an address whose only receiver is transparent; every address has a
     /// [`Revision::R2`] encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
@@ -844,14 +648,11 @@ impl Address {
         })
     }
 
-    /// Converts this [`Address`] to a [`ZcashAddress`] for sharing.
+    /// Converts this [`Address`] to a [`ZcashAddress`].
     ///
-    /// A unified address omits its transparent receiver when it has a shielded receiver,
-    /// and includes it otherwise.
-    ///
-    /// A unified address is encoded at [ZIP 316] [`Revision::R0`] if that revision can
-    /// represent it, and at [`Revision::R2`] otherwise. Sapling, transparent, and TEX
-    /// addresses have a single encoding.
+    /// A unified address is encoded with every receiver and metadata item, at [ZIP 316]
+    /// [`Revision::R0`] if that revision can represent it, and at [`Revision::R2`]
+    /// otherwise. Sapling, transparent, and TEX addresses have a single encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {
@@ -865,31 +666,26 @@ impl Address {
         }
     }
 
-    /// Returns the string encoding of this [`Address`] for sharing.
+    /// Returns the string encoding of this [`Address`].
     ///
-    /// A unified address omits its transparent receiver when it has a shielded receiver,
-    /// and includes it otherwise.
-    ///
-    /// A unified address is encoded at [ZIP 316] [`Revision::R0`] if that revision can
-    /// represent it, and at [`Revision::R2`] otherwise. Sapling, transparent, and TEX
-    /// addresses have a single encoding.
+    /// A unified address is encoded with every receiver and metadata item, at [ZIP 316]
+    /// [`Revision::R0`] if that revision can represent it, and at [`Revision::R2`]
+    /// otherwise. Sapling, transparent, and TEX addresses have a single encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         self.to_zcash_address(params).to_string()
     }
 
-    /// Returns the string encoding of this [`Address`] for sharing.
+    /// Returns the string encoding of this [`Address`].
     ///
-    /// A unified address omits its transparent receiver when it has a shielded receiver,
-    /// and includes it otherwise.
-    ///
-    /// A unified address is encoded at the given [ZIP 316] revision. Sapling,
-    /// transparent, and TEX addresses have a single encoding and ignore `ua_revision`.
+    /// A unified address is encoded with every receiver and metadata item, at the given
+    /// [ZIP 316] revision. Sapling, transparent, and TEX addresses have a single encoding
+    /// and ignore `ua_revision`.
     ///
     /// Returns [`UnifiedEncodingError::NotRepresentable`] if this is a unified address
-    /// with no encoding at `ua_revision`. [`Revision::R0`] cannot encode expiry metadata
-    /// or an address whose only receiver is transparent; every address has a
+    /// that `ua_revision` cannot encode in full. [`Revision::R0`] cannot encode expiry
+    /// metadata or an address whose only receiver is transparent; every address has a
     /// [`Revision::R2`] encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
@@ -900,87 +696,6 @@ impl Address {
     ) -> Result<String, UnifiedEncodingError> {
         self.to_zcash_address_revision(params, ua_revision)
             .map(|addr| addr.to_string())
-    }
-
-    /// Converts this [`Address`] to a [`ZcashAddress`] that preserves every receiver.
-    ///
-    /// A unified address includes every receiver.
-    ///
-    /// A unified address is encoded at the given [ZIP 316] revision. Sapling,
-    /// transparent, and TEX addresses have a single encoding and ignore `ua_revision`.
-    ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this is a unified address
-    /// with no encoding at `ua_revision`. [`Revision::R0`] cannot encode expiry metadata
-    /// or an address whose only receiver is transparent; every address has a
-    /// [`Revision::R2`] encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_receiver_preserving_zcash_address_revision<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        ua_revision: Revision,
-    ) -> Result<ZcashAddress, UnifiedEncodingError> {
-        match self {
-            Address::Unified(ua) => {
-                ua.to_receiver_preserving_zcash_address_revision(params.network_type(), ua_revision)
-            }
-            _ => self.to_zcash_address_revision(params, ua_revision),
-        }
-    }
-
-    /// Returns the string encoding of this [`Address`] that preserves every receiver.
-    ///
-    /// A unified address includes every receiver.
-    ///
-    /// A unified address is encoded at the given [ZIP 316] revision. Sapling,
-    /// transparent, and TEX addresses have a single encoding and ignore `ua_revision`.
-    ///
-    /// Returns [`UnifiedEncodingError::NotRepresentable`] if this is a unified address
-    /// with no encoding at `ua_revision`. [`Revision::R0`] cannot encode expiry metadata
-    /// or an address whose only receiver is transparent; every address has a
-    /// [`Revision::R2`] encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_receiver_preserving_revision<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        ua_revision: Revision,
-    ) -> Result<String, UnifiedEncodingError> {
-        self.to_receiver_preserving_zcash_address_revision(params, ua_revision)
-            .map(|addr| addr.to_string())
-    }
-
-    /// Converts this [`Address`] to a [`ZcashAddress`] that preserves every receiver.
-    ///
-    /// A unified address includes every receiver.
-    ///
-    /// A unified address is encoded at [ZIP 316] [`Revision::R0`] if that revision can
-    /// represent it, and at [`Revision::R2`] otherwise. Sapling, transparent, and TEX
-    /// addresses have a single encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn to_receiver_preserving_zcash_address<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> ZcashAddress {
-        match self {
-            Address::Unified(ua) => ua.to_receiver_preserving_zcash_address(params.network_type()),
-            _ => self.to_zcash_address(params),
-        }
-    }
-
-    /// Returns the string encoding of this [`Address`] that preserves every receiver.
-    ///
-    /// A unified address includes every receiver.
-    ///
-    /// A unified address is encoded at [ZIP 316] [`Revision::R0`] if that revision can
-    /// represent it, and at [`Revision::R2`] otherwise. Sapling, transparent, and TEX
-    /// addresses have a single encoding.
-    ///
-    /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn encode_receiver_preserving<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_receiver_preserving_zcash_address(params)
-            .to_string()
     }
 
     /// Returns whether or not this [`Address`] can receive funds in the specified pool.
@@ -1140,26 +855,32 @@ mod tests {
             Some(dfvk.default_address().1)
         };
 
-        let transparent = None;
+        // Every encoding must retain the transparent receiver alongside the shielded ones.
+        for transparent in [None, Some(TransparentAddress::PublicKeyHash([0; 20]))] {
+            #[cfg(all(feature = "orchard", feature = "sapling"))]
+            let ua =
+                UnifiedAddress::from_receivers(orchard, sapling, transparent, None, None).unwrap();
 
-        #[cfg(all(feature = "orchard", feature = "sapling"))]
-        let ua = UnifiedAddress::from_receivers(orchard, sapling, transparent, None, None).unwrap();
+            #[cfg(all(not(feature = "orchard"), feature = "sapling"))]
+            let ua = UnifiedAddress::from_receivers(sapling, transparent, None, None).unwrap();
 
-        #[cfg(all(not(feature = "orchard"), feature = "sapling"))]
-        let ua = UnifiedAddress::from_receivers(sapling, transparent, None, None).unwrap();
+            #[cfg(all(feature = "orchard", not(feature = "sapling")))]
+            let ua = UnifiedAddress::from_receivers(orchard, transparent, None, None).unwrap();
 
-        #[cfg(all(feature = "orchard", not(feature = "sapling")))]
-        let ua = UnifiedAddress::from_receivers(orchard, transparent, None, None).unwrap();
-
-        let addr = Address::from(ua);
-        for revision in [Revision::R0, Revision::R2] {
-            let addr_str = addr
-                .encode_revision(&MAIN_NETWORK, revision)
-                .expect("a shielded address without metadata has an encoding at every revision");
+            let addr = Address::from(ua);
             assert_eq!(
-                Address::decode(&MAIN_NETWORK, &addr_str),
+                Address::decode(&MAIN_NETWORK, &addr.encode(&MAIN_NETWORK)),
                 Some(addr.clone())
             );
+            for revision in [Revision::R0, Revision::R2] {
+                let addr_str = addr.encode_revision(&MAIN_NETWORK, revision).expect(
+                    "a shielded address without metadata has an encoding at every revision",
+                );
+                assert_eq!(
+                    Address::decode(&MAIN_NETWORK, &addr_str),
+                    Some(addr.clone())
+                );
+            }
         }
     }
 
@@ -1209,15 +930,11 @@ mod tests {
             let ua = UnifiedAddress::decode(&MAIN_NETWORK, tv.unified_addr)
                 .expect("test vector is a valid unified address");
             assert_eq!(
-                ua.encode_receiver_preserving_revision(&MAIN_NETWORK, Revision::R0)
-                    .as_deref(),
+                ua.encode_revision(&MAIN_NETWORK, Revision::R0).as_deref(),
                 Ok(tv.unified_addr),
             );
             // Revision 0 can represent every test vector, so it is the compatible choice.
-            assert_eq!(
-                ua.encode_receiver_preserving(&MAIN_NETWORK),
-                tv.unified_addr,
-            );
+            assert_eq!(ua.encode(&MAIN_NETWORK), tv.unified_addr,);
         }
     }
 

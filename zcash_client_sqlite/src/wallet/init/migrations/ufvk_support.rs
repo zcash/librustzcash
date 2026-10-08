@@ -162,7 +162,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let address_str: String = ufvk
                     .default_address(ua_request)?
                     .0
-                    .encode_receiver_preserving(&self.params);
+                    .encode(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily

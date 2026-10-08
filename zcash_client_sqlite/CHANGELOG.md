@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Unified addresses that the wallet generates to fill its transparent gap limit
+  are stored with their transparent receiver, so `WalletRead::list_addresses`
+  returns that receiver.
+
 ## [0.23.0-pre.1] - 2026-10-06
 
 ### Added

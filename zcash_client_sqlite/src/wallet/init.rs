@@ -1481,7 +1481,7 @@ mod tests {
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
-            .encode_receiver_preserving(&wdb.params);
+            .encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1620,10 +1620,7 @@ mod tests {
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
-                assert_eq!(
-                    ua.encode_receiver_preserving(&Network::MainNetwork),
-                    tv.unified_addr,
-                );
+                assert_eq!(ua.encode(&Network::MainNetwork), tv.unified_addr);
 
                 db_data
                     .get_next_available_address(account_id, ua_request)

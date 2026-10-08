@@ -1394,7 +1394,7 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     params: &P,
     address: &Address,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
-    let addr_str = address.encode_receiver_preserving(params);
+    let addr_str = address.encode(params);
     // For a UA the transparent receiver (if any) may match the cached column; for non-UA
     // addresses the same string serves both roles (the `cached_transparent_receiver_address`
     // column only ever holds transparent addresses, so a Sapling query against it simply
@@ -1716,7 +1716,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             // the diversifier index is stored in big-endian order to allow sorting
             ":diversifier_index_be": &di_be,
             ":key_scope": KeyScope::EXTERNAL.encode(),
-            ":address": &address.encode_receiver_preserving(params),
+            ":address": &address.encode(params),
             ":transparent_child_index": transparent_child_index,
             ":cached_transparent_receiver_address": &cached_taddr,
             ":exposed_at_height": exposed_at_height.map(u32::from),

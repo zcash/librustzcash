@@ -3001,7 +3001,11 @@ mod tests {
         },
     };
     use rusqlite::named_params;
-    use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
+    use zcash_keys::{
+        address::UnifiedAddress,
+        encoding::AddressCodec,
+        keys::{ReceiverRequirement, UnifiedAddressRequest},
+    };
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
     use {
@@ -3010,7 +3014,7 @@ mod tests {
         std::collections::HashSet,
         transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
-        zcash_keys::{address::Address, encoding::AddressCodec},
+        zcash_keys::address::Address,
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
 
@@ -3523,6 +3527,53 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// Every unified address that gap-limit generation stores keeps the transparent receiver
+    /// cached for its row, and the row's receiver flags record that receiver.
+    #[test]
+    fn store_address_range_retains_transparent_receiver() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+
+        let mut stmt = st
+            .wallet()
+            .db()
+            .conn
+            .prepare(
+                "SELECT address, cached_transparent_receiver_address, receiver_flags
+                 FROM addresses
+                 WHERE key_scope = :external_scope
+                   AND transparent_child_index IS NOT NULL",
+            )
+            .unwrap();
+        let rows: Vec<(String, Option<String>, i64)> = stmt
+            .query_map(
+                named_params! { ":external_scope": KeyScope::EXTERNAL.encode() },
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        // The account has shielded keys, so every gap-limit row is a unified address.
+        assert!(!rows.is_empty());
+        for (address, cached_taddr, flags) in rows {
+            let ua = UnifiedAddress::decode(&network, &address).unwrap();
+            assert!(ua.has_orchard() || ua.has_sapling());
+            assert_eq!(
+                ua.transparent().map(|taddr| taddr.encode(&network)),
+                cached_taddr,
+                "address {address} omits its cached transparent receiver"
+            );
+            assert!(
+                ReceiverFlags::from_bits_retain(flags).contains(ReceiverFlags::P2PKH),
+                "receiver flags of {address} omit P2PKH"
+            );
+        }
     }
 
     /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the
