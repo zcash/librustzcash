@@ -28,6 +28,11 @@ workspace.
 - `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
   matches on the transparent receiver of a unified `address` that also has a
   shielded receiver.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now spends notes from a later shielded pool when the change from the
+  preferred pool's notes alone would fall below the dust threshold. Previously
+  it returned `InsufficientFunds` in that case, with `available` above
+  `required`.
 
 ## [0.25.0-pre.1] - 2026-10-06
 

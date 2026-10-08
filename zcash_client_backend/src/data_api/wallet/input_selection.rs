@@ -1048,7 +1048,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut transparent_dust: BTreeSet<OutPoint> = BTreeSet::new();
 
         let mut shielded_inputs = ReceivedNotes::empty();
-        let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
@@ -1083,9 +1082,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // which case input selection reports `InsufficientFunds`.
         pool_preference.retain(|pool| spend_policy.permits_shielded(*pool));
 
-        // This loop is guaranteed to terminate because on each iteration we check that the amount
-        // of funds selected is strictly increasing. The loop will either return a successful
-        // result or the wallet will eventually run out of funds to select.
+        // This loop is guaranteed to terminate: the check at the bottom continues only when
+        // selection offers more value than the balance was computed over, and each pass either
+        // raises the requirement, so that the next trimmed set is strictly larger, excludes a
+        // dust note, each at most once, or changes the transparent input set (see below). The
+        // loop will either return a successful result or the wallet will eventually run out of
+        // funds to select.
         loop {
             #[cfg(not(feature = "orchard"))]
             let sapling_bundle_required = true;
@@ -1177,6 +1179,28 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 selected_input_ids.chain(ironwood_inputs.iter().map(|(id, _)| id));
 
             let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
+
+            // The value the balance below is computed over: the selected notes trimmed to the
+            // pools in use. Selection has made progress when it offers more than this, even if
+            // the set of selected notes did not grow: a larger requirement draws the pools
+            // trimmed away above into the next iteration.
+            #[cfg(not(feature = "orchard"))]
+            let balance_input_value = shielded_inputs.total_value()?;
+            #[cfg(feature = "orchard")]
+            let balance_input_value = {
+                let overflow = || GreedyInputSelectorError::Balance(BalanceError::Overflow);
+                let mut value = Zatoshis::ZERO;
+                if sapling_bundle_required {
+                    value = (value + shielded_inputs.sapling_value()?).ok_or_else(overflow)?;
+                }
+                if orchard_bundle_required {
+                    value = (value + shielded_inputs.orchard_value()?).ok_or_else(overflow)?;
+                }
+                if ironwood_bundle_required {
+                    value = (value + shielded_inputs.ironwood_value()?).ok_or_else(overflow)?;
+                }
+                value
+            };
 
             let wallet_meta = change_strategy
                 .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
@@ -1291,7 +1315,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // set, either by re-gathering with a corrected value bound (`InsufficientFunds`)
             // or by pruning dust (`DustInputs`). A changed transparent input set is a valid
             // form of progress in its own right (distinct from the shielded-note progress
-            // tracked by `prior_available`/`new_available` below): without this, an account
+            // tracked by `balance_input_value`/`new_available` below): without this, an account
             // with no spendable shielded notes at all (or none beyond what's already
             // excluded) would spuriously report `InsufficientFunds` on the very next check
             // below, even though the changed transparent input set might already be
@@ -1482,8 +1506,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     .map_err(InputSelectorError::DataSource)?,
             };
 
+            // Loop again when selection offers more value than the balance above was computed
+            // over, or the transparent input set changed this iteration; otherwise no further
+            // iteration can balance the transaction.
             let new_available = shielded_inputs.total_value()?;
-            if new_available <= prior_available && !transparent_inputs_changed {
+            if new_available <= balance_input_value && !transparent_inputs_changed {
                 // `amount_required` was computed over the transparent inputs as well as the
                 // notes, so the value reported against it must count both.
                 let transparent_available = transparent_inputs
@@ -1496,11 +1523,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     available: (new_available + transparent_available)
                         .ok_or(BalanceError::Overflow)?,
                 });
-            } else {
-                // If the set of selected shielded notes has grown, or the transparent
-                // input set changed this iteration, we will loop again and see whether
-                // we now have enough funds.
-                prior_available = new_available;
             }
         }
     }
