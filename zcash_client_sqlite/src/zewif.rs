@@ -1501,7 +1501,14 @@ where
                     derived_source,
                 )?;
                 let imported = wdb
-                    .import_account_ufvk(account.name(), &decoded, &birthday, purpose, key_source)
+                    .import_account_ufvk(
+                        account.name(),
+                        &decoded,
+                        &birthday,
+                        purpose,
+                        key_source,
+                        None,
+                    )
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
             }
@@ -1526,7 +1533,14 @@ where
                     derived_source,
                 )?;
                 let imported = wdb
-                    .import_account_ufvk(account.name(), &ufvk, &birthday, purpose, key_source)
+                    .import_account_ufvk(
+                        account.name(),
+                        &ufvk,
+                        &birthday,
+                        purpose,
+                        key_source,
+                        None,
+                    )
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
             }
