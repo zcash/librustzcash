@@ -13,7 +13,9 @@ workspace.
 ### Fixed
 - Unified addresses that the wallet generates to fill its transparent gap limit
   are stored with their transparent receiver, so `WalletRead::list_addresses`
-  returns that receiver.
+  returns that receiver. A migration restores the transparent receiver to such
+  addresses that `zcash_client_sqlite 0.23.0-pre.1` stored without it, if the
+  wallet has not exposed them.
 
 ## [0.23.0-pre.1] - 2026-10-06
 
