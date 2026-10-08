@@ -1214,6 +1214,81 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
 }
 
+/// Tests that a transfer whose change from the preferred pool's note would be dust draws on
+/// a note in another pool instead of failing.
+///
+/// The test:
+/// - Adds a note in the `P0` pool and a smaller one in the `P1` pool.
+/// - Proposes a transfer to a `P0` recipient of an amount that the `P0` note covers, but
+///   whose change from that note alone would fall below the dust threshold.
+/// - Verifies that the proposal spends both notes, at the two-bundle fee, and that the
+///   change is the remainder of both.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+#[cfg(feature = "orchard")]
+pub fn transfer_grows_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p0_note_value = Zatoshis::const_from_u64(60_000);
+    let p1_note_value = Zatoshis::const_from_u64(20_000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, p0_note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, p1_note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+    let total = (p0_note_value + p1_note_value).unwrap();
+
+    let to: Address = P0::sk_default_address(&P0::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(47_000);
+
+    // The `P0` note alone would leave change of 3000 zatoshis, below the dust threshold of
+    // one marginal fee, so the `P1` note is spent as well: two bundles, each padded to two
+    // logical actions.
+    let expected_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_change = (total - amount - expected_fee).unwrap();
+
+    let proposal = st.propose_transfer_to(&to, amount);
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(amount)
+    );
+    let input_pools = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| match n.note() {
+            Note::Sapling(_) => ShieldedPool::Sapling,
+            Note::Orchard { pool, .. } => match pool {
+                ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+                ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
+            },
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        input_pools,
+        BTreeSet::from([P0::SHIELDED_PROTOCOL, P1::SHIELDED_PROTOCOL])
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
 /// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
 /// error when the `transparent-inputs` feature is not enabled.
 #[cfg(not(feature = "transparent-inputs"))]

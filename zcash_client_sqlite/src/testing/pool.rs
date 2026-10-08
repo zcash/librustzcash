@@ -91,6 +91,17 @@ pub(crate) fn send_max_spends_inputs_across_pools<
     )
 }
 
+#[cfg(feature = "orchard")]
+pub(crate) fn transfer_grows_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::transfer_grows_across_pools_at_a_dust_shortfall::<
+        P0,
+        P1,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_max_fee_overflow_is_an_error::<T>(
