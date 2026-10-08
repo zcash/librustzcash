@@ -17,11 +17,12 @@ use zcash_protocol::consensus::NetworkType;
 pub(crate) mod address;
 pub(crate) mod fvk;
 pub(crate) mod ivk;
+mod revision;
 
 pub use address::{Address, Receiver};
 pub use fvk::{Fvk, Ufvk};
 pub use ivk::{Ivk, Uivk};
-pub use zcash_protocol::address::Revision;
+pub use revision::Revision;
 
 #[cfg(feature = "test-dependencies")]
 pub use address::testing;
@@ -516,8 +517,8 @@ pub(crate) mod private {
         MUST_UNDERSTAND_METADATA_MIN, MetadataItem, MetadataTypecode, PADDING_LEN, ParseError,
         Typecode, Uitem,
     };
+    use crate::unified::Revision;
     use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
-    use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key (data item).

@@ -8,9 +8,9 @@ use core::str::FromStr;
 use std::error::Error;
 
 use bech32::{Bech32, Bech32m, Checksum, Hrp, primitives::decode::CheckedHrpstring};
-use zcash_protocol::consensus::{NetworkConstants, NetworkType};
-use zcash_protocol::constants::{mainnet, regtest, testnet};
+use zcash_protocol::consensus::NetworkType;
 
+use crate::constants::{self, mainnet, regtest, testnet};
 use crate::kind::unified::Encoding;
 use crate::{AddressKind, ZcashAddress, kind::*};
 
@@ -166,14 +166,22 @@ fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
 impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
-            AddressKind::Sprout(data) => encode_b58(self.net.b58_sprout_address_prefix(), data),
+            AddressKind::Sprout(data) => {
+                encode_b58(constants::b58_sprout_address_prefix(self.net), data)
+            }
             AddressKind::Sapling(data) => {
-                encode_bech32::<Bech32>(self.net.hrp_sapling_payment_address(), data)
+                encode_bech32::<Bech32>(constants::hrp_sapling_payment_address(self.net), data)
             }
             AddressKind::Unified(addr) => addr.encode(&self.net),
-            AddressKind::P2pkh(data) => encode_b58(self.net.b58_pubkey_address_prefix(), data),
-            AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
-            AddressKind::Tex(data) => encode_bech32::<Bech32m>(self.net.hrp_tex_address(), data),
+            AddressKind::P2pkh(data) => {
+                encode_b58(constants::b58_pubkey_address_prefix(self.net), data)
+            }
+            AddressKind::P2sh(data) => {
+                encode_b58(constants::b58_script_address_prefix(self.net), data)
+            }
+            AddressKind::Tex(data) => {
+                encode_bech32::<Bech32m>(constants::hrp_tex_address(self.net), data)
+            }
         };
         write!(f, "{encoded}")
     }
@@ -244,7 +252,7 @@ mod tests {
             ZcashAddress {
                 net: NetworkType::Main,
                 kind: AddressKind::Unified(unified::Address {
-                    revision: zcash_protocol::address::Revision::R0,
+                    revision: unified::Revision::R0,
                     items: vec![unified::Uitem::Data(unified::address::Receiver::Sapling(
                         [0; 43],
                     ))],
@@ -256,7 +264,7 @@ mod tests {
             ZcashAddress {
                 net: NetworkType::Test,
                 kind: AddressKind::Unified(unified::Address {
-                    revision: zcash_protocol::address::Revision::R0,
+                    revision: unified::Revision::R0,
                     items: vec![unified::Uitem::Data(unified::address::Receiver::Sapling(
                         [0; 43],
                     ))],
@@ -268,7 +276,7 @@ mod tests {
             ZcashAddress {
                 net: NetworkType::Regtest,
                 kind: AddressKind::Unified(unified::Address {
-                    revision: zcash_protocol::address::Revision::R0,
+                    revision: unified::Revision::R0,
                     items: vec![unified::Uitem::Data(unified::address::Receiver::Sapling(
                         [0; 43],
                     ))],

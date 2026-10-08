@@ -9,6 +9,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::constants` module, containing:
+  - `mainnet`, `testnet`, and `regtest` modules, which define
+    `HRP_SAPLING_EXTENDED_SPENDING_KEY`, `HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY`,
+    and `B58_SECRET_KEY_PREFIX`, with the same names as in
+    `zcash_protocol::constants::{mainnet, testnet, regtest}`.
+  - `hrp_sapling_extended_spending_key`, `hrp_sapling_extended_full_viewing_key`,
+    and `b58_secret_key_prefix`, which take a `NetworkType`.
+
+### Changed
+- `zcash_keys::keys::transparent::Key::{decode_base58, encode_base58}` now take
+  a `NetworkType` instead of `&N` where `N: NetworkConstants`. Callers holding
+  consensus parameters pass `params.network_type()`.
+
 ## [0.17.0-pre.1] - 2026-10-06
 
 ### Added

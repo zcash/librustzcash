@@ -1,17 +1,26 @@
 use gumdrop::Options;
 use sapling::zip32::ExtendedFullViewingKey;
-use zcash_keys::encoding::{decode_extended_full_viewing_key, encode_payment_address};
-use zcash_protocol::constants::{mainnet, testnet};
+use zcash_address::constants as address_constants;
+use zcash_keys::{
+    constants as key_constants,
+    encoding::{decode_extended_full_viewing_key, encode_payment_address},
+};
 use zip32::DiversifierIndex;
 
 fn parse_viewing_key(s: &str) -> Result<(ExtendedFullViewingKey, bool), &'static str> {
-    decode_extended_full_viewing_key(mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s)
-        .map(|vk| (vk, true))
-        .or_else(|_| {
-            decode_extended_full_viewing_key(testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s)
-                .map(|vk| (vk, false))
-        })
-        .map_err(|_| "Invalid Sapling viewing key")
+    decode_extended_full_viewing_key(
+        key_constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+        s,
+    )
+    .map(|vk| (vk, true))
+    .or_else(|_| {
+        decode_extended_full_viewing_key(
+            key_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            s,
+        )
+        .map(|vk| (vk, false))
+    })
+    .map_err(|_| "Invalid Sapling viewing key")
 }
 
 fn parse_diversifier_index(s: &str) -> Result<DiversifierIndex, &'static str> {
@@ -62,9 +71,9 @@ fn main() {
         "{}",
         encode_payment_address(
             if is_mainnet {
-                mainnet::HRP_SAPLING_PAYMENT_ADDRESS
+                address_constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS
             } else {
-                testnet::HRP_SAPLING_PAYMENT_ADDRESS
+                address_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
             },
             &address
         )

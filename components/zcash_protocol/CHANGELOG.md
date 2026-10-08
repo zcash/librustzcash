@@ -10,6 +10,37 @@ workspace.
 
 ## [Unreleased]
 
+### Deprecated
+- The address encoding prefix constants in
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants
+  of the same names in `zcash_address::constants::{mainnet, testnet, regtest}`:
+  - `HRP_SAPLING_PAYMENT_ADDRESS`
+  - `HRP_TEX_ADDRESS`
+  - `HRP_UNIFIED_ADDRESS`, `HRP_UNIFIED_FVK`, `HRP_UNIFIED_IVK`
+  - `B58_SPROUT_ADDRESS_PREFIX`, `B58_PUBKEY_ADDRESS_PREFIX`,
+    `B58_SCRIPT_ADDRESS_PREFIX`
+- The key encoding prefix constants in
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants
+  of the same names in `zcash_keys::constants::{mainnet, testnet, regtest}`:
+  - `HRP_SAPLING_EXTENDED_SPENDING_KEY`, `HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY`
+  - `B58_SECRET_KEY_PREFIX`
+- All `zcash_protocol::consensus::NetworkConstants` methods except `coin_type`.
+  Use the functions of the same names in `zcash_address::constants` (for
+  address encodings) or `zcash_keys::constants` (for key encodings), which take
+  a `NetworkType`. A caller holding consensus parameters passes
+  `params.network_type()`.
+
+### Removed
+- `zcash_protocol::address` module, including `Revision`. Use
+  `zcash_address::unified::Revision` instead.
+- `zcash_protocol::consensus::NetworkConstants::{hrp_unified_address_r2,
+  hrp_unified_address_r2_ti, hrp_unified_fvk_r2, hrp_unified_ivk_r2}`. Use the
+  functions of the same names in `zcash_address::constants` instead.
+- `zcash_protocol::constants::{mainnet, testnet, regtest}::{HRP_UNIFIED_ADDRESS_R2,
+  HRP_UNIFIED_ADDRESS_R2_TI, HRP_UNIFIED_FVK_R2, HRP_UNIFIED_IVK_R2}`. Use the
+  constants of the same names in `zcash_address::constants::{mainnet, testnet,
+  regtest}` instead.
+
 ## [0.11.0-pre.0] - 2026-09-30
 
 This release sets the NU7 activation height to 4465026 on testnet.

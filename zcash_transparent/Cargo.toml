@@ -18,7 +18,6 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
@@ -72,7 +71,6 @@ default = ["std"]
 std = [
     "dep:document-features",
     "secp256k1?/std",
-    "zcash_address/std",
     "zcash_script/std",
 ]
 

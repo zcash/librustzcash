@@ -11,6 +11,10 @@ pub const COIN_TYPE: u32 = 1;
 ///
 /// [`ExtendedSpendingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedSpendingKey.html
 /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY` instead."
+)]
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-test";
 
 /// The HRP for a Bech32-encoded testnet Sapling [`ExtendedFullViewingKey`].
@@ -19,6 +23,10 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-test";
 ///
 /// [`ExtendedFullViewingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedFullViewingKey.html
 /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY` instead."
+)]
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewtestsapling";
 
 /// The HRP for a Bech32-encoded testnet Sapling [`PaymentAddress`].
@@ -27,6 +35,10 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewtestsapling";
 ///
 /// [`PaymentAddress`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/struct.PaymentAddress.html
 /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS` instead."
+)]
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "ztestsapling";
 
 /// The prefix for a Base58Check-encoded testnet Sprout address.
@@ -34,6 +46,10 @@ pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "ztestsapling";
 /// Defined in the [Zcash Protocol Specification section 5.6.3][sproutpaymentaddrencoding].
 ///
 /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::B58_SPROUT_ADDRESS_PREFIX` instead."
+)]
 pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0xb6];
 
 /// The prefix for a Base58Check-encoded DER-encoded testnet [`SecretKey`], as specified via the
@@ -41,21 +57,37 @@ pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0xb6];
 ///
 /// [`SecretKey`]: https://docs.rs/secp256k1/latest/secp256k1/struct.SecretKey.html
 /// [`EncodeSecret`]: https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::testnet::B58_SECRET_KEY_PREFIX` instead."
+)]
 pub const B58_SECRET_KEY_PREFIX: [u8; 1] = [0xef];
 
 /// The prefix for a Base58Check-encoded testnet transparent [`PublicKeyHash`].
 ///
 /// [`PublicKeyHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX` instead."
+)]
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1d, 0x25];
 
 /// The prefix for a Base58Check-encoded testnet transparent [`ScriptHash`].
 ///
 /// [`ScriptHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX` instead."
+)]
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xba];
 
 /// The HRP for a Bech32m-encoded testnet [ZIP 320] TEX address.
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::HRP_TEX_ADDRESS` instead."
+)]
 pub const HRP_TEX_ADDRESS: &str = "textest";
 
 /// The HRP for a Bech32m-encoded testnet Unified Address.
@@ -63,6 +95,10 @@ pub const HRP_TEX_ADDRESS: &str = "textest";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::HRP_UNIFIED_ADDRESS` instead."
+)]
 pub const HRP_UNIFIED_ADDRESS: &str = "utest";
 
 /// The HRP for a Bech32m-encoded testnet Unified FVK.
@@ -70,6 +106,10 @@ pub const HRP_UNIFIED_ADDRESS: &str = "utest";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::HRP_UNIFIED_FVK` instead."
+)]
 pub const HRP_UNIFIED_FVK: &str = "uviewtest";
 
 /// The HRP for a Bech32m-encoded testnet Unified IVK.
@@ -77,32 +117,8 @@ pub const HRP_UNIFIED_FVK: &str = "uviewtest";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::testnet::HRP_UNIFIED_IVK` instead."
+)]
 pub const HRP_UNIFIED_IVK: &str = "uivktest";
-
-/// The HRP for a Bech32m-encoded testnet shielded-only Revision 2 Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_ADDRESS_R2: &str = "zutest";
-
-/// The HRP for a Bech32m-encoded testnet transparent-including Revision 2 Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_ADDRESS_R2_TI: &str = "tutest";
-
-/// The HRP for a Bech32m-encoded testnet Revision 2 Unified FVK.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_FVK_R2: &str = "uvftest";
-
-/// The HRP for a Bech32m-encoded testnet Revision 2 Unified IVK.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_IVK_R2: &str = "uvitest";

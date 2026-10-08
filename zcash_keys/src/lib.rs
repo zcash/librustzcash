@@ -20,6 +20,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod address;
+pub mod constants;
 pub mod encoding;
 
 #[cfg(any(

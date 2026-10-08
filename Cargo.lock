@@ -7753,7 +7753,6 @@ dependencies = [
  "secp256k1",
  "sha2 0.10.8",
  "subtle",
- "zcash_address",
  "zcash_encoding",
  "zcash_protocol",
  "zcash_script",

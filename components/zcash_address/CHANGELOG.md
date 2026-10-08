@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::constants` module, containing:
+  - `mainnet`, `testnet`, and `regtest` modules, which define the HRP and
+    Base58Check prefix constants of the address and Unified container encodings,
+    with the same names as in `zcash_protocol::constants::{mainnet, testnet, regtest}`.
+  - `hrp_sapling_payment_address`, `hrp_tex_address`, `hrp_unified_address`,
+    `hrp_unified_fvk`, `hrp_unified_ivk`, `hrp_unified_address_r2`,
+    `hrp_unified_address_r2_ti`, `hrp_unified_fvk_r2`, `hrp_unified_ivk_r2`,
+    `b58_sprout_address_prefix`, `b58_pubkey_address_prefix`, and
+    `b58_script_address_prefix`, which take a `NetworkType`.
+
+### Changed
+- `zcash_address::unified::Revision` is now defined in this crate, and is no
+  longer a re-export of `zcash_protocol::address::Revision`.
+
 ## [0.14.0-pre.1] - 2026-10-06
 
 ### Added

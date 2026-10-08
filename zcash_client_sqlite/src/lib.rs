@@ -4669,7 +4669,7 @@ mod tests {
     pub(crate) fn import_transparent_only_account_ufvk() {
         use crate::wallet::encoding::KeyScope;
         use ::transparent::keys::AccountPrivKey;
-        use zcash_protocol::consensus::{NetworkConstants, Parameters};
+        use zcash_protocol::consensus::Parameters;
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
@@ -4742,7 +4742,9 @@ mod tests {
         // It round-trips through the `tu` encoding.
         let encoded = ua.encode_receiver_preserving(&network);
         assert!(
-            encoded.starts_with(network.network_type().hrp_unified_address_r2_ti()),
+            encoded.starts_with(zcash_address::constants::hrp_unified_address_r2_ti(
+                network.network_type()
+            )),
             "{encoded} is not a transparent-including Revision 2 Unified Address",
         );
         assert_eq!(
@@ -4765,7 +4767,8 @@ mod tests {
 
         // Every external-scope address row is stored in the transparent-including Revision 2
         // encoding, not as a bare transparent address.
-        let expected_hrp = network.network_type().hrp_unified_address_r2_ti();
+        let expected_hrp =
+            zcash_address::constants::hrp_unified_address_r2_ti(network.network_type());
         let stored_addresses = st
             .wallet()
             .conn()
@@ -5207,8 +5210,8 @@ mod tests {
         let mut stored = address.encode_receiver_preserving(state.network());
 
         for revision in [
-            zcash_protocol::address::Revision::R2,
-            zcash_protocol::address::Revision::R0,
+            zcash_address::unified::Revision::R2,
+            zcash_address::unified::Revision::R0,
         ] {
             let encoded = address
                 .encode_receiver_preserving_revision(state.network(), revision)
