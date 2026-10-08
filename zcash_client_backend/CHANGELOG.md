@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `Error::Proposal(ProposalError::TransactionTooLarge)` when a
+  transaction of the proposal would exceed the block size limit, as
+  `propose_transfer` and `propose_shielding` do. Previously the oversized
+  proposal was returned, and its inputs locked if requested, and it failed only
+  in `create_proposed_transactions`.
+
 ## [0.25.0-pre.1] - 2026-10-06
 
 ### Changed

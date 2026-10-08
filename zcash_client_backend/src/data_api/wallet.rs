@@ -1112,7 +1112,9 @@ where
 /// input selection knows the fee, so only it can leave nothing behind.
 ///
 /// The wallet must have been scanned far enough to establish target and anchor heights;
-/// otherwise [`InputSelectorError::SyncRequired`] is returned.
+/// otherwise [`InputSelectorError::SyncRequired`] is returned. If a transaction of the
+/// proposal would exceed the size a block may carry, [`ProposalError::TransactionTooLarge`]
+/// is returned and no inputs are locked.
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database.
@@ -1192,6 +1194,8 @@ where
         memo,
         locked_input_policy,
     )?;
+
+    proposal.check_transaction_size()?;
 
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
