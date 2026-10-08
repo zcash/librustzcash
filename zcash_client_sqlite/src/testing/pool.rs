@@ -150,6 +150,14 @@ pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: Shielded
 }
 
 #[cfg(feature = "transparent-inputs")]
+pub(crate) fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::insufficient_funds_counts_transparent_inputs::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
 pub(crate) fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<
         T,

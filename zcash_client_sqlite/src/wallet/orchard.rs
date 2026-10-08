@@ -835,6 +835,12 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn insufficient_funds_counts_transparent_inputs() {
+        testing::pool::insufficient_funds_counts_transparent_inputs::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn spend_everything_multi_step_single_note_proposed_transfer() {
         testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<OrchardPoolTester>(
         )
