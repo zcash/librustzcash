@@ -581,11 +581,18 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// and all build paths. It is not called during proposal deserialization, so
     /// previously-persisted proposals remain recoverable.
     pub fn check_transaction_size(&self) -> Result<(), ProposalError> {
+        self.check_transaction_size_within(MAX_BLOCK_BYTES)
+    }
+
+    /// Checks whether every step's estimated serialized size is at most `limit` bytes,
+    /// returning [`ProposalError::TransactionTooLarge`] (carrying `limit`) for the first step
+    /// that is not.
+    pub(crate) fn check_transaction_size_within(&self, limit: usize) -> Result<(), ProposalError> {
         let steps = self.steps();
         for step in steps.iter() {
             let estimated_size = step
                 .estimated_serialized_size(&|s_ref| Self::resolve_prior_output_pool(steps, s_ref));
-            if estimated_size > MAX_BLOCK_BYTES {
+            if estimated_size > limit {
                 // Count per-pool shielded inputs (both the step's own and prior-step)
                 // so the counts match what the estimate charged.
                 let sapling_input_count = step.input_count_in_pool(PoolType::SAPLING)
@@ -616,7 +623,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                         .count();
                 return Err(ProposalError::TransactionTooLarge {
                     estimated_size,
-                    limit: MAX_BLOCK_BYTES,
+                    limit,
                     sapling_input_count,
                     #[cfg(feature = "orchard")]
                     orchard_input_count,
@@ -631,8 +638,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Resolves the pool of a prior-step output referenced by `s_ref`, by looking up
     /// the referenced step in the proposal's step list. Shared by
     /// [`estimated_serialized_size`](Self::estimated_serialized_size) and
-    /// [`check_transaction_size`](Self::check_transaction_size) to avoid duplicating the
-    /// `StepOutput`-to-`PoolType` resolution logic.
+    /// [`check_transaction_size_within`](Self::check_transaction_size_within) to avoid
+    /// duplicating the `StepOutput`-to-`PoolType` resolution logic.
     fn resolve_prior_output_pool(steps: &NonEmpty<Step<NoteRef>>, s_ref: &StepOutput) -> PoolType {
         let prior = &steps[s_ref.step_index()];
         match s_ref.output_index() {

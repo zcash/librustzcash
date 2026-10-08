@@ -148,6 +148,64 @@ pub(crate) fn send_max_rejects_oversized_transaction_at_proposal<T: ShieldedPool
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn send_max_within_size_bound_spends_largest_notes_that_fit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_spends_largest_notes_that_fit::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_within_size_bound_is_max_spendable_when_everything_fits<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_is_max_spendable_when_everything_fits::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_without_size_bound_rejects_oversized<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_without_size_bound_rejects_oversized::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_within_size_bound_remainder_is_spendable_afterwards<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_remainder_is_spendable_afterwards::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_within_size_bound_locks_only_selected_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_locks_only_selected_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_max_within_size_bound_to_tex_bounds_the_first_step<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_to_tex_bounds_the_first_step::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn send_max_within_size_bound_drops_by_value_across_pools<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_drops_by_value_across_pools::<P0, P1>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_everything_proposal_fails_when_unconfirmed_funds_present::<T>(
         TestDbFactory::default(),

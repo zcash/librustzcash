@@ -48,8 +48,8 @@ pub use super::locking::{LockRequest, unlock_proposal_inputs};
 use super::{InputSource, locking::lock_proposal_inputs};
 use crate::{
     data_api::{
-        Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
-        WalletCommitmentTrees, WalletRead, WalletWrite,
+        Account, MaxSpendMode, NoteCommitmentTree, ReceivedNotes, SentTransaction,
+        SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
         error::{AddressExpiryError, Error},
         wallet::input_selection::propose_send_max,
     },
@@ -80,8 +80,9 @@ use zcash_primitives::transaction::{
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
+    constants::MAX_BLOCK_BYTES,
     memo::MemoBytes,
-    value::Zatoshis,
+    value::{BalanceError, Zatoshis},
     zip318::AnchorBucketInterval,
 };
 use zip32::Scope;
@@ -123,7 +124,7 @@ use {
     std::collections::BTreeMap,
     transparent::pczt::Bip32Derivation,
     zcash_note_encryption::{Domain, ShieldedOutput, try_output_recovery_with_pkd_esk},
-    zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
+    zcash_protocol::consensus::NetworkConstants,
 };
 
 pub mod input_selection;
@@ -293,6 +294,116 @@ pub type ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT> = Error<
     <FeeRuleT as FeeRule>::Error,
     <DbT as InputSource>::NoteRef,
 >;
+
+/// The spendable notes that a send-max proposal left unspent because spending them would
+/// have exceeded the transaction size bound.
+///
+/// Only [`MaxSpendMode::WithinSizeBound`] leaves notes unspent; under the other modes the
+/// remainder is always zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendMaxRemainder {
+    value: Zatoshis,
+    sapling_note_count: usize,
+    #[cfg(feature = "orchard")]
+    orchard_note_count: usize,
+    #[cfg(feature = "orchard")]
+    ironwood_note_count: usize,
+}
+
+impl SendMaxRemainder {
+    /// The remainder of a send-max proposal that spends every selected note.
+    pub(crate) const ZERO: Self = Self {
+        value: Zatoshis::ZERO,
+        sapling_note_count: 0,
+        #[cfg(feature = "orchard")]
+        orchard_note_count: 0,
+        #[cfg(feature = "orchard")]
+        ironwood_note_count: 0,
+    };
+
+    /// Constructs the remainder consisting of the given notes.
+    pub(crate) fn from_notes<NoteRef>(
+        notes: &ReceivedNotes<NoteRef>,
+    ) -> Result<Self, BalanceError> {
+        Ok(Self {
+            value: notes.total_value()?,
+            sapling_note_count: notes.sapling().len(),
+            #[cfg(feature = "orchard")]
+            orchard_note_count: notes.orchard().len(),
+            #[cfg(feature = "orchard")]
+            ironwood_note_count: notes.ironwood().len(),
+        })
+    }
+
+    /// Returns the total value of the notes left unspent.
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    /// Returns the number of notes left unspent, across all shielded pools.
+    pub fn note_count(&self) -> usize {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_note_count;
+
+        #[cfg(feature = "orchard")]
+        return self.sapling_note_count + self.orchard_note_count + self.ironwood_note_count;
+    }
+
+    /// Returns the number of notes left unspent in the given shielded pool.
+    pub fn note_count_in_pool(&self, pool: ShieldedPool) -> usize {
+        match pool {
+            ShieldedPool::Sapling => self.sapling_note_count,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => self.orchard_note_count,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => self.ironwood_note_count,
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+        }
+    }
+
+    /// Returns whether no notes were left unspent.
+    pub fn is_zero(&self) -> bool {
+        self.note_count() == 0
+    }
+}
+
+/// A send-max proposal, together with the spendable notes it left unspent.
+///
+/// Returned by [`propose_send_max_transfer`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendMaxProposal<FeeRuleT, NoteRef> {
+    proposal: Proposal<FeeRuleT, NoteRef>,
+    remainder: SendMaxRemainder,
+}
+
+impl<FeeRuleT, NoteRef> SendMaxProposal<FeeRuleT, NoteRef> {
+    /// Constructs a send-max proposal from its constituent parts.
+    pub(crate) fn from_parts(
+        proposal: Proposal<FeeRuleT, NoteRef>,
+        remainder: SendMaxRemainder,
+    ) -> Self {
+        Self {
+            proposal,
+            remainder,
+        }
+    }
+
+    /// Returns the proposal, which may be executed using [`create_proposed_transactions`].
+    pub fn proposal(&self) -> &Proposal<FeeRuleT, NoteRef> {
+        &self.proposal
+    }
+
+    /// Returns the spendable notes that the proposal leaves unspent.
+    pub fn remainder(&self) -> &SendMaxRemainder {
+        &self.remainder
+    }
+
+    /// Consumes this value, returning the proposal and its remainder.
+    pub fn into_parts(self) -> (Proposal<FeeRuleT, NoteRef>, SendMaxRemainder) {
+        (self.proposal, self.remainder)
+    }
+}
 
 /// Errors that may be generated in construction of proposals for transparent->shielded
 /// wallet-internal transfers.
@@ -1101,9 +1212,10 @@ where
 /// Proposes spending the maximum available value from the given shielded pools, sending it
 /// to a single recipient.
 ///
-/// Returns the proposal, which may then be executed using [`create_proposed_transactions`].
-/// Depending upon the recipient address, more than one transaction may be constructed in the
-/// execution of the returned proposal.
+/// Returns a [`SendMaxProposal`] holding the proposal, which may then be executed using
+/// [`create_proposed_transactions`], and the spendable notes it leaves unspent. Depending upon
+/// the recipient address, more than one transaction may be constructed in the execution of the
+/// returned proposal.
 ///
 /// Unlike [`propose_transfer`], the caller does not choose an amount. The value sent is
 /// whatever remains once the fee for the selected inputs is covered, and that fee is not
@@ -1134,7 +1246,11 @@ where
 ///   [`MaxSpendMode::MaxSpendable`] skips such notes and proposes a transaction spending
 ///   the rest; [`MaxSpendMode::Everything`] returns an error instead, so that a caller who
 ///   needs the pools genuinely emptied cannot be handed a partial result that looks like a
-///   complete one.
+///   complete one. [`MaxSpendMode::WithinSizeBound`] selects notes as `MaxSpendable` does but,
+///   where spending all of them would exceed the transaction size bound, spends the largest
+///   prefix of them, ordered by value descending, whose transactions fit, and reports the
+///   rest as the [`SendMaxProposal::remainder`]; if that prefix cannot cover its own fee,
+///   [`InputSelectorError::InsufficientFunds`] is returned.
 /// * `confirmations_policy`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
@@ -1162,7 +1278,55 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     locked_input_policy: &input_selection::LockedInputPolicy,
     lock_inputs: Option<LockRequest>,
 ) -> Result<
-    Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+    SendMaxProposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+    ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
+>
+where
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule + Clone,
+{
+    propose_send_max_transfer_within_size_limit(
+        wallet_db,
+        params,
+        spend_from_account,
+        spend_pools,
+        fee_rule,
+        recipient,
+        memo,
+        mode,
+        confirmations_policy,
+        locked_input_policy,
+        lock_inputs,
+        MAX_BLOCK_BYTES,
+    )
+}
+
+/// [`propose_send_max_transfer`], with the transaction size bound set to `size_limit` bytes
+/// rather than [`MAX_BLOCK_BYTES`].
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub(crate) fn propose_send_max_transfer_within_size_limit<
+    DbT,
+    ParamsT,
+    FeeRuleT,
+    CommitmentTreeErrT,
+>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    spend_pools: &[ShieldedPool],
+    fee_rule: &FeeRuleT,
+    recipient: ZcashAddress,
+    memo: Option<MemoBytes>,
+    mode: MaxSpendMode,
+    confirmations_policy: ConfirmationsPolicy,
+    locked_input_policy: &input_selection::LockedInputPolicy,
+    lock_inputs: Option<LockRequest>,
+    size_limit: usize,
+) -> Result<
+    SendMaxProposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
 >
 where
@@ -1180,7 +1344,7 @@ where
         return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
     }
 
-    let proposal = propose_send_max(
+    let send_max = propose_send_max(
         params,
         wallet_db,
         fee_rule,
@@ -1193,16 +1357,24 @@ where
         recipient,
         memo,
         locked_input_policy,
+        size_limit,
     )?;
 
-    proposal.check_transaction_size()?;
+    send_max
+        .proposal()
+        .check_transaction_size_within(size_limit)?;
 
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
-        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
+        lock_proposal_inputs(
+            wallet_db,
+            send_max.proposal(),
+            request.owner(),
+            lock_expiry_height,
+        )?;
     }
 
-    Ok(proposal)
+    Ok(send_max)
 }
 
 /// Constructs a proposal to shield all of the funds belonging to the provided set of

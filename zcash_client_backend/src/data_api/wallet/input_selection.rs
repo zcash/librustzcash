@@ -15,7 +15,8 @@ use {
     zip321::Payment,
 };
 
-use core::marker::PhantomData;
+use core::{cmp::Reverse, marker::PhantomData};
+use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -45,12 +46,12 @@ use crate::{
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
-    wallet::WalletTransparentOutput,
+    wallet::{ReceivedNote, WalletTransparentOutput},
 };
 
 pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
 
-use super::ConfirmationsPolicy;
+use super::{ConfirmationsPolicy, SendMaxProposal, SendMaxRemainder};
 
 #[cfg(feature = "orchard")]
 use crate::{data_api::wallet::ironwood_active_at, fees::orchard as orchard_fees};
@@ -1575,6 +1576,14 @@ fn ironwood_bundle_version_for_height<ParamsT: consensus::Parameters, H: Into<Bl
     .unwrap_or(::orchard::bundle::BundleVersion::ironwood_v3())
 }
 
+/// The error type of the send-max proposal functions.
+type SendMaxErrT<DbErrT, FeeRuleT, NoteRef> =
+    InputSelectorError<DbErrT, GreedyInputSelectorError, <FeeRuleT as FeeRule>::Error, NoteRef>;
+
+/// Proposes sending the maximum value of the account's notes in `spend_pools` that are selected
+/// under `mode` to `recipient`. Under [`MaxSpendMode::WithinSizeBound`], the proposal spends the
+/// largest prefix of those notes in [`SizeBoundOrder`] whose transactions are each at most
+/// `size_limit` bytes; otherwise it spends all of them, whatever its size.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     params: &ParamsT,
@@ -1589,14 +1598,10 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     recipient: ZcashAddress,
     memo: Option<MemoBytes>,
     locked_input_policy: &LockedInputPolicy,
+    size_limit: usize,
 ) -> Result<
-    Proposal<FeeRuleT, InputSourceT::NoteRef>,
-    InputSelectorError<
-        InputSourceT::Error,
-        GreedyInputSelectorError,
-        FeeRuleT::Error,
-        InputSourceT::NoteRef,
-    >,
+    SendMaxProposal<FeeRuleT, InputSourceT::NoteRef>,
+    SendMaxErrT<InputSourceT::Error, FeeRuleT, InputSourceT::NoteRef>,
 >
 where
     ParamsT: consensus::Parameters,
@@ -1620,6 +1625,209 @@ where
         )
         .map_err(InputSelectorError::DataSource)?;
 
+    let propose = |notes| {
+        propose_send_max_from_notes(
+            params,
+            fee_rule,
+            notes,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            recipient.clone(),
+            memo.clone(),
+        )
+    };
+
+    match mode {
+        MaxSpendMode::MaxSpendable | MaxSpendMode::Everything => Ok(SendMaxProposal::from_parts(
+            propose(spendable_notes)?,
+            SendMaxRemainder::ZERO,
+        )),
+        MaxSpendMode::WithinSizeBound => {
+            propose_largest_fitting_send_max(spendable_notes, size_limit, propose)
+        }
+    }
+}
+
+/// Proposes a send-max transaction spending the largest prefix of `notes`, in
+/// [`SizeBoundOrder`], for which `propose` yields a proposal whose transactions are each at most
+/// `size_limit` bytes, and reports the notes after that prefix as the remainder.
+///
+/// A proposal spending more notes is never smaller, so the prefix is found by binary search.
+/// A prefix for which `propose` fails, such as one that cannot cover its fee, is not treated as
+/// exceeding the bound; if the largest fitting prefix is such a prefix, its error is returned.
+fn propose_largest_fitting_send_max<FeeRuleT, NoteRef, DbErrT>(
+    notes: ReceivedNotes<NoteRef>,
+    size_limit: usize,
+    propose: impl Fn(
+        ReceivedNotes<NoteRef>,
+    ) -> Result<Proposal<FeeRuleT, NoteRef>, SendMaxErrT<DbErrT, FeeRuleT, NoteRef>>,
+) -> Result<SendMaxProposal<FeeRuleT, NoteRef>, SendMaxErrT<DbErrT, FeeRuleT, NoteRef>>
+where
+    FeeRuleT: FeeRule,
+    NoteRef: Clone,
+{
+    let balance_error = |e| InputSelectorError::Selection(GreedyInputSelectorError::Balance(e));
+    let fits = |proposal: &Proposal<FeeRuleT, NoteRef>| {
+        proposal.check_transaction_size_within(size_limit).is_ok()
+    };
+
+    let ordered = SizeBoundOrder::new(&notes).map_err(balance_error)?;
+    let proposal = propose(notes)?;
+    if fits(&proposal) {
+        return Ok(SendMaxProposal::from_parts(
+            proposal,
+            SendMaxRemainder::ZERO,
+        ));
+    }
+
+    let count = largest_fitting_prefix(ordered.len(), |count| {
+        propose(ordered.prefix(count)).is_ok_and(|proposal| !fits(&proposal))
+    });
+    let proposal = propose(ordered.prefix(count))?;
+    let remainder = SendMaxRemainder::from_notes(&ordered.suffix(count)).map_err(balance_error)?;
+    Ok(SendMaxProposal::from_parts(proposal, remainder))
+}
+
+/// Returns the largest `count` less than `len` for which `exceeds(count)` is false, or zero if
+/// there is none, given that `exceeds` is true for `len` and, once true for some count, true
+/// for every larger count. `exceeds(0)` is never evaluated.
+fn largest_fitting_prefix(len: usize, mut exceeds: impl FnMut(usize) -> bool) -> usize {
+    // Invariant: `exceeds(high)` holds, and `low` is zero or `exceeds(low)` does not hold.
+    let (mut low, mut high) = (0, len);
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        if exceeds(mid) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    low
+}
+
+/// Spendable notes in the order in which [`MaxSpendMode::WithinSizeBound`] retains them: by
+/// value descending, then by pool, then by note commitment tree position ascending.
+struct SizeBoundOrder<NoteRef> {
+    sapling: Vec<ReceivedNote<NoteRef, ::sapling::Note>>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<ReceivedNote<NoteRef, ::orchard::note::Note>>,
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<ReceivedNote<NoteRef, ::orchard::note::Note>>,
+    /// The pool of each note, in order. Each pool's notes are sorted in the same order, so the
+    /// first `n` notes overall are the first notes of each pool, in the counts given here.
+    pools: Vec<ShieldedPool>,
+}
+
+impl<NoteRef: Clone> SizeBoundOrder<NoteRef> {
+    /// Orders the given notes, returning an error if a note's value is invalid.
+    fn new(notes: &ReceivedNotes<NoteRef>) -> Result<Self, BalanceError> {
+        /// Returns the notes sorted by value descending, then position ascending, each with
+        /// its sort key.
+        #[allow(clippy::type_complexity)]
+        fn sorted<NoteRef: Clone, NoteT: Clone>(
+            notes: &[ReceivedNote<NoteRef, NoteT>],
+            pool: ShieldedPool,
+            value: impl Fn(&ReceivedNote<NoteRef, NoteT>) -> Result<Zatoshis, BalanceError>,
+        ) -> Result<(Vec<ReceivedNote<NoteRef, NoteT>>, Vec<SizeBoundKey>), BalanceError> {
+            let mut keyed = notes
+                .iter()
+                .map(|note| {
+                    Ok((
+                        (
+                            Reverse(value(note)?),
+                            pool,
+                            note.note_commitment_tree_position(),
+                        ),
+                        note.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, BalanceError>>()?;
+            keyed.sort_by(|(a, _), (b, _)| a.cmp(b));
+            Ok(keyed.into_iter().map(|(key, note)| (note, key)).unzip())
+        }
+
+        let (sapling, mut keys) =
+            sorted(notes.sapling(), ShieldedPool::Sapling, |n| n.note_value())?;
+        #[cfg(feature = "orchard")]
+        let orchard = {
+            let (orchard, orchard_keys) =
+                sorted(notes.orchard(), ShieldedPool::Orchard, |n| n.note_value())?;
+            keys.extend(orchard_keys);
+            orchard
+        };
+        #[cfg(feature = "orchard")]
+        let ironwood = {
+            let (ironwood, ironwood_keys) =
+                sorted(notes.ironwood(), ShieldedPool::Ironwood, |n| n.note_value())?;
+            keys.extend(ironwood_keys);
+            ironwood
+        };
+        keys.sort();
+
+        Ok(Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+            pools: keys.into_iter().map(|(_, pool, _)| pool).collect(),
+        })
+    }
+
+    /// Returns the number of notes.
+    fn len(&self) -> usize {
+        self.pools.len()
+    }
+
+    /// Returns the number of notes from the given pool among the first `count` notes.
+    fn count_in_pool(&self, count: usize, pool: ShieldedPool) -> usize {
+        self.pools[..count].iter().filter(|p| **p == pool).count()
+    }
+
+    /// Returns the first `count` notes.
+    fn prefix(&self, count: usize) -> ReceivedNotes<NoteRef> {
+        ReceivedNotes::new(
+            self.sapling[..self.count_in_pool(count, ShieldedPool::Sapling)].to_vec(),
+            #[cfg(feature = "orchard")]
+            self.orchard[..self.count_in_pool(count, ShieldedPool::Orchard)].to_vec(),
+            #[cfg(feature = "orchard")]
+            self.ironwood[..self.count_in_pool(count, ShieldedPool::Ironwood)].to_vec(),
+        )
+    }
+
+    /// Returns the notes after the first `count` notes.
+    fn suffix(&self, count: usize) -> ReceivedNotes<NoteRef> {
+        ReceivedNotes::new(
+            self.sapling[self.count_in_pool(count, ShieldedPool::Sapling)..].to_vec(),
+            #[cfg(feature = "orchard")]
+            self.orchard[self.count_in_pool(count, ShieldedPool::Orchard)..].to_vec(),
+            #[cfg(feature = "orchard")]
+            self.ironwood[self.count_in_pool(count, ShieldedPool::Ironwood)..].to_vec(),
+        )
+    }
+}
+
+/// The sort key of [`SizeBoundOrder`].
+type SizeBoundKey = (Reverse<Zatoshis>, ShieldedPool, Position);
+
+/// Proposes sending the value of `spendable_notes`, less the fee, to `recipient`, spending
+/// every note.
+#[allow(clippy::too_many_arguments)]
+fn propose_send_max_from_notes<ParamsT, FeeRuleT, NoteRef, DbErrT>(
+    params: &ParamsT,
+    fee_rule: &FeeRuleT,
+    spendable_notes: ReceivedNotes<NoteRef>,
+    target_height: TargetHeight,
+    anchor_height: BlockHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    recipient: ZcashAddress,
+    memo: Option<MemoBytes>,
+) -> Result<Proposal<FeeRuleT, NoteRef>, SendMaxErrT<DbErrT, FeeRuleT, NoteRef>>
+where
+    ParamsT: consensus::Parameters,
+    FeeRuleT: FeeRule + Clone,
+{
     let input_total = spendable_notes
         .total_value()
         .map_err(|e| InputSelectorError::Selection(GreedyInputSelectorError::Balance(e)))?;
@@ -2530,6 +2738,9 @@ where
         wallet_meta,
     )
 }
+
+#[cfg(test)]
+mod send_max_tests;
 
 #[cfg(all(test, feature = "transparent-inputs"))]
 mod tests {

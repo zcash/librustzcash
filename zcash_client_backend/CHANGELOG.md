@@ -10,6 +10,23 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::MaxSpendMode::WithinSizeBound`
+- `zcash_client_backend::data_api::wallet::{SendMaxProposal, SendMaxRemainder}`
+
+### Changed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns a `SendMaxProposal` instead of a `Proposal`. Obtain the proposal with
+  `SendMaxProposal::proposal` or `SendMaxProposal::into_parts`. Under
+  `MaxSpendMode::MaxSpendable` and `MaxSpendMode::Everything` the remainder is
+  always zero.
+- `zcash_client_backend::data_api::MaxSpendMode` has a new variant,
+  `WithinSizeBound`. Implementations of `InputSource::select_spendable_notes`
+  that match on `MaxSpendMode` must handle it; it selects the same notes as
+  `MaxSpendable`.
+- `zcash_client_backend::data_api::testing::TestState::propose_send_max_transfer`
+  now returns a `SendMaxProposal`.
+
 ### Fixed
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
   returns `Error::Proposal(ProposalError::TransactionTooLarge)` when a

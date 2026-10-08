@@ -319,7 +319,9 @@ pub(crate) enum NoteRequest {
 impl NoteRequest {
     pub(crate) fn from_max_spend_mode(value: MaxSpendMode, anchor_height: BlockHeight) -> Self {
         match value {
-            MaxSpendMode::MaxSpendable => NoteRequest::Spendable { anchor_height },
+            MaxSpendMode::MaxSpendable | MaxSpendMode::WithinSizeBound => {
+                NoteRequest::Spendable { anchor_height }
+            }
             MaxSpendMode::Everything => NoteRequest::UnspentOrError { anchor_height },
         }
     }

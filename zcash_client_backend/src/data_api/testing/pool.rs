@@ -151,6 +151,9 @@ use dsl::{TestDsl, TestNoteConfig};
 pub mod locking;
 pub use locking::*;
 
+pub mod send_max;
+pub use send_max::*;
+
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
 ///
@@ -732,7 +735,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
     let addy = to.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -741,7 +744,9 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
             MaxSpendMode::MaxSpendable,
             confirmation_policy,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
@@ -863,7 +868,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
     let addy = to.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -872,7 +877,9 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
@@ -1034,7 +1041,7 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
     let expected_payment = (value - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -1043,7 +1050,9 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 1);
@@ -1159,7 +1168,7 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     let expected_payment = (total - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -1168,7 +1177,9 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 1);
@@ -1284,7 +1295,7 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
     let expected_fee = MINIMUM_FEE;
     let expected_payment = (value - expected_fee).unwrap();
 
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -1293,7 +1304,9 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 1);
@@ -1588,7 +1601,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
     let addy = to.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
@@ -1601,7 +1614,9 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
                 true,
             ),
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
@@ -1738,7 +1753,7 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
     let addy = tex_addr.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
@@ -1747,7 +1762,9 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 2);
@@ -1888,7 +1905,7 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
     let addy = tex_addr.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
@@ -1897,7 +1914,9 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 2);
@@ -2036,7 +2055,7 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
     let addy = tex_addr.to_zcash_address(st.network());
-    let proposal = st
+    let (proposal, remainder) = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
@@ -2045,7 +2064,9 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+    assert!(remainder.is_zero());
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 2);

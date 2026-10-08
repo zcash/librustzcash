@@ -539,6 +539,52 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_within_size_bound_spends_largest_notes_that_fit() {
+        testing::pool::send_max_within_size_bound_spends_largest_notes_that_fit::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    fn send_max_within_size_bound_is_max_spendable_when_everything_fits() {
+        testing::pool::send_max_within_size_bound_is_max_spendable_when_everything_fits::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    fn send_max_without_size_bound_rejects_oversized() {
+        testing::pool::send_max_without_size_bound_rejects_oversized::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn send_max_within_size_bound_remainder_is_spendable_afterwards() {
+        testing::pool::send_max_within_size_bound_remainder_is_spendable_afterwards::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    fn send_max_within_size_bound_locks_only_selected_notes() {
+        testing::pool::send_max_within_size_bound_locks_only_selected_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_max_within_size_bound_to_tex_bounds_the_first_step() {
+        testing::pool::send_max_within_size_bound_to_tex_bounds_the_first_step::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn send_max_within_size_bound_drops_by_value_across_pools() {
+        testing::pool::send_max_within_size_bound_drops_by_value_across_pools::<
+            SaplingPoolTester,
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
     fn send_max_proposal_fails_when_unconfirmed_funds_present() {
         testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<SaplingPoolTester>()
     }
