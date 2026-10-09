@@ -2107,6 +2107,10 @@ pub trait WalletRead {
     ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns information about every address tracked for this account.
+    ///
+    /// An exposed unified address can omit the transparent receiver that the wallet tracks
+    /// at its diversifier index. The result then also contains that receiver, as an
+    /// [`Address::Transparent`] entry whose [`AddressSource`] has the same diversifier index.
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error>;
 
     /// Returns the wallet account that controls the given address, if any.

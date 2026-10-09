@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
+  implementation to also return the transparent receiver that the wallet tracks
+  at the diversifier index of an exposed unified address that omits it, as an
+  `Address::Transparent` entry with that diversifier index.
+- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+  now pays a unified address with every receiver of that address. Previously
+  it omitted the transparent receiver of an address that also had a shielded
+  receiver.
+
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
   now counts the value of the selected transparent inputs in the `available`
