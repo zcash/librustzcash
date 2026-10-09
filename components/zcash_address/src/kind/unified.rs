@@ -114,6 +114,18 @@ pub enum MetadataTypecode {
     Unknown(u32),
 }
 
+impl MetadataTypecode {
+    /// Returns whether [ZIP 316] requires a reader to understand a metadata item of this
+    /// type. A reader that does not understand such an item must reject the container
+    /// that holds it, so the item cannot be dropped without changing the meaning of the
+    /// container.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn is_must_understand(&self) -> bool {
+        u32::from(*self) >= MUST_UNDERSTAND_METADATA_MIN
+    }
+}
+
 impl From<MetadataTypecode> for u32 {
     fn from(t: MetadataTypecode) -> Self {
         match t {
@@ -1188,3 +1200,31 @@ pub trait Item: SealedItem {
 }
 
 impl<T: SealedItem> Item for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        METADATA_TYPECODE_MAX, METADATA_TYPECODE_MIN, MUST_UNDERSTAND_METADATA_MIN,
+        MetadataTypecode, Typecode,
+    };
+
+    #[test]
+    fn expiry_metadata_is_must_understand() {
+        assert!(MetadataTypecode::ExpiryHeight.is_must_understand());
+        assert!(MetadataTypecode::ExpiryTime.is_must_understand());
+    }
+
+    #[test]
+    fn must_understand_follows_typecode_range() {
+        for value in METADATA_TYPECODE_MIN..=METADATA_TYPECODE_MAX {
+            match Typecode::try_from(value) {
+                Ok(Typecode::Metadata(tc)) => assert_eq!(
+                    tc.is_must_understand(),
+                    value >= MUST_UNDERSTAND_METADATA_MIN,
+                    "typecode {value:#04X}"
+                ),
+                other => panic!("typecode {value:#04X} parsed as {other:?}"),
+            }
+        }
+    }
+}

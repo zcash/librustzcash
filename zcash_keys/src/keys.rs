@@ -2805,8 +2805,7 @@ mod tests {
                     panic!("UA derivation failed for account {}: {e:?}", tv.account)
                 });
             assert_eq!(
-                ua.encode_receiver_preserving_revision(&MAIN_NETWORK, Revision::R2)
-                    .as_deref(),
+                ua.encode_revision(&MAIN_NETWORK, Revision::R2).as_deref(),
                 Ok(tv.derived_ua),
                 "derived UA mismatch for account {}",
                 tv.account

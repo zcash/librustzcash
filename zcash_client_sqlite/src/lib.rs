@@ -4740,7 +4740,7 @@ mod tests {
         assert!(!ua.has_orchard());
 
         // It round-trips through the `tu` encoding.
-        let encoded = ua.encode_receiver_preserving(&network);
+        let encoded = ua.encode(&network);
         assert!(
             encoded.starts_with(zcash_address::constants::hrp_unified_address_r2_ti(
                 network.network_type()
@@ -5207,15 +5207,13 @@ mod tests {
 
         let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
         let address = Address::Unified(Box::new(ua));
-        let mut stored = address.encode_receiver_preserving(state.network());
+        let mut stored = address.encode(state.network());
 
         for revision in [
             zcash_address::unified::Revision::R2,
             zcash_address::unified::Revision::R0,
         ] {
-            let encoded = address
-                .encode_receiver_preserving_revision(state.network(), revision)
-                .unwrap();
+            let encoded = address.encode_revision(state.network(), revision).unwrap();
             state
                 .wallet_mut()
                 .conn_mut()

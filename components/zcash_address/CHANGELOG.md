@@ -20,6 +20,7 @@ workspace.
     `hrp_unified_address_r2_ti`, `hrp_unified_fvk_r2`, `hrp_unified_ivk_r2`,
     `b58_sprout_address_prefix`, `b58_pubkey_address_prefix`, and
     `b58_script_address_prefix`, which take a `NetworkType`.
+- `zcash_address::unified::MetadataTypecode::is_must_understand`
 
 ### Changed
 - `zcash_address::unified::Revision` is now defined in this crate, and is no

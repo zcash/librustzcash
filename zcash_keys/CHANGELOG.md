@@ -17,11 +17,36 @@ workspace.
     `zcash_protocol::constants::{mainnet, testnet, regtest}`.
   - `hrp_sapling_extended_spending_key`, `hrp_sapling_extended_full_viewing_key`,
     and `b58_secret_key_prefix`, which take a `NetworkType`.
+- `zcash_keys::address::UnifiedAddress::prune_retaining`
+- `zcash_keys::address::PruneError`
 
 ### Changed
 - `zcash_keys::keys::transparent::Key::{decode_base58, encode_base58}` now take
   a `NetworkType` instead of `&N` where `N: NetworkConstants`. Callers holding
   consensus parameters pass `params.network_type()`.
+- The following methods now encode every receiver of a `UnifiedAddress`.
+  Previously they omitted the transparent receiver of an address that also had a
+  shielded receiver. To encode an address without its transparent receiver,
+  first remove that receiver with `UnifiedAddress::prune_retaining`.
+  - `zcash_keys::address::UnifiedAddress::{to_zcash_address,
+    to_zcash_address_revision, encode, encode_revision}`
+  - `zcash_keys::address::Address::{to_zcash_address, to_zcash_address_revision,
+    encode, encode_revision}`
+
+### Removed
+- `zcash_keys::address::UnifiedAddress::{to_receiver_preserving_zcash_address,
+  to_receiver_preserving_zcash_address_revision, encode_receiver_preserving,
+  encode_receiver_preserving_revision}` and
+  `zcash_keys::address::Address::{to_receiver_preserving_zcash_address,
+  to_receiver_preserving_zcash_address_revision, encode_receiver_preserving,
+  encode_receiver_preserving_revision}`. Use the corresponding
+  `to_zcash_address`, `to_zcash_address_revision`, `encode`, and
+  `encode_revision` methods instead.
+- `zcash_keys::address::UnifiedAddress::{to_transparent_including_zcash_address,
+  to_transparent_including_zcash_address_revision, encode_transparent_including,
+  encode_transparent_including_revision}`. Use `UnifiedAddress::has_transparent`
+  together with the corresponding `to_zcash_address`, `to_zcash_address_revision`,
+  `encode`, and `encode_revision` methods instead.
 
 ## [0.17.0-pre.1] - 2026-10-06
 
