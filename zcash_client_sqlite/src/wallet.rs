@@ -156,6 +156,7 @@ use crate::{
 use {
     crate::GapLimits,
     ::transparent::{
+        address::TransparentAddress,
         bundle::{OutPoint, TxOut},
         keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
@@ -169,15 +170,12 @@ use {
 use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
 use FindAccountForAddressError as E;
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::{descriptor::sh, script::Evaluable};
 #[cfg(feature = "zcashd-compat")]
 use {
     crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
     zcash_keys::keys::zcashd,
-};
-#[cfg(feature = "transparent-key-import")]
-use {
-    ::transparent::address::TransparentAddress,
-    zcash_script::{descriptor::sh, script::Evaluable},
 };
 
 pub mod commitment_tree;
@@ -1309,7 +1307,7 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
     let mut addrs = vec![];
 
     let mut stmt_addrs = conn.prepare(
-        "SELECT address, diversifier_index_be, key_scope
+        "SELECT address, diversifier_index_be, key_scope, cached_transparent_receiver_address
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
@@ -1336,7 +1334,8 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
             .then(|| _scope.into())
             .flatten();
 
-        let addr_source = match decode_diversifier_index_be(di_vec)? {
+        let diversifier_index = decode_diversifier_index_be(di_vec)?;
+        let addr_source = match diversifier_index {
             Some(di) => Ok::<_, SqliteClientError>(AddressSource::Derived {
                 diversifier_index: di,
                 #[cfg(feature = "transparent-inputs")]
@@ -1350,11 +1349,32 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
             )),
         }?;
 
+        // A unified address can omit the transparent receiver that the wallet tracks at its
+        // index. List that receiver as its own transparent address.
+        #[cfg(feature = "transparent-inputs")]
+        let omitted_taddr = match (&addr, diversifier_index, row.get::<_, Option<String>>(3)?) {
+            (Address::Unified(ua), Some(di), Some(cached_taddr)) if !ua.has_transparent() => {
+                let taddr = TransparentAddress::decode(params, &cached_taddr)?;
+                // `from_parts` accepts a transparent key scope on a transparent address, so this
+                // is always `Some`.
+                AddressInfo::from_parts(
+                    Address::Transparent(taddr),
+                    AddressSource::Derived {
+                        diversifier_index: di,
+                        transparent_key_scope: _scope.into(),
+                    },
+                )
+            }
+            _ => None,
+        };
+
         addrs.push(AddressInfo::from_parts(addr, addr_source).ok_or(
             SqliteClientError::CorruptedData(
                 "transparent key scope information present for shielded address".to_string(),
             ),
         )?);
+        #[cfg(feature = "transparent-inputs")]
+        addrs.extend(omitted_taddr);
     }
 
     Ok(addrs)
