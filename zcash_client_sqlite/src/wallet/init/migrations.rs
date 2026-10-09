@@ -186,6 +186,7 @@ migration_modules!(
     v_tx_outputs_transparent_addresses,
     v_tx_outputs_use_legacy_false,
     wallet_summaries,
+    witness_anchor_stable,
     witness_stabilized_notes,
     zip318_classification,
 );
@@ -277,39 +278,44 @@ pub(super) fn all_migrations<
     //       \                      /               /                 |               \
     //        \                    /               /                  |                \
     //         \                  /               /                   |                 \
-    //      witness_stabilized_notes    v_tx_outputs_key_scopes  standalone_p2sh      add_transparent_value_index
-    //               /                     /        |             /            \
-    //  tree_retained_checkpoints   ivk_item_cache  |            /      orchard_note_version
-    //                                              |           /                \
-    //                             .----------------'          /                  \
-    //                             |                          /                    \
-    //                             |  add_transparent_receiver_address_index        \
-    //                             |               |                                 \
-    //                             |      standalone_address               ironwood_received_notes -----------------------------------------.
-    //                             |               |                         /        |        \                  \                         |
-    //                             |      restore_ua_transparent_receivers  /         |         \                  \                        |
-    //                             |                     ironwood_pool_code_views     |     note_locking  fix_bad_ironwood_change_flagging  |
-    //                             |                             |         \          |                |                                    |
-    //                             |                             |          \  v_address_uses_ironwood |                   orchard_ironwood_migration_tables
-    //                             |                             |           \                         |                                    |
-    //                             |                             |            \                 tx_status_observation_intent                |
-    //                             |                             |             \                                                            |
-    //                             `------ v_tx_outputs_transparent_addresses   \                                          orchard_ironwood_migration_anchor_interval
-    //                                                      |                    |                                                          |
-    //                                       v_tx_outputs_diversifier_index      |                                                          |
-    //                                                                           \                                                          |
-    //                                                                      v_transactions_pool_crossing                                    |
-    //                                                                                   |                           orchard_ironwood_migration_unsatisfiability
-    //                                                                         zip318_classification                                        |
-    //                                                                                   |                               orchard_ironwood_migration_history
-    //                                                                      v_transactions_zip318_kind                                      |
-    //                                                                          /                    \                   orchard_ironwood_broadcast_binding
-    //                                                                         /                      \                                     |
-    //                                                                        /                        \                orchard_ironwood_migration_txid_blob
-    //                                                                       /                          \                  /
-    //                                                                      /                          v_migration_transactions
-    //                                                                     /                            /
-    //                                                                 fix_v_transactions_multi_account_totals
+    //        witness_stabilized_notes    v_tx_outputs_key_scopes  standalone_p2sh      add_transparent_value_index
+    //               /            |          /        |             /            \
+    //  tree_retained_checkpoints |   ivk_item_cache  |            /      orchard_note_version
+    //                            |                   |           /                \
+    //                            |  .----------------'          /                  \
+    //                            |  |                          /                    \
+    //                            |  |  add_transparent_receiver_address_index        \
+    //                     .------'  |               |                                 \
+    //                    /          |      standalone_address               ironwood_received_notes -----------------------------------------.
+    //                   /           |               |                         / /        |        \                                          |
+    //                  /            |      restore_ua_transparent_receivers  / /         |         \                                         |
+    //                 /             |                                       / /          |          \                                        |
+    //                /              |         .----------------------------' /           |           \                                       |
+    //               /               |        /                              /            |            \                                      |
+    //               |               |   note_locking      ironwood_pool_code_views       |   fix_bad_ironwood_change_flagging                |
+    //               |               |   /    |                      |         \          |                                                   |
+    //               |  ------------.|.-'     |                      |          \  v_address_uses_ironwood                     orchard_ironwood_migration_tables
+    //               | /             |        |                      |           \                                                            |
+    //    witness_anchor_stable      |        |                      |            \                                                           |
+    //                               |        |                      |             |                                                          |
+    //                               |  tx_status_observation_intent |             |                                                          |
+    //                               |                               |             |                                                          |
+    //                               `------ v_tx_outputs_transparent_addresses    |                                         orchard_ironwood_migration_anchor_interval
+    //                                                        |                    |                                                          |
+    //                                         v_tx_outputs_diversifier_index      |                                                          |
+    //                                                                             \                                                          |
+    //                                                                        v_transactions_pool_crossing                                    |
+    //                                                                                     |                           orchard_ironwood_migration_unsatisfiability
+    //                                                                           zip318_classification                                        |
+    //                                                                                     |                               orchard_ironwood_migration_history
+    //                                                                        v_transactions_zip318_kind                                      |
+    //                                                                            /                    \                   orchard_ironwood_broadcast_binding
+    //                                                                           /                      \                                     |
+    //                                                                          /                        \                orchard_ironwood_migration_txid_blob
+    //                                                                         /                          \                  /
+    //                                                                        /                          v_migration_transactions
+    //                                                                       /                            /
+    //                                                                   fix_v_transactions_multi_account_totals
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -435,6 +441,9 @@ pub(super) fn all_migrations<
         Box::new(fix_v_transactions_multi_account_totals::Migration),
         Box::new(restore_ua_transparent_receivers::Migration {
             params: params.clone(),
+        }),
+        Box::new(witness_anchor_stable::Migration {
+            _params: params.clone(),
         }),
     ]
 }

@@ -10,7 +10,32 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
+- `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+- `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
+- `zcash_client_backend::data_api::PutBlocksError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
+- `zcash_client_backend::data_api::chain::error::Error` implements
+  `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
+
 ### Changed
+- `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
+  `Anchor`, ordered between `ChainTip` and `Verify`.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a block at
+  an already-scanned height whose hash differs from the hash the wallet recorded
+  there as `Error::Scan(ScanError::BlockHashMismatch)`, a continuity error at that
+  height, and writes nothing. Previously the block was passed to
+  `WalletWrite::put_blocks`, and any conflict surfaced as `Error::Wallet`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
+  `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
+  commitment tree conflict as `PutBlocksError::Continuity` and any other failure
+  as `PutBlocksError::Wallet`; callers that matched on `Self::Error` match on
+  `PutBlocksError::Wallet` instead.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a note
+  commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
+  a continuity error at the first block of the batch, instead of as
+  `Error::Wallet`.
 - `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
   implementation to also return the transparent receiver that the wallet tracks
   at the diversifier index of an exposed unified address that omits it, as an
@@ -19,6 +44,34 @@ workspace.
   now pays a unified address with every receiver of that address. Previously
   it omitted the transparent receiver of an address that also had a shielded
   receiver.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks` takes the wallet's
+  view of the chain tip as a new `chain_tip: Option<BlockHeight>` argument, and
+  `zcash_client_backend::data_api::ll::wallet::update_tree` takes a
+  `checkpoint_floor: BlockHeight` argument and its `missing_checkpoints`
+  argument unconditionally. `Checkpoint` retention is now used only within
+  `PRUNING_DEPTH` blocks of the chain tip: every scanned height in that window
+  receives a checkpoint in every tree, whether or not a block there carries a
+  commitment, and a block-end checkpoint below the window is not created; such
+  a commitment keeps only the marking that protects a wallet note.
+  `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights` takes the
+  window's heights as a new argument,
+  `zcash_client_backend::data_api::ll::wallet::ensure_checkpoints` takes the set
+  of checkpoints the batch creates and the block-end tree positions as separate
+  arguments. `batch_ensure_heights`, `ensure_checkpoints`,
+  `checkpoint_positions`, and `cross_pool_ensure_heights` in
+  `zcash_client_backend::data_api::ll::wallet` are available without the
+  `orchard` feature.
+- `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
+  now documented to return an anchor whose tree state is exactly the state at
+  `min_confirmations` below the target, and `None` when the backend cannot
+  identify such a state, for example because blocks between its latest
+  checkpoint and that depth are unscanned. An implementation that returned the
+  most recent checkpoint at or below that depth without this condition must be
+  updated.
+
+### Removed
+- `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
+  newly_discovered_notes_become_stabilized}`.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`

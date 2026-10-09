@@ -58,9 +58,10 @@ use zcash_client_backend::{
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        OutputLockStore, PutBlocksError, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -94,7 +95,7 @@ use zcash_protocol::{
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::SqliteClientError,
+    error::{PutBlocksTransactionError, SqliteClientError},
     wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
@@ -1754,8 +1755,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
-        let (target_height, _) = self
-            .get_target_and_anchor_heights(NonZeroU32::MIN)?
+        let target_height = wallet::mempool_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
         let TableConstants {
@@ -1990,8 +1990,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.put_blocks(from_state, blocks))
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
+        self.transactionally(|wdb| {
+            wdb.put_blocks(from_state, blocks)
+                .map_err(PutBlocksTransactionError::Batch)
+        })
+        .map_err(PutBlocksTransactionError::into_put_blocks_error)
     }
 
     fn put_received_transparent_utxo(
@@ -2416,7 +2420,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
         // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
         // retention grids are retained as durable anchors. The activation height is `None` (and so
         // anchor retention is inactive) on networks that do not yet have an assigned NU6.3
@@ -2441,8 +2445,11 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                     core::iter::once(self.anchor_retention_interval).chain(committed),
                 ))
             })
-            .transpose()?
+            .transpose()
+            .map_err(PutBlocksError::Wallet)?
             .flatten();
+        let chain_tip = wallet::chain_tip_height(self.conn.borrow())
+            .map_err(|e| PutBlocksError::Wallet(SqliteClientError::from(e)))?;
 
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
@@ -2450,9 +2457,13 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             self.gap_limits,
             from_state,
             blocks,
+            chain_tip,
             anchor_retention.as_ref(),
         )
-        .map_err(SqliteClientError::from)
+        .map_err(|error| match error {
+            ll::wallet::PutBlocksError::Continuity(error) => PutBlocksError::Continuity(error),
+            other => PutBlocksError::Wallet(SqliteClientError::from(other)),
+        })
     }
 
     fn put_received_transparent_utxo(
@@ -2461,6 +2472,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         #[cfg(feature = "transparent-inputs")]
         return {
+            if let Some(mined_height) = _output.mined_height() {
+                wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+            }
             let (account_id, _, key_scope, utxo_id) =
                 wallet::transparent::put_received_transparent_utxo(
                     self.conn.0,
@@ -2494,6 +2508,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         d_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let Some(mined_height) = d_tx.mined_height() {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
         store_decrypted_tx(
@@ -2661,6 +2678,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.0,
             &self.params,
@@ -2962,6 +2982,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.borrow(), &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.borrow(),
             &self.params,

@@ -796,7 +796,7 @@ mod tests {
     /// here: SQLite's `ALTER TABLE ... ADD COLUMN` splices the new definition into the stored text
     /// just before the closing parenthesis, so a repaired schema separates its last two columns
     /// with `\n        , ` where the `CREATE TABLE` that states the same shape writes `,\n`.
-    fn normalize_sql(s: &str) -> String {
+    pub(crate) fn normalize_sql(s: &str) -> String {
         let re = Regex::new(r"\s+").unwrap();
         let re_punct = Regex::new(r"([(),])").unwrap();
         re.replace_all(&re_punct.replace_all(s, " $1 "), " ")
@@ -885,7 +885,7 @@ mod tests {
             db::INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_IRONWOOD_RECEIVED_NOTES_ADDRESS,
             db::INDEX_IRONWOOD_RECEIVED_NOTES_TX,
-            db::INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_STABILIZED,
+            db::INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE,
             db::INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT,
@@ -894,13 +894,13 @@ mod tests {
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ADDRESS,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
-            db::INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE,
             db::INDEX_SAPLING_RNS_NOTE,
             db::INDEX_SAPLING_RNS_TX,
             db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_SAPLING_RECEIVED_NOTES_ADDRESS,
             db::INDEX_SAPLING_RECEIVED_NOTES_TX,
-            db::INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED,
+            db::INDEX_SAPLING_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE,
             db::INDEX_SENT_NOTES_FROM_ACCOUNT,
             db::INDEX_SENT_NOTES_TO_ACCOUNT,
             db::INDEX_SENT_NOTES_TX,

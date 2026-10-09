@@ -15,6 +15,7 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_client_backend::data_api::PutBlocksError as WalletPutBlocksError;
 use zcash_client_backend::data_api::error::RewindError;
 use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
@@ -623,9 +624,10 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             },
             #[cfg(feature = "transparent-inputs")]
             ll::wallet::PutBlocksError::GapAddresses(e) => SqliteClientError::from(e),
-            // `PutBlocksError` is `#[non_exhaustive]`, so a variant introduced by a future
-            // `zcash_client_backend` release reaches this conversion with no counterpart
-            // here until this crate is updated to map it. Report it rather than panicking.
+            // `WalletWrite::put_blocks` reports `Continuity` through its own error type, so that
+            // variant reaches this conversion only from other callers. `PutBlocksError` is
+            // `#[non_exhaustive]`, so a variant that a future `zcash_client_backend` release adds
+            // also reaches this arm. Both are reported unclassified rather than lost.
             other => SqliteClientError::BackendError(BackendError::PutBlocks(Box::new(other))),
         }
     }
@@ -659,6 +661,33 @@ impl From<LockError> for zcash_client_backend::data_api::error::LockError<Sqlite
             ),
             LockError::LockFailure(output) => {
                 zcash_client_backend::data_api::error::LockError::LockFailure(output)
+            }
+        }
+    }
+}
+
+/// Carries the outcome of `WalletWrite::put_blocks` through `WalletDb::transactionally`, which
+/// also needs somewhere to report the transaction's own failure to begin or commit.
+pub(crate) enum PutBlocksTransactionError {
+    /// The batch was rejected or could not be persisted.
+    Batch(WalletPutBlocksError<SqliteClientError>),
+    /// The enclosing transaction could not be begun or committed.
+    Transaction(rusqlite::Error),
+}
+
+impl From<rusqlite::Error> for PutBlocksTransactionError {
+    fn from(e: rusqlite::Error) -> Self {
+        PutBlocksTransactionError::Transaction(e)
+    }
+}
+
+impl PutBlocksTransactionError {
+    /// Folds a transaction failure into the batch error's wallet-error case.
+    pub(crate) fn into_put_blocks_error(self) -> WalletPutBlocksError<SqliteClientError> {
+        match self {
+            PutBlocksTransactionError::Batch(e) => e,
+            PutBlocksTransactionError::Transaction(e) => {
+                WalletPutBlocksError::Wallet(SqliteClientError::from(e))
             }
         }
     }

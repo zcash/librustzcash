@@ -102,6 +102,7 @@ use crate::{
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
+    scanning::ScanError,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
@@ -2288,12 +2289,19 @@ pub trait WalletRead {
     /// [`ScanPriority::Verify`]: crate::data_api::scanning::ScanPriority
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
 
-    /// Returns the default target height (for the block in which a new
-    /// transaction would be mined) and anchor height (to use for a new
-    /// transaction), given the range of block heights that the backend
-    /// knows about.
+    /// Returns the target height for a new transaction (the height of the block in which it
+    /// would be mined, one above the chain tip) and the anchor height to use for it.
     ///
-    /// This will return `Ok(None)` if no block data is present in the database.
+    /// The anchor is the note commitment tree state at the policy depth, `min_confirmations`
+    /// below the target. The returned height identifies a checkpoint carrying exactly that
+    /// state; it may lie below the policy depth when every block between the two has been
+    /// scanned and added no commitments.
+    ///
+    /// Returns `Ok(None)` if the chain tip is unknown, or if the backend cannot identify such
+    /// a checkpoint, for example because a block between its latest checkpoint and the policy
+    /// depth has not been scanned. An implementation must not return an anchor carrying an
+    /// older tree state: doing so reveals on chain how far behind the tip the wallet was when
+    /// it spent.
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
@@ -3510,6 +3518,36 @@ impl AccountBirthday {
     }
 }
 
+/// Errors returned by [`WalletWrite::put_blocks`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PutBlocksError<E> {
+    /// The batch, or the chain state it extends, conflicts with chain state the wallet already
+    /// holds; nothing from the batch was persisted. The carried error is a continuity error whose
+    /// height is the first block of the batch.
+    Continuity(ScanError),
+    /// The wallet failed to persist the batch.
+    Wallet(E),
+}
+
+impl<E: fmt::Display> fmt::Display for PutBlocksError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PutBlocksError::Continuity(e) => write!(f, "{e}"),
+            PutBlocksError::Wallet(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for PutBlocksError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PutBlocksError::Continuity(e) => Some(e),
+            PutBlocksError::Wallet(e) => Some(e),
+        }
+    }
+}
+
 /// This trait encapsulates the write capabilities required to update stored wallet data.
 ///
 /// # Adding accounts
@@ -3994,11 +4032,18 @@ pub trait WalletWrite:
     /// - `from_state` must be the chain state for the block height prior to the first
     ///   block in `blocks`.
     /// - `blocks` must be sequential, in order of increasing block height.
+    ///
+    /// ### Errors
+    /// - [`PutBlocksError::Continuity`] if the note commitment data of `blocks`, or the trees of
+    ///   `from_state`, conflict with note commitment tree state the wallet already holds. The
+    ///   caller should recover as from any other continuity error reported while scanning, by
+    ///   rewinding below the error's height.
+    /// - [`PutBlocksError::Wallet`] if persisting the batch fails.
     fn put_blocks(
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error>;
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>>;
 
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(

@@ -10,7 +10,7 @@ use crate::{
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::{
-    WalletWrite,
+    WalletRead, WalletWrite,
     anchor_retention::AnchorRetentionInterval,
     chain::{ChainState, error::Error},
     testing::{
@@ -654,17 +654,17 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
     }
 }
 
-/// Regression test: a note-commitment-tree error encountered while storing scanned blocks via
-/// `put_blocks` must surface as [`SqliteClientError::PutBlocksCommitmentTree`], carrying the
-/// affected shielded pool and the range of block heights being added, rather than as the bare
-/// `CommitmentTree` variant.
+/// A note commitment tree conflict encountered while storing scanned blocks via `put_blocks` is a
+/// chain-continuity failure: the batch, or the `from_state` it extends, disagrees with tree state
+/// the wallet already holds, so a sync loop must rewind and re-fetch rather than abort. The
+/// failure is reported at the first block of the batch, and nothing from the batch is persisted.
 ///
-/// The error is forced by scanning a contiguous range of wallet A's blocks but supplying a
+/// The conflict is forced by scanning a contiguous range of wallet A's blocks but supplying a
 /// `from_state` whose frontier was captured from a second wallet that scanned the same number of
 /// blocks with different note values: the chain state has the same tree shape (so it passes
 /// `put_blocks`' sequentiality checks) but conflicting node hashes, so `insert_frontier` inside
 /// `put_blocks` fails.
-pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
+pub(crate) fn put_blocks_commitment_tree_conflict_is_a_continuity_error<T: ShieldedPoolTester>() {
     // Wallet A: scan an initial range of blocks and capture its (consistent) chain state at the
     // last scanned height.
     let mut wallet_a =
@@ -766,19 +766,21 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
         &bad_from_state,
         scan_blocks as usize,
     ) {
-        Err(Error::Wallet(SqliteClientError::PutBlocksCommitmentTree {
-            pool,
-            block_range,
-            ..
-        })) => {
-            assert_eq!(pool, T::SHIELDED_PROTOCOL);
-            // `put_blocks` reports the range as `from_state.block_height()..(last_scanned + 1)`,
-            // i.e. starting at the frontier/`from_state` height and ending one past the last
-            // scanned block.
-            assert_eq!(block_range, (from_height - 1)..(from_height + scan_blocks));
+        Err(Error::Scan(err)) if err.is_continuity_error() => {
+            assert_eq!(err.at_height(), from_height);
         }
-        other => panic!("expected PutBlocksCommitmentTree error, got {other:?}"),
+        other => panic!("expected a continuity error, got {other:?}"),
     }
+
+    // Nothing from the rejected batch was persisted.
+    assert_eq!(
+        wallet_a
+            .wallet()
+            .block_max_scanned()
+            .unwrap()
+            .map(|meta| meta.block_height()),
+        Some(from_height - 1)
+    );
 }
 
 pub(crate) fn rewind_to_chain_state_deep<T: ShieldedPoolTester>() {
@@ -802,17 +804,71 @@ pub(crate) fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester>() {
     )
 }
 
-#[cfg(feature = "expensive-tests")]
-pub(crate) fn stabilized_note_spendable_after_deep_rewind<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_after_deep_rewind::<T, _>(
+pub(crate) fn b_note_stable_across_rewind_below_birthday<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::b_note_stable_across_rewind_below_birthday::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
 }
 
-#[cfg(feature = "expensive-tests")]
-pub(crate) fn newly_discovered_notes_become_stabilized<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::newly_discovered_notes_become_stabilized::<T, _>(
+pub(crate) fn a_note_requires_full_birthday_shard_scan<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::a_note_requires_full_birthday_shard_scan::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_rewind_above_shard_end<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_rewind_above_shard_end::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_rewind_un_mines_shard_completion<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_rewind_un_mines_shard_completion::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn stabilized_note_spendable_across_small_tip_advance<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_across_small_tip_advance::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn anchor_is_policy_depth_state_or_absent<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::anchor_is_policy_depth_state_or_absent::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn open_shard_note_spendable_across_commitment_free_stretch<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn completed_shard_note_spendable_with_unscanned_gap_below_it<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::completed_shard_note_spendable_with_unscanned_gap_below_it::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn stabilized_note_floor_invalidated_by_reorg<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_floor_invalidated_by_reorg::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
@@ -1036,4 +1092,11 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
         TestDbFactory::default(),
         BlockCache::new(),
     );
+}
+
+pub(crate) fn reorg_below_scanned_height_is_a_continuity_error<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::reorg_below_scanned_height_is_a_continuity_error::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
 }

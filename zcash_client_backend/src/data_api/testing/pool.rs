@@ -11,6 +11,7 @@ use incrementalmerkletree::{Hashable, Level, Position, frontier::Frontier};
 use rand::{Rng, RngExt};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
+use subtle::ConditionallySelectable;
 
 use transparent::address::TransparentAddress;
 use zcash_keys::{
@@ -38,10 +39,10 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        MaxSpendMode, NoteFilter, Ratio, SAPLING_SHARD_HEIGHT, TargetValue, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
-        chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
+        chain::{self, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
         testing::{
             AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
@@ -82,7 +83,7 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::propose_transfer,
+    crate::data_api::{ORCHARD_SHARD_HEIGHT, wallet::propose_transfer},
     std::collections::BTreeMap,
     zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
@@ -152,6 +153,608 @@ use dsl::{TestDsl, TestNoteConfig};
 
 pub mod locking;
 pub use locking::*;
+
+/// Value of the single wallet note placed in shard 1 by the
+/// [`build_stable_shard_fixture`] and [`build_tip_shard_fixture`] fixtures.
+pub(crate) const SHARD_1_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
+
+/// Number of empty cached (but unscanned) blocks that
+/// [`build_shard_1_note_fixture`] places *below* the account birthday, so
+/// that a rewind which lowers the account birthday can recover by re-scanning
+/// genuine cached blocks. Deliberately not aligned with any rewind target or
+/// window boundary used by the tests, so boundary off-by-one errors cannot be
+/// masked by coincidentally-matching fixture geometry.
+pub(crate) const PRE_BIRTHDAY_BLOCKS: u32 = 55;
+
+/// Value of account A's wallet note (placed in the interior of completed
+/// shard 1) in the [`build_two_account_recovery_fixture`] fixture.
+const RECOVERY_A_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
+
+/// Value of account B's wallet note (placed in the chain-tip shard) in the
+/// [`build_two_account_recovery_fixture`] fixture.
+const RECOVERY_B_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(80_000);
+
+/// The number of leaves between the shard 1 fixtures' initial frontier and the end of shard 1.
+/// The frontier ends at position 131000, so shard 1's last position is 131071.
+const SHARD_1_FRONTIER_GAP: u32 = 71;
+
+/// Builds the starting state shared by the shard 1 fixtures: note commitment trees whose
+/// frontier lies [`SHARD_1_FRONTIER_GAP`] leaves short of shard 1's end,
+/// [`PRE_BIRTHDAY_BLOCKS`] cached empty blocks below the birthday, and an account imported
+/// at the birthday. Returns the test state, the account's id, its spending key, and its
+/// viewing key for pool `T`.
+fn build_shard_1_prefix_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+    T::Fvk,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Sapling and Orchard shards have the same height, so one shard size positions the
+    // frontier of each pool.
+    const SHARD_POSITIONS: u32 = 1 << SAPLING_SHARD_HEIGHT;
+    #[cfg(feature = "orchard")]
+    const _: () = assert!(SAPLING_SHARD_HEIGHT == ORCHARD_SHARD_HEIGHT);
+
+    // Matches the hard-coded seed used by
+    // `TestBuilder::with_account_having_current_birthday`, so the imported
+    // account carries the keys that builder-created accounts would have.
+    const TEST_SEED: [u8; 32] = [0u8; 32];
+
+    // The frontier is unaligned with shard boundaries; a boundary-aligned
+    // frontier would cause `prior_subtree_roots` to cache shard 1 and then
+    // `insert_frontier` would fail trying to reinstall its leaf into the
+    // cached-leaf-form shard.
+    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - SHARD_1_FRONTIER_GAP;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
+
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    initial_tree_size.into(),
+                    NonZeroU8::new(SAPLING_SHARD_HEIGHT).unwrap(),
+                );
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    initial_tree_size.into(),
+                    NonZeroU8::new(ORCHARD_SHARD_HEIGHT).unwrap(),
+                );
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1 - PRE_BIRTHDAY_BLOCKS,
+                    BlockHash([5; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    ironwood_initial_tree,
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .build();
+
+    // Pre-birthday history: empty blocks at
+    // `[birthday - PRE_BIRTHDAY_BLOCKS, birthday - 1]`, cached but never
+    // scanned during fixture setup. Empty blocks leave the note commitment
+    // trees untouched, so the chain state at `birthday - 1` carries the same
+    // frontier the initial chain state installed.
+    for _ in 0..PRE_BIRTHDAY_BLOCKS {
+        st.generate_empty_block();
+    }
+
+    // Import the wallet account with birthday `birthday_height`, anchored on
+    // the chain state of the cached block at `birthday - 1`. This decouples
+    // the account birthday from the cache floor: the cache extends
+    // `PRE_BIRTHDAY_BLOCKS` below the birthday.
+    let usk = UnifiedSpendingKey::from_seed(st.network(), &TEST_SEED, zip32::AccountId::ZERO)
+        .expect("account USK derivation from seed should succeed");
+    let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
+    let birthday_prior_chain_state = st
+        .latest_cached_block()
+        .expect("pre-birthday blocks have been cached")
+        .chain_state()
+        .clone();
+    let birthday = AccountBirthday::from_parts(birthday_prior_chain_state, None);
+    let seed = Secret::new(TEST_SEED.to_vec());
+    let (account, _) = st
+        .wallet_mut()
+        .import_account_hd("primary", &seed, zip32::AccountId::ZERO, &birthday, None)
+        .expect("account import should succeed");
+    let account_id = account.id();
+
+    (st, account_id, usk, dfvk)
+}
+
+/// Shared construction for the stable- and tip-shard fixtures. Both fixtures
+/// use the same initial chain state and two real blocks (Block A places a
+/// wallet note in shard 1's interior, Block B's scan completes shard 1 via
+/// real leaves and spills 9 leaves into shard 2). They differ only in how
+/// many trailing filler blocks are scanned past Block B:
+/// * [`build_stable_shard_fixture`] appends `PRUNING_DEPTH + 10` trailing
+///   blocks, pushing the pruning floor above shard 1's `subtree_end_height`
+///   so the note stabilizes against the completed-shard interpretation.
+/// * [`build_tip_shard_fixture`] appends only 5 trailing blocks, leaving
+///   the wallet's birthday inside the chain-tip pruning window so the note
+///   stabilizes against the active-shard interpretation.
+///
+/// The block cache also holds [`PRE_BIRTHDAY_BLOCKS`] empty blocks *below*
+/// the account birthday. These are never scanned during fixture setup —
+/// mirroring production, where the chain always has (unscanned) history
+/// below any account's birthday — but they give a rewind-then-rescan flow
+/// real cached blocks to re-scan when a rewind lowers the account birthday.
+/// To decouple the account birthday from the cache floor, the account is
+/// imported mid-fixture (once the pre-birthday blocks exist) rather than
+/// created by `TestBuilder`; its birthday frontier is the chain state of the
+/// cached block at `birthday - 1`.
+///
+/// All block sizes here are well within plausible mainnet limits (the
+/// 300-output-per-block ceiling we use as our model upper bound), and every
+/// block is generated, so the block cache is contiguous from
+/// `birthday - PRE_BIRTHDAY_BLOCKS` to `chain_tip` and any
+/// rewind-then-rescan flow can drive a continuous re-scan.
+///
+/// In the diagram, `X` is the wallet's note commitment, `f` counts
+/// non-wallet filler commitments, `P` is [`PRE_BIRTHDAY_BLOCKS`], and `N` is
+/// `trailing_filler_blocks`. The shard 1/2 boundary falls inside Block B,
+/// whose 30 leaves split 21/9 across it.
+///
+/// ```text
+/// blocks:  |<-(faked state)->|<--P empty blk-->|<------A------>|<------B------>|<-----N blk----->|
+///     birthday-P-1      birthday-P         birthday        birthday+1      birthday+2        chain_tip
+/// leaves:  |<---(2^17-71)--->|<-------0------->|<----X+49f---->|<-----30f----->|<------N f------>|
+/// shards:  |<shard 0>|<--------------------shard 1--------------------->|<-------shard 2------>|...
+/// ```
+///
+/// Wallet notes placed by this fixture:
+///
+/// | height     | position | shard | value      |
+/// |------------|----------|-------|------------|
+/// | `birthday` | 131001   | 1     | 150 000    |
+fn build_shard_1_note_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+    trailing_filler_blocks: u32,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk, dfvk) = build_shard_1_prefix_fixture::<T, Dsf>(ds_factory, cache);
+
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    // Block A at `birthday`: 50 outputs at positions 131001..131050. The
+    // first output is the wallet note (position 131001); outputs 2..50 are
+    // non-wallet fillers. The note sits deep in shard 1's interior, well
+    // away from any shard boundary.
+    let mut block_a_outputs = Vec::with_capacity(50);
+    block_a_outputs.push(FakeCompactOutput::new(
+        dfvk.clone(),
+        AddressType::DefaultExternal,
+        SHARD_1_NOTE_VALUE,
+    ));
+    for _ in 1..50 {
+        block_a_outputs.push(FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ));
+    }
+    let (block_a_height, _, _) = st.generate_next_block_multi(&block_a_outputs);
+    st.scan_cached_blocks(block_a_height, 1);
+
+    // Block B at `birthday + 1`: 30 outputs at positions 131051..131080.
+    // Outputs 1..21 fill the remaining slots of shard 1 (positions
+    // 131051..131071); outputs 22..30 land in shard 2 (positions
+    // 131072..131080). Output 21 fills shard 1's last slot.
+    let block_b_outputs: Vec<_> = (0..30)
+        .map(|_| {
+            FakeCompactOutput::new(
+                not_our_key.clone(),
+                AddressType::DefaultExternal,
+                filler_value,
+            )
+        })
+        .collect();
+    let (block_b_height, _, _) = st.generate_next_block_multi(&block_b_outputs);
+    st.scan_cached_blocks(block_b_height, 1);
+
+    // Declare shard 1 complete at `block_b_height` (= `birthday + 1`).
+    // Scanning Block B fills shard 1's last leaf, but the wallet's scanning
+    // path does not on its own write `subtree_end_height` into the
+    // `*_tree_shards` table; that's the caller's responsibility (modelling
+    // the server-cap-sync path in production). Without this call,
+    // `mark_stabilized_notes` would never see a non-NULL
+    // `subtree_end_height` for shard 1 and the wallet note would never
+    // stabilize.
+    let shard_1_root = T::shard_root(&mut st, 1).unwrap();
+    T::put_subtree_roots(
+        &mut st,
+        1,
+        &[CommitmentTreeRoot::from_parts(block_b_height, shard_1_root)],
+    )
+    .unwrap();
+
+    // Trailing filler blocks past Block B, each adding 1 non-wallet output to
+    // shard 2.
+    if trailing_filler_blocks > 0 {
+        for _ in 0..trailing_filler_blocks {
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+        }
+        st.scan_cached_blocks(block_b_height + 1, trailing_filler_blocks as usize);
+    }
+
+    (st, account_id, usk)
+}
+
+/// Builds a fixture in which the wallet's shard 1 contains a real wallet
+/// note at position 131001, the shard completes via real scanning at
+/// `birthday + 1`, and `PRUNING_DEPTH + 10` trailing filler blocks push the
+/// pruning floor above shard 1's `subtree_end_height`. Under the corrected
+/// spendability rule the note is stabilized with `witness_anchor_stable =
+/// birthday + 1` (the completed-shard `subtree_end_height`).
+///
+/// Final state:
+///   `chain_tip = birthday + PRUNING_DEPTH + 11`
+///   `pruning_floor = birthday + 11`
+///   shard 1: complete (positions 65536..131071), `subtree_end_height = birthday + 1`
+///   shard 2: partial (positions 131072..131072 + 8 + PRUNING_DEPTH + 10)
+pub(crate) fn build_stable_shard_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    build_shard_1_note_fixture::<T, Dsf>(ds_factory, cache, PRUNING_DEPTH + 10)
+}
+
+/// Builds a fixture in which the wallet's shard 1 contains a real wallet
+/// note at position 131001 and the shard completes via real scanning at
+/// `birthday + 1`, but only 5 trailing filler blocks follow -- keeping the
+/// chain tip close enough to the birthday that the birthday height sits
+/// *inside* the chain-tip pruning window. Under the corrected spendability
+/// rule the note is stabilized via the active-shard interpretation:
+/// `witness_anchor_stable = birthday` (= `t.block`, Block A's height, not
+/// the shard's `subtree_end_height`).
+///
+/// Final state:
+///   `chain_tip = birthday + 6`
+///   `pruning_floor = birthday - 94`  (chain_tip - PRUNING_DEPTH)
+///   `lowest_window_checkpoint = birthday - 93`  (pruning_floor + 1)
+///   birthday sits inside the pruning window; shard 1 is complete but its
+///   `subtree_end_height` (= birthday + 1) is above the pruning floor.
+pub(crate) fn build_tip_shard_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    build_shard_1_note_fixture::<T, Dsf>(ds_factory, cache, 5)
+}
+
+/// Builds a two-account fixture backed by a single contiguous run of real blocks, used by the
+/// rewind-recovery tests that need genuine chain history on *both* sides of a wallet birthday.
+///
+/// Account A is the wallet's primary account (zip32 index 0 on seed `[0u8; 32]`, created by
+/// `TestBuilder`); account B is derived from the same seed at zip32 index 1 and imported once the
+/// chain has been scanned up to the block before B's birthday. Importing B mid-fixture is what
+/// lets B's own note be created in a block that the fixture generates.
+///
+/// In the diagram, `A` is account A's note commitment, `B` is account B's note commitment, and `f`
+/// counts non-wallet filler commitments. Heights are `b_A = Nu5 + 1000` (account A's birthday) and
+/// `b_A + 5` (account B's birthday, also denoted `b_B`); the trailing `PRUNING_DEPTH + 10` blocks
+/// push the pruning floor (`chain_tip - PRUNING_DEPTH`) above shard 1's `subtree_end_height`.
+///
+/// ```text
+/// blocks:  |<-(faked state)->|<----A1----->|<----A2---->|<---3 blk--->|<----B----->|<---PD+10 blk--->|
+///       nu5+999             b_A          b_A+1        b_A+2      (b_A+5;b_B)     b_B+4           chain_tip
+/// leaves:  |<---2^17 - 71--->|<---A+34f--->|<----36f--->|<----3f----->|<---B+4f--->|<----PD+10 f---->|
+/// shards:  |<shard 0>|<----------shard 1--------------->|<------------------shard 2------------------>..
+/// ```
+///
+/// * Shard 1 is completed by Block A2's last leaf and declared at
+///   `subtree_end_height = H_A + 1` via `put_subtree_roots`. Account A's note
+///   sits in its interior (position 131001), clear of any shard boundary.
+/// * Shard 2 is the partial chain-tip shard; account B's note (position
+///   131075) sits in its interior.
+/// * Blocks A1, A2, the three fillers, Block B, and the trailing fillers form
+///   one gap-free cached run, so a rewind to any height above `H_A` can be
+///   recovered by re-scanning real blocks rather than faked tree state.
+///
+/// Wallet notes placed by this fixture:
+///
+/// | account | height    | position | shard | value   |
+/// |---------|-----------|----------|-------|---------|
+/// | A       | `H_A`     | 131001   | 1     | 150 000 |
+/// | B       | `H_A + 5` | 131075   | 2     |  80 000 |
+fn build_two_account_recovery_fixture<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) -> (
+    TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
+    <Dsf as DataStoreFactory>::AccountId,
+    UnifiedSpendingKey,
+)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Sapling and Orchard shards have the same height, so one shard size positions the
+    // frontier of each pool.
+    const SHARD_POSITIONS: u32 = 1 << SAPLING_SHARD_HEIGHT;
+    #[cfg(feature = "orchard")]
+    const _: () = assert!(SAPLING_SHARD_HEIGHT == ORCHARD_SHARD_HEIGHT);
+
+    // Matches the hard-coded seed used by
+    // `TestBuilder::with_account_having_current_birthday`, so account B can
+    // be derived from the same seed at zip32 index 1.
+    const TEST_SEED: [u8; 32] = [0u8; 32];
+
+    // Initial frontier 71 positions short of shard 1's end (position
+    // 131000); see [`build_shard_1_note_fixture`] for why the frontier is
+    // kept off the shard boundary.
+    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - 71;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
+
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    initial_tree_size.into(),
+                    NonZeroU8::new(SAPLING_SHARD_HEIGHT).unwrap(),
+                );
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    initial_tree_size.into(),
+                    NonZeroU8::new(ORCHARD_SHARD_HEIGHT).unwrap(),
+                );
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    ironwood_initial_tree,
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
+
+    let dfvk_a = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    // Derive account B's viewing key ahead of any scanning so Block B can
+    // carry a B-destined output.
+    let zip32_index_b = zip32::AccountId::ZERO.next().unwrap();
+    let usk_b = UnifiedSpendingKey::from_seed(st.network(), &TEST_SEED, zip32_index_b)
+        .expect("account B USK derivation from seed should succeed");
+    let fvk_b = T::sk_to_fvk(T::usk_to_sk(&usk_b));
+
+    // Block A1 at `H_A`: 35 outputs at positions 131001..131035. Output #1 is
+    // account A's wallet note (position 131001); the rest are non-wallet
+    // fillers.
+    let mut block_a1_outputs = Vec::with_capacity(35);
+    block_a1_outputs.push(FakeCompactOutput::new(
+        dfvk_a.clone(),
+        AddressType::DefaultExternal,
+        RECOVERY_A_NOTE_VALUE,
+    ));
+    for _ in 1..35 {
+        block_a1_outputs.push(FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ));
+    }
+    let (block_a1_height, _, _) = st.generate_next_block_multi(&block_a1_outputs);
+
+    // Block A2 at `H_A + 1`: 36 non-wallet outputs at positions
+    // 131036..131071. Output #36 fills shard 1's last leaf.
+    let block_a2_outputs: Vec<_> = (0..36)
+        .map(|_| {
+            FakeCompactOutput::new(
+                not_our_key.clone(),
+                AddressType::DefaultExternal,
+                filler_value,
+            )
+        })
+        .collect();
+    let (block_a2_height, _, _) = st.generate_next_block_multi(&block_a2_outputs);
+    st.scan_cached_blocks(block_a1_height, 2);
+
+    // Declare shard 1 complete at `H_A + 1`; scanning alone does not write
+    // `subtree_end_height` (see [`build_shard_1_note_fixture`]).
+    let shard_1_root = T::shard_root(&mut st, 1).unwrap();
+    T::put_subtree_roots(
+        &mut st,
+        1,
+        &[CommitmentTreeRoot::from_parts(
+            block_a2_height,
+            shard_1_root,
+        )],
+    )
+    .unwrap();
+
+    // Three filler blocks at `H_A + 2 ..= H_A + 4`, one non-wallet output
+    // each (positions 131072..131074, the start of shard 2).
+    for _ in 0..3 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(block_a2_height + 1, 3);
+
+    // Import account B with a birthday one block above the current tip
+    // (`H_A + 5`). The prior chain state is taken from the latest cached
+    // block so B's birthday frontier reflects real scanned history.
+    let b_prior_chain_state = st
+        .latest_cached_block()
+        .expect("blocks have been scanned")
+        .chain_state()
+        .clone();
+    let b_birthday = AccountBirthday::from_parts(b_prior_chain_state, None);
+    let seed = Secret::new(TEST_SEED.to_vec());
+    let (account_b, _) = st
+        .wallet_mut()
+        .import_account_hd("account B", &seed, zip32_index_b, &b_birthday, None)
+        .expect("account B import should succeed");
+    let account_b_id = account_b.id();
+
+    // Block B at `H_A + 5`: 5 outputs at positions 131075..131079. Output #1
+    // is account B's wallet note (position 131075); the rest are fillers.
+    let mut block_b_outputs = Vec::with_capacity(5);
+    block_b_outputs.push(FakeCompactOutput::new(
+        fvk_b.clone(),
+        AddressType::DefaultExternal,
+        RECOVERY_B_NOTE_VALUE,
+    ));
+    for _ in 1..5 {
+        block_b_outputs.push(FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ));
+    }
+    let (block_b_height, _, _) = st.generate_next_block_multi(&block_b_outputs);
+
+    // `PRUNING_DEPTH + 10` trailing filler blocks push the pruning floor
+    // above shard 1's `subtree_end_height`.
+    let trailing_filler_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..trailing_filler_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(block_b_height, 1 + trailing_filler_blocks as usize);
+
+    (st, account_b_id, usk_b)
+}
+
+/// Asserts that a send-max-spendable proposal for `account` consumes exactly
+/// `expected_balance`: the proposal's output amounts plus its required fee
+/// must sum to `expected_balance`. Catches the case where the spend path can
+/// see fewer notes than the balance path reported.
+pub(crate) fn assert_send_max_consumes_balance<T, Cache, DbT, ParamsT, AccountIdT, ErrT>(
+    st: &mut TestState<Cache, DbT, ParamsT>,
+    account_id: AccountIdT,
+    expected_balance: Zatoshis,
+) where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    <Cache::BlockSource as BlockSource>::Error: std::fmt::Debug,
+    ParamsT: consensus::Parameters + Send + 'static,
+    AccountIdT: std::fmt::Debug + std::cmp::Eq + std::hash::Hash,
+    ErrT: std::fmt::Debug,
+    DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
+        + WalletTest
+        + WalletWrite
+        + WalletRead<AccountId = AccountIdT, Error = ErrT>
+        + WalletCommitmentTrees,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+{
+    let send_max_recipient = T::sk_default_address(&T::sk(&[0xdd; 32]));
+    let proposal = st
+        .propose_send_max_transfer(
+            account_id,
+            &Zip317FeeRule::standard(),
+            send_max_recipient.to_zcash_address(st.network()),
+            None,
+            MaxSpendMode::MaxSpendable,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("send-max proposal should succeed when spendable balance is non-zero");
+    let step = proposal.steps().first();
+    let total_payments: Zatoshis = step
+        .transaction_request()
+        .payments()
+        .values()
+        .map(|p| p.amount().expect("send-max proposal payments have amounts"))
+        .sum::<Option<Zatoshis>>()
+        .expect("send-max payments should not overflow");
+    let fee = step.balance().fee_required();
+    assert_eq!(
+        (total_payments + fee).expect("payments + fee should not overflow"),
+        expected_balance,
+        "send-max proposal outputs + fee must equal the spendable balance",
+    );
+}
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
@@ -4066,81 +4669,107 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     assert_eq!(spendable.len(), 1);
 }
 
+/// A gap in scanned coverage directly below the policy depth withholds the anchor: the wallet
+/// cannot know that its latest checkpoint carries the tree state at that depth. Scanning the
+/// gap restores the anchor without any new checkpoint, since the gap's blocks add no
+/// commitments.
 pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
-    // Generate a block with funds belonging to our wallet.
     st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500000));
 
-    // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
-    // belong to us so that we can get a checkpoint in the tree.
     let account = st.test_account().cloned().unwrap();
+    let birthday = account.birthday().height();
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = Zatoshis::const_from_u64(10000);
-    let sapling_end_size = st.latest_cached_block().unwrap().sapling_end_size();
-    let orchard_end_size = st.latest_cached_block().unwrap().orchard_end_size();
-    let ironwood_end_size = st.latest_cached_block().unwrap().ironwood_end_size();
-    st.generate_block_at(
-        account.birthday().height() + 10,
-        BlockHash([0; 32]),
-        &[FakeCompactOutput::new(
-            &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
-        )],
-        sapling_end_size,
-        orchard_end_size,
-        ironwood_end_size,
+
+    // Nine empty blocks, then a block carrying a foreign output. Scanning only the last leaves
+    // the wallet with checkpoints at `birthday` and `birthday + 10` and no scanned coverage in
+    // between.
+    const GAP_BLOCKS: u32 = 9;
+    for _ in 0..GAP_BLOCKS {
+        st.generate_empty_block();
+    }
+    let (checkpoint_above_gap, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    assert_eq!(checkpoint_above_gap, birthday + GAP_BLOCKS + 1);
+    st.scan_cached_blocks(checkpoint_above_gap, 1);
+
+    let selection_policy = ConfirmationsPolicy::new_unchecked(
+        1,
+        5,
+        #[cfg(feature = "transparent-inputs")]
         false,
     );
+    let spend_policy = ConfirmationsPolicy::new_symmetrical_unchecked(
+        5,
+        #[cfg(feature = "transparent-inputs")]
+        false,
+    );
+    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let to = T::fvk_default_address(&not_our_key).to_zcash_address(st.network());
+    let request = || {
+        TransactionRequest::new(vec![Payment::without_memo(
+            to.clone(),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap()
+    };
 
-    // Scan the block
-    st.scan_cached_blocks(account.birthday().height() + 10, 1);
-
-    // Verify that our note is considered spendable
+    // The policy depth lies inside the gap: there is no anchor, so nothing is selectable and
+    // a spend is refused rather than built against the older checkpoint.
     let spendable = T::select_spendable_notes(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        TargetHeight::from(account.birthday().height() + 5),
-        ConfirmationsPolicy::new_unchecked(
-            1,
-            5,
-            #[cfg(feature = "transparent-inputs")]
-            false,
-        ),
+        TargetHeight::from(birthday + 5),
+        selection_policy,
         &[],
     )
     .unwrap();
-    assert_eq!(spendable.len(), 1);
-
-    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
-    let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
-
-    let to = T::fvk_default_address(&not_our_key);
-    let req = TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(10000),
-    )])
-    .unwrap();
-
-    // Attempt to spend the note with 5 confirmations
+    assert!(
+        spendable.is_empty(),
+        "the policy depth lies in the unscanned gap, so there is no anchor"
+    );
     assert_matches!(
         st.spend(
             &input_selector,
             &change_strategy,
             account.usk(),
-            req,
+            request(),
             OvkPolicy::Sender,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                5,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            ),
+            spend_policy,
+        ),
+        Err(Error::ScanRequired)
+    );
+
+    // Scanning the gap restores the anchor: the checkpoint at `birthday` carries the tree
+    // state at every height through `birthday + 9`.
+    st.scan_cached_blocks(birthday + 1, GAP_BLOCKS as usize);
+
+    let spendable = T::select_spendable_notes(
+        &st,
+        account.id(),
+        TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
+        TargetHeight::from(birthday + 5),
+        selection_policy,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(spendable.len(), 1);
+    assert_matches!(
+        st.spend(
+            &input_selector,
+            &change_strategy,
+            account.usk(),
+            request(),
+            OvkPolicy::Sender,
+            spend_policy,
         ),
         Ok(_)
     );
@@ -4862,33 +5491,26 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     .unwrap();
     assert_eq!(st.get_total_balance(acct_id), expected_final);
 
-    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, Some(0)),
-        (100001, Some(1)),
-        (100002, Some(1)),
-        (100007, Some(1)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(3)),
-        (100014, Some(5)),
-        (100020, Some(6)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    // Every scanned height lies within `PRUNING_DEPTH` of the chain tip, so each one carries a
+    // checkpoint in both trees, at the position of the nearest preceding commitment in that
+    // tree.
+    let expected_checkpoints_p0: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, Some(0u64))])
+        .chain((100001..=100012).map(|h| (h, Some(1))))
+        .chain([(100013, Some(3))])
+        .chain((100014..=100019).map(|h| (h, Some(5))))
+        .chain([(100020, Some(6))])
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
-    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [
-        (99999, None),
-        (100000, None),
-        (100001, None),
-        (100002, Some(0)),
-        (100007, Some(0)), // synthetic checkpoint in empty span from scan start
-        (100013, Some(0)),
-        (100014, Some(2)),
-        (100020, Some(2)),
-    ]
-    .into_iter()
-    .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
-    .collect();
+    let expected_checkpoints_p1: Vec<(BlockHeight, Option<Position>)> = [(99999u32, None)]
+        .into_iter()
+        .chain([(100000, None), (100001, None)])
+        .chain((100002..=100013).map(|h| (h, Some(0u64))))
+        .chain((100014..=100020).map(|h| (h, Some(2))))
+        .map(|(h, pos)| (BlockHeight::from(h), pos.map(Position::from)))
+        .collect();
 
     let p0_checkpoints = st
         .wallet()
@@ -5740,211 +6362,34 @@ pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
         .expect("rewind_to_chain_state should succeed across a non-contiguous scan");
 }
 
-/// Multiple wallet notes in a stabilized shard remain spendable after a deep
-/// `rewind_to_chain_state` moves the scan queue below them.
-pub fn stabilized_note_spendable_after_deep_rewind<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
-where
+/// Helper: drive the value-conservation checks once a recovery sequence
+/// claims the note is spendable again. Run a send-max proposal (consume
+/// exactly the reported balance) and a real fixed-value spend that must
+/// construct a transaction end-to-end.
+fn assert_recovered_balance_spends<T, Cache, DbT, ParamsT, AccountIdT, ErrT>(
+    st: &mut TestState<Cache, DbT, ParamsT>,
+    account_id: AccountIdT,
+    usk: &UnifiedSpendingKey,
+    expected_balance: Zatoshis,
+) where
     T: ShieldedPoolTester,
-    Dsf: DataStoreFactory,
-    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Cache: TestCache,
+    <Cache::BlockSource as BlockSource>::Error: std::fmt::Debug,
+    ParamsT: consensus::Parameters + Send + 'static,
+    AccountIdT: std::fmt::Debug + std::cmp::Eq + std::hash::Hash + Copy,
+    ErrT: std::fmt::Debug,
+    DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
+        + WalletTest
+        + WalletWrite
+        + WalletRead<AccountId = AccountIdT, Error = ErrT>
+        + WalletCommitmentTrees,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
+    <DbT as WalletRead>::Account: data_api::Account<AccountId = AccountIdT>,
 {
-    // Test plan:
-    // 1. Set up a wallet with an initial chain state whose tree has shard 0 fully
-    //    cached and shard 1 one position short of full (frontier at position
-    //    `2 * 2^16 - 2 = 131070`). The frontier lives in a partial shard 1 rather
-    //    than at a shard boundary; a boundary-aligned frontier would cause
-    //    `prior_subtree_roots` to cache shard 1 and then `insert_frontier` would
-    //    fail trying to reinstall its leaf into the cached-leaf-form shard.
-    // 2. Scan a single block of 65537 outputs. The first output finishes shard 1
-    //    (position 131071) and the remaining 65536 outputs fill all of shard 2
-    //    (positions 131072..196607). Three of those outputs are wallet-owned and
-    //    land at the first, middle, and last slots of shard 2 (tree positions
-    //    131072, 163840, and 196607); every other slot is non-wallet filler.
-    // 3. Declare shard 2 complete at `note_height` via `put_subtree_roots(2, ...)`
-    //    so `mark_stabilized_notes` has the `subtree_end_height` it needs to flip
-    //    the shard 2 notes' `witness_stabilized` flag once the pruning floor rises
-    //    above the shard.
-    // 4. Scan `PRUNING_DEPTH + 10` one-output post-note blocks. They land in shard
-    //    3 (positions 196608+), pushing the pruning-floor checkpoint's tree
-    //    position into shard 3 so `shardtree::truncate_shards(3)` — invoked by the
-    //    upcoming rewind — preserves shard 2 and every row it indexes.
-    // 5. Deep-rewind to a height below `note_height` and verify `scan_queue` is
-    //    rewound all the way to the target.
-    // 6. Before restoring the chain tip: the balance path reads the witness_stabilized
-    //    flag directly, so `get_spendable_balance` must return the full
-    //    three-note sum; the spend path requires a chain tip for the anchor, so
-    //    `propose_transfer` must fail with `ScanRequired`/`InsufficientFunds`.
-    // 7. Call `update_chain_tip(pre_rewind_tip)` and re-verify the balance.
-    // 8. Build and sign an actual spend — exercising the full note-selection and
-    //    witness-construction path — and assert it produces exactly one tx.
+    // Send-max consumes exactly the reported balance.
+    assert_send_max_consumes_balance::<T, _, _, _, _, _>(st, account_id, expected_balance);
 
-    const SHARD_HEIGHT: u32 = 16;
-    const SHARD_POSITIONS: u32 = 1 << SHARD_HEIGHT; // 65536
-
-    // Step 1: set up the wallet with shard 0 cached + frontier in a partial shard 1.
-    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - 1;
-
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_initial_chain_state(|rng, network| {
-            // The birthday is anchored at NU5 + 1000 rather than the more common
-            // Sapling-activation baseline because the orchard variant of this test
-            // pre-populates an orchard commitment-tree frontier; that requires
-            // Orchard to be active at the birthday height, which isn't true at
-            // Sapling activation. `+ 1000` is an arbitrary buffer past NU5 so
-            // heights like `birthday_height - 500` (see below) stay comfortably
-            // within the activated range.
-            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
-
-            let (prior_sapling_roots, sapling_initial_tree) =
-                Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    initial_tree_size.into(),
-                    NonZeroU8::new(SHARD_HEIGHT as u8).unwrap(),
-                );
-            // Shard 0 is the only complete shard at this tree size.
-            let prior_sapling_roots = prior_sapling_roots
-                .into_iter()
-                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
-                .collect::<Vec<_>>();
-
-            #[cfg(feature = "orchard")]
-            let (prior_orchard_roots, orchard_initial_tree) =
-                Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    initial_tree_size.into(),
-                    NonZeroU8::new(SHARD_HEIGHT as u8).unwrap(),
-                );
-            #[cfg(feature = "orchard")]
-            let prior_orchard_roots = prior_orchard_roots
-                .into_iter()
-                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
-                .collect::<Vec<_>>();
-
-            // Ironwood is not active at these test heights, so its tree is empty.
-            #[cfg(feature = "orchard")]
-            let ironwood_initial_tree = Frontier::empty();
-
-            InitialChainState {
-                chain_state: ChainState::new(
-                    birthday_height - 1,
-                    BlockHash([5; 32]),
-                    sapling_initial_tree,
-                    #[cfg(feature = "orchard")]
-                    orchard_initial_tree,
-                    #[cfg(feature = "orchard")]
-                    ironwood_initial_tree,
-                ),
-                prior_sapling_roots,
-                #[cfg(feature = "orchard")]
-                prior_orchard_roots,
-            }
-        })
-        .with_account_having_current_birthday()
-        .build();
-
-    let dfvk = T::test_account_fvk(&st);
-    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
-    let filler_value = Zatoshis::const_from_u64(1000);
-
-    // Step 2: scan a single block whose outputs finish shard 1 and fill all of
-    // shard 2. Three wallet outputs at the first, middle, and last slots of
-    // shard 2; everything else is non-wallet filler. Distinct wallet-output
-    // values keep failures easier to diagnose.
-    let note_values = [
-        Zatoshis::const_from_u64(100_000),
-        Zatoshis::const_from_u64(200_000),
-        Zatoshis::const_from_u64(150_000),
-    ];
-    let total_note_value = note_values.iter().sum::<Option<Zatoshis>>().unwrap();
-    // Shard 2 spans tree positions 2 * 2^16 .. 3 * 2^16 - 1 = 131072..196607.
-    let note_tree_positions: [u32; 3] = [
-        2 * SHARD_POSITIONS,                       // first slot of shard 2
-        2 * SHARD_POSITIONS + SHARD_POSITIONS / 2, // middle slot of shard 2
-        3 * SHARD_POSITIONS - 1,                   // last slot of shard 2
-    ];
-
-    let scan_block_size: u32 = SHARD_POSITIONS + 1; // finish shard 1 + fill shard 2
-    let first_scanned_position: u32 = initial_tree_size; // = 131071
-    let mut outputs = Vec::with_capacity(scan_block_size as usize);
-    let mut next_wallet_ix = 0;
-    for offset in 0..scan_block_size {
-        let tree_pos = first_scanned_position + offset;
-        if next_wallet_ix < note_tree_positions.len()
-            && tree_pos == note_tree_positions[next_wallet_ix]
-        {
-            outputs.push(FakeCompactOutput::new(
-                dfvk.clone(),
-                AddressType::DefaultExternal,
-                note_values[next_wallet_ix],
-            ));
-            next_wallet_ix += 1;
-        } else {
-            outputs.push(FakeCompactOutput::new(
-                not_our_key.clone(),
-                AddressType::DefaultExternal,
-                filler_value,
-            ));
-        }
-    }
-    let (note_height, _, _) = st.generate_next_block_multi(&outputs);
-    st.scan_cached_blocks(note_height, 1);
-
-    // Pick a rewind target well below the wallet's birthday so the rewind
-    // drops every initially-seeded scan_queue row — exercising the case where
-    // stabilized-shard metadata is the only thing keeping the notes spendable.
-    let birthday_height = st
-        .wallet()
-        .get_wallet_birthday()
-        .unwrap()
-        .expect("account birthday should be set");
-    let rewind_target = birthday_height - 100;
-
-    // Step 3: declare shard 2 complete at `note_height`. We must pass shard 2's
-    // actual computed root (not an arbitrary placeholder) because the cap already
-    // contains annotations inherited from the initial chain state's frontier, and
-    // `put_subtree_roots` refuses to install a conflicting root.
-    let shard_2_root = T::shard_root(&mut st, 2).unwrap();
-    T::put_subtree_roots(
-        &mut st,
-        2,
-        &[CommitmentTreeRoot::from_parts(note_height, shard_2_root)],
-    )
-    .unwrap();
-
-    // Step 4: scan more than `PRUNING_DEPTH` blocks past the note-filled block
-    // into shard 3, so the rewind's truncation position is in shard 3 and the
-    // ensuing `truncate_shards(3)` leaves shard 2 intact.
-    let extra_blocks = PRUNING_DEPTH + 10;
-    for _ in 0..extra_blocks {
-        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
-    }
-    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
-
-    let account = st.test_account().unwrap().clone();
-
-    // Step 5: deep-rewind to the target. The rewind target is below the account birthday,
-    // so the account must be included in the reset set for the birthday to be lowered.
-    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target with
-    // a `Historic` rescan range, so the chain tip remains observable as the pre-rewind tip
-    // and notes whose `witness_stabilized = 1` flag survives can still be spent.
-    st.wallet_mut()
-        .rewind_to_chain_state(
-            ChainState::empty(rewind_target, BlockHash([0; 32])),
-            HashSet::from([account.id()]),
-        )
-        .expect("rewind_to_chain_state should succeed");
-
-    // Step 6: balance reflects all three stabilized notes, and a spend can be proposed
-    // immediately because the chain tip is preserved by the rewind.
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        total_note_value,
-        "all stabilized notes should remain spendable after deep rewind"
-    );
-
-    // Step 7: build and sign a real spend end-to-end.
+    // A small fixed-value spend must construct a transaction.
     let to_extsk = T::sk(&[0xcc; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let send_value = Zatoshis::const_from_u64(10_000);
@@ -5958,302 +6403,966 @@ where
     let input_selector = GreedyInputSelector::new();
     let proposal = st
         .propose_transfer(
-            account.id(),
+            account_id,
             &input_selector,
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
         )
-        .expect("proposal should succeed with stabilized note after deep rewind");
+        .expect("propose_transfer should succeed against stabilized notes after the recovery scan");
     let txids = st
         .create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
-            account.usk(),
+            usk,
             OvkPolicy::Sender,
             &proposal,
         )
-        .expect("spend construction should succeed");
+        .expect("transaction construction should succeed");
     assert_eq!(
         txids.len(),
         1,
-        "the spend should produce exactly one transaction"
+        "the spend should produce exactly one transaction",
     );
 }
 
-/// Verifies that when a new account is imported into a fully-scanned wallet,
-/// the ensuing re-scan discovers the new account's previously-unknown notes
-/// and `scan_complete → mark_stabilized_notes` flags them `witness_stabilized`
-/// on the fly, so they remain spendable across a subsequent deep
-/// `rewind_to_chain_state`.
-pub fn newly_discovered_notes_become_stabilized<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+/// A note in the chain-tip shard stays recoverable across a rewind to below
+/// its account's birthday, as long as the chain has real history there to
+/// re-scan.
+///
+/// Uses `build_two_account_recovery_fixture`: account B's birthday is
+/// `H_A + 5`, and account A contributes the real blocks `H_A ..= H_A + 4`.
+/// The rewind targets `H_A + 2` -- below B's birthday but inside A's history
+/// -- so the recovery re-scan covers genuine cached blocks rather than faked
+/// tree state (the `CacheMiss` failure mode of an all-faked pre-birthday
+/// fixture).
+///
+///   1. Baseline: both accounts' notes are spendable.
+///   2. After the rewind: B's balance is zero (its chain-tip shard is
+///      re-dirtied and the pruning window carries the `Anchor` stamp).
+///   3. After re-scanning the dirty range: B's note is spendable again and
+///      value conservation holds.
+pub fn b_note_stable_across_rewind_below_birthday<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    // Test plan:
-    //
-    // 1. Build a fully-scanned wallet containing account A:
-    //    (a) install an initial chain state whose commitment tree has shard 0
-    //        cached and a frontier sitting in a partial shard 1 (the same
-    //        setup used by `stabilized_note_spendable_after_deep_rewind`);
-    //    (b) generate one note-containing block at `birthday_height` that
-    //        finishes shard 1 and fills shard 2, with three A-owned outputs
-    //        and three outputs for a not-yet-imported account B, non-wallet
-    //        filler elsewhere;
-    //    (c) generate `PRUNING_DEPTH + 10` filler blocks past the note block
-    //        to push the pruning floor past shard 2;
-    //    (d) scan the note block, declare shard 2 complete via
-    //        `put_subtree_roots`, then scan the filler blocks — the
-    //        second-batch `mark_stabilized_notes` call flips A's three notes
-    //        to `witness_stabilized = 1`. B's outputs are in the cached
-    //        blocks but produce no `*_received_notes` rows because B is not
-    //        yet in the wallet.
-    // 2. Confirm A's notes are spendable (sanity check on the initial
-    //    stabilization).
-    // 3. Import account B from the same seed at zip32 index 1, sharing A's
-    //    `AccountBirthday`. `add_account` rewrites `scan_queue` to replace
-    //    the post-birthday `Scanned` range with `Historic`, forcing a
-    //    re-scan.
-    // 4. Re-scan the cached blocks from the birthday through the chain tip.
-    //    The blocks are now processed against both A and B; three new
-    //    `*_received_notes` rows get inserted at B's shard-2 positions.
-    //    Confirm both accounts' balances reflect their respective totals.
-    // 5. Deep-rewind to well below the birthday. A non-stabilized note
-    //    cannot pass the post-rewind scan-state gate in
-    //    `select_spendable_notes_matching_value`, so if B's notes remain
-    //    spendable after this rewind, they *must* have been flagged
-    //    `witness_stabilized` during the re-scan of step 4. Assert that both
-    //    A's and B's full totals are spendable.
-
-    const SHARD_HEIGHT: u32 = 16;
-    const SHARD_POSITIONS: u32 = 1 << SHARD_HEIGHT; // 65536
-
-    // Matches the hard-coded seed used by
-    // `TestBuilder::with_account_having_current_birthday`. Re-using it at
-    // zip32 index 1 lets us deterministically derive B's viewing key before
-    // B is imported, and guarantees that the later `import_account_hd(index=1)`
-    // call recovers the same key (zip32 derivation is deterministic).
-    const TEST_SEED: [u8; 32] = [0u8; 32];
-
-    // Step 1a: initial tree state — shard 0 fully cached, frontier at one
-    // position short of shard 1's last slot. A boundary-aligned frontier
-    // would cause `prior_subtree_roots` to cache shard 1 and then
-    // `insert_frontier` would fail trying to reinstall its leaf into the
-    // cached-leaf-form shard.
-    let initial_tree_size: u32 = 2 * SHARD_POSITIONS - 1;
-
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_initial_chain_state(|rng, network| {
-            // The birthday is anchored at NU5 + 1000 rather than the more common
-            // Sapling-activation baseline because the orchard variant of this test
-            // pre-populates an orchard commitment-tree frontier; that requires
-            // Orchard to be active at the birthday height, which isn't true at
-            // Sapling activation. `+ 1000` is an arbitrary buffer past NU5 so
-            // heights like `birthday_height - 500` (see below) stay comfortably
-            // within the activated range.
-            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
-
-            let (prior_sapling_roots, sapling_initial_tree) =
-                Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    initial_tree_size.into(),
-                    NonZeroU8::new(SHARD_HEIGHT as u8).unwrap(),
-                );
-            // Each prior subtree root is attached to one arbitrary height
-            // well before the birthday. 500 is a round buffer past NU5 but
-            // strictly below `birthday_height`; the exact value doesn't
-            // matter because stabilization only cares about shard *end*
-            // heights.
-            let prior_sapling_roots = prior_sapling_roots
-                .into_iter()
-                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
-                .collect::<Vec<_>>();
-
-            #[cfg(feature = "orchard")]
-            let (prior_orchard_roots, orchard_initial_tree) =
-                Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    initial_tree_size.into(),
-                    NonZeroU8::new(SHARD_HEIGHT as u8).unwrap(),
-                );
-            #[cfg(feature = "orchard")]
-            let prior_orchard_roots = prior_orchard_roots
-                .into_iter()
-                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
-                .collect::<Vec<_>>();
-
-            // Ironwood is not active at these test heights, so its tree is empty.
-            #[cfg(feature = "orchard")]
-            let ironwood_initial_tree = Frontier::empty();
-
-            InitialChainState {
-                chain_state: ChainState::new(
-                    birthday_height - 1,
-                    BlockHash([5; 32]),
-                    sapling_initial_tree,
-                    #[cfg(feature = "orchard")]
-                    orchard_initial_tree,
-                    #[cfg(feature = "orchard")]
-                    ironwood_initial_tree,
-                ),
-                prior_sapling_roots,
-                #[cfg(feature = "orchard")]
-                prior_orchard_roots,
-            }
-        })
-        .with_account_having_current_birthday()
-        .build();
-
-    let dfvk_a = T::test_account_fvk(&st);
-    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
-    let filler_value = Zatoshis::const_from_u64(1000);
-
-    // Derive account B's viewing key from the same seed at zip32 index 1.
-    // This must run before any scanning so the note block below can place
-    // B-destined outputs even though B is absent from the wallet.
-    let zip32_index_b = zip32::AccountId::ZERO.next().unwrap();
-    let usk_b = UnifiedSpendingKey::from_seed(st.network(), &TEST_SEED, zip32_index_b)
-        .expect("account B USK derivation from seed should succeed");
-    let fvk_b = T::sk_to_fvk(T::usk_to_sk(&usk_b));
-
-    // Step 1b: build the note block. A's three outputs sit at the first,
-    // middle, and last slots of shard 2; B's three outputs occupy adjacent
-    // (but distinct) slots. Everything else is non-wallet filler.
-    let a_positions: [u32; 3] = [
-        2 * SHARD_POSITIONS,                       // first slot of shard 2
-        2 * SHARD_POSITIONS + SHARD_POSITIONS / 2, // middle slot of shard 2
-        3 * SHARD_POSITIONS - 1,                   // last slot of shard 2
-    ];
-    let b_positions: [u32; 3] = [
-        2 * SHARD_POSITIONS + 1,                       // one after A's first
-        2 * SHARD_POSITIONS + SHARD_POSITIONS / 2 + 1, // one after A's middle
-        3 * SHARD_POSITIONS - 2,                       // one before A's last
-    ];
-    let a_values = [
-        Zatoshis::const_from_u64(100_000),
-        Zatoshis::const_from_u64(200_000),
-        Zatoshis::const_from_u64(150_000),
-    ];
-    let b_values = [
-        Zatoshis::const_from_u64(70_000),
-        Zatoshis::const_from_u64(80_000),
-        Zatoshis::const_from_u64(90_000),
-    ];
-    let total_a = a_values.iter().sum::<Option<Zatoshis>>().unwrap();
-    let total_b = b_values.iter().sum::<Option<Zatoshis>>().unwrap();
-
-    // `scan_block_size = SHARD_POSITIONS + 1`: one slot finishes shard 1,
-    // the remaining 65 536 fill all of shard 2.
-    let scan_block_size: u32 = SHARD_POSITIONS + 1;
-    let first_scanned_position: u32 = initial_tree_size;
-    let mut outputs = Vec::with_capacity(scan_block_size as usize);
-    for offset in 0..scan_block_size {
-        let tree_pos = first_scanned_position + offset;
-        let output = if let Some(ix) = a_positions.iter().position(|&p| p == tree_pos) {
-            FakeCompactOutput::new(dfvk_a.clone(), AddressType::DefaultExternal, a_values[ix])
-        } else if let Some(ix) = b_positions.iter().position(|&p| p == tree_pos) {
-            FakeCompactOutput::new(fvk_b.clone(), AddressType::DefaultExternal, b_values[ix])
-        } else {
-            FakeCompactOutput::new(
-                not_our_key.clone(),
-                AddressType::DefaultExternal,
-                filler_value,
-            )
-        };
-        outputs.push(output);
-    }
-    let (note_height, _, _) = st.generate_next_block_multi(&outputs);
-
-    // Step 1c: filler blocks past the note block, sized to put the pruning
-    // floor past shard 2's end height in step 1d.
-    let extra_blocks = PRUNING_DEPTH + 10;
-    for _ in 0..extra_blocks {
-        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
-    }
-
-    // Step 1d: scan the note block, declare shard 2 complete, scan the
-    // filler blocks. The batch ordering mirrors
-    // `stabilized_note_spendable_after_deep_rewind`: shard 2's root can
-    // only be computed after its leaves are in the wallet's tree, and
-    // `put_subtree_roots` must run before the next scan batch so
-    // `mark_stabilized_notes` sees shard 2's `subtree_end_height`.
-    st.scan_cached_blocks(note_height, 1);
-    let shard_2_root = T::shard_root(&mut st, 2).unwrap();
-    T::put_subtree_roots(
-        &mut st,
-        2,
-        &[CommitmentTreeRoot::from_parts(note_height, shard_2_root)],
-    )
-    .unwrap();
-    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
-
+    let (mut st, account_b_id, usk_b) =
+        build_two_account_recovery_fixture::<T, Dsf>(ds_factory, cache);
     let account_a = st.test_account().unwrap().clone();
+    let birthday_a = account_a.birthday().height();
+    let birthday_b = birthday_a + 5;
 
-    // Step 2: baseline. A's notes are discovered and stabilized; B's
-    // outputs have no corresponding wallet rows (B absent).
+    // (1) Baseline: both notes spendable.
     assert_eq!(
         st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
-        total_a,
-        "A's three notes must be spendable after the initial scan + stabilization",
-    );
-
-    // Step 3: import account B, sharing A's birthday so `add_account`
-    // rewrites the post-birthday `Scanned` range to `Historic` (forcing
-    // a re-scan).
-    let b_birthday = account_a.birthday().clone();
-    let seed = Secret::new(TEST_SEED.to_vec());
-    let (account_b, _usk_b) = st
-        .wallet_mut()
-        .import_account_hd("account B", &seed, zip32_index_b, &b_birthday, None)
-        .expect("account B import should succeed");
-
-    // Step 4: re-scan every cached block at or after the birthday. The
-    // blocks were previously processed only against A; now they're
-    // processed against B too, inserting three new `*_received_notes`
-    // rows at B's shard-2 positions. After this batch
-    // `mark_stabilized_notes` runs and should flip B's new rows to
-    // `witness_stabilized = 1`.
-    st.scan_cached_blocks(note_height, (1 + extra_blocks) as usize);
-
-    assert_eq!(
-        st.get_spendable_balance(account_b.id(), ConfirmationsPolicy::MIN),
-        total_b,
-        "B's three newly-discovered notes must be spendable after the re-scan",
+        RECOVERY_A_NOTE_VALUE,
+        "account A's note must be spendable in the freshly-built fixture",
     );
     assert_eq!(
-        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
-        total_a,
-        "A's notes must remain spendable across B's import and re-scan",
+        st.get_spendable_balance(account_b_id, ConfirmationsPolicy::MIN),
+        RECOVERY_B_NOTE_VALUE,
+        "account B's note must be spendable in the freshly-built fixture",
     );
 
-    // Step 5: deep-rewind. The rewind target sits well below the wallet's
-    // birthday so `scan_queue` is rewound all the way out of any range
-    // covering shard 2. Only notes flagged `witness_stabilized = 1` can
-    // pass the post-rewind scan-state gate in
-    // `select_spendable_notes_matching_value`; any B note that was never
-    // stabilized would drop out of the balance here.
-    let rewind_target = account_a.birthday().height() - 100;
+    // (2) Rewind to `H_A + 2`: below B's birthday (`H_A + 5`) but within the
+    // run of real blocks contributed by account A.
+    let rewind_target = birthday_a + 2;
+    assert!(
+        rewind_target < birthday_b,
+        "the rewind target must sit below account B's birthday",
+    );
     st.wallet_mut()
         .rewind_to_chain_state(
             ChainState::empty(rewind_target, BlockHash([0; 32])),
-            HashSet::from([account_a.id(), account_b.id()]),
+            HashSet::from([account_b_id]),
+        )
+        .expect("rewind_to_chain_state should succeed");
+
+    assert_eq!(
+        st.get_spendable_balance(account_b_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "immediately after the rewind account B's note must not be spendable",
+    );
+
+    // (3) Re-scan every dirtied block. `H_A + 3 ..= chain_tip` is a
+    // contiguous run of real cached blocks, so the re-scan completes without
+    // a `CacheMiss`.
+    let chain_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should still be set after rewind");
+    let rescan_from = rewind_target + 1;
+    let rescan_count = u32::from(chain_tip) - u32::from(rescan_from) + 1;
+    st.scan_cached_blocks(rescan_from, rescan_count as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_b_id, ConfirmationsPolicy::MIN),
+        RECOVERY_B_NOTE_VALUE,
+        "after re-scanning the dirty range account B's note must be spendable again",
+    );
+    assert_eq!(
+        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
+        RECOVERY_A_NOTE_VALUE,
+        "account A's note is unaffected by a rewind that stays above its shard",
+    );
+
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(
+        &mut st,
+        account_b_id,
+        &usk_b,
+        RECOVERY_B_NOTE_VALUE,
+    );
+}
+
+/// Recovering a completed-shard note after a rewind re-dirties its shard
+/// requires re-scanning the *entire* birthday shard -- not merely the block
+/// that re-discovers the note -- plus the anchor range.
+///
+/// Uses `build_two_account_recovery_fixture`. Account A's note sits at the
+/// start of shard 1, which Block A2 completes. The rewind targets `H_A - 1`,
+/// re-dirtying shard 1; recovery then proceeds in stages:
+///
+///   1. Baseline: A's note is spendable.
+///   2. After the rewind: A's balance is zero.
+///   3. After re-scanning only Block A1 (which re-discovers A's note but
+///      leaves shard 1's later leaves unscanned): still zero -- the witness
+///      needs every leaf to the note's right within the shard.
+///   4. After also re-scanning Block A2 (shard 1 complete and scan-clean)
+///      but not the anchor range: still zero.
+///   5. After re-scanning the anchor range (the chain-tip pruning window):
+///      A's note is spendable again -- with the blocks between shard 1 and
+///      the pruning window left unscanned, since the chain-tip shard's
+///      frontier already suffices to build the witness.
+pub fn a_note_requires_full_birthday_shard_scan<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_b_id, _) = build_two_account_recovery_fixture::<T, Dsf>(ds_factory, cache);
+    let account_a = st.test_account().unwrap().clone();
+    let birthday_a = account_a.birthday().height();
+    let block_a1_height = birthday_a;
+    let block_a2_height = birthday_a + 1;
+
+    // (1) Baseline.
+    assert_eq!(
+        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
+        RECOVERY_A_NOTE_VALUE,
+        "account A's note must be spendable in the freshly-built fixture",
+    );
+
+    // (2) Rewind below A's birthday, re-dirtying shard 1. Both accounts'
+    // birthdays sit above the target, so both are reset.
+    let rewind_target = birthday_a - 1;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::from([account_a.id(), account_b_id]),
         )
         .expect("rewind_to_chain_state should succeed");
 
     assert_eq!(
         st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
-        total_a,
-        "A's notes must survive the deep rewind, confirming they were and \
-         remain witness_stabilized",
+        Zatoshis::ZERO,
+        "immediately after the rewind account A's note must not be spendable",
     );
+
+    // (3) Re-scan only Block A1. A's note is re-discovered, but shard 1's
+    // leaves at positions 131036..131071 (Block A2) are still unscanned.
+    st.scan_cached_blocks(block_a1_height, 1);
     assert_eq!(
-        st.get_spendable_balance(account_b.id(), ConfirmationsPolicy::MIN),
-        total_b,
-        "B's three re-scan-discovered notes must survive the deep rewind, \
-         confirming that mark_stabilized_notes fired on the freshly-inserted \
-         B rows during the re-scan",
+        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "account A's note must stay non-spendable while its shard is only partially scanned",
+    );
+
+    // (4) Re-scan Block A2, completing shard 1. The shard is scan-clean
+    // again, but the anchor range has not been rescanned.
+    st.scan_cached_blocks(block_a2_height, 1);
+    assert_eq!(
+        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "completing shard 1 is not enough while the anchor range is unscanned",
+    );
+
+    // (5) Re-scan the chain-tip pruning window (the anchor range), leaving
+    // the blocks between shard 1 and the pruning window unscanned.
+    let chain_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should still be set after rewind");
+    let pruning_window_start = chain_tip - (PRUNING_DEPTH - 1);
+    st.scan_cached_blocks(pruning_window_start, PRUNING_DEPTH as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),
+        RECOVERY_A_NOTE_VALUE,
+        "after shard 1 and the anchor range are rescanned account A's note is spendable again",
+    );
+
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(
+        &mut st,
+        account_a.id(),
+        account_a.usk(),
+        RECOVERY_A_NOTE_VALUE,
+    );
+}
+
+/// R2: rewind to a height above shard 1's end (stable-shard fixture).
+///
+/// The rewind target sits *above* `shard 1`'s `subtree_end_height`
+/// (= `birthday + 1`). The force-rewrite covers
+/// `(new_birthday = target + 1, chain_tip + 1]` as `Historic`; that range
+/// starts above shard 1's end and therefore does *not* overlap shard 1's
+/// extent. `mark_anchor_priority_window` upgrades the pruning window
+/// portion of the rewrite to `Anchor`.
+///
+/// Class 2 (target between shard end and pruning floor) and Class 3 (target
+/// inside pruning window) of the previous test suite collapse here: in both
+/// cases the rewrite range starts above shard 1 and so leaves the shard's
+/// scan-state untouched. We pick `birthday + 5` as a representative target.
+///
+/// Under the corrected spendability rule, shard 1 stays scan-clean across
+/// the rewind, so only the chain-tip pruning window needs to be rescanned to
+/// restore the note's `spendable` status.
+pub fn stabilized_note_rewind_above_shard_end<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let birthday_height = st
+        .wallet()
+        .get_wallet_birthday()
+        .unwrap()
+        .expect("account birthday should be set");
+
+    // Baseline.
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable",
+    );
+
+    // Rewind to a height above shard 1's end (= birthday + 1). Picking
+    // `birthday + 5` lands in the Historic territory below the pruning
+    // window; any choice in `(birthday + 1, chain_tip]` would exercise the
+    // same regime.
+    let rewind_target = birthday_height + 5;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed");
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "immediately after rewind the Anchor stamp on the pruning window blocks the balance",
+    );
+
+    // Rescan only the chain-tip pruning window. Shard 1's extent
+    // `(shard_0_end, birthday + 1]` sits below the rewrite range, so the
+    // shard is still scan-clean. The corrected rule should restore the note
+    // to `spendable`.
+    let chain_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should still be set after rewind");
+    let pruning_window_start = chain_tip - (PRUNING_DEPTH - 1);
+    st.scan_cached_blocks(pruning_window_start, PRUNING_DEPTH as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        SHARD_1_NOTE_VALUE,
+        "shard 1's extent is below the rewrite range; pruning-window rescan must restore the note",
+    );
+
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(
+        &mut st,
+        account_id,
+        &usk,
+        SHARD_1_NOTE_VALUE,
+    );
+}
+
+/// R3: rewind un-mines the shard-completion block (tip-shard fixture).
+///
+/// The tip-shard fixture leaves the wallet's birthday inside the chain-tip
+/// pruning window (`chain_tip = birthday + 6`,
+/// `pruning_floor = birthday - 94`,
+/// `lowest_window_checkpoint = birthday - 93`). A rewind target below the
+/// birthday therefore drives `truncation_target` to
+/// `max(target, birthday - 93)`; with `target = birthday - 50` the
+/// truncation lands at the lowest checkpoint at or above `birthday - 50`,
+/// which is the account's birthday-frontier checkpoint at `birthday - 1`
+/// (the pre-birthday blocks are unscanned and so carry no checkpoints).
+/// Truncation removes shardtree state strictly above `birthday - 1`, which
+/// discards the leaves inserted by Blocks A and B (positions
+/// 131001..131080). Shard 1's last leaf (position 131071) is among those
+/// discarded, so shard 1 reverts from complete to partial.
+///
+/// Under the corrected spendability rule, the note must not be reported as
+/// spendable while its containing shard is partial -- even though
+/// `witness_anchor_stable` is still set. Recovery requires rescanning from
+/// the lowered birthday through the chain tip — all genuine cached blocks —
+/// so that shard 1's leaves are reinserted and the shard returns to
+/// complete + scan-clean.
+pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk) = build_tip_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let birthday_height = st
+        .wallet()
+        .get_wallet_birthday()
+        .unwrap()
+        .expect("account birthday should be set");
+
+    // Baseline: the note is stabilized via the active-shard interpretation
+    // (witness_anchor_stable = birthday = Block A's height), and the rule
+    // accepts it because shard 1 is currently scan-clean.
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        SHARD_1_NOTE_VALUE,
+        "tip-shard fixture must report the active-shard-stabilized note as spendable",
+    );
+
+    // Rewind to a height well below the birthday, acknowledging that this
+    // lowers the account birthday to `rewind_target + 1`. Truncation lands at
+    // the lowest tree checkpoint at or above the target — the account's
+    // birthday-frontier checkpoint at `birthday - 1` — removing both Block
+    // A's and Block B's leaves and reverting shard 1 to partial. The rewind
+    // target sits above the cache floor
+    // (`birthday - PRE_BIRTHDAY_BLOCKS`), so the whole post-rewind scan
+    // range is backed by genuine cached blocks.
+    let rewind_target = birthday_height - 50;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::from([account_id]),
+        )
+        .expect("rewind_to_chain_state should succeed");
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "after rewind the Anchor stamp + the partial shard combine to withhold the note",
+    );
+
+    // Recover by re-scanning every cached block from the lowered birthday
+    // (`rewind_target + 1`) through the chain tip: 49 pre-birthday empty
+    // blocks, Block A, Block B, and the 5 trailing fillers. The block cache
+    // is contiguous across the original birthday, so a single
+    // `scan_cached_blocks` call drives the full re-scan. After this, shard 1
+    // is complete and scan-clean again.
+    let new_birthday = rewind_target + 1;
+    let recovery_block_count = 49 + 1 + 1 + 5;
+    st.scan_cached_blocks(new_birthday, recovery_block_count as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        SHARD_1_NOTE_VALUE,
+        "after re-scanning from the lowered birthday through the chain tip, shard 1 is \
+         complete and the note is spendable again",
+    );
+
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(
+        &mut st,
+        account_id,
+        &usk,
+        SHARD_1_NOTE_VALUE,
+    );
+}
+
+/// A stabilized note must remain spendable across a chain-tip advance smaller than the
+/// trusted anchor depth, and must stop being spendable once the advance reaches that
+/// depth.
+///
+/// `update_chain_tip` stamps the unscanned extension `(max_scanned, new_tip]` with
+/// `ChainTip` priority. The anchor the wallet will select for a spend is derived from
+/// the *new* tip (`target - min_confirmations(trusted)`); while the tip has advanced by
+/// fewer than `min_confirmations` blocks, that anchor still lies within scanned history:
+/// the tree structure between the note's anchor-stable height and the anchor is fully
+/// known and a witness against exactly that anchor's root is constructable, so the
+/// unscanned extension — which lies entirely *above* the anchor and cannot participate
+/// in the witness — must not veto spendability.
+///
+/// Once the advance reaches the anchor depth, the policy anchor lies in unscanned
+/// territory, so the wallet has no anchor and must report zero spendable value until it
+/// has scanned forward.
+pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, _usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+
+    let policy = ConfirmationsPolicy::default();
+    let anchor_depth = u32::from(policy.trusted());
+    assert!(
+        anchor_depth > 1,
+        "this test requires a trusted anchor depth of at least 2 so that a nonzero tip \
+         advance can stay below it",
+    );
+
+    // Baseline: the wallet is fully scanned and the stabilized note is spendable.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable under the default policy",
+    );
+
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+
+    // Advance the chain tip by one block fewer than the trusted anchor depth, without
+    // scanning. The policy anchor against the new tip
+    // (`new_tip + 1 - anchor_depth = scanned_tip - 1`) is still within scanned history,
+    // so the note must remain spendable.
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + (anchor_depth - 1))
+        .unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "a tip advance smaller than the anchor depth must not suspend spendability",
+    );
+
+    // Advance the tip by exactly the anchor depth. The policy anchor
+    // (`new_tip + 1 - anchor_depth = scanned_tip + 1`) now lies in the unscanned
+    // extension, so nothing may be reported spendable until the wallet scans forward.
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + anchor_depth)
+        .unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "a tip advance reaching the anchor depth must suspend spendability until the \
+         wallet has scanned to the new anchor",
+    );
+}
+
+/// The anchor for a new transaction is the tree state `trusted` confirmations below the
+/// target, or absent. The wallet never substitutes an older tree state: an anchor older than
+/// the policy depth would publish, on chain, how far behind the tip the wallet was when it
+/// spent. Every height within the pruning window is checkpointed, so scanned empty blocks do
+/// not move the anchor below the policy depth.
+pub fn anchor_is_policy_depth_state_or_absent<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, _usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Synced to the tip: the anchor sits exactly `trusted` below the target.
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Reopen after an offline period longer than the pruning window. The sync loop's first
+    // act is `update_chain_tip`; nothing above the old tip has been scanned.
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let advance = PRUNING_DEPTH + 10;
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + advance)
+        .unwrap();
+
+    assert_eq!(
+        st.wallet()
+            .get_target_and_anchor_heights(policy.trusted())
+            .unwrap(),
+        None,
+        "no checkpoint exists at the policy anchor, so there must be no anchor at all",
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), Zatoshis::ZERO);
+
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    assert_matches!(
+        st.propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy
+        ),
+        Err(Error::ScanRequired)
+    );
+
+    // Catch up. Once the block at the policy anchor is scanned, the anchor returns at exactly
+    // `trusted` below the new target and the note is spendable again.
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    for _ in 0..advance {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(scanned_tip + 1, advance as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a caught-up wallet has an anchor");
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Scanned empty blocks carry no new commitments, but every height within the pruning
+    // window is checkpointed, so the anchor stays at the policy depth once it lies among them.
+    let last_filler = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let empty_blocks = u32::from(policy.trusted()) + 2;
+    for _ in 0..empty_blocks {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_filler + 1, empty_blocks as usize);
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a wallet synced across empty blocks has an anchor");
+    assert!(
+        policy.anchor_height(target) > last_filler,
+        "test invariant: the policy depth must lie among the empty blocks",
+    );
+    assert_eq!(anchor, policy.anchor_height(target));
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+}
+
+/// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
+/// stabilized in the open tip shard, whose shard the server later reports complete while the
+/// blocks between the wallet's scanned tip and the shard's end remain unscanned, must not be
+/// reported spendable: the wallet holds no leaves for that region, so no witness against any
+/// later anchor can be built. Scanning the region restores spendability.
+pub fn shard_completeness_derives_from_scan_queue<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // Offline: the server reports the note's shard complete at `shard_end`, the tip advances
+    // to `new_tip`, and the wallet scans only the pruning window at the new tip. The blocks
+    // between the old tip and `shard_end` stay unscanned.
+    let shard_end = scanned_tip + 300;
+    let new_tip = scanned_tip + 400;
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            shard_end,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    for _ in 0..(new_tip - scanned_tip) {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let window_start = new_tip - (PRUNING_DEPTH - 1);
+    st.scan_cached_blocks(window_start, PRUNING_DEPTH as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "the note's shard has unscanned blocks below the pruning window, so the note is not \
+         witnessable and must not be reported spendable",
+    );
+
+    // Scanning the unscanned region makes the shard scan-clean and the note spendable.
+    st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// `Checkpoint` retention covers every height within `PRUNING_DEPTH` of the chain tip, so a
+/// commitment-free stretch of blocks never leaves the wallet without an anchor at the policy
+/// depth. A note in the open tip shard, whose floor advances with the pruning floor, therefore
+/// stays spendable across such a stretch.
+pub fn open_shard_note_spendable_across_commitment_free_stretch<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let last_commitment = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // More than `PRUNING_DEPTH` blocks without a shielded output in any pool, scanned as one
+    // batch, so no block-end checkpoint is created for any of them.
+    let stretch = PRUNING_DEPTH + 10;
+    for _ in 0..stretch {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(last_commitment + 1, stretch as usize);
+
+    let (target, anchor) = st
+        .wallet()
+        .get_target_and_anchor_heights(policy.trusted())
+        .unwrap()
+        .expect("a synced wallet has an anchor");
+    assert_eq!(
+        anchor,
+        policy.anchor_height(target),
+        "every height within the pruning window is checkpointed, so the anchor is the policy \
+         depth even though no block there carries a commitment",
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// A note's in-shard witness needs every leaf to its right through the shard's end, and none
+/// to its left beyond what the frontier inserted when its block was scanned already supplies.
+/// A note found in the block that completes its shard is therefore spendable while the earlier
+/// block of that shard remains unscanned.
+pub fn completed_shard_note_spendable_with_unscanned_gap_below_it<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    /// The number of non-wallet outputs in Block A1, which precede the wallet note in shard 1.
+    const BLOCK_A1_FILLERS: u32 = 35;
+    const NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
+
+    let (mut st, account_id, usk, dfvk) = build_shard_1_prefix_fixture::<T, Dsf>(ds_factory, cache);
+
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    // Block A1 at the birthday: the first `BLOCK_A1_FILLERS` positions of the gap below the
+    // end of shard 1, all non-wallet fillers.
+    let block_a1_outputs: Vec<_> = (0..BLOCK_A1_FILLERS)
+        .map(|_| {
+            FakeCompactOutput::new(
+                not_our_key.clone(),
+                AddressType::DefaultExternal,
+                filler_value,
+            )
+        })
+        .collect();
+    let (block_a1_height, _, _) = st.generate_next_block_multi(&block_a1_outputs);
+
+    // Block A2: the wallet note, then fillers through the last position of shard 1.
+    let block_a2_output_count = SHARD_1_FRONTIER_GAP - BLOCK_A1_FILLERS;
+    let mut block_a2_outputs = Vec::with_capacity(block_a2_output_count as usize);
+    block_a2_outputs.push(FakeCompactOutput::new(
+        dfvk.clone(),
+        AddressType::DefaultExternal,
+        NOTE_VALUE,
+    ));
+    for _ in 1..block_a2_output_count {
+        block_a2_outputs.push(FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ));
+    }
+    let (block_a2_height, _, _) = st.generate_next_block_multi(&block_a2_outputs);
+
+    // Bury shard 1 beyond the pruning depth.
+    let trailing_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..trailing_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let chain_tip = block_a2_height + trailing_blocks;
+
+    // Scan from Block A2 onward only, leaving Block A1 unscanned below the note.
+    st.wallet_mut().update_chain_tip(chain_tip).unwrap();
+    st.scan_cached_blocks(block_a2_height, 1);
+    let shard_1_root = T::shard_root(&mut st, 1).unwrap();
+    T::put_subtree_roots(
+        &mut st,
+        1,
+        &[CommitmentTreeRoot::from_parts(
+            block_a2_height,
+            shard_1_root,
+        )],
+    )
+    .unwrap();
+    st.scan_cached_blocks(block_a2_height + 1, trailing_blocks as usize);
+
+    let unscanned = st.wallet().suggest_scan_ranges().unwrap();
+    assert!(
+        unscanned
+            .iter()
+            .any(|range| range.block_range().contains(&block_a1_height)),
+        "test invariant: Block A1 must remain unscanned: {unscanned:?}",
+    );
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::default()),
+        NOTE_VALUE,
+        "every leaf after the note through its shard's end is present, so the note is \
+         witnessable and must be spendable",
+    );
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(&mut st, account_id, &usk, NOTE_VALUE);
+}
+
+/// A note's stored anchor floor (`witness_anchor_stable`) is a claim about the chain the
+/// wallet was observing when the floor was written: every block bearing on the note's
+/// witness context up to that height has been scanned, so the wallet's determination of
+/// witness constructability is grounded in chain data it has verified. A rewind that
+/// truncates wallet state below a stored floor discards the scanned blocks and tree data
+/// backing that claim, so the claim must not survive the truncation.
+///
+/// This test drives the false positive that arises if it does. A change note is mined at
+/// the chain tip and stabilizes with its floor at its own mined height. A reorg then
+/// rewinds the wallet three blocks below that height, and the same transaction is
+/// re-mined two blocks lower on the new chain, with a non-wallet output in the block
+/// directly above it that the wallet does not (yet) scan. Once the new chain advances far
+/// enough that the unscanned block falls below the chain-tip pruning window, the
+/// window-scanned check no longer sees the gap, and the stale floor — sitting exactly at
+/// the gap's upper boundary — vouches that the region between the note and the window is
+/// durably scanned. Every spendability check then passes and the wallet reports the note
+/// spendable, even though that determination rests on blocks that exist only on the
+/// reorged-away chain: the unscanned gap on the new chain has been neither
+/// hash-chain-verified nor checked for spends of the wallet's notes.
+///
+/// The truncation must instead invalidate the stored floor. The note then re-stabilizes
+/// from new-chain data only once its shard is scan-clean, so the wallet reports zero
+/// spendable value while the gap remains, and the note becomes spendable when the gap is
+/// scanned.
+pub fn stabilized_note_floor_invalidated_by_reorg<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Baseline: the fixture note is stabilized and spendable.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable under the default policy",
+    );
+
+    // Spend the fixture note, producing a wallet transaction whose change note carries
+    // the stability floor under test. (A received note cannot be used here: re-mining
+    // the *same* transaction at a different height is what lets the note row keep its
+    // stored floor across the reorg, and only wallet-created transactions can be mined
+    // into the fake chain twice.) The proposal is created against the fixture chain
+    // state, before the additional blocks below are generated, so input selection can
+    // only see the fixture note.
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy,
+        )
+        .unwrap();
+    let txid = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap()[0];
+
+    // Extend the old chain by three scanned blocks: a second wallet note, a non-wallet
+    // filler, and the transaction created above. The second wallet note is structural:
+    // it occupies the first note-commitment-tree position that the upcoming rewind
+    // truncates away. A marked (wallet-note) leaf keeps its pruned sibling's hash stored
+    // explicitly, so truncating at its boundary cleanly splits the pair; were the leaf a
+    // pruned non-wallet commitment, truncation would leave behind a merged hash node
+    // spanning the boundary, and re-scanning the divergent chain would hit a note
+    // commitment tree insertion conflict instead of exercising the spendability rule.
+    let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
+    let extra_note_value = Zatoshis::const_from_u64(25000);
+    let (extra_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, extra_note_value);
+
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+
+    let (tx_height, _) = st.generate_next_block_including(txid);
+
+    // Scan all three blocks in a single batch. This matters for the tree surgery below:
+    // scanning in one batch writes no batch-boundary frontier (and thus no cached
+    // interior-node hash annotations) above the rewind target, so truncating there and
+    // re-scanning the divergent chain does not conflict with stale annotations. The
+    // change note lands in the open chain-tip shard, which is scan-clean after the
+    // batch, so it stabilizes immediately with its floor at its own mined height (above
+    // the pruning floor).
+    st.scan_cached_blocks(extra_height, 3);
+
+    // The wallet's whole balance is now the change note plus the second wallet note (the
+    // fixture note is spent). The reorg below permanently un-mines the second note, so
+    // the recovered balance at the end of the test is the change value alone.
+    let change_value = (st.get_total_balance(account_id) - extra_note_value)
+        .expect("balance covers the extra note value");
+    assert!(change_value > Zatoshis::ZERO);
+
+    // Reorg: rewind the wallet to three blocks below the transaction's mined height —
+    // just below the second wallet note. This truncates the tree data above the rewind
+    // target, including everything the change note's stored floor vouches for, and
+    // un-mines both the transaction and the second note. The block cache is truncated
+    // separately so that the chain regenerated below diverges from the reorged-away one.
+    let rewind_target = tx_height - 3;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed");
+    st.truncate_cache_to_height(rewind_target);
+
+    // On the new chain, the same transaction is re-mined two blocks lower than before
+    // (the second wallet note is not re-mined at all)...
+    let (remine_height, _) = st.generate_next_block_including(txid);
+    assert_eq!(remine_height, tx_height - 2);
+
+    // ...with a non-wallet output in the block directly above it. The output makes the
+    // gap material: the wallet can obtain that commitment's value only by scanning the
+    // gap block or by trusting a server-supplied frontier, and until the block is
+    // scanned it may conceal spends of the wallet's notes.
+    let (gap_height, _, _) =
+        st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+    assert_eq!(gap_height, tx_height - 1);
+
+    // Extend the new chain with single-output filler blocks (empty blocks would leave
+    // the note commitment tree without checkpoints at the new heights, clamping the
+    // wallet's anchor selection below the region under test) until the gap block sits
+    // just below the pruning window of the new tip
+    // (`new_tip - PRUNING_DEPTH = gap_height + 1`).
+    let mut new_tip = gap_height;
+    for _ in 0..(PRUNING_DEPTH + 1) {
+        new_tip = st
+            .generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value)
+            .0;
+    }
+
+    // Scan the re-mined transaction's block, then everything above the gap block, which
+    // is deliberately left unscanned: it is the only hole in the wallet's view of the
+    // new chain, and it lies below the pruning window, where only the note's stability
+    // floor guards against it.
+    st.scan_cached_blocks(remine_height, 1);
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    st.scan_cached_blocks(gap_height + 1, (PRUNING_DEPTH + 1) as usize);
+
+    // The change note's old floor (its old-chain mined height) sits exactly at the top
+    // of the unscanned gap; were it to survive the truncation, it would vouch that the
+    // gap does not matter and the note would be reported spendable. The truncation must
+    // instead have invalidated the floor, and the note — whose shard is not scan-clean
+    // while the gap remains — must not have re-stabilized.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "a stability floor written on the reorged-away chain must not vouch for \
+         spendability while the new chain has an unscanned gap below the pruning window",
+    );
+
+    // Scanning the gap block closes the hole: the change note re-stabilizes from
+    // new-chain data and becomes spendable.
+    st.scan_cached_blocks(gap_height, 1);
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        change_value,
+        "closing the gap must restore spendability of the change note",
     );
 }
 
@@ -10137,5 +11246,68 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
             &proposal
         ),
         Ok(_)
+    );
+}
+
+/// A block downloaded for a height the wallet has already scanned, carrying a different hash,
+/// is a chain reorg. Scanning must report it as a continuity error before any wallet state is
+/// written, so that the sync loop rewinds, rather than surface it from the storage layer as a
+/// conflict the loop cannot classify.
+pub fn reorg_below_scanned_height_is_a_continuity_error<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::chain::error::Error as ChainError;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (note_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    const SCANNED_BLOCKS: u32 = 10;
+    for _ in 0..SCANNED_BLOCKS {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(note_height + 1, SCANNED_BLOCKS as usize);
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+
+    // Replace the three blocks above the fork with different ones, leaving the wallet's rows
+    // for those heights in place.
+    const REORG_DEPTH: u32 = 3;
+    let fork_height = scanned_tip - REORG_DEPTH;
+    st.truncate_cache_to_height(fork_height);
+    for _ in 0..REORG_DEPTH {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let stored_hash = st
+        .wallet()
+        .block_metadata(fork_height + 1)
+        .unwrap()
+        .expect("the block above the fork was scanned")
+        .block_hash();
+
+    let result = st.try_scan_cached_blocks(fork_height + 1, REORG_DEPTH as usize);
+    assert_matches!(
+        result,
+        Err(ChainError::Scan(ref err)) if err.is_continuity_error() && err.at_height() == fork_height + 1
+    );
+
+    // Nothing was written: the recorded tip and the stored block are as before.
+    assert_eq!(st.wallet().chain_height().unwrap(), Some(scanned_tip));
+    assert_eq!(
+        st.wallet()
+            .block_metadata(fork_height + 1)
+            .unwrap()
+            .map(|meta| meta.block_hash()),
+        Some(stored_hash),
     );
 }
