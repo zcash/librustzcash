@@ -1542,6 +1542,25 @@ pub struct ChangeReceivers {
 }
 
 impl ChangeReceivers {
+    /// Returns the given outputs, for a caller that determines where change goes without
+    /// an account viewing key to read it from.
+    ///
+    /// The Orchard and Ironwood pools share one flag, as they share the account's Orchard
+    /// key. A value in which nothing can receive is permitted, and means change cannot be
+    /// placed; see [`Self::from_uivk`] for the viewing-key-derived case.
+    pub fn new(
+        sapling: bool,
+        orchard: bool,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<TransparentChangeKind>,
+    ) -> Self {
+        Self {
+            sapling,
+            orchard,
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+        }
+    }
+
     /// Returns the outputs in which an account with the given viewing key can receive change.
     pub fn from_uivk(uivk: &UnifiedIncomingViewingKey) -> Self {
         Self {
@@ -4860,6 +4879,53 @@ mod tests {
     };
 
     use super::*;
+
+    /// The Orchard and Ironwood pools share the account's Orchard key, so one flag has to
+    /// answer for both; and a value in which nothing can receive is representable, which
+    /// is what lets a caller say change has nowhere to go.
+    #[test]
+    fn change_receivers_new_reports_what_it_was_given() {
+        let receivers = ChangeReceivers::new(
+            true,
+            false,
+            #[cfg(feature = "transparent-inputs")]
+            None,
+        );
+        assert!(receivers.can_receive(PoolType::SAPLING));
+        assert!(!receivers.can_receive(PoolType::ORCHARD));
+        assert!(!receivers.can_receive(PoolType::IRONWOOD));
+        assert!(!receivers.can_receive(PoolType::Transparent));
+
+        let receivers = ChangeReceivers::new(
+            false,
+            true,
+            #[cfg(feature = "transparent-inputs")]
+            Some(TransparentChangeKind::P2sh),
+        );
+        assert!(!receivers.can_receive(PoolType::SAPLING));
+        assert!(receivers.can_receive(PoolType::ORCHARD));
+        assert!(receivers.can_receive(PoolType::IRONWOOD));
+        #[cfg(feature = "transparent-inputs")]
+        {
+            assert!(receivers.can_receive(PoolType::Transparent));
+            assert_eq!(receivers.transparent(), Some(TransparentChangeKind::P2sh));
+        }
+
+        let nothing = ChangeReceivers::new(
+            false,
+            false,
+            #[cfg(feature = "transparent-inputs")]
+            None,
+        );
+        for pool in [
+            PoolType::SAPLING,
+            PoolType::ORCHARD,
+            PoolType::IRONWOOD,
+            PoolType::Transparent,
+        ] {
+            assert!(!nothing.can_receive(pool), "{pool:?} should not receive");
+        }
+    }
 
     #[cfg(feature = "orchard")]
     use crate::data_api::error::FindAccountForAddressError;
