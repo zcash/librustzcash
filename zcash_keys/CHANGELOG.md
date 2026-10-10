@@ -112,6 +112,9 @@ This release supports the NU7 upgrade on testnet.
 - `zcash_keys::address::Address::encode_receiver_preserving`
 - `zcash_keys::keys::UnifiedFullViewingKey::p2pkh`
 - `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
+- `zcash_keys::keys::UnifiedFullViewingKey::from_p2sh`, the only public way to
+  construct a unified full viewing key. A P2SH account has no spending key to
+  derive one from, so it must be assembled from its cosigners' keys.
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2pkh`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
 - `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`
