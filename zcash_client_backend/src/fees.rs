@@ -364,7 +364,9 @@ pub enum ChangeError<E, NoteRefT> {
         /// The total of the inputs provided to change selection
         available: Zatoshis,
         /// The total amount of input value required to fund the requested outputs,
-        /// including the required fees.
+        /// including the required fees. When returned by
+        /// [`ChangeStrategy::compute_balance`], this exceeds the total value of the inputs
+        /// it was given.
         required: Zatoshis,
     },
     /// Some of the inputs provided to the transaction have value less than the
@@ -376,7 +378,8 @@ pub enum ChangeError<E, NoteRefT> {
     /// though in practice they would not cause the fee to increase. Inputs with
     /// value greater than the marginal fee will never be excluded.
     ///
-    /// The ordering of the inputs in each list is unspecified.
+    /// Every input named is one of the inputs that were provided, and at least one is
+    /// named. The ordering of the inputs in each list is unspecified.
     DustInputs {
         /// The outpoints for transparent inputs that could not be determined to
         /// have economic value in the context of this input selection.

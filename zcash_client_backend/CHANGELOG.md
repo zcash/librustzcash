@@ -19,6 +19,12 @@ workspace.
   now pays a unified address with every receiver of that address. Previously
   it omitted the transparent receiver of an address that also had a shielded
   receiver.
+- `zcash_client_backend::data_api::InputSource::{select_spendable_notes,
+  select_single_spendable_note}` must never return a note in `exclude`.
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` must return a
+  `ChangeError::InsufficientFunds` whose `required` value exceeds the total
+  value of the inputs it was given, and a `ChangeError::DustInputs` that names
+  at least one of the inputs it was given and no others.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
@@ -28,6 +34,11 @@ workspace.
 - `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
   matches on the transparent receiver of a unified `address` that also has a
   shielded receiver.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now spends notes from a later shielded pool when the change from the
+  preferred pool's notes alone would fall below the dust threshold. Previously
+  it returned `InsufficientFunds` in that case, with `available` above
+  `required`.
 
 ## [0.25.0-pre.1] - 2026-10-06
 
