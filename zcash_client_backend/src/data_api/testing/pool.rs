@@ -1289,6 +1289,47 @@ pub fn transfer_grows_across_pools_at_a_dust_shortfall<
     assert_eq!(st.get_total_balance(account.id()), expected_change);
 }
 
+/// Tests that a transfer which draws on a second pool at a dust shortfall reports
+/// `InsufficientFunds` over both pools when the second note cannot cover the two-bundle fee.
+///
+/// The test:
+/// - Adds a note in the `P0` pool and a smaller one in the `P1` pool.
+/// - Proposes a transfer to a `P0` recipient of an amount that the `P0` note covers, but
+///   whose change from that note alone would fall below the dust threshold.
+/// - Verifies that the proposal fails with `InsufficientFunds`, requiring the amount plus
+///   the two-bundle fee and reporting the value of both notes as available.
+#[cfg(feature = "orchard")]
+pub fn transfer_fails_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p0_note_value = Zatoshis::const_from_u64(60_000);
+    let p1_note_value = Zatoshis::const_from_u64(6_000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, p0_note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, p1_note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+    let total = (p0_note_value + p1_note_value).unwrap();
+
+    let to: Address = P0::sk_default_address(&P0::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(47_000);
+
+    // The `P0` note alone would leave change of 3000 zatoshis, below the dust threshold of
+    // one marginal fee, so the `P1` note is drawn on as well: two bundles, each padded to two
+    // logical actions. Together the notes fall 1000 zatoshis short of the amount plus that fee.
+    let two_bundle_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let required = (amount + two_bundle_fee).unwrap();
+
+    st.expect_insufficient_funds(&to, amount, total, required);
+}
+
 /// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
 /// error when the `transparent-inputs` feature is not enabled.
 #[cfg(not(feature = "transparent-inputs"))]
