@@ -818,6 +818,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn transfer_grows_across_pools_at_a_dust_shortfall() {
+        testing::pool::transfer_grows_across_pools_at_a_dust_shortfall::<
+            OrchardPoolTester,
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    fn transfer_fails_across_pools_at_a_dust_shortfall() {
+        testing::pool::transfer_fails_across_pools_at_a_dust_shortfall::<
+            OrchardPoolTester,
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
     fn send_max_fails_when_balance_is_consumed_by_fees() {
         testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<OrchardPoolTester>()
     }

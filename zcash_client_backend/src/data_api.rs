@@ -1802,8 +1802,9 @@ pub trait InputSource {
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
-    /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
-    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// be included, and a note in `exclude` is never returned. Locked outputs are selected
+    /// according to `lock_filter` (see [`LockFilter`]; a [`LockFilter::Policy`] carrying the
+    /// default `Exclude` selects none).
     #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
@@ -1817,9 +1818,9 @@ pub trait InputSource {
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the OLDEST single spendable note whose value alone is at least `value`, drawn
-    /// from the first pool in `sources` (in the given preference order) that holds one. The
-    /// returned collection contains at most one note; it is empty when no single eligible note
-    /// covers the value.
+    /// from the first pool in `sources` (in the given preference order) that holds one. A note
+    /// in `exclude` is never returned. The returned collection contains at most one note; it is
+    /// empty when no single eligible note covers the value.
     ///
     /// This is the selection primitive behind
     /// [`NoteSelection::PreferSingle`](crate::data_api::wallet::input_selection::NoteSelection):
