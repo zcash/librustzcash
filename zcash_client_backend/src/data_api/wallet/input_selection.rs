@@ -1082,12 +1082,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // which case input selection reports `InsufficientFunds`.
         pool_preference.retain(|pool| spend_policy.permits_shielded(*pool));
 
-        // This loop is guaranteed to terminate: the check at the bottom continues only when
-        // selection offers more value than the balance was computed over, and each pass either
-        // raises the requirement, so that the next trimmed set is strictly larger, excludes a
-        // dust note, each at most once, or changes the transparent input set (see below). The
-        // loop will either return a successful result or the wallet will eventually run out of
-        // funds to select.
+        // Termination rests on two contracts: the data source returns only notes from the pools
+        // it is asked for and never one in `exclude`, and the change strategy reports a
+        // requirement above the inputs it was given. The check at the bottom continues only when
+        // selection offers more value than the balance was computed over, or this pass
+        // re-gathered the transparent inputs at a higher bound or pruned one of them. Each
+        // continuing pass either raises the requirement (so the next trimmed set is strictly
+        // larger), excludes a dust note (each at most once), or re-gathers or prunes transparent
+        // inputs, each a bounded number of times (see below). The loop will either return a
+        // successful result or the wallet will eventually run out of funds to select.
         loop {
             #[cfg(not(feature = "orchard"))]
             let sapling_bundle_required = true;
