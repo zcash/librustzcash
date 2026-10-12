@@ -577,6 +577,21 @@ mod tests {
     }
 
     #[test]
+    fn completed_shard_note_spendable_after_scanning_anchor_window_sapling() {
+        testing::pool::completed_shard_note_spendable_after_scanning_anchor_window::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn completed_shard_note_spendable_after_scanning_anchor_window_orchard() {
+        testing::pool::completed_shard_note_spendable_after_scanning_anchor_window::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
     fn open_shard_note_spendable_across_commitment_free_stretch_sapling() {
         testing::pool::open_shard_note_spendable_across_commitment_free_stretch::<SaplingPoolTester>(
         )
