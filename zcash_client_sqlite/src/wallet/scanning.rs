@@ -1357,13 +1357,13 @@ pub(crate) mod tests {
             Ok(())
         );
 
-        // Check the scan range again, we should see a `ChainTip` range for the period we've been
-        // offline.
+        // Check the scan range again. Every unscanned range we've been offline for lies within the
+        // pruning window, so it has `Anchor` priority.
         assert_matches!(
             suggest_scan_ranges(st.wallet().conn(), Historic),
             Ok(scan_ranges) if scan_ranges == vec![
-                scan_range((sap_active + 320)..(sap_active + 341), ChainTip),
-                scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
+                scan_range((sap_active + 320)..(sap_active + 341), Anchor),
+                scan_range((sap_active + 300)..(sap_active + 310), Anchor)
             ]
         );
 
@@ -1374,14 +1374,17 @@ pub(crate) mod tests {
             Ok(())
         );
 
-        // Check the scan range again, we should see a `Validate` range for the previous wallet
-        // tip, and then a `ChainTip` for the remaining range.
+        // Check the scan range again, we should see a `Verify` range for the previous wallet
+        // tip, then the new pruning window with `Anchor` priority. The ranges given `Anchor`
+        // for the previous window keep that priority, and the remaining range is `ChainTip`.
         assert_matches!(
             suggest_scan_ranges(st.wallet().conn(), Historic),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 320)..(sap_active + 330), Verify),
-                scan_range((sap_active + 330)..(sap_active + 451), ChainTip),
-                scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
+                scan_range((sap_active + 351)..(sap_active + 451), Anchor),
+                scan_range((sap_active + 330)..(sap_active + 341), Anchor),
+                scan_range((sap_active + 300)..(sap_active + 310), Anchor),
+                scan_range((sap_active + 341)..(sap_active + 351), ChainTip)
             ]
         );
 
@@ -1594,13 +1597,16 @@ pub(crate) mod tests {
         let new_tip = prior_tip + 500;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
         let chain_end = u32::from(new_tip + 1);
+        let window_start = chain_end - PRUNING_DEPTH;
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The wallet's birthday onward is marked for recovery. Because we don't
-            // yet have any chain state, it is marked with `Historic` priority rather
+            // The chain-tip pruning window is scanned first.
+            scan_range(window_start..chain_end, Anchor),
+            // The rest of the range from the wallet's birthday is marked for recovery. Because
+            // we don't yet have any chain state, it is marked with `Historic` priority rather
             // than `ChainTip`.
-            scan_range(wallet_birthday..chain_end, Historic),
+            scan_range(wallet_birthday..window_start, Historic),
             // The range below the wallet's birthday height is ignored.
             scan_range(sap_active..wallet_birthday, Ignored),
         ];
@@ -1636,13 +1642,16 @@ pub(crate) mod tests {
         let tip_height = prior_tip_height + 500;
         st.wallet_mut().update_chain_tip(tip_height).unwrap();
         let chain_end = u32::from(tip_height + 1);
+        let window_start = chain_end - PRUNING_DEPTH;
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The last (incomplete) shard's range starting from the wallet birthday is
-            // marked for catching up to the chain tip, to ensure that if any notes are
+            // The chain-tip pruning window is scanned first.
+            scan_range(window_start..chain_end, Anchor),
+            // The rest of the last (incomplete) shard's range starting from the wallet birthday
+            // is marked for catching up to the chain tip, to ensure that if any notes are
             // discovered after the wallet's birthday, they will be spendable.
-            scan_range(birthday.height().into()..chain_end, ChainTip),
+            scan_range(birthday.height().into()..window_start, ChainTip),
             // The range below the birthday height is ignored.
             scan_range(sap_active..birthday.height().into(), Ignored),
         ];
@@ -1748,10 +1757,14 @@ pub(crate) mod tests {
             Ignored,
         );
 
+        // The chain-tip pruning window as of `prior_tip`.
+        let prior_window_start = u32::from(prior_tip + 1) - PRUNING_DEPTH;
+
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
+            scan_range(prior_window_start..(prior_tip + 1).into(), Anchor),
             scan_range(
-                account.birthday().height().into()..(prior_tip + 1).into(),
+                account.birthday().height().into()..prior_window_start,
                 ChainTip,
             ),
             pre_birthday_range.clone(),
@@ -1779,9 +1792,10 @@ pub(crate) mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            scan_range((max_scanned + 1).into()..(prior_tip + 1).into(), ChainTip),
+            scan_range((max_scanned + 1).into()..(prior_tip + 1).into(), Anchor),
+            scan_range(prior_window_start..max_scanned.into(), Anchor),
             scan_range(
-                account.birthday().height().into()..max_scanned.into(),
+                account.birthday().height().into()..prior_window_start,
                 ChainTip,
             ),
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
@@ -1827,20 +1841,20 @@ pub(crate) mod tests {
                 (max_scanned + 1).into()..(max_scanned + 1 + VERIFY_LOOKAHEAD).into(),
                 Verify,
             ),
-            // The last shard needs to catch up to the chain tip in order to make notes spendable.
-            scan_range(last_shard_start.into()..u32::from(new_tip + 1), ChainTip),
-            // The range between the verification blocks and the prior tip is still in the queue.
+            // The new chain-tip pruning window, which covers the last shard and the gap between
+            // the prior tip and it, is scanned first. It joins the part of the prior window above
+            // the verification blocks.
             scan_range(
-                (max_scanned + 1 + VERIFY_LOOKAHEAD).into()..(prior_tip + 1).into(),
-                ChainTip,
+                (max_scanned + 1 + VERIFY_LOOKAHEAD).into()..u32::from(new_tip + 1),
+                Anchor,
             ),
+            // The part of the prior window below the max scanned block keeps its priority.
+            scan_range(prior_window_start..max_scanned.into(), Anchor),
             // The remainder of the second-to-last shard's range is still in the queue.
             scan_range(
-                account.birthday().height().into()..max_scanned.into(),
+                account.birthday().height().into()..prior_window_start,
                 ChainTip,
             ),
-            // The gap between the prior tip and the last shard is deferred as low priority.
-            scan_range((prior_tip + 1).into()..last_shard_start.into(), Historic),
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
@@ -1962,9 +1976,13 @@ pub(crate) mod tests {
         let prior_tip = max_scanned + 20;
         st.wallet_mut().update_chain_tip(prior_tip).unwrap();
 
+        // The chain-tip pruning window as of `prior_tip`.
+        let prior_window_start = u32::from(prior_tip + 1) - PRUNING_DEPTH;
+
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            scan_range(birthday.height().into()..(prior_tip + 1).into(), ChainTip),
+            scan_range(prior_window_start..(prior_tip + 1).into(), Anchor),
+            scan_range(birthday.height().into()..prior_window_start, ChainTip),
             scan_range(sap_active.into()..birthday.height().into(), Ignored),
         ];
 
@@ -2074,10 +2092,13 @@ pub(crate) mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The blocks after the max scanned block up to the chain tip are prioritised.
-            scan_range((max_scanned + 1).into()..chain_end, ChainTip),
+            // The blocks after the max scanned block up to the chain tip lie within the
+            // chain-tip pruning window, and are scanned first.
+            scan_range((max_scanned + 1).into()..chain_end, Anchor),
+            // The new window and the prior one both extend below the max scanned block.
+            scan_range(prior_window_start..max_scanned.into(), Anchor),
             // The remainder of the second-to-last shard's range is still in the queue.
-            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
+            scan_range(birthday.height().into()..prior_window_start, ChainTip),
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
@@ -2485,15 +2506,14 @@ pub(crate) mod tests {
         let new_tip = birthday.height() + 122;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
 
-        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
-        // priority, and that the range from the wallet birthday to the end of the birthday shard
-        // has Historic priority.
+        // Verify that the suggested scan ranges include the chain-tip pruning window with Anchor
+        // priority and the rest of the chain-tip range with ChainTip priority, and that the range
+        // from the wallet birthday to the end of the birthday shard has Historic priority.
         let birthday_height = birthday.height().into();
+        let window_start = u32::from(new_tip + 1) - PRUNING_DEPTH;
         let expected = vec![
-            scan_range(
-                (birthday_height + 12)..(new_tip + 1).into(),
-                ScanPriority::ChainTip,
-            ),
+            scan_range(window_start..(new_tip + 1).into(), ScanPriority::Anchor),
+            scan_range((birthday_height + 12)..window_start, ScanPriority::ChainTip),
             scan_range(
                 birthday_height..(birthday_height + 12),
                 ScanPriority::Historic,
@@ -2577,15 +2597,13 @@ pub(crate) mod tests {
         let new_tip = birthday.height() + 122;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
 
-        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
-        // priority, and that the range from the wallet birthday to the end of the birthday shard
-        // has Historic priority.
+        // Verify that the suggested scan ranges include the chain-tip pruning window with Anchor
+        // priority and the rest of the range from the wallet birthday with ChainTip priority.
         let birthday_height = birthday.height().into();
+        let window_start = u32::from(new_tip + 1) - PRUNING_DEPTH;
         let expected = vec![
-            scan_range(
-                birthday_height..(new_tip + 1).into(),
-                ScanPriority::ChainTip,
-            ),
+            scan_range(window_start..(new_tip + 1).into(), ScanPriority::Anchor),
+            scan_range(birthday_height..window_start, ScanPriority::ChainTip),
             scan_range(
                 st.sapling_activation_height().into()..birthday_height,
                 ScanPriority::Ignored,

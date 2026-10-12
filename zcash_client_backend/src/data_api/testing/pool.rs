@@ -46,6 +46,7 @@ use crate::{
         anchor_retention::AnchorRetentionInterval,
         chain::{self, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
+        scanning::ScanPriority,
         testing::{
             AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
             single_output_change_strategy,
@@ -7799,6 +7800,78 @@ where
     // Scanning the unscanned region makes the note spendable.
     st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
     assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// A chain tip advance that leaves the wallet more than the pruning window behind schedules the
+/// window ahead of the rest of the unscanned range. Scanning only the ranges scheduled above
+/// [`ScanPriority::ChainTip`] makes a note in a completed shard spendable again, while blocks
+/// between the previously scanned tip and the window remain unscanned.
+pub fn completed_shard_note_spendable_after_scanning_anchor_window<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    // Fall behind the chain by twice the pruning window, as a wallet does when it is reopened
+    // after a period offline.
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    let advance = 2 * PRUNING_DEPTH;
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    for _ in 0..advance {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let new_tip = scanned_tip + advance;
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "nothing is spendable until the wallet has scanned to the policy anchor",
+    );
+
+    // Scan, in suggested order, only the ranges scheduled ahead of ordinary forward sync.
+    while let Some(range) = st
+        .wallet()
+        .suggest_scan_ranges()
+        .unwrap()
+        .into_iter()
+        .find(|range| range.priority() > ScanPriority::ChainTip)
+    {
+        st.scan_cached_blocks(range.block_range().start, range.len());
+    }
+
+    let window_start = new_tip - (PRUNING_DEPTH - 1);
+    let unscanned = st.wallet().suggest_scan_ranges().unwrap();
+    assert!(
+        unscanned
+            .iter()
+            .any(|range| range.block_range().start < window_start),
+        "test invariant: blocks below the pruning window must remain unscanned: {unscanned:?}",
+    );
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "once the pruning window is scanned, the completed-shard note must be spendable",
+    );
+    assert_recovered_balance_spends::<T, _, _, _, _, _>(
+        &mut st,
+        account_id,
+        &usk,
+        SHARD_1_NOTE_VALUE,
+    );
 }
 
 /// `Checkpoint` retention covers every height within `PRUNING_DEPTH` of the chain tip, so a

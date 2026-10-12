@@ -930,6 +930,13 @@ pub(crate) fn anchor_is_policy_depth_state_or_absent<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn completed_shard_note_spendable_after_scanning_anchor_window<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::completed_shard_note_spendable_after_scanning_anchor_window::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
         TestDbFactory::default(),
