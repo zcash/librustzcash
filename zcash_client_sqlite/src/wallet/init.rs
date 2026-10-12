@@ -211,6 +211,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::PutBlocksCommitmentTree { .. }
         | SqliteClientError::TruncateCommitmentTree { .. }
         | SqliteClientError::RequestedRewindInvalid { .. }
+        | SqliteClientError::PruneAboveWalletBirthday { .. }
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::Zip32AccountIndexOutOfRange
         | SqliteClientError::AccountCollision(_)

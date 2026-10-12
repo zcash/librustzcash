@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
+
 ### Changed
+- `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
+  `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
+  unchanged, when `height` is above the wallet birthday.
 - `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
   commitment tree conflict as `PutBlocksError::Continuity` rather than as
   `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other

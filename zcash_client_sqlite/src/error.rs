@@ -104,6 +104,16 @@ pub enum SqliteClientError {
         requested_height: BlockHeight,
     },
 
+    /// A request to prune the scan queue named a height above the wallet birthday. Blocks at or
+    /// above the wallet birthday may hold an account's notes, or the note commitments that the
+    /// witnesses for those notes require, so the scan queue must keep them.
+    PruneAboveWalletBirthday {
+        /// The height below which the caller asked to prune the scan queue.
+        requested_height: BlockHeight,
+        /// The wallet birthday: the lowest birthday of any account in the wallet.
+        wallet_birthday: BlockHeight,
+    },
+
     /// An error occurred in generating a Zcash address.
     AddressGeneration(AddressGenerationError),
 
@@ -352,6 +362,13 @@ impl fmt::Display for SqliteClientError {
                 "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
                 safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{h0}")),
                 requested_height
+            ),
+            SqliteClientError::PruneAboveWalletBirthday {
+                requested_height,
+                wallet_birthday,
+            } => write!(
+                f,
+                "The scan queue may only be pruned below the wallet birthday {wallet_birthday}; the requested height was {requested_height}."
             ),
             SqliteClientError::DecodingError(e) => write!(f, "{e}"),
             #[cfg(feature = "transparent-inputs")]
