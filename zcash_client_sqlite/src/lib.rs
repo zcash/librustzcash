@@ -66,8 +66,8 @@ use zcash_client_backend::{
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
         ll::{
-            self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
-            wallet::store_decrypted_tx,
+            self, LowLevelWalletRead, LowLevelWalletWrite, PutBlockMetaError,
+            ReceivedSaplingOutput, wallet::store_decrypted_tx,
         },
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
@@ -2920,7 +2920,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         #[cfg(feature = "orchard")] orchard_action_count: u32,
         #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] ironwood_action_count: u32,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), PutBlockMetaError<Self::Error>> {
+        // A block stored at this height with a different hash means that the chain has
+        // reorganized below the scanned range. Report that before anything is overwritten.
+        if let Some(stored) = wallet::stored_block_hash(self.conn.borrow(), block_height)
+            .map_err(PutBlockMetaError::Storage)?
+            && stored != block_hash
+        {
+            return Err(PutBlockMetaError::HashMismatch { stored });
+        }
         wallet::put_block(
             self.conn.borrow(),
             block_height,
@@ -2937,6 +2945,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             #[cfg(feature = "orchard")]
             ironwood_action_count,
         )
+        .map_err(PutBlockMetaError::Storage)
     }
 
     fn put_tx_meta(

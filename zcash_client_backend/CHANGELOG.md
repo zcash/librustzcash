@@ -17,9 +17,22 @@ workspace.
 - `zcash_client_backend::data_api::chain::error::Error` implements
   `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+- `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
+- `zcash_client_backend::data_api::ll::PutBlockMetaError`
 - `zcash_client_backend::data_api::testing::pool::{reorg_below_scanned_height_is_a_continuity_error}`
 
 ### Changed
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
+  returns `Result<(), PutBlockMetaError<Self::Error>>`. An implementation that
+  already holds a block at the given height with a different hash returns
+  `PutBlockMetaError::HashMismatch`, carrying the stored hash, and stores
+  nothing; any other failure is `PutBlockMetaError::Storage`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` reports a block at
+  an already-scanned height whose hash differs from the hash the wallet recorded
+  there as `PutBlocksError::Continuity(ScanError::BlockHashMismatch)`, and
+  `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
+  `Error::Scan(ScanError::BlockHashMismatch)`. Both are continuity errors at
+  that height. Previously the conflict surfaced as a storage error.
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
   `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
   commitment tree conflict as `PutBlocksError::Continuity` and any other failure
