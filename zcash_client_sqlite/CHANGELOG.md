@@ -16,6 +16,7 @@ workspace.
   items of the account's unified incoming viewing key.
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::set_account_name`.
+- `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
 
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
@@ -34,6 +35,9 @@ workspace.
   of at the chain tip.
 - From NU7 activation, the wallet retains anchor checkpoints on the scaled ZIP 318
   anchor grid (every 432 blocks rather than every 144).
+- `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
+  `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
+  unchanged, when `height` is above the wallet birthday.
 - `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
   commitment tree conflict as `PutBlocksError::Continuity` rather than as
   `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other

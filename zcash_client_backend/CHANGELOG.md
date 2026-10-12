@@ -100,6 +100,10 @@ workspace.
   expiry modulus at heights from NU7 activation.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method
   `set_account_name`.
+- `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
+  `height` to be at or below the wallet birthday. An implementation returns an
+  error, and leaves the scan queue unchanged, for a `height` above the wallet
+  birthday.
 - `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
   `Anchor`, ordered between `ChainTip` and `Verify`.
 - `zcash_client_backend::data_api::WalletWrite::{put_received_transparent_utxo,
