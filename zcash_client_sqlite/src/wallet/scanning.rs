@@ -163,18 +163,19 @@ pub(crate) fn range_fully_scanned(
     Ok(covered == end_exclusive - start_inclusive)
 }
 
-/// Gives the chain-tip pruning window [`ScanPriority::Anchor`] priority, so that the wallet
-/// scans the window before it continues normal forward sync.
+/// Gives the unscanned ranges in the chain-tip pruning window [`ScanPriority::Anchor`]
+/// priority, so that the wallet scans the window before it continues normal forward sync.
 ///
 /// The window is `(max(chain_tip - PRUNING_DEPTH, wallet_birthday - 1), chain_tip]`, so it
 /// never includes a block below the wallet birthday. If either `chain_tip_height` or
-/// `wallet_birthday` is unset, this function does nothing. `Scanned` ranges in the window keep
-/// their priority.
+/// `wallet_birthday` is unset, this function does nothing. `Scanned`, `Verify`, and `Ignored`
+/// ranges in the window keep their priority. Heights in the window that no `scan_queue` range
+/// covers are not added to the queue.
 ///
 /// This must be called after operations that mutate `scan_queue` priorities or shift
 /// `chain_tip_height` in ways that can leave the pruning window with non-`Scanned` overlap:
-/// rewind, truncate-to-height, truncate-to-chain-state, and account import are the current
-/// triggers.
+/// a chain tip update, rewind, truncate-to-height, truncate-to-chain-state, and account
+/// import are the current triggers.
 pub(crate) fn mark_anchor_priority_window(
     conn: &rusqlite::Transaction<'_>,
 ) -> Result<(), SqliteClientError> {
@@ -203,12 +204,42 @@ pub(crate) fn mark_anchor_priority_window(
     }
 
     let range = BlockHeight::from(window_start)..BlockHeight::from(chain_tip_exclusive);
-    replace_queue_entries::<SqliteClientError>(
-        conn,
-        &range,
-        std::iter::once(ScanRange::from_parts(range.clone(), ScanPriority::Anchor)),
-        false,
-    )
+
+    // The parts of the window that the scan queue holds with a priority above `Scanned` and
+    // below `Anchor`, each with `Anchor` priority. The query excludes every other range, so
+    // those ranges keep their priority: `Ignored` and `Scanned` ranges are not scanned again,
+    // and the wallet scans `Verify` ranges before `Anchor` ranges.
+    let anchor_ranges = conn
+        .prepare_cached(
+            "SELECT max(block_range_start, :window_start), min(block_range_end, :window_end)
+             FROM scan_queue
+             WHERE block_range_start < :window_end
+               AND block_range_end > :window_start
+               AND priority > :scanned_priority
+               AND priority < :anchor_priority
+             ORDER BY block_range_start",
+        )?
+        .query_and_then(
+            named_params![
+                ":window_start": window_start,
+                ":window_end": chain_tip_exclusive,
+                ":scanned_priority": priority_code(&ScanPriority::Scanned),
+                ":anchor_priority": priority_code(&ScanPriority::Anchor),
+            ],
+            |row| {
+                Ok::<_, rusqlite::Error>(ScanRange::from_parts(
+                    BlockHeight::from(row.get::<_, u32>(0)?)
+                        ..BlockHeight::from(row.get::<_, u32>(1)?),
+                    ScanPriority::Anchor,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if anchor_ranges.is_empty() {
+        return Ok(());
+    }
+    replace_queue_entries::<SqliteClientError>(conn, &range, anchor_ranges.into_iter(), false)
 }
 
 pub(crate) fn suggest_scan_ranges(
@@ -1117,6 +1148,10 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         false,
     )?;
 
+    // Nothing is spendable until the pruning window is scanned through the policy anchor, so
+    // schedule the window ahead of the rest of the unscanned range.
+    mark_anchor_priority_window(conn)?;
+
     Ok(())
 }
 
@@ -1658,6 +1693,36 @@ pub(crate) mod tests {
 
         let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// `update_chain_tip` rewrites the scan queue more than once. An error returned later in the
+    /// same transaction must leave none of those rewrites in place.
+    #[test]
+    fn update_chain_tip_rolls_back_on_error() {
+        let (mut st, _, birthday, _) =
+            test_with_nu5_birthday_offset::<SaplingPoolTester>(76, 1000, BlockHash([0; 32]), true);
+        let tip_height = birthday.height() + 500;
+
+        let queue = |st: &TestState<BlockCache, TestDb, LocalNetwork>| {
+            suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap()
+        };
+        let queue_before = queue(&st);
+
+        let result: Result<(), SqliteClientError> =
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                wdb.update_chain_tip(tip_height)?;
+                // Fail after the queue rewrites; all of them must roll back.
+                Err(SqliteClientError::ChainHeightUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::ChainHeightUnknown));
+        assert_eq!(queue(&st), queue_before);
+
+        // The same update, committed, does rewrite the queue.
+        st.wallet_mut().update_chain_tip(tip_height).unwrap();
+        assert!(
+            queue(&st).iter().any(|range| range.priority() == Anchor),
+            "a committed update must give the pruning window `Anchor` priority",
+        );
     }
 
     #[test]

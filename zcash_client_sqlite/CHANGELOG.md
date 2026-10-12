@@ -44,12 +44,13 @@ workspace.
   `SqliteClientError::BlockConflict`, so
   `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
   `Error::Scan(ScanError::BlockHashMismatch)`.
-- After any operation that disturbs the wallet's anchor —
-  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
-  or importing an account whose birthday is below the prior wallet
-  birthday — the chain-tip pruning window is given the priority
-  `ScanPriority::Anchor`, so `suggest_scan_ranges` returns it ahead of every
-  range other than `Verify` ranges.
+- `WalletWrite::update_chain_tip`, and any operation that disturbs the wallet's
+  anchor — `rewind_to_chain_state`, `truncate_to_height`,
+  `truncate_to_chain_state`, or importing an account whose birthday is below the
+  prior wallet birthday — gives the queued ranges of the chain-tip pruning
+  window `ScanPriority::Anchor` priority, so `suggest_scan_ranges` returns them
+  ahead of every range other than `Verify` ranges. `Scanned`, `Verify`, and
+  `Ignored` ranges keep their priority.
 - The spendability rule for shielded notes now uses a per-note
   `witness_settled_height` column on `*_received_notes` (replacing the prior
   boolean `witness_stabilized` flag). The stored value is the note's settled
