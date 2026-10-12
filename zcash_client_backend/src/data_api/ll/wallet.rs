@@ -37,7 +37,7 @@ use crate::{
     wallet::{Recipient, WalletTransparentOutput},
 };
 
-use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
+use super::{LowLevelWalletRead, LowLevelWalletWrite, PutBlockMetaError, TxMeta};
 
 #[cfg(feature = "orchard")]
 use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
@@ -433,7 +433,16 @@ where
                 #[cfg(feature = "orchard")]
                 block.ironwood().commitments().len().try_into().unwrap(),
             )
-            .map_err(PutBlocksError::Storage)?;
+            .map_err(|error| match error {
+                PutBlockMetaError::HashMismatch { stored } => {
+                    PutBlocksError::Continuity(ScanError::BlockHashMismatch {
+                        at_height: block.height(),
+                        stored,
+                        scanned: block.block_hash(),
+                    })
+                }
+                PutBlockMetaError::Storage(error) => PutBlocksError::Storage(error),
+            })?;
 
         for tx in block.transactions() {
             let tx_ref = wallet_db

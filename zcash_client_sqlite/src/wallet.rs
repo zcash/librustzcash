@@ -5094,7 +5094,31 @@ pub(crate) fn get_account_ids(
     Ok(result)
 }
 
-/// Inserts information about a scanned block into the database.
+/// Returns the hash of the block that the database holds at `block_height`, if any.
+pub(crate) fn stored_block_hash(
+    conn: &rusqlite::Connection,
+    block_height: BlockHeight,
+) -> Result<Option<BlockHash>, SqliteClientError> {
+    conn.query_row(
+        "SELECT hash FROM blocks WHERE height = ?",
+        [u32::from(block_height)],
+        |row| row.get::<_, Vec<u8>>(0),
+    )
+    .optional()?
+    .map(|bytes| {
+        BlockHash::try_from_slice(&bytes).ok_or_else(|| {
+            SqliteClientError::CorruptedData(format!(
+                "Invalid block hash at height {}",
+                u32::from(block_height)
+            ))
+        })
+    })
+    .transpose()
+}
+
+/// Inserts information about a scanned block into the database, replacing any information
+/// stored for a block at the same height. The caller checks first that a block stored at
+/// `block_height` has the hash `block_hash`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_block(
     conn: &rusqlite::Transaction<'_>,
@@ -5108,28 +5132,6 @@ pub(crate) fn put_block(
     #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
     #[cfg(feature = "orchard")] ironwood_action_count: u32,
 ) -> Result<(), SqliteClientError> {
-    let block_hash_data = conn
-        .query_row(
-            "SELECT hash FROM blocks WHERE height = ?",
-            [u32::from(block_height)],
-            |row| row.get::<_, Vec<u8>>(0),
-        )
-        .optional()?;
-
-    // Ensure that in the case of an upsert, we don't overwrite block data
-    // with information for a block with a different hash.
-    if let Some(bytes) = block_hash_data {
-        let expected_hash = BlockHash::try_from_slice(&bytes).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!(
-                "Invalid block hash at height {}",
-                u32::from(block_height)
-            ))
-        })?;
-        if expected_hash != block_hash {
-            return Err(SqliteClientError::BlockConflict(block_height));
-        }
-    }
-
     let mut stmt_upsert_block = conn.prepare_cached(
         "INSERT INTO blocks (
             height,

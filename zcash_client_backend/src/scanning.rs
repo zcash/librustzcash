@@ -18,7 +18,7 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
-use zcash_primitives::transaction::TxId;
+use zcash_primitives::{block::BlockHash, transaction::TxId};
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight},
@@ -737,6 +737,17 @@ pub enum ScanError {
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
 
+    /// A block at a height the wallet has already scanned carries a hash other than the one the
+    /// wallet recorded there: the chain has reorganized below the scanned range.
+    BlockHashMismatch {
+        /// The height of the conflicting block.
+        at_height: BlockHeight,
+        /// The hash that the wallet recorded at `at_height`.
+        stored: BlockHash,
+        /// The hash of the block that was scanned at `at_height`.
+        scanned: BlockHash,
+    },
+
     /// The note commitment data of a batch of scanned blocks, or the chain state the batch
     /// extends, conflicts with note commitment tree state the wallet already holds.
     CommitmentTreeConflict {
@@ -806,6 +817,7 @@ impl ScanError {
         match self {
             EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
+            BlockHashMismatch { .. } => true,
             CommitmentTreeConflict { .. } => true,
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
@@ -822,6 +834,7 @@ impl ScanError {
         match self {
             EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
+            BlockHashMismatch { at_height, .. } => *at_height,
             CommitmentTreeConflict { at_height, .. } => *at_height,
             BlockHeightDiscontinuity { new_height, .. } => *new_height,
             TreeSizeMismatch { at_height, .. } => *at_height,
@@ -849,6 +862,14 @@ impl fmt::Display for ScanError {
             PrevHashMismatch { at_height } => write!(
                 f,
                 "The parent hash of proposed block does not correspond to the block hash at height {at_height}."
+            ),
+            BlockHashMismatch {
+                at_height,
+                stored,
+                scanned,
+            } => write!(
+                f,
+                "The block at height {at_height} has hash {scanned}, but the wallet recorded {stored} at that height."
             ),
             CommitmentTreeConflict {
                 pool,

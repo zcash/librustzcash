@@ -334,12 +334,31 @@ pub trait LowLevelWalletRead {
     ) -> Result<Option<Self::Account>, Self::Error>;
 }
 
+/// An error returned by [`LowLevelWalletWrite::put_block_meta`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PutBlockMetaError<E> {
+    /// The wallet data store already holds a block at the given height with a different hash.
+    /// The chain has reorganized below the wallet's scanned range.
+    HashMismatch {
+        /// The hash that the wallet data store holds at the given height.
+        stored: BlockHash,
+    },
+    /// The wallet data store failed.
+    Storage(E),
+}
+
 /// A capability trait that provides low-level wallet write operations. These operations are used
 /// to provide standard implementations for certain [`WalletWrite`] trait methods.
 ///
 /// [`WalletWrite`]: super::WalletWrite
 pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// Add metadata about a block to the wallet data store.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PutBlockMetaError::HashMismatch`], and stores nothing, if the wallet data store
+    /// already holds a block at `block_height` whose hash is not `block_hash`.
     #[allow(clippy::too_many_arguments)]
     fn put_block_meta(
         &mut self,
@@ -352,7 +371,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         #[cfg(feature = "orchard")] orchard_action_count: u32,
         #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] ironwood_action_count: u32,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), PutBlockMetaError<Self::Error>>;
 
     /// Add metadata about a transaction to the wallet data store.
     fn put_tx_meta(
