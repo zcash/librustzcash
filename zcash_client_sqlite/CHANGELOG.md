@@ -38,6 +38,12 @@ workspace.
   commitment tree conflict as `PutBlocksError::Continuity` rather than as
   `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
   note commitment tree errors.
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a block at
+  an already-scanned height whose hash differs from the stored hash as
+  `PutBlocksError::Continuity(ScanError::BlockHashMismatch)` rather than as
+  `SqliteClientError::BlockConflict`, so
+  `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
+  `Error::Scan(ScanError::BlockHashMismatch)`.
 
 ## [0.23.0-pre.2] - 2026-10-13
 
