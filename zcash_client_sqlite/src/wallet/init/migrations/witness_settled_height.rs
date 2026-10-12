@@ -112,6 +112,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                        AND shard.shard_index = (rn.commitment_tree_position >> :shard_height)
                        AND rn.commitment_tree_position IS NOT NULL
                        AND t.block IS NOT NULL
+                       -- The note's block is at or above the wallet birthday, where the
+                       -- scan queue covers every block with a range that is not `Ignored`,
+                       -- so no range above `Scanned` means every block is scanned.
                        AND NOT EXISTS (
                            SELECT 1 FROM scan_queue q
                            WHERE q.priority > :scanned_priority

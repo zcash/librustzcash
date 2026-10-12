@@ -84,8 +84,10 @@ pub(crate) fn pruning_floor(chain_tip: BlockHeight) -> BlockHeight {
 }
 
 /// Returns true when every `scan_queue` range overlapping the portion of the chain-tip
-/// pruning window at or below `policy_anchor` has `Scanned` priority (or `Ignored`, for
-/// pre-birthday gaps). This is the wallet-level precondition for treating any stabilized
+/// pruning window at or below `policy_anchor` has `Scanned` priority (or `Ignored`, below the
+/// wallet birthday, where no block needs a scan). By the invariants of
+/// [`TABLE_SCAN_QUEUE`](super::db::TABLE_SCAN_QUEUE), this means that every block of that
+/// portion at or above the wallet birthday is scanned. This is the wallet-level precondition for treating any stabilized
 /// note as spendable: as long as a range above `Scanned` remains in that region, the cap
 /// state needed to witness stabilized notes against the anchor can't be reliably
 /// reconstructed.
@@ -727,6 +729,10 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 /// through the end of the note's shard when the shard is complete, and through the chain tip
 /// when it is not. The enclosing query binds `t` to the note's transaction, `shard` to the
 /// note's `*_tree_shards` row, and the `:scanned_priority` parameter.
+///
+/// The note's block is at or above the wallet birthday, so by the invariants of
+/// [`TABLE_SCAN_QUEUE`](super::db::TABLE_SCAN_QUEUE), a block that no range above `Scanned`
+/// priority covers is scanned.
 const NOTE_SCANNED_ABOVE_CONDITION: &str = "NOT EXISTS (
     SELECT 1 FROM scan_queue q
     WHERE q.priority > :scanned_priority
@@ -865,6 +871,8 @@ pub(crate) fn mark_stabilized_notes(
         // and above); `Ignored` sorts *below* `Scanned` and denotes pre-birthday
         // ranges whose tree state is supplied by the birthday frontier rather
         // than by scanning, so it is not a gap and must not gate the promotion.
+        // The invariants of `TABLE_SCAN_QUEUE` make this check exact at and above
+        // the wallet birthday.
         let scanned_priority = priority_code(&ScanPriority::Scanned);
         let sql = format!(
             "UPDATE {pool}_received_notes AS rn

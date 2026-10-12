@@ -397,6 +397,10 @@ pub(crate) fn is_note_spendable_at_anchor(
 ///
 /// The condition holds when `rn.witness_settled_height` or `:anchor_height` is `NULL`; check 1,
 /// and the absence of an anchor, decide those cases.
+///
+/// The blocks it checks lie above the note's own block, which is at or above the wallet
+/// birthday, so by the invariants of [`TABLE_SCAN_QUEUE`](super::db::TABLE_SCAN_QUEUE), a block
+/// that no range above `Scanned` priority covers is scanned.
 pub(crate) fn note_witness_region_scanned_condition() -> String {
     let region_end = "MIN(:anchor_height, IFNULL(shard.subtree_end_height, :anchor_height))";
     format!(

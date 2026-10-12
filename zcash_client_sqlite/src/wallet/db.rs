@@ -1223,7 +1223,19 @@ CREATE TABLE ironwood_tree_retained_checkpoints (
 
 /// Stores the [`ScanPriority`] for all block ranges in the wallet's view of the chain.
 ///
+/// The ranges never overlap. Every write to the queue keeps these invariants for the blocks
+/// from the wallet birthday to the chain tip:
+///
+/// - Exactly one range covers each block.
+/// - No range that covers one of these blocks is `Ignored`.
+///
+/// Code that asks whether such a block is scanned can therefore check that no range above
+/// `Scanned` priority covers it. Below the wallet birthday the queue can differ:
+/// [`WalletWrite::prune_scan_queue_below`] can relabel ranges there as `Ignored` or remove
+/// them, and blocks below the wallet birthday never need a scan.
+///
 /// [`ScanPriority`]: zcash_client_backend::data_api::scanning::ScanPriority
+/// [`WalletWrite::prune_scan_queue_below`]: zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below
 pub(super) const TABLE_SCAN_QUEUE: &str = "
 CREATE TABLE scan_queue (
     block_range_start INTEGER NOT NULL,
