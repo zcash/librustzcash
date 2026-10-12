@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
+
 ### Changed
+- `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
+  `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
+  unchanged, when `height` is above the wallet birthday.
 - `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a block at
   an already-scanned height whose hash differs from the stored hash as
   `PutBlocksError::Continuity(ScanError::BlockHashMismatch)` rather than as

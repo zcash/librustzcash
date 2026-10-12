@@ -426,12 +426,27 @@ pub(crate) fn queue_rescan(
 /// beneath the lowest retained entry is deleted outright, since raising the queue's floor
 /// cannot open an interior gap.
 ///
-/// Returns the number of queue entries that were removed or altered.
+/// `height` must not exceed the wallet birthday. Every `Ignored` range and every removed range
+/// then lies below the wallet birthday, so the queue keeps covering every block from the
+/// wallet birthday to the chain tip with ranges that are not `Ignored`.
+///
+/// Returns the number of queue entries that were removed or altered, or
+/// [`SqliteClientError::PruneAboveWalletBirthday`] without changing the queue if `height` is
+/// above the wallet birthday.
 pub(crate) fn prune_scan_queue_below(
     conn: &rusqlite::Transaction<'_>,
     height: BlockHeight,
     retain_with_priority: Option<ScanPriority>,
 ) -> Result<u64, SqliteClientError> {
+    if let Some(wallet_birthday) = wallet_birthday(conn)?
+        && height > wallet_birthday
+    {
+        return Err(SqliteClientError::PruneAboveWalletBirthday {
+            requested_height: height,
+            wallet_birthday,
+        });
+    }
+
     let is_retained = |priority: ScanPriority| {
         retain_with_priority
             .is_some_and(|retain| priority <= ScanPriority::Scanned || priority >= retain)
@@ -3070,6 +3085,40 @@ pub(crate) mod tests {
             .query_row("SELECT COUNT(*) FROM scan_queue", [], |r| r.get(0))
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    /// Blocks at or above the wallet birthday may hold an account's notes, or the note
+    /// commitments that their witnesses require. A request to prune above the wallet birthday
+    /// therefore fails and leaves the queue unchanged, while a request to prune at the wallet
+    /// birthday succeeds.
+    #[test]
+    fn prune_scan_queue_below_rejects_a_height_above_the_wallet_birthday() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let birthday = st.test_account().unwrap().birthday().height();
+        st.wallet_mut()
+            .update_chain_tip(birthday + PRUNING_DEPTH)
+            .unwrap();
+        let queue_before = queue_contents(&st);
+
+        let above_birthday = birthday + 1;
+        assert_matches!(
+            st.wallet_mut()
+                .prune_scan_queue_below(above_birthday, Some(ScanPriority::OpenAdjacent)),
+            Err(SqliteClientError::PruneAboveWalletBirthday {
+                requested_height,
+                wallet_birthday,
+            }) if requested_height == above_birthday && wallet_birthday == birthday
+        );
+        assert_eq!(queue_contents(&st), queue_before);
+
+        assert_matches!(
+            st.wallet_mut()
+                .prune_scan_queue_below(birthday, Some(ScanPriority::OpenAdjacent)),
+            Ok(_)
+        );
     }
 
     /// A note whose containing shard's `subtree_end_height` is known (e.g. populated by

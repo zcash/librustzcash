@@ -3977,6 +3977,12 @@ pub trait WalletWrite:
     /// ([`WalletRead::get_wallet_birthday`]) as `height` and retain
     /// [`ScanPriority::OpenAdjacent`] and greater — the priorities that may legitimately
     /// reach below the wallet birthday in service of note witnesses.
+    ///
+    /// `height` must not exceed the wallet birthday. Blocks at or above the wallet birthday may
+    /// hold an account's notes, or the note commitments that the witnesses for those notes
+    /// require. An implementation therefore returns an error, and leaves the queue unchanged,
+    /// when `height` is above the wallet birthday. A wallet with no accounts has no birthday,
+    /// and accepts any `height`.
     fn prune_scan_queue_below(
         &mut self,
         height: BlockHeight,
