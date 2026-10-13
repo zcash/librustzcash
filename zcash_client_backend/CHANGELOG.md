@@ -39,6 +39,7 @@ workspace.
   reorg_below_scanned_height_is_a_continuity_error,
   retained_boundaries_below_window_are_usable_anchors,
   shard_completeness_derives_from_scan_queue,
+  spendable_balance_agrees_with_note_selection,
   stabilized_note_rewind_above_shard_end,
   stabilized_note_rewind_un_mines_shard_completion,
   stabilized_note_settled_height_invalidated_by_reorg,

@@ -566,6 +566,17 @@ mod tests {
     }
 
     #[test]
+    fn spendable_balance_agrees_with_note_selection_sapling() {
+        testing::pool::spendable_balance_agrees_with_note_selection::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn spendable_balance_agrees_with_note_selection_orchard() {
+        testing::pool::spendable_balance_agrees_with_note_selection::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn shard_completeness_derives_from_scan_queue_sapling() {
         testing::pool::shard_completeness_derives_from_scan_queue::<SaplingPoolTester>()
     }
