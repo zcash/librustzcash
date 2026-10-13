@@ -590,6 +590,19 @@ mod tests {
     }
 
     #[test]
+    fn completed_shard_note_spendable_with_unscanned_gap_below_it_sapling() {
+        testing::pool::completed_shard_note_spendable_with_unscanned_gap_below_it::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn completed_shard_note_spendable_with_unscanned_gap_below_it_orchard() {
+        testing::pool::completed_shard_note_spendable_with_unscanned_gap_below_it::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
     fn stabilized_note_settled_height_invalidated_by_reorg_sapling() {
         testing::pool::stabilized_note_settled_height_invalidated_by_reorg::<SaplingPoolTester>()
     }
