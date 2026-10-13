@@ -342,66 +342,92 @@ pub(crate) fn anchor_frontier_available(
     )
 }
 
-/// Encodes the wallet's spendability rule for a single note at the chosen anchor height `a`,
-/// given the predicates that compose it. All must hold for the note to be spendable.
-///
-/// 1. **Settled height set.** `witness_settled_height` (`s`) is the height through which the
-///    note's witness data is settled: every block after the note's own block, through `s`, has
-///    been scanned. For a note in a completed shard it is the shard's end height; for a note in
-///    the open shard it is the pruning floor as of the last scan that reached the tip, never
-///    below the note's own height.
-/// 2. **Pruning window fully scanned through the policy anchor.** No `scan_queue` range above
-///    `Scanned` priority overlaps the portion of the chain-tip pruning window at or below the
-///    anchor height the confirmations policy implies at the current chain tip
-///    (`target - min_confirmations`). The window is at most `PRUNING_DEPTH` blocks and is
-///    scanned at [`ScanPriority::Anchor`], ahead of every range except `Verify` ranges;
-///    verifying it is fully scanned proves the hash chain is intact from the bottom of the
-///    window through the anchor. A not-yet-scanned tip extension strictly above the policy
-///    anchor (the routine state between `update_chain_tip` and the next scan, when the tip has
-///    advanced by fewer than `min_confirmations` blocks) cannot participate in a witness against
-///    the anchor's root and does not block. The caller computes this wallet-state-wide
-///    predicate once per call.
-/// 3. **Witness region scanned.** The note's witness at `a` needs every leaf to the note's right
-///    within its shard, up to the end of block `min(a, E)`, where `E` is the shard's end height
-///    (unbounded while the shard is open). The frontier inserted when the note's block was
-///    scanned supplies the leaves to its left. If `s >= min(a, E)`, the settled height covers
-///    this region; otherwise no `scan_queue` range above `Scanned` priority may overlap
-///    `(s, min(a, E)]`. Use [`note_witness_region_scanned_condition`] to compute this in SQL.
-/// 4. **Anchor frontier available.** The wallet's shardtree must have a frontier at the chosen
-///    anchor height (a checkpoint from which a witness against that anchor can be reconstructed).
-///    Use [`anchor_frontier_available`] to compute this once per pool per call.
-/// 5. **Confirmations met.** The note must have met its confirmations-policy threshold, which
-///    also implies `note.mined_height <= anchor_height` (so the note exists in the tree at the
-///    chosen anchor).
-///
-/// [`ScanPriority::Anchor`]: zcash_client_backend::data_api::scanning::ScanPriority::Anchor
-pub(crate) fn is_note_spendable_at_anchor(
-    witness_settled_height: Option<BlockHeight>,
-    prunable_window_scanned: bool,
-    witness_region_scanned: bool,
-    anchor_available: bool,
-    confirmations_met: bool,
-) -> bool {
-    witness_settled_height.is_some()
-        && prunable_window_scanned
-        && witness_region_scanned
-        && anchor_available
-        && confirmations_met
+/// The conditions of the spendability rule that hold or fail for every note of one pool at once,
+/// at one anchor height. [`note_spendable_at_anchor_condition`] reads them from its
+/// `:prunable_window_scanned` and `:anchor_available` parameters.
+pub(crate) struct AnchorConditions {
+    /// No `scan_queue` range above `Scanned` priority overlaps the chain-tip pruning window at or
+    /// below the anchor height that the confirmations policy implies at the chain tip.
+    pub(crate) prunable_window_scanned: bool,
+    /// The pool's note commitment tree holds a checkpoint at the anchor height.
+    pub(crate) anchor_available: bool,
 }
 
-/// Returns the SQL condition for check 3 of [`is_note_spendable_at_anchor`], over a
-/// received-notes row `rn` and its shard row `shard` (all columns `NULL` when the wallet holds no
-/// row for the note's shard), at the anchor height bound to `:anchor_height`: either the note's
-/// settled height covers the blocks that its witness at the anchor needs, or no `scan_queue`
-/// range above `Scanned` priority overlaps the blocks that it does not cover.
+impl AnchorConditions {
+    /// Reads the conditions for `protocol`, for a transaction at `target_height` under
+    /// `confirmations_policy` that uses `anchor_height`. With no anchor height, the anchor is not
+    /// available. With no known chain tip, the pruning window is not scanned.
+    pub(crate) fn read(
+        conn: &Connection,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        anchor_height: Option<BlockHeight>,
+        protocol: ShieldedPool,
+    ) -> Result<Self, SqliteClientError> {
+        let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
+        let prunable_window_scanned = match super::chain_tip_height(conn)? {
+            Some(chain_tip) => {
+                super::scanning::prunable_window_fully_scanned(conn, chain_tip, policy_anchor)?
+            }
+            None => false,
+        };
+        let anchor_available = match anchor_height {
+            Some(height) => anchor_frontier_available(conn, height, protocol)?,
+            None => false,
+        };
+        Ok(AnchorConditions {
+            prunable_window_scanned,
+            anchor_available,
+        })
+    }
+}
+
+/// Returns the SQL condition that a note is spendable at the anchor height `a` bound to
+/// `:anchor_height`, apart from its confirmations. A note is spendable when this condition holds
+/// and the note has met its confirmations-policy threshold, which
+/// [`ConfirmationsPolicy::confirmations_until_spendable`] decides.
 ///
-/// The condition holds when `rn.witness_settled_height` or `:anchor_height` is `NULL`; check 1,
-/// and the absence of an anchor, decide those cases.
+/// The condition ranges over a received-notes row `rn`, its transaction `t`, and its shard row
+/// `shard`; the columns of `shard` are `NULL` when the wallet holds no row for the note's shard.
+/// The parameters `:prunable_window_scanned` and `:anchor_available` take the
+/// [`AnchorConditions`] for the note's pool. The condition holds when all of these hold:
 ///
-/// The blocks it checks lie above the note's own block, which is at or above the wallet
+/// 1. **Settled height set.** `rn.witness_settled_height` (`s`) is set: every block after the
+///    note's own block, through `s`, has been scanned.
+/// 2. **Pruning window scanned through the policy anchor.** No `scan_queue` range above
+///    `Scanned` priority overlaps the chain-tip pruning window at or below the anchor height the
+///    confirmations policy implies at the chain tip. This proves the hash chain intact from the
+///    bottom of the window through the anchor. A tip extension above that anchor, which is not
+///    yet scanned, cannot take part in a witness at the anchor and does not block.
+/// 3. **Anchor frontier available.** The note commitment tree holds a checkpoint at `a`.
+/// 4. **Mined at or below the anchor.** The note's block is at or below `a`, so the note is in
+///    the tree at `a`.
+/// 5. **Witness region scanned.** The note's witness at `a` needs every leaf to the note's right
+///    within its shard, through the end of block `min(a, E)`, where `E` is the shard's end height
+///    (unbounded while the shard is open). The frontier inserted when the note's block was
+///    scanned supplies the leaves to its left. Either `s >= min(a, E)`, or no `scan_queue` range
+///    above `Scanned` priority overlaps `(s, min(a, E)]`.
+///
+/// The blocks that check 5 reads lie above the note's own block, which is at or above the wallet
 /// birthday, so by the invariants of [`TABLE_SCAN_QUEUE`](super::db::TABLE_SCAN_QUEUE), a block
 /// that no range above `Scanned` priority covers is scanned.
-pub(crate) fn note_witness_region_scanned_condition() -> String {
+///
+/// The condition is `NULL` or false when `:anchor_height` is `NULL`.
+pub(crate) fn note_spendable_at_anchor_condition() -> String {
+    format!(
+        "(rn.witness_settled_height IS NOT NULL
+          AND :prunable_window_scanned = 1
+          AND :anchor_available = 1
+          AND t.block <= :anchor_height
+          AND {})",
+        note_witness_region_scanned_condition(),
+    )
+}
+
+/// Returns the SQL condition for check 5 of [`note_spendable_at_anchor_condition`], over the same
+/// rows and parameters. The condition holds when `rn.witness_settled_height` or `:anchor_height`
+/// is `NULL`; the other checks decide those cases.
+fn note_witness_region_scanned_condition() -> String {
     let region_end = "MIN(:anchor_height, IFNULL(shard.subtree_end_height, :anchor_height))";
     format!(
         "(rn.witness_settled_height >= {region_end}
@@ -564,8 +590,7 @@ where
              rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
-             rn.witness_settled_height,
-             {} AS witness_region_scanned,
+             {} AS spendable_at_anchor,
              IFNULL(t.trust_status, 0) AS trust_status,
              MAX(tt.mined_height) AS max_shielding_input_height,
              MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -591,7 +616,7 @@ where
          AND rn.id NOT IN ({})  -- the note is unspent
          AND ({}) -- the note is eligible under the lock filter
          GROUP BY rn.id",
-        note_witness_region_scanned_condition(),
+        note_spendable_at_anchor_condition(),
         tx_unexpired_condition("t"),
         spent_notes_clause(table_prefix),
         output_eligible_condition(lock_filter, "rn")
@@ -609,15 +634,28 @@ where
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
+    // For `NoteRequest::Unspent` there is no anchor, so no note is spendable at one; the
+    // request returns every unspent note regardless.
+    let anchor_conditions = AnchorConditions::read(
+        conn,
+        target_height,
+        confirmations_policy,
+        note_request.anchor_height(),
+        protocol,
+    )?;
     let account_uuid = account.0;
     let target_height_arg = u32::from(target_height);
     let anchor_height_arg = note_request.anchor_height().map(u32::from);
+    let prunable_window_scanned_arg = i64::from(anchor_conditions.prunable_window_scanned);
+    let anchor_available_arg = i64::from(anchor_conditions.anchor_available);
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),
         (":target_height", &target_height_arg),
         (":anchor_height", &anchor_height_arg),
+        (":prunable_window_scanned", &prunable_window_scanned_arg),
+        (":anchor_available", &anchor_available_arg),
         (":exclude", &excluded_ptr),
         (":min_value", &min_value),
     ];
@@ -627,51 +665,24 @@ where
         &sql_params[..],
         |row| -> Result<_, SqliteClientError> {
             let result_note = to_received_note(params, protocol, row)?;
-            let witness_settled_height = row
-                .get::<_, Option<u32>>("witness_settled_height")?
-                .map(BlockHeight::from);
-            let witness_region_scanned = row
-                .get::<_, Option<bool>>("witness_region_scanned")?
+            let spendable_at_anchor = row
+                .get::<_, Option<bool>>("spendable_at_anchor")?
                 .unwrap_or(false);
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
             Ok((
                 result_note,
-                witness_settled_height,
+                spendable_at_anchor,
                 tx_trust_status,
                 tx_shielding_inputs_trusted,
-                witness_region_scanned,
             ))
         },
     )?;
 
-    let chain_tip = super::chain_tip_height(conn)?;
-    // The anchor height the confirmations policy implies at the current chain tip; the
-    // window check is bounded here rather than at the tip, so that a not-yet-scanned tip
-    // extension lying entirely above the anchor does not suspend spendability.
-    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-    let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
-        None => false,
-    };
-    // Compute anchor_available once per call: it's a per-pool, per-anchor-height check.
-    // For `NoteRequest::Unspent` (no anchor in the request) the spendability gate doesn't
-    // run, so the value is irrelevant; default to `false` in that case.
-    let anchor_available = match note_request.anchor_height() {
-        Some(h) => anchor_frontier_available(conn, h, protocol)?,
-        None => false,
-    };
-
     row_results
         .map(|t| match t? {
-            (
-                Some(note),
-                witness_settled_height,
-                tx_trusted,
-                tx_shielding_inputs_trusted,
-                witness_region_scanned,
-            ) => {
+            (Some(note), spendable_at_anchor, tx_trusted, tx_shielding_inputs_trusted) => {
                 let confirmations_met = confirmations_policy.confirmations_until_spendable(
                     target_height,
                     PoolType::Shielded(protocol),
@@ -682,13 +693,7 @@ where
                     tx_shielding_inputs_trusted,
                 ) == 0;
 
-                let is_spendable = is_note_spendable_at_anchor(
-                    witness_settled_height,
-                    prunable_window_scanned,
-                    witness_region_scanned,
-                    anchor_available,
-                    confirmations_met,
-                );
+                let is_spendable = spendable_at_anchor && confirmations_met;
 
                 match (note_request, is_spendable) {
                     (NoteRequest::UnspentOrError { .. }, false) => {
@@ -755,24 +760,6 @@ where
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
 
-    // The chain-tip pruning window must be fully scanned up to the policy anchor for any
-    // stabilized note to be selectable; otherwise witness construction against the anchor
-    // can't reliably trust its cap state. The check is bounded at the policy anchor
-    // (`target - min_confirmations`) rather than the chain tip, so that a not-yet-scanned
-    // tip extension lying entirely above the anchor does not suspend spendability. If
-    // `chain_tip_height` is unset there's no spendable balance anyway, so treat the
-    // predicate as false.
-    let chain_tip = super::chain_tip_height(conn)?;
-    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-    let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
-        None => false,
-    };
-    // Compute anchor_available once per call: a per-pool, per-anchor-height check on the
-    // shardtree's cap state. The SQL pre-filter doesn't gate on this (it has no access to
-    // the shardtree), so we must check it in Rust.
-    let anchor_available = anchor_frontier_available(conn, anchor_height, protocol)?;
-
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached.
     // 1) Use a window function to create a view of all notes, ordered from oldest to
@@ -822,7 +809,7 @@ where
         "id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, witness_settled_height, witness_region_scanned, trust_status,
+                mined_height, trust_status,
                 max_shielding_input_height, min_shielding_input_trust"
     );
     // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
@@ -847,7 +834,7 @@ where
         ),
     };
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
-    let witness_region_scanned = note_witness_region_scanned_condition();
+    let spendable_at_anchor = note_spendable_at_anchor_condition();
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
              SELECT
@@ -858,8 +845,6 @@ where
                  SUM(value) OVER ({window_frame}) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
-                 rn.witness_settled_height,
-                 {witness_region_scanned} AS witness_region_scanned,
                  IFNULL(t.trust_status, 0) AS trust_status,
                  MAX(tt.mined_height) AS max_shielding_input_height,
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -880,15 +865,7 @@ where
              AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL
-             -- The note must be mined at or below the anchor for the anchor's tree
-             -- frontier to witness it
-             AND t.block <= :anchor_height
-             -- Checks 1 to 3 of `is_note_spendable_at_anchor`: the note's settled height is
-             -- set, the chain-tip pruning window has no range above `Scanned` priority, and the
-             -- blocks that the note's witness at the anchor needs are scanned.
-             AND rn.witness_settled_height IS NOT NULL
-             AND :prunable_window_scanned = 1
-             AND {witness_region_scanned}
+             AND {spendable_at_anchor}
              AND rn.id NOT IN rarray(:exclude)
              AND rn.id NOT IN ({}) -- the note is not spent
              AND ({eligible_condition}) -- the note is eligible under the lock filter
@@ -910,14 +887,19 @@ where
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
-    // The chain-tip-pruning-window check is wallet-state-wide; if no chain tip is
-    // recorded the SQL returns no rows (the `:prunable_window_scanned = 1` predicate
-    // compares against 0).
+    let anchor_conditions = AnchorConditions::read(
+        conn,
+        target_height,
+        confirmations_policy,
+        Some(anchor_height),
+        protocol,
+    )?;
     let account_uuid = account.0;
     let anchor_height_arg = u32::from(anchor_height);
     let target_height_arg = u32::from(target_height);
     let target_value_arg = u64::from(target_value);
-    let prunable_window_scanned_arg = i64::from(prunable_window_scanned);
+    let prunable_window_scanned_arg = i64::from(anchor_conditions.prunable_window_scanned);
+    let anchor_available_arg = i64::from(anchor_conditions.anchor_available);
     let min_value = u64::from(zip317::MARGINAL_FEE);
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
@@ -927,32 +909,25 @@ where
         (":target_value", &target_value_arg),
         (":exclude", &excluded_ptr),
         (":prunable_window_scanned", &prunable_window_scanned_arg),
+        (":anchor_available", &anchor_available_arg),
         (":min_value", &min_value),
     ];
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
     let notes = stmt_select_notes.query_and_then(&sql_params[..], |row| {
-        let witness_settled_height = row
-            .get::<_, Option<u32>>("witness_settled_height")?
-            .map(BlockHeight::from);
         let tx_trust_status = row.get::<_, bool>("trust_status")?;
         let max_shielding_input_height = row
             .get::<_, Option<u32>>("max_shielding_input_height")?
             .map(BlockHeight::from);
         let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
-        let witness_region_scanned = row
-            .get::<_, Option<bool>>("witness_region_scanned")?
-            .unwrap_or(false);
         let note = to_spendable_note(params, protocol, row)?;
 
         Ok(note.map(|n| {
             (
                 n,
-                witness_settled_height,
                 tx_trust_status,
                 max_shielding_input_height,
                 tx_shielding_inputs_trusted,
-                witness_region_scanned,
             )
         }))
     })?;
@@ -964,11 +939,9 @@ where
                 .map(
                     |(
                         note,
-                        witness_settled_height,
                         tx_trusted,
                         max_shielding_input_height,
                         tx_shielding_inputs_trusted,
-                        witness_region_scanned,
                     )| {
                         let confirmations_met = confirmations_policy.confirmations_until_spendable(
                             target_height,
@@ -980,16 +953,9 @@ where
                             tx_shielding_inputs_trusted,
                         ) == 0;
 
-                        // The SQL pre-filter already enforced checks 1 to 3; the helper adds the
-                        // `anchor_available` and confirmations gates.
-                        is_note_spendable_at_anchor(
-                            witness_settled_height,
-                            prunable_window_scanned,
-                            witness_region_scanned,
-                            anchor_available,
-                            confirmations_met,
-                        )
-                        .then_some(note)
+                        // The query selects only notes that are spendable at the anchor apart
+                        // from their confirmations.
+                        confirmations_met.then_some(note)
                     },
                 )
                 .transpose()
@@ -1290,7 +1256,7 @@ mod tests {
         testing::{AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+    use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
     use crate::{
         testing::{BlockCache, db::TestDbFactory},
@@ -1325,28 +1291,77 @@ mod tests {
         assert_eq!(unspent_note_meta.len(), 1);
     }
 
-    /// A note is spendable only when every check of the spendability rule holds.
+    /// The spendability condition holds only when each of its checks holds.
     #[test]
-    fn is_note_spendable_requires_every_check() {
-        let settled = Some(BlockHeight::from(100));
-        let spendable = |settled, window, region, anchor_available, confirmations| {
-            super::is_note_spendable_at_anchor(
-                settled,
-                window,
-                region,
-                anchor_available,
-                confirmations,
+    fn note_spendable_at_anchor_condition_requires_every_check() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let conn = st.wallet().conn();
+        // With an empty scan queue, every block reads as scanned, so check 5 holds.
+        conn.execute("DELETE FROM scan_queue", []).unwrap();
+
+        struct Inputs {
+            settled: Option<u32>,
+            block: u32,
+            anchor: Option<u32>,
+            window_scanned: bool,
+            anchor_available: bool,
+        }
+        let holds = |inputs: Inputs| -> bool {
+            conn.query_row(
+                &format!(
+                    "SELECT {} FROM (SELECT :settled AS witness_settled_height) rn,
+                     (SELECT :block AS block) t
+                     LEFT OUTER JOIN (SELECT NULL AS subtree_end_height) shard",
+                    super::note_spendable_at_anchor_condition()
+                ),
+                named_params![
+                    ":settled": inputs.settled,
+                    ":block": inputs.block,
+                    ":anchor_height": inputs.anchor,
+                    ":prunable_window_scanned": inputs.window_scanned,
+                    ":anchor_available": inputs.anchor_available,
+                ],
+                |row| row.get::<_, Option<bool>>(0),
             )
+            .unwrap()
+            .unwrap_or(false)
         };
-        assert!(spendable(settled, true, true, true, true));
-        assert!(!spendable(None, true, true, true, true)); // no settled height
-        assert!(!spendable(settled, false, true, true, true)); // window not fully scanned
-        assert!(!spendable(settled, true, false, true, true)); // witness region not scanned
-        assert!(!spendable(settled, true, true, false, true)); // anchor frontier unavailable
-        assert!(!spendable(settled, true, true, true, false)); // confirmations not met
+
+        let base: u32 = 2_000_000;
+        let spendable = || Inputs {
+            settled: Some(base + 10),
+            block: base,
+            anchor: Some(base + 20),
+            window_scanned: true,
+            anchor_available: true,
+        };
+        assert!(holds(spendable()));
+        assert!(!holds(Inputs {
+            settled: None,
+            ..spendable()
+        }));
+        assert!(!holds(Inputs {
+            window_scanned: false,
+            ..spendable()
+        }));
+        assert!(!holds(Inputs {
+            anchor_available: false,
+            ..spendable()
+        }));
+        assert!(!holds(Inputs {
+            block: base + 21,
+            ..spendable()
+        }));
+        assert!(!holds(Inputs {
+            anchor: None,
+            ..spendable()
+        }));
     }
 
-    /// Check 3 holds when the note's settled height `s` reaches `min(a, E)`, and otherwise when
+    /// Check 5 holds when the note's settled height `s` reaches `min(a, E)`, and otherwise when
     /// no range above `Scanned` overlaps `(s, min(a, E)]`.
     #[test]
     fn note_witness_region_scanned_condition_checks_only_the_uncovered_region() {

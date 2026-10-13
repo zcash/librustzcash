@@ -2719,7 +2719,6 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
         target_height: TargetHeight,
-        chain_tip: BlockHeight,
         anchor_height: Option<BlockHeight>,
         confirmations_policy: ConfirmationsPolicy,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
@@ -2744,17 +2743,17 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
 
-        let prunable_window_scanned =
-            scanning::prunable_window_fully_scanned(tx, chain_tip, trusted_height)?;
-
-        let anchor_available = anchor_height.map_or(Ok(false), |h| {
-            common::anchor_frontier_available(tx, h, protocol)
-        })?;
+        let anchor_conditions = common::AnchorConditions::read(
+            tx,
+            target_height,
+            confirmations_policy,
+            anchor_height,
+            protocol,
+        )?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
-                    rn.witness_settled_height,
-                    {} AS witness_region_scanned,
+                    {} AS spendable_at_anchor,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2775,7 +2774,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
              WHERE ({}) -- the transaction is unexpired
              AND rn.id NOT IN ({}) -- and the received note is unspent
              GROUP BY rn.id",
-            common::note_witness_region_scanned_condition(),
+            common::note_spendable_at_anchor_condition(),
             common::tx_unexpired_condition("t"),
             common::spent_notes_clause(table_prefix),
         ))?;
@@ -2783,6 +2782,8 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let mut rows = stmt_select_notes.query(named_params![
             ":target_height": u32::from(target_height),
             ":anchor_height": anchor_height.map(u32::from),
+            ":prunable_window_scanned": anchor_conditions.prunable_window_scanned,
+            ":anchor_available": anchor_conditions.anchor_available,
         ])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
@@ -2813,17 +2814,13 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            let witness_settled_height = row
-                .get::<_, Option<u32>>("witness_settled_height")?
-                .map(BlockHeight::from);
-
             let is_locked = locking::is_locked_at(
                 row.get::<_, Option<u32>>("lock_expiry_height")?,
                 target_height,
             );
 
-            let witness_region_scanned = row
-                .get::<_, Option<bool>>("witness_region_scanned")?
+            let spendable_at_anchor = row
+                .get::<_, Option<bool>>("spendable_at_anchor")?
                 .unwrap_or(false);
 
             let confirmations_met = confirmations_policy.confirmations_until_spendable(
@@ -2835,13 +2832,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
                 max_shielding_input_height,
                 tx_shielding_inputs_trusted,
             ) == 0;
-            let is_spendable = common::is_note_spendable_at_anchor(
-                witness_settled_height,
-                prunable_window_scanned,
-                witness_region_scanned,
-                anchor_available,
-                confirmations_met,
-            );
+            let is_spendable = spendable_at_anchor && confirmations_met;
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
@@ -2891,7 +2882,6 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         with_pool_balances(
             tx,
             target_height,
-            chain_tip_height,
             anchor_height,
             confirmations_policy,
             &mut account_balances,
@@ -2921,7 +2911,6 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         with_pool_balances(
             tx,
             target_height,
-            chain_tip_height,
             anchor_height,
             confirmations_policy,
             &mut account_balances,
@@ -2949,7 +2938,6 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     with_pool_balances(
         tx,
         target_height,
-        chain_tip_height,
         anchor_height,
         confirmations_policy,
         &mut account_balances,

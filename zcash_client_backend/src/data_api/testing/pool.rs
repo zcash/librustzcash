@@ -31,7 +31,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::Zatoshis,
+    value::{MAX_MONEY, Zatoshis},
 };
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
@@ -126,7 +126,7 @@ use {
     zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
     zcash_protocol::{
         TxId,
-        value::{BalanceError, MAX_MONEY, ZatBalance},
+        value::{BalanceError, ZatBalance},
     },
 };
 
@@ -7501,6 +7501,122 @@ where
     assert_eq!(
         st.get_spendable_balance(account_id, policy),
         SHARD_1_NOTE_VALUE
+    );
+}
+
+/// The spendable balance that the wallet summary reports equals the value of the notes that note
+/// selection returns for the same confirmations policy, through both selection paths, in each of
+/// several wallet states: confirmed notes, an unconfirmed note, a chain tip advance shorter than
+/// the anchor depth, a chain tip advance far beyond the pruning window, and after the wallet
+/// scans to the new tip.
+pub fn spendable_balance_agrees_with_note_selection<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    /// The number of wallet notes received before the first comparison.
+    const RECEIVED_NOTES: u32 = 3;
+    /// The number of blocks by which a small chain tip advance moves the tip; fewer than the
+    /// trusted confirmations of the default policy.
+    const SMALL_TIP_ADVANCE: u32 = 2;
+    /// The number of blocks beyond the pruning depth by which a far chain tip advance moves the
+    /// tip.
+    const FAR_TIP_ADVANCE_BEYOND_WINDOW: u32 = 20;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let account_id = st.test_account().unwrap().id();
+    let policy = ConfirmationsPolicy::default();
+    let fvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let note_value = Zatoshis::const_from_u64(100_000);
+    let filler_value = Zatoshis::const_from_u64(1000);
+
+    macro_rules! assert_agreement {
+        ($state:expr) => {{
+            let chain_tip = st
+                .wallet()
+                .chain_height()
+                .unwrap()
+                .expect("chain tip is known");
+            let target_height = TargetHeight::from(chain_tip + 1);
+            let summary = st.get_spendable_balance(account_id, policy);
+            let selected_value = |target_value| {
+                T::select_spendable_notes(&st, account_id, target_value, target_height, policy, &[])
+                    .unwrap()
+                    .iter()
+                    .map(|note| T::note_value(note.note()))
+                    .try_fold(Zatoshis::ZERO, |sum, value| sum + value)
+                    .expect("the selected value is in range")
+            };
+            assert_eq!(
+                selected_value(TargetValue::AllFunds(MaxSpendMode::MaxSpendable)),
+                summary,
+                "selection of all spendable funds disagrees with the summary: {}",
+                $state,
+            );
+            assert_eq!(
+                selected_value(TargetValue::AtLeast(Zatoshis::const_from_u64(MAX_MONEY))),
+                summary,
+                "value-targeted selection disagrees with the summary: {}",
+                $state,
+            );
+            summary
+        }};
+    }
+
+    let first_note_height = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .map_or_else(|| st.sapling_activation_height(), |tip| tip + 1);
+    for _ in 0..RECEIVED_NOTES {
+        st.generate_next_block(&fvk, AddressType::DefaultExternal, note_value);
+    }
+    let confirming_blocks = u32::from(policy.untrusted());
+    for _ in 0..confirming_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(
+        first_note_height,
+        (RECEIVED_NOTES + confirming_blocks) as usize,
+    );
+    let confirmed_balance = assert_agreement!("confirmed notes");
+    assert!(
+        confirmed_balance > Zatoshis::ZERO,
+        "test invariant: the confirmed notes must be spendable",
+    );
+
+    let (unconfirmed_height, _, _) =
+        st.generate_next_block(&fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(unconfirmed_height, 1);
+    assert_agreement!("an unconfirmed note");
+
+    let tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    st.wallet_mut()
+        .update_chain_tip(tip + SMALL_TIP_ADVANCE)
+        .unwrap();
+    assert_agreement!("a chain tip advance shorter than the anchor depth");
+
+    let far_tip = tip + PRUNING_DEPTH + FAR_TIP_ADVANCE_BEYOND_WINDOW;
+    st.wallet_mut().update_chain_tip(far_tip).unwrap();
+    assert_eq!(
+        assert_agreement!("a chain tip advance far beyond the pruning window"),
+        Zatoshis::ZERO,
+        "test invariant: no note is spendable before the wallet scans to the new tip",
+    );
+
+    for _ in u32::from(tip)..u32::from(far_tip) {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(tip + 1, (far_tip - tip) as usize);
+    assert!(
+        assert_agreement!("after the wallet scans to the new tip") > confirmed_balance,
+        "test invariant: every received note must be spendable once the wallet is synced",
     );
 }
 

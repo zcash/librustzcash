@@ -893,6 +893,13 @@ pub(crate) fn completed_shard_note_spendable_after_scanning_anchor_window<T: Shi
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn spendable_balance_agrees_with_note_selection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spendable_balance_agrees_with_note_selection::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
         TestDbFactory::default(),
