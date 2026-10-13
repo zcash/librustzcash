@@ -23,6 +23,7 @@ workspace.
   b_note_stable_across_rewind_below_birthday, BoundaryScanOrder,
   completed_shard_note_spendable_across_older_birthday_import,
   completed_shard_note_spendable_after_rewind_once_window_rescanned,
+  completed_shard_note_spendable_with_unscanned_gap_below_it,
   note_in_recently_completed_shard_spendable_once_confirmed,
   open_shard_note_spendable_across_commitment_free_stretch,
   open_shard_note_spendable_across_older_birthday_import,
