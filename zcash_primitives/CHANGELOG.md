@@ -11,12 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_primitives::transaction::builder`:
-  - `default_tx_expiry_delta`
-  - `OVERWINTER_DEFAULT_TX_EXPIRY_DELTA`
-  - `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`
-  - `NU7_DEFAULT_TX_EXPIRY_DELTA`
-  - `Builder::expiry_height`
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `default_tx_expiry_delta`
+    - `OVERWINTER_DEFAULT_TX_EXPIRY_DELTA`
+    - `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`
+    - `NU7_DEFAULT_TX_EXPIRY_DELTA`
+    - `Builder::expiry_height`
+  - `sighash::{PrecomputedSighashData, Zip244Error}`
+  - `{Zip143Digests, Zip244Digests}`
 
 ### Changed
 - MSRV is now 1.89
@@ -26,11 +29,25 @@ workspace.
   delta is 120 blocks from NU7 activation onward, and 20 blocks before Blossom
   activation; it remains 40 blocks between those upgrades. To keep a different
   expiry, set it with `with_expiry_height`.
+- `zcash_primitives::transaction::TxDigests` is now an enum with variants
+  `Zip143(Zip143Digests)` and `Zip244(Zip244Digests)`. The struct formerly
+  named `TxDigests` is now `Zip244Digests`; its fields are private, and are
+  read through its accessor methods.
+- `zcash_primitives::transaction::txid::TxIdDigester` now produces
+  `Zip244Digests`, and `txid::to_txid` takes `&Zip244Digests`.
 
 ### Removed
 - `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA`. Use
   `default_tx_expiry_delta`, or `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA` for the
   pre-NU7 value.
+- `zcash_primitives::transaction::sighash::signature_hash`. Use
+  `PrecomputedSighashData::new(tx)` and call
+  `PrecomputedSighashData::signature_hash` for each input.
+- The `zcash_primitives::transaction::{sighash_v4, sighash_v5, sighash_v6}`
+  modules, including `v4_signature_hash`, `v5_signature_hash`, and
+  `v6_signature_hash`. Use `PrecomputedSighashData` instead; for a version 5 or
+  later transaction whose Sapling proofs are not serialized, construct it with
+  `PrecomputedSighashData::new_zip244`.
 
 ## [0.31.0-pre.2] - 2026-10-13
 

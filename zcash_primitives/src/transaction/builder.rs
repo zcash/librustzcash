@@ -31,9 +31,8 @@ use std::sync::mpsc::Sender;
 #[cfg(feature = "circuits")]
 use {
     crate::transaction::{
-        Authorization, Coinbase, TransactionData, TxDigests, Unauthorized,
-        sighash::{SignableInput, signature_hash},
-        txid::TxIdDigester,
+        Authorization, Coinbase, TransactionData, Unauthorized,
+        sighash::{PrecomputedSighashData, SignableInput},
     },
     ::sapling::prover::{OutputProver, SpendProver},
     ::transparent::builder::TransparentSigningSet,
@@ -1476,7 +1475,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
                             .map(Some)
                             .map_err(Error::Coinbase)
                     },
-                    |b, _, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
+                    |b, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
                     &[],
                     &[],
                     rng,
@@ -1490,8 +1489,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
                 self.build_internal::<Unauthorized, _, _, _, _>(
                     |b| Ok(b.build()),
-                    |b, unauthed_tx, txid_parts| {
-                        authorize_transparent(b, unauthed_tx, txid_parts, transparent_signing_set)
+                    |b, sighash_data| {
+                        authorize_transparent(b, sighash_data, transparent_signing_set)
                     },
                     sapling_extsks,
                     orchard_saks,
@@ -1516,8 +1515,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         >,
         authorize_transparent: impl FnOnce(
             &transparent::bundle::Bundle<A::TransparentAuth>,
-            &TransactionData<A>,
-            &TxDigests<blake2b_simd::Hash>,
+            &PrecomputedSighashData<A>,
         ) -> Result<
             transparent::bundle::Bundle<transparent::bundle::Authorized>,
             transparent::builder::Error,
@@ -1655,20 +1653,21 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         //
         // Signatures -- everything but the signatures must already have been added.
         //
-        let txid_parts = unauthed_tx.digest(TxIdDigester);
+        let sighash_data = PrecomputedSighashData::new(unauthed_tx);
 
-        let transparent_bundle = unauthed_tx
+        let transparent_bundle = sighash_data
+            .tx()
             .transparent_bundle
             .as_ref()
-            .map(|b| authorize_transparent(b, &unauthed_tx, &txid_parts))
+            .map(|b| authorize_transparent(b, &sighash_data))
             .transpose()
             .map_err(Error::TransparentBuild)?;
 
         // the commitment being signed is shared across all Sapling inputs; once
         // V4 transactions are deprecated this should just be the txid, but
         // for now we need to continue to compute it here.
-        let shielded_sig_commitment =
-            signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
+        let shielded_sig_commitment = sighash_data.signature_hash(&SignableInput::Shielded);
+        let unauthed_tx = sighash_data.into_tx();
 
         let sapling_asks = sapling_extsks
             .iter()
@@ -1913,14 +1912,15 @@ pub fn cached_orchard_proving_key(
 #[cfg(feature = "circuits")]
 fn authorize_transparent(
     b: &transparent::bundle::Bundle<transparent::builder::Unauthorized>,
-    unauthed_tx: &TransactionData<Unauthorized>,
-    txid_parts: &TxDigests<blake2b_simd::Hash>,
+    sighash_data: &PrecomputedSighashData<Unauthorized>,
     transparent_signing_set: &TransparentSigningSet,
 ) -> Result<transparent::bundle::Bundle<transparent::bundle::Authorized>, transparent::builder::Error>
 {
     b.clone().apply_signatures(
         |input| {
-            *signature_hash(unauthed_tx, &SignableInput::Transparent(input), txid_parts).as_ref()
+            *sighash_data
+                .signature_hash(&SignableInput::Transparent(input))
+                .as_ref()
         },
         transparent_signing_set,
     )

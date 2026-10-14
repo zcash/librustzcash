@@ -18,7 +18,8 @@ use zcash_protocol::{
 };
 
 use super::{
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+    Authorization, Authorized, TransactionDigest, TransparentDigests, TxId, TxVersion,
+    Zip244Digests,
 };
 
 /// TxId tree root personalization
@@ -305,7 +306,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type OrchardDigest = Option<Blake2bHash>;
     type IronwoodDigest = Option<Blake2bHash>;
 
-    type Digest = TxDigests<Blake2bHash>;
+    type Digest = Zip244Digests<Blake2bHash>;
 
     fn digest_header(
         &self,
@@ -365,7 +366,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         orchard_digest: Self::OrchardDigest,
         ironwood_digest: Self::IronwoodDigest,
     ) -> Self::Digest {
-        TxDigests {
+        Zip244Digests {
             header_digest,
             transparent_digests,
             sapling_digest,
@@ -467,7 +468,7 @@ pub(crate) fn to_hash_v6(
 pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
-    digests: &TxDigests<Blake2bHash>,
+    digests: &Zip244Digests<Blake2bHash>,
 ) -> TxId {
     let txid_digest = if txversion.has_ironwood() {
         to_hash_v6(

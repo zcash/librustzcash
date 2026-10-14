@@ -10,7 +10,7 @@ use ::transparent::{
 use zcash_protocol::consensus::BranchId;
 
 use super::{
-    Authorization, TransactionData,
+    Authorization, TransactionData, TransparentDigests, Zip143Digests,
     components::{sapling as sapling_serialization, sprout::JsDescription},
     sighash::SignableInput,
 };
@@ -128,12 +128,63 @@ fn sapling_outputs_hash(outputs: &[OutputDescription<GrothProofBytes>]) -> Blake
         .hash(&data)
 }
 
-pub fn v4_signature_hash<
+/// Computes the digests of `tx` that [ZIP 143] and [ZIP 243] signature hashes commit to,
+/// in time linear in the size of `tx`.
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+pub(crate) fn zip143_digests<
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
+) -> Zip143Digests<Blake2bHash> {
+    let vin = tx
+        .transparent_bundle
+        .as_ref()
+        .map_or(&[][..], |b| b.vin.as_slice());
+    let vout = tx
+        .transparent_bundle
+        .as_ref()
+        .map_or(&[][..], |b| b.vout.as_slice());
+
+    Zip143Digests {
+        transparent: TransparentDigests {
+            prevouts_digest: prevout_hash(vin),
+            sequence_digest: sequence_hash(vin),
+            outputs_digest: outputs_hash(vout),
+        },
+        joinsplits: tx
+            .sprout_bundle
+            .as_ref()
+            .filter(|b| !b.joinsplits.is_empty())
+            .map(|b| joinsplits_hash(tx.consensus_branch_id, &b.joinsplits, &b.joinsplit_pubkey)),
+        sapling_spends: tx
+            .sapling_bundle
+            .as_ref()
+            .filter(|b| !b.shielded_spends().is_empty())
+            .map(|b| sapling_spends_hash(b.shielded_spends())),
+        sapling_outputs: tx
+            .sapling_bundle
+            .as_ref()
+            .filter(|b| !b.shielded_outputs().is_empty())
+            .map(|b| sapling_outputs_hash(b.shielded_outputs())),
+    }
+}
+
+/// Implements the [ZIP 143] and [ZIP 243] signature hash, using the `digests` of `tx`.
+///
+/// # Panics
+///
+/// Panics if `tx` is a pre-Overwinter transaction, or if `signable_input` is a transparent
+/// input and `tx` has no transparent bundle.
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+pub(crate) fn v4_signature_hash<A: Authorization>(
+    tx: &TransactionData<A>,
     signable_input: &SignableInput<'_>,
+    digests: &Zip143Digests<Blake2bHash>,
 ) -> Blake2bHash {
     let hash_type = signable_input.hash_type();
     if tx.version.has_overwinter() {
@@ -151,35 +202,20 @@ pub fn v4_signature_hash<
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            prevout_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            digests.transparent.prevouts_digest
         );
         update_hash!(
             h,
             (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            sequence_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            digests.transparent.sequence_digest
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            h.update(
-                outputs_hash(
-                    tx.transparent_bundle
-                        .as_ref()
-                        .map_or(&[], |b| b.vout.as_slice()),
-                )
-                .as_bytes(),
-            );
+            h.update(digests.transparent.outputs_digest.as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match (tx.transparent_bundle.as_ref(), signable_input) {
                 (Some(b), SignableInput::Transparent(input)) if input.index() < &b.vout.len() => {
@@ -191,35 +227,25 @@ pub fn v4_signature_hash<
             h.update(&[0; 32]);
         };
 
-        update_hash!(
-            h,
-            !tx.sprout_bundle
+        h.update(
+            digests
+                .joinsplits
                 .as_ref()
-                .is_none_or(|b| b.joinsplits.is_empty()),
-            {
-                let bundle = tx.sprout_bundle.as_ref().unwrap();
-                joinsplits_hash(
-                    tx.consensus_branch_id,
-                    &bundle.joinsplits,
-                    &bundle.joinsplit_pubkey,
-                )
-            }
+                .map_or(&[0; 32][..], |d| d.as_bytes()),
         );
 
         if tx.version.has_sapling() {
-            update_hash!(
-                h,
-                !tx.sapling_bundle
+            h.update(
+                digests
+                    .sapling_spends
                     .as_ref()
-                    .is_none_or(|b| b.shielded_spends().is_empty()),
-                sapling_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
+                    .map_or(&[0; 32][..], |d| d.as_bytes()),
             );
-            update_hash!(
-                h,
-                !tx.sapling_bundle
+            h.update(
+                digests
+                    .sapling_outputs
                     .as_ref()
-                    .is_none_or(|b| b.shielded_outputs().is_empty()),
-                sapling_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
+                    .map_or(&[0; 32][..], |d| d.as_bytes()),
             );
         }
         h.update(&tx.lock_time.to_le_bytes());

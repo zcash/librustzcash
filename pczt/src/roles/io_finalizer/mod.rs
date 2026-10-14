@@ -4,7 +4,7 @@
 //! - Updates the various bsk values using the rcv information from spends and outputs.
 
 use rand_core::{CryptoRng, Rng};
-use zcash_primitives::transaction::{sighash::SignableInput, txid::TxIdDigester};
+use zcash_primitives::transaction::sighash::SignableInput;
 
 use crate::{
     ExtractError, ParsedPczt, Pczt,
@@ -12,7 +12,7 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    sighash,
+    precompute_sighash_data, sighash,
 };
 
 pub struct IoFinalizer {
@@ -75,8 +75,8 @@ impl IoFinalizer {
                 | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
                 | FLAG_SHIELDED_MODIFIABLE);
         }
-        let txid_parts = tx_data.digest(TxIdDigester);
-        let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
+        let sighash_data = precompute_sighash_data(&global, tx_data)?;
+        let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
 
         // The Sapling bundle is always finalized: unlike the Orchard-protocol
         // Transaction Extractor, the Sapling one requires `bsk` to be set even when
