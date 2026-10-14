@@ -714,6 +714,26 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
+pub(crate) fn set_account_name(
+    conn: &rusqlite::Transaction,
+    account_uuid: AccountUuid,
+    name: &str,
+) -> Result<(), SqliteClientError> {
+    let rows_updated = conn.execute(
+        "UPDATE accounts SET name = :name WHERE uuid = :account_uuid",
+        named_params![
+            ":name": name,
+            ":account_uuid": account_uuid.0,
+        ],
+    )?;
+
+    if rows_updated == 0 {
+        Err(SqliteClientError::AccountUnknown)
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn delete_account(
     conn: &rusqlite::Transaction,
     account_uuid: AccountUuid,

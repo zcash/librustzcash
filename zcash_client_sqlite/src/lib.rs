@@ -768,6 +768,21 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
         Ok(result)
     }
 
+    /// Sets the human-readable name of the given account, replacing any existing name.
+    ///
+    /// Only the account's name is changed; its keys, birthday and all other state are left
+    /// unchanged.
+    ///
+    /// Returns [`SqliteClientError::AccountUnknown`] if no account with the given identifier
+    /// exists in the wallet.
+    pub fn set_account_name(
+        &mut self,
+        account: AccountUuid,
+        name: &str,
+    ) -> Result<(), SqliteClientError> {
+        self.transactionally(|wdb| wallet::set_account_name(wdb.conn.0, account, name))
+    }
+
     /// Attempts to construct a witness for each note belonging to the wallet that is believed by
     /// the wallet to currently be spendable, and returns a vector of the ranges that must be
     /// rescanned in order to correct missing witness data.
@@ -4148,6 +4163,93 @@ mod tests {
             st.wallet().get_wallet_recover_until().unwrap(),
             Some(zcash_protocol::consensus::BlockHeight::from_u32(123456))
         );
+    }
+
+    /// The name given to an account by the `set_account_name` tests.
+    const RENAMED_ACCOUNT_NAME: &str = "Renamed account";
+
+    #[test]
+    fn set_account_name_updates_account_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+
+        st.wallet_mut()
+            .db_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_replaces_null_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        st.wallet_mut()
+            .conn_mut()
+            .execute("UPDATE accounts SET name = NULL", [])
+            .unwrap();
+        assert_eq!(
+            st.wallet().get_account(account_id).unwrap().unwrap().name(),
+            None
+        );
+
+        st.wallet_mut()
+            .db_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_rejects_unknown_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let result = st
+            .wallet_mut()
+            .db_mut()
+            .set_account_name(AccountUuid(Uuid::nil()), RENAMED_ACCOUNT_NAME);
+
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+    }
+
+    #[test]
+    fn set_account_name_preserves_keys_and_birthday() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        let network = *st.network();
+        let before = st.wallet().get_account(account_id).unwrap().unwrap();
+
+        st.wallet_mut()
+            .db_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let after = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(
+            after.ufvk().map(|ufvk| ufvk.encode(&network)),
+            before.ufvk().map(|ufvk| ufvk.encode(&network))
+        );
+        assert_eq!(
+            after.uivk().encode(&network),
+            before.uivk().encode(&network)
+        );
+        assert_eq!(after.birthday_height(), before.birthday_height());
     }
 
     #[test]

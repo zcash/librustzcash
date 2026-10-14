@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::WalletDb::set_account_name`
+
 ## [0.23.0-pre.1] - 2026-10-06
 
 ### Added
