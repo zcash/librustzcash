@@ -8,8 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- Migrated to `zcash_keys 0.17.0-pre.2`, `zcash_primitives 0.31.0-pre.2`, and
-  `zcash_protocol 0.11.0-pre.1`.
+- Migrated to `pczt 0.10.0-pre.2`, `zcash_keys 0.17.0-pre.2`,
+  `zcash_primitives 0.31.0-pre.2`, and `zcash_protocol 0.11.0-pre.1`.
 
 ## [0.2.0-pre.1] - 2026-10-06
 
