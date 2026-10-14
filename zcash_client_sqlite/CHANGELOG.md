@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::set_account_name`.
+
 ## [0.23.0-pre.1] - 2026-10-06
 
 ### Added

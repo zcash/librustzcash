@@ -3614,6 +3614,14 @@ impl WalletWrite for MockWalletDb {
         todo!()
     }
 
+    fn set_account_name(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,

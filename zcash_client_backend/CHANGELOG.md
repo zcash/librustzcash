@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::WalletWrite` has a new required method
+  `set_account_name`.
+
 ## [0.25.0-pre.1] - 2026-10-06
 
 ### Changed

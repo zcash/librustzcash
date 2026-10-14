@@ -282,6 +282,13 @@ pub(crate) fn account_deletion_with_internal_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn account_rename<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::account_rename::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     T: ShieldedPoolTester,
 >() {
