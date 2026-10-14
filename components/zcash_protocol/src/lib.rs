@@ -22,7 +22,6 @@ extern crate std;
 
 use core::fmt;
 
-pub mod address;
 pub mod consensus;
 pub mod constants;
 #[cfg(feature = "local-consensus")]

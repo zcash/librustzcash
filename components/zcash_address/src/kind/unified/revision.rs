@@ -1,5 +1,3 @@
-//! Types related to Zcash address encoding.
-
 use core::fmt;
 
 /// The revision of ZIP 316 Unified Encoding used for a particular address or viewing key.

@@ -457,7 +457,7 @@ mod tests {
             "INSERT INTO accounts (account, ufvk, address, transparent_address) VALUES (0, ?, ?, ?)",
             params![
                 ufvk.encode(&network).unwrap(),
-                ua.encode_receiver_preserving(&network),
+                ua.encode(&network),
                 &taddr
             ]
         ).unwrap();

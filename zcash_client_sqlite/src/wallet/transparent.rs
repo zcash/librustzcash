@@ -2980,14 +2980,16 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 mod tests {
     use secrecy::Secret;
     use transparent::{
+        address::TransparentAddress,
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     };
     use zcash_client_backend::{
-        data_api::{Account as _, WalletRead, WalletWrite, testing::TestBuilder},
+        data_api::{Account as _, AddressSource, WalletRead, WalletWrite, testing::TestBuilder},
         wallet::{Exposure, TransparentAddressMetadata, WalletTransparentOutput},
     };
     use zcash_primitives::block::BlockHash;
+    use zip32::DiversifierIndex;
 
     use crate::{
         GapLimits, WalletDb,
@@ -3001,16 +3003,18 @@ mod tests {
         },
     };
     use rusqlite::named_params;
-    use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
+    use zcash_keys::{
+        address::{Address, UnifiedAddress},
+        encoding::AddressCodec,
+        keys::{ReceiverRequirement, UnifiedAddressRequest},
+    };
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
     use {
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
-        transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
-        zcash_keys::{address::Address, encoding::AddressCodec},
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
 
@@ -3522,6 +3526,140 @@ mod tests {
             TestDbFactory::default(),
             BlockCache::new(),
             GapLimits::default(),
+        );
+    }
+
+    /// Every unified address that gap-limit generation stores keeps the transparent receiver
+    /// cached for its row, and the row's receiver flags record that receiver.
+    #[test]
+    fn store_address_range_retains_transparent_receiver() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+
+        let mut stmt = st
+            .wallet()
+            .db()
+            .conn
+            .prepare(
+                "SELECT address, cached_transparent_receiver_address, receiver_flags
+                 FROM addresses
+                 WHERE key_scope = :external_scope
+                   AND transparent_child_index IS NOT NULL",
+            )
+            .unwrap();
+        let rows: Vec<(String, Option<String>, i64)> = stmt
+            .query_map(
+                named_params! { ":external_scope": KeyScope::EXTERNAL.encode() },
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        // The account has shielded keys, so every gap-limit row is a unified address.
+        assert!(!rows.is_empty());
+        for (address, cached_taddr, flags) in rows {
+            let ua = UnifiedAddress::decode(&network, &address).unwrap();
+            assert!(ua.has_orchard() || ua.has_sapling());
+            assert_eq!(
+                ua.transparent().map(|taddr| taddr.encode(&network)),
+                cached_taddr,
+                "address {address} omits its cached transparent receiver"
+            );
+            assert!(
+                ReceiverFlags::from_bits_retain(flags).contains(ReceiverFlags::P2PKH),
+                "receiver flags of {address} omit P2PKH"
+            );
+        }
+    }
+
+    /// `list_addresses` reports the transparent receiver that the wallet tracks at the index of
+    /// an exposed unified address that omits it, as a transparent address of its own.
+    #[test]
+    fn list_addresses_reports_tracked_transparent_receiver() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // The unexposed external rows that gap-limit generation stored, each with a cached
+        // transparent receiver.
+        let mut stmt = st
+            .wallet()
+            .db()
+            .conn
+            .prepare(
+                "SELECT transparent_child_index FROM addresses
+                 WHERE key_scope = :external_scope
+                   AND exposed_at_height IS NULL
+                   AND transparent_child_index IS NOT NULL
+                 ORDER BY transparent_child_index",
+            )
+            .unwrap();
+        let unexposed: Vec<u32> = stmt
+            .query_map(
+                named_params! { ":external_scope": KeyScope::EXTERNAL.encode() },
+                |r| r.get(0),
+            )
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+
+        // Expose a shielded-only address at one of those indices.
+        let shielded_only = UnifiedAddressRequest::unsafe_custom(
+            ReceiverRequirement::Allow,
+            ReceiverRequirement::Allow,
+            ReceiverRequirement::Omit,
+        );
+        let (index, ua) = unexposed
+            .into_iter()
+            .find_map(|i| {
+                st.wallet_mut()
+                    .get_address_for_index(account_uuid, DiversifierIndex::from(i), shielded_only)
+                    .unwrap()
+                    .map(|ua| (DiversifierIndex::from(i), ua))
+            })
+            .expect("some unexposed index is a valid Sapling diversifier index");
+        assert!(!ua.has_transparent());
+
+        let cached_taddr: String = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT cached_transparent_receiver_address FROM addresses
+                 WHERE key_scope = :external_scope AND diversifier_index_be = :di_be",
+                named_params! {
+                    ":external_scope": KeyScope::EXTERNAL.encode(),
+                    ":di_be": encode_diversifier_index_be(index),
+                },
+                |r| r.get(0),
+            )
+            .unwrap();
+        let taddr = TransparentAddress::decode(&network, &cached_taddr).unwrap();
+
+        let listed = st.wallet().list_addresses(account_uuid).unwrap();
+        let at_index: Vec<_> = listed
+            .iter()
+            .filter(|info| {
+                matches!(
+                    info.source(),
+                    AddressSource::Derived { diversifier_index, .. } if diversifier_index == index
+                )
+            })
+            .collect();
+        assert_eq!(at_index.len(), 2);
+        assert_eq!(at_index[0].address(), &Address::from(ua));
+        assert_eq!(at_index[1].address(), &Address::Transparent(taddr));
+        assert_eq!(
+            at_index[1].source().transparent_key_scope(),
+            Some(&TransparentKeyScope::EXTERNAL)
         );
     }
 

@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.1`.
+- `zcash_transparent` no longer depends on `zcash_address`.
+
+### Removed
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`. Use
+  `zcash_keys::address::Receiver::Transparent(addr).to_zcash_address(net)`
+  instead.
+- The `zcash_address::TryFromAddress` impl for
+  `zcash_transparent::address::TransparentAddress`, which enabled
+  `ZcashAddress::convert::<TransparentAddress>()`. Use
+  `ZcashAddress::convert_if_network::<zcash_keys::address::Address>(net)` and
+  match `Address::Transparent` instead.
+
 ## [0.11.0-pre.1] - 2026-10-06
 
 ### Changed

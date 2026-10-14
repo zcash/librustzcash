@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    restore_ua_transparent_receivers,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -285,7 +286,8 @@ pub(super) fn all_migrations<
     //                             |  add_transparent_receiver_address_index        \
     //                             |               |                                 \
     //                             |      standalone_address               ironwood_received_notes -----------------------------------------.
-    //                             |                                        /         |         \                  \                        |
+    //                             |               |                         /        |        \                  \                         |
+    //                             |      restore_ua_transparent_receivers  /         |         \                  \                        |
     //                             |                     ironwood_pool_code_views     |     note_locking  fix_bad_ironwood_change_flagging  |
     //                             |                             |         \          |                |                                    |
     //                             |                             |          \  v_address_uses_ironwood |                   orchard_ironwood_migration_tables
@@ -431,6 +433,9 @@ pub(super) fn all_migrations<
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
         Box::new(fix_v_transactions_multi_account_totals::Migration),
+        Box::new(restore_ua_transparent_receivers::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 

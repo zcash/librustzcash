@@ -18,6 +18,31 @@ workspace.
   proposal was returned, and its inputs locked if requested, and it failed only
   in `create_proposed_transactions`.
 
+## [0.25.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `pczt 0.10.0-pre.2`, `zcash_address 0.14.0-pre.2`,
+  `zcash_keys 0.17.0-pre.2`, `zcash_primitives 0.31.0-pre.2`,
+  `zcash_proofs 0.31.0-pre.2`, `zcash_protocol 0.11.0-pre.1`,
+  `zcash_transparent 0.11.0-pre.2`, and `zip321 0.10.0-pre.2`.
+- `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
+  implementation to also return the transparent receiver that the wallet tracks
+  at the diversifier index of an exposed unified address that omits it, as an
+  `Address::Transparent` entry with that diversifier index.
+- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+  now pays a unified address with every receiver of that address. Previously
+  it omitted the transparent receiver of an address that also had a shielded
+  receiver.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now counts the value of the selected transparent inputs in the `available`
+  field of the `InsufficientFunds` error it returns. Previously that field
+  reported the value of the selected shielded notes alone.
+- `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
+  matches on the transparent receiver of a unified `address` that also has a
+  shielded receiver.
+
 ## [0.25.0-pre.1] - 2026-10-06
 
 ### Changed
