@@ -11,6 +11,10 @@ pub const COIN_TYPE: u32 = 133;
 ///
 /// [`ExtendedSpendingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedSpendingKey.html
 /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY` instead."
+)]
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 
 /// The HRP for a Bech32-encoded mainnet [`ExtendedFullViewingKey`].
@@ -19,6 +23,10 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 ///
 /// [`ExtendedFullViewingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedFullViewingKey.html
 /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY` instead."
+)]
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 
 /// The HRP for a Bech32-encoded mainnet Sapling [`PaymentAddress`].
@@ -27,6 +35,10 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 ///
 /// [`PaymentAddress`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/struct.PaymentAddress.html
 /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS` instead."
+)]
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zs";
 
 /// The prefix for a Base58Check-encoded mainnet Sprout address.
@@ -34,6 +46,10 @@ pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zs";
 /// Defined in the [Zcash Protocol Specification section 5.6.3][sproutpaymentaddrencoding].
 ///
 /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::B58_SPROUT_ADDRESS_PREFIX` instead."
+)]
 pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0x9a];
 
 /// The prefix for a Base58Check-encoded DER-encoded mainnet [`SecretKey`], as specified via the
@@ -41,21 +57,37 @@ pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0x9a];
 ///
 /// [`SecretKey`]: https://docs.rs/secp256k1/latest/secp256k1/struct.SecretKey.html
 /// [`EncodeSecret`]: https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_keys::constants::mainnet::B58_SECRET_KEY_PREFIX` instead."
+)]
 pub const B58_SECRET_KEY_PREFIX: [u8; 1] = [0x80];
 
 /// The prefix for a Base58Check-encoded mainnet [`PublicKeyHash`].
 ///
 /// [`PublicKeyHash`]: https://docs.rs/zcash_transparent/latest/zcash_transparent/address/enum.TransparentAddress.html
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX` instead."
+)]
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xb8];
 
 /// The prefix for a Base58Check-encoded mainnet [`ScriptHash`].
 ///
 /// [`ScriptHash`]: https://docs.rs/zcash_transparent/latest/zcash_transparent/address/enum.TransparentAddress.html
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX` instead."
+)]
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
 
 /// The HRP for a Bech32m-encoded mainnet [ZIP 320] TEX address.
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::HRP_TEX_ADDRESS` instead."
+)]
 pub const HRP_TEX_ADDRESS: &str = "tex";
 
 /// The HRP for a Bech32m-encoded mainnet Unified Address.
@@ -63,6 +95,10 @@ pub const HRP_TEX_ADDRESS: &str = "tex";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::HRP_UNIFIED_ADDRESS` instead."
+)]
 pub const HRP_UNIFIED_ADDRESS: &str = "u";
 
 /// The HRP for a Bech32m-encoded mainnet Unified FVK.
@@ -70,6 +106,10 @@ pub const HRP_UNIFIED_ADDRESS: &str = "u";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::HRP_UNIFIED_FVK` instead."
+)]
 pub const HRP_UNIFIED_FVK: &str = "uview";
 
 /// The HRP for a Bech32m-encoded mainnet Unified IVK.
@@ -77,32 +117,8 @@ pub const HRP_UNIFIED_FVK: &str = "uview";
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
+#[deprecated(
+    since = "0.11.0",
+    note = "Use `zcash_address::constants::mainnet::HRP_UNIFIED_IVK` instead."
+)]
 pub const HRP_UNIFIED_IVK: &str = "uivk";
-
-/// The HRP for a Bech32m-encoded mainnet shielded-only Revision 2 Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_ADDRESS_R2: &str = "zu";
-
-/// The HRP for a Bech32m-encoded mainnet transparent-including Revision 2 Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_ADDRESS_R2_TI: &str = "tu";
-
-/// The HRP for a Bech32m-encoded mainnet Revision 2 Unified FVK.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_FVK_R2: &str = "uvf";
-
-/// The HRP for a Bech32m-encoded mainnet Revision 2 Unified IVK.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_IVK_R2: &str = "uvi";

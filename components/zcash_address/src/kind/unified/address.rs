@@ -1,10 +1,10 @@
-use zcash_protocol::address::Revision;
-use zcash_protocol::{PoolType, constants};
-
-use super::{DataTypecode, ParseError, Uitem, private::SealedItem};
-
 use alloc::vec::Vec;
 use core::convert::TryInto;
+
+use zcash_protocol::PoolType;
+
+use super::{DataTypecode, ParseError, Uitem, private::SealedItem};
+use crate::{constants, unified::Revision};
 
 /// The set of known Receivers for Unified Addresses.
 ///
@@ -190,6 +190,7 @@ pub mod testing {
     use alloc::collections::BTreeSet;
     use alloc::vec::Vec;
 
+    use crate::unified::Revision;
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         collection::vec,
@@ -197,7 +198,6 @@ pub mod testing {
         sample::select,
         strategy::Strategy,
     };
-    use zcash_protocol::address::Revision;
 
     use super::{Address, Receiver};
     use crate::unified::{DataTypecode, MetadataItem, Uitem};
@@ -338,9 +338,9 @@ mod tests {
     use alloc::borrow::ToOwned;
     use alloc::vec::Vec;
 
+    use crate::unified::Revision;
     use assert_matches::assert_matches;
     use zcash_encoding::MAX_COMPACT_SIZE;
-    use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
     use crate::{

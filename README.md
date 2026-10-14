@@ -93,13 +93,12 @@ graph TB
 
     zcash_client_backend --> zip321
 
-    zcash_transparent --> zcash_address
-    %% zcash_keys --> zcash_address
+    zcash_keys --> zcash_address
     %% zcash_client_backend --> zcash_address
     %% zcash_client_sqlite --> zcash_address
     zip321 --> zcash_address
 
-    %% zcash_transparent --> zcash_protocol
+    zcash_transparent --> zcash_protocol
     %% zcash_keys --> zcash_protocol
     %% zcash_client_sqlite --> zcash_protocol
     %% zcash_primitives --> zcash_protocol
