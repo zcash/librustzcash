@@ -10,10 +10,66 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
+
 ### Changed
+- `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
+  `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
+  unchanged, when `height` is above the wallet birthday.
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a block at
+  an already-scanned height whose hash differs from the stored hash as
+  `PutBlocksError::Continuity(ScanError::BlockHashMismatch)` rather than as
+  `SqliteClientError::BlockConflict`, so
+  `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
+  `Error::Scan(ScanError::BlockHashMismatch)`.
 - `WalletRead::list_addresses` now also returns the transparent receiver that
   the wallet tracks at the index of an exposed unified address that omits it,
   as an `Address::Transparent` entry with that diversifier index.
+- `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
+  commitment tree conflict as `PutBlocksError::Continuity` rather than as
+  `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
+  note commitment tree errors.
+- `WalletWrite::update_chain_tip`, and any operation that disturbs the wallet's
+  anchor — `rewind_to_chain_state`, `truncate_to_height`,
+  `truncate_to_chain_state`, or importing an account whose birthday is below the
+  prior wallet birthday — gives the queued ranges of the chain-tip pruning
+  window `ScanPriority::Anchor` priority, so `suggest_scan_ranges` returns them
+  ahead of every range other than `Verify` ranges. `Scanned`, `Verify`, and
+  `Ignored` ranges keep their priority.
+- The spendability rule for shielded notes now uses a per-note
+  `witness_settled_height` column on `*_received_notes` (replacing the prior
+  boolean `witness_stabilized` flag). The stored value is the note's settled
+  height: every block from the note's own block through it has been scanned. A
+  note is spendable when it has a settled height; no `scan_queue` range above
+  `Scanned` priority overlaps the portion of the chain-tip pruning window at or
+  below the anchor height the confirmations policy implies at the current chain
+  tip (a not-yet-scanned tip extension strictly above that anchor does not
+  suspend spendability); no such range overlaps the blocks above the settled
+  height, through the earlier of the chosen anchor height and the end of the
+  note's shard; the chosen anchor's tree root is constructable; and the note has
+  met its confirmations-policy threshold. A truncation of wallet data (`rewind_to_chain_state`,
+  `truncate_to_height`, or `truncate_to_chain_state`) clears any settled height
+  above the truncation height; affected notes become spendable again once the
+  wallet rescans the blocks above their remaining settled height.
+  `rewind_to_chain_state` first advances each settled height through the blocks
+  already scanned. Migration to this schema is automatic.
+- `WalletWrite::put_blocks` creates note commitment tree checkpoints only within
+  `PRUNING_DEPTH` blocks of the chain tip, and creates one at every scanned
+  height in that window whether or not the block carries a shielded output.
+  Scanning older blocks no longer creates checkpoints, and a wallet that is
+  synced to the tip always holds a checkpoint at the anchor height its
+  confirmations policy implies.
+- `WalletRead::get_target_and_anchor_heights`, and the anchor used by
+  `get_wallet_summary`, `propose_transfer`, and `propose_shielding`, now
+  returns the highest checkpoint at or below `min_confirmations` below the
+  target only when every block between that checkpoint and that depth has
+  been scanned, so that the anchor's tree state is the state at that depth;
+  otherwise it returns `None`. It previously returned that checkpoint
+  unconditionally. A wallet whose scanned height lags the chain tip by
+  `min_confirmations` blocks or more therefore reports no spendable shielded
+  balance, and proposals fail with `ScanRequired`, until it has scanned to
+  that depth.
 
 ### Fixed
 - Unified addresses that the wallet generates to fill its transparent gap limit
@@ -21,6 +77,14 @@ workspace.
   returns that receiver. A migration restores the transparent receiver to such
   addresses that `zcash_client_sqlite 0.23.0-pre.1` stored without it, if the
   wallet has not exposed them.
+- `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
+  `WalletWrite::set_transaction_status`, and
+  `WalletWrite::put_received_transparent_utxo` now extend the scan queue when
+  they learn of a block above the known chain tip, so the queue stays
+  contiguous from the wallet birthday to the tip. Previously a range scanned
+  above the queue's coverage, or a transaction or transparent output mined
+  above the known tip, left the intervening heights absent from the queue and
+  from `suggest_scan_ranges`.
 
 ## [0.23.0-pre.1] - 2026-10-06
 

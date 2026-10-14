@@ -400,9 +400,9 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_settled_height INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -417,9 +417,9 @@ pub(super) const INDEX_SAPLING_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_sapling_received_notes_tx ON sapling_received_notes (
     transaction_id ASC
 )"#;
-pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
-CREATE INDEX idx_sapling_received_notes_witness_stabilized ON sapling_received_notes (
-    witness_stabilized
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_SETTLED_HEIGHT: &str = r#"
+CREATE INDEX idx_sapling_received_notes_witness_settled_height ON sapling_received_notes (
+    witness_settled_height
 )"#;
 
 /// A junction table between received Sapling notes and the transactions that spend them.
@@ -494,10 +494,10 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL DEFAULT 2,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_settled_height INTEGER,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -512,9 +512,9 @@ pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_orchard_received_notes_tx ON orchard_received_notes (
     transaction_id ASC
 )"#;
-pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
-CREATE INDEX idx_orchard_received_notes_witness_stabilized ON orchard_received_notes (
-    witness_stabilized
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_SETTLED_HEIGHT: &str = r#"
+CREATE INDEX idx_orchard_received_notes_witness_settled_height ON orchard_received_notes (
+    witness_settled_height
 )"#;
 
 /// A junction table between received Orchard notes and the transactions that spend them.
@@ -570,10 +570,10 @@ CREATE TABLE ironwood_received_notes (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_settled_height INTEGER,
     UNIQUE (transaction_id, action_index)
 )";
 pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT: &str = "
@@ -588,9 +588,9 @@ pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_TX: &str = "
 CREATE INDEX idx_ironwood_received_notes_tx ON ironwood_received_notes (
     transaction_id ASC
 )";
-pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = "
-CREATE INDEX idx_ironwood_received_notes_witness_stabilized ON ironwood_received_notes (
-    witness_stabilized
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_SETTLED_HEIGHT: &str = "
+CREATE INDEX idx_ironwood_received_notes_witness_settled_height ON ironwood_received_notes (
+    witness_settled_height
 )";
 
 /// A junction table between received Ironwood notes and the transactions that spend them.
@@ -1223,7 +1223,19 @@ CREATE TABLE ironwood_tree_retained_checkpoints (
 
 /// Stores the [`ScanPriority`] for all block ranges in the wallet's view of the chain.
 ///
+/// The ranges never overlap. Every write to the queue keeps these invariants for the blocks
+/// from the wallet birthday to the chain tip:
+///
+/// - Exactly one range covers each block.
+/// - No range that covers one of these blocks is `Ignored`.
+///
+/// Code that asks whether such a block is scanned can therefore check that no range above
+/// `Scanned` priority covers it. Below the wallet birthday the queue can differ:
+/// [`WalletWrite::prune_scan_queue_below`] can relabel ranges there as `Ignored` or remove
+/// them, and blocks below the wallet birthday never need a scan.
+///
 /// [`ScanPriority`]: zcash_client_backend::data_api::scanning::ScanPriority
+/// [`WalletWrite::prune_scan_queue_below`]: zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below
 pub(super) const TABLE_SCAN_QUEUE: &str = "
 CREATE TABLE scan_queue (
     block_range_start INTEGER NOT NULL,

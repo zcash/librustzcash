@@ -114,7 +114,7 @@ fn real_test_prover() -> &'static LocalTxProver {
 }
 use crate::{
     data_api::{
-        MaxSpendMode, OutputLockStore, TargetValue,
+        MaxSpendMode, OutputLockStore, PutBlocksError, TargetValue,
         error::{LockError, RewindError},
         wallet::TargetHeight,
     },
@@ -1061,6 +1061,17 @@ where
     /// want to re-scan a set of cached blocks.
     pub fn truncate_to_height_retaining_cache(&mut self, height: BlockHeight) {
         self.wallet_mut().truncate_to_height(height).unwrap();
+        self.latest_block_height = Some(height);
+    }
+
+    /// Truncates the block cache to the specified height without touching the wallet, so
+    /// that subsequent `generate_next_block_*` calls extend a divergent chain from that
+    /// height. This is useful for simulating a reorg after rewinding the wallet via
+    /// [`WalletWrite::rewind_to_chain_state`], which performs its own (deeper) truncation
+    /// of wallet data.
+    pub fn truncate_cache_to_height(&mut self, height: BlockHeight) {
+        self.cache.truncate_to_height(height);
+        self.cached_blocks.split_off(&(height + 1));
         self.latest_block_height = Some(height);
     }
 }
@@ -3654,7 +3665,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _from_state: &ChainState,
         _blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
         Ok(())
     }
 

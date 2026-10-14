@@ -139,7 +139,7 @@ use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use self::{
     common::{TableConstants, table_constants},
-    scanning::{parse_priority_code, priority_code, replace_queue_entries},
+    scanning::{priority_code, replace_queue_entries},
 };
 use crate::{
     AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
@@ -147,7 +147,7 @@ use crate::{
     error::{BackendError, SqliteClientError},
     util::Clock,
     wallet::{
-        commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
+        commitment_tree::{SqliteShardStore, max_checkpoint_at_or_below},
         encoding::LEGACY_ADDRESS_INDEX_NULL,
     },
 };
@@ -2715,6 +2715,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         })
         .collect::<Result<HashMap<AccountUuid, AccountBalance>, _>>()?;
 
+    #[allow(clippy::too_many_arguments)]
     fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
         target_height: TargetHeight,
@@ -2734,42 +2735,25 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
             Zatoshis,
         ) -> Result<(), SqliteClientError>,
     {
-        let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
-
-        // If the shard containing the anchor height contains any unscanned ranges that start
-        // below or including that height, none of our shielded balance is currently spendable.
-        #[tracing::instrument(skip_all)]
-        fn is_any_spendable(
-            conn: &rusqlite::Connection,
-            anchor_height: BlockHeight,
-            table_prefix: &'static str,
-        ) -> Result<bool, SqliteClientError> {
-            conn.query_row(
-                &format!(
-                    "SELECT NOT EXISTS(
-                         SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges
-                         WHERE :anchor_height
-                            BETWEEN subtree_start_height
-                            AND IFNULL(subtree_end_height, :anchor_height)
-                         AND block_range_start <= :anchor_height
-                     )"
-                ),
-                named_params![":anchor_height": u32::from(anchor_height)],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|e| e.into())
-        }
-
+        let TableConstants {
+            table_prefix,
+            shard_height,
+            ..
+        } = table_constants::<SqliteClientError>(protocol)?;
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
 
-        let any_spendable =
-            anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
+        let anchor_conditions = common::AnchorConditions::read(
+            tx,
+            target_height,
+            confirmations_policy,
+            anchor_height,
+            protocol,
+        )?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
-                    scan_state.max_priority,
-                    rn.witness_stabilized,
+                    {} AS spendable_at_anchor,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2778,9 +2762,8 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
-             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-                ON rn.commitment_tree_position >= scan_state.start_position
-                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             LEFT OUTER JOIN {table_prefix}_tree_shards shard
+                ON shard.shard_index = rn.commitment_tree_position >> {shard_height}
              LEFT OUTER JOIN transparent_received_output_spends ros
                 ON ros.transaction_id = t.id_tx
              LEFT OUTER JOIN transparent_received_outputs tro
@@ -2791,12 +2774,16 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
              WHERE ({}) -- the transaction is unexpired
              AND rn.id NOT IN ({}) -- and the received note is unspent
              GROUP BY rn.id",
+            common::note_spendable_at_anchor_condition(),
             common::tx_unexpired_condition("t"),
             common::spent_notes_clause(table_prefix),
         ))?;
 
         let mut rows = stmt_select_notes.query(named_params![
             ":target_height": u32::from(target_height),
+            ":anchor_height": anchor_height.map(u32::from),
+            ":prunable_window_scanned": anchor_conditions.prunable_window_scanned,
+            ":anchor_available": anchor_conditions.anchor_available,
         ])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
@@ -2815,21 +2802,6 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
                 .map(KeyScope::decode)
                 .transpose()?;
 
-            // If `max_priority` is null, this means that the note is not positioned; the note
-            // will not be spendable, so we assign the scan priority to `ChainTip` as a priority
-            // that is greater than `Scanned`
-            let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
-            let max_priority = max_priority_raw.map_or_else(
-                || Ok(ScanPriority::ChainTip),
-                |raw| {
-                    parse_priority_code(raw).ok_or_else(|| {
-                        SqliteClientError::CorruptedData(format!(
-                            "Priority code {raw} not recognized."
-                        ))
-                    })
-                },
-            )?;
-
             let received_height = row
                 .get::<_, Option<u32>>("mined_height")?
                 .map(BlockHeight::from);
@@ -2842,33 +2814,25 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
-
             let is_locked = locking::is_locked_at(
                 row.get::<_, Option<u32>>("lock_expiry_height")?,
                 target_height,
             );
 
-            // A stabilized note is unconditionally spendable. Its originating transaction has been
-            // confirmed well beyond any reasonable confirmation policy, and its witness data
-            // cannot be removed by truncation.
-            //
-            // Non-stabilized notes require more checks: we must have enough chain tip information
-            // to construct witnesses, the shard that the note resides in must be sufficiently
-            // scanned that we can construct the witness for the note, and the note has enough
-            // confirmations to be spent.
-            let is_spendable = witness_stabilized
-                || (any_spendable
-                    && max_priority <= ScanPriority::Scanned
-                    && confirmations_policy.confirmations_until_spendable(
-                        target_height,
-                        PoolType::Shielded(protocol),
-                        recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
-                        received_height,
-                        tx_trusted,
-                        max_shielding_input_height,
-                        tx_shielding_inputs_trusted,
-                    ) == 0);
+            let spendable_at_anchor = row
+                .get::<_, Option<bool>>("spendable_at_anchor")?
+                .unwrap_or(false);
+
+            let confirmations_met = confirmations_policy.confirmations_until_spendable(
+                target_height,
+                PoolType::Shielded(protocol),
+                recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                received_height,
+                tx_trusted,
+                max_shielding_input_height,
+                tx_shielding_inputs_trusted,
+            ) == 0;
+            let is_spendable = spendable_at_anchor && confirmations_met;
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
@@ -3440,34 +3404,42 @@ pub(crate) fn mempool_height(
     Ok(chain_tip_height(conn)?.map(|h| TargetHeight::from(h + 1)))
 }
 
+/// Returns the anchor height for a transaction targeting `target_height`.
+///
+/// The anchor is the tree state at the policy depth `target_height - min_confirmations`. It is
+/// identified by the highest checkpoint at or below that depth. Every scanned height within
+/// `PRUNING_DEPTH` of the chain tip is checkpointed, so when the depth lies in that window and
+/// every block up to it has been scanned, that checkpoint is at the depth itself. Returns `None`
+/// when no tree holds such a checkpoint, when the trees disagree on it, or when any block
+/// between it and the policy depth is unscanned.
+/// The wallet then has no anchor; it never substitutes an older tree state, which would reveal
+/// on chain how far behind the tip the wallet was when it spent.
 pub(crate) fn get_anchor_height(
     conn: &rusqlite::Connection,
     target_height: TargetHeight,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
-    let sapling_anchor_height = get_max_checkpointed_height(
-        conn,
-        ShieldedPool::Sapling,
-        target_height,
-        min_confirmations,
-    )?;
+    let policy_depth = target_height.saturating_sub(u32::from(min_confirmations));
 
+    let sapling = max_checkpoint_at_or_below(conn, crate::SAPLING_TABLES_PREFIX, policy_depth)?;
     #[cfg(feature = "orchard")]
-    let orchard_anchor_height = get_max_checkpointed_height(
-        conn,
-        ShieldedPool::Orchard,
-        target_height,
-        min_confirmations,
-    )?;
-
+    let orchard = max_checkpoint_at_or_below(conn, crate::ORCHARD_TABLES_PREFIX, policy_depth)?;
+    #[cfg(feature = "orchard")]
+    let ironwood = max_checkpoint_at_or_below(conn, crate::IRONWOOD_TABLES_PREFIX, policy_depth)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_anchor_height: Option<BlockHeight> = None;
+    let (orchard, ironwood): (Option<BlockHeight>, Option<BlockHeight>) = (None, None);
 
-    Ok(sapling_anchor_height
-        .zip(orchard_anchor_height)
-        .map(|(s, o)| std::cmp::min(s, o))
-        .or(sapling_anchor_height)
-        .or(orchard_anchor_height))
+    let mut present = [sapling, orchard, ironwood].into_iter().flatten();
+    let Some(anchor_height) = present.next() else {
+        return Ok(None);
+    };
+    if present.any(|h| h != anchor_height) {
+        return Ok(None);
+    }
+
+    let state_reaches_policy_depth =
+        scanning::range_fully_scanned(conn, (anchor_height + 1)..=policy_depth)?;
+    Ok(state_reaches_policy_depth.then_some(anchor_height))
 }
 
 pub(crate) fn get_target_and_anchor_heights(
@@ -4640,6 +4612,34 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     // for a lower one never sees.
     crate::pool_migration::orchard_ironwood::truncate_to_height(conn, truncation_height)?;
 
+    // A note's settled height asserts that every block after the note's block, through that
+    // height, has been scanned. Blocks above the truncation height are discarded, so a settled
+    // height above it no longer holds. Clear it. `mark_stabilized_notes` sets it again once the
+    // wallet has rescanned the note's witness region.
+    {
+        let clear_stale_settled_heights = |table_prefix: &str| {
+            conn.execute(
+                &format!(
+                    "UPDATE {table_prefix}_received_notes
+                     SET witness_settled_height = NULL
+                     WHERE witness_settled_height > :truncation_height"
+                ),
+                named_params![":truncation_height": u32::from(truncation_height)],
+            )
+        };
+        // The tables of every pool exist whatever features are enabled, so clear all of them.
+        clear_stale_settled_heights(crate::SAPLING_TABLES_PREFIX)?;
+        clear_stale_settled_heights(crate::ORCHARD_TABLES_PREFIX)?;
+        clear_stale_settled_heights(crate::IRONWOOD_TABLES_PREFIX)?;
+    }
+
+    // After truncation the chain-tip pruning window may contain ranges whose priority is
+    // no longer `Scanned`. Give the window `Anchor` priority so that re-establishing
+    // a usable anchor takes precedence over normal forward sync. If the window is fully
+    // `Scanned` already (e.g. the truncation didn't actually mutate any blocks), the
+    // dominance rule preserves those ranges and this is effectively a no-op.
+    scanning::mark_anchor_priority_window(conn)?;
+
     Ok(truncation_height)
 }
 
@@ -4903,6 +4903,13 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     // bound of the rescan range we install above the rewind target.
     let chain_tip = chain_tip_height(conn).map_err(|e| RewindError::DataSource(e.into()))?;
 
+    // The rewind rewrites the scan queue above its target height to `Historic`. Advance each
+    // note's settled height through the scanned blocks first. Truncation preserves the note
+    // commitment trees at and below the truncation height, so a settled height at or below it
+    // stays valid, and the note does not wait for a rescan of blocks the wallet has already
+    // scanned. Truncation then clears any settled height above the truncation height.
+    scanning::mark_stabilized_notes(conn).map_err(RewindError::DataSource)?;
+
     // Truncate wallet data above the pruning floor only when the target is below the wallet's
     // max scanned height; if the target is at or above the max scanned height, the wallet has
     // not yet scanned past the rewind point and there is nothing above it to remove.
@@ -4911,9 +4918,13 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
         .map(|m| m.block_height())
         && target_height < max_scanned_height
     {
-        // Compute the floor height of the pruning window.
-        let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
-        let truncation_target = target_height.max(pruning_floor);
+        // The lowest height in the chain-tip pruning window; truncation must not
+        // go below this, because the shardtree retains checkpoints only for the
+        // window. `scanning::pruning_floor` returns the highest height *outside*
+        // the window (heights strictly greater are inside), so the inclusive
+        // lower bound of the window is `pruning_floor + 1`.
+        let lowest_window_checkpoint = scanning::pruning_floor(max_scanned_height) + 1;
+        let truncation_target = target_height.max(lowest_window_checkpoint);
 
         // Determine the height to which the note commitment trees can actually be truncated:
         // the deepest checkpoint at or above `truncation_target` retained by any pool. In a
@@ -4944,7 +4955,7 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             window_floor = window_floor.into_iter().chain(pool_floor).min();
         }
 
-        let truncation_height = window_floor.unwrap_or(pruning_floor);
+        let truncation_height = window_floor.unwrap_or(lowest_window_checkpoint);
 
         // Use `truncate_to_height_internal` to perform full truncation of data within the
         // pruning window. Blocks above `target_height` are re-scanned by the `Historic`
@@ -4957,31 +4968,6 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             gap_limits,
             truncation_height,
             target_height,
-        )
-        .map_err(RewindError::DataSource)?;
-    }
-
-    // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
-    // forcing re-scan of any blocks that previously appeared above the target. This both
-    // re-queues the blocks above the truncation floor (which truncate_to_height_internal
-    // already trimmed) and overrides any `Scanned`/`Historic` entries in the
-    // `(target_height, truncation_height]` window that survived a deep rewind, so the sync
-    // loop will re-scan them. With `force_rescans = true` the only entries this preserves are
-    // those whose priority would dominate `Historic` even under a forced rescan
-    // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
-    // and cannot overwrite anything.
-    if let Some(t) = chain_tip
-        && target_height < t
-    {
-        let rescan_range = (target_height + 1)..(t + 1);
-        replace_queue_entries::<SqliteClientError>(
-            conn,
-            &rescan_range,
-            std::iter::once(ScanRange::from_parts(
-                rescan_range.clone(),
-                ScanPriority::Historic,
-            )),
-            true,
         )
         .map_err(RewindError::DataSource)?;
     }
@@ -5007,6 +4993,37 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             ],
         )
         .map_err(|e| RewindError::DataSource(e.into()))?;
+    }
+
+    // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
+    // forcing re-scan of any blocks that previously appeared above the target. This both
+    // re-queues the blocks above the truncation floor (which truncate_to_height_internal
+    // already trimmed) and overrides any `Scanned`/`Historic` entries in the
+    // `(target_height, truncation_height]` window that survived a deep rewind, so the sync
+    // loop will re-scan them. With `force_rescans = true` the only entries this preserves are
+    // those whose priority would dominate `Historic` even under a forced rescan
+    // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Anchor`, `Verify`); `Ignored` is the lowest
+    // priority and cannot overwrite anything. This runs after the birthday update above,
+    // because `mark_anchor_priority_window` reads the updated birthday.
+    if let Some(chain_tip) = chain_tip
+        && target_height < chain_tip
+    {
+        let rescan_range = new_birthday..(chain_tip + 1);
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &rescan_range,
+            std::iter::once(ScanRange::from_parts(
+                rescan_range.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )
+        .map_err(RewindError::DataSource)?;
+
+        // Give the chain-tip pruning window `Anchor` priority again. The Historic
+        // rewrite above downgrades the window's previously-Scanned ranges; the new priority makes
+        // the window scan ahead of the rest of the rewritten range.
+        scanning::mark_anchor_priority_window(conn).map_err(RewindError::DataSource)?;
     }
 
     Ok(())
@@ -5052,7 +5069,31 @@ pub(crate) fn get_account_ids(
     Ok(result)
 }
 
-/// Inserts information about a scanned block into the database.
+/// Returns the hash of the block that the database holds at `block_height`, if any.
+pub(crate) fn stored_block_hash(
+    conn: &rusqlite::Connection,
+    block_height: BlockHeight,
+) -> Result<Option<BlockHash>, SqliteClientError> {
+    conn.query_row(
+        "SELECT hash FROM blocks WHERE height = ?",
+        [u32::from(block_height)],
+        |row| row.get::<_, Vec<u8>>(0),
+    )
+    .optional()?
+    .map(|bytes| {
+        BlockHash::try_from_slice(&bytes).ok_or_else(|| {
+            SqliteClientError::CorruptedData(format!(
+                "Invalid block hash at height {}",
+                u32::from(block_height)
+            ))
+        })
+    })
+    .transpose()
+}
+
+/// Inserts information about a scanned block into the database, replacing any information
+/// stored for a block at the same height. The caller checks first that a block stored at
+/// `block_height` has the hash `block_hash`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_block(
     conn: &rusqlite::Transaction<'_>,
@@ -5066,28 +5107,6 @@ pub(crate) fn put_block(
     #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
     #[cfg(feature = "orchard")] ironwood_action_count: u32,
 ) -> Result<(), SqliteClientError> {
-    let block_hash_data = conn
-        .query_row(
-            "SELECT hash FROM blocks WHERE height = ?",
-            [u32::from(block_height)],
-            |row| row.get::<_, Vec<u8>>(0),
-        )
-        .optional()?;
-
-    // Ensure that in the case of an upsert, we don't overwrite block data
-    // with information for a block with a different hash.
-    if let Some(bytes) = block_hash_data {
-        let expected_hash = BlockHash::try_from_slice(&bytes).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!(
-                "Invalid block hash at height {}",
-                u32::from(block_height)
-            ))
-        })?;
-        if expected_hash != block_hash {
-            return Err(SqliteClientError::BlockConflict(block_height));
-        }
-    }
-
     let mut stmt_upsert_block = conn.prepare_cached(
         "INSERT INTO blocks (
             height,
@@ -6324,12 +6343,14 @@ mod tests {
     };
 
     use incrementalmerkletree::frontier::Frontier;
+    use zcash_protocol::local_consensus::LocalNetwork;
+
+    use crate::testing::db::TestDb;
+
     #[cfg(feature = "orchard")]
     use {
-        crate::testing::db::TestDb, ::orchard::tree::MerkleHashOrchard,
-        incrementalmerkletree::Hashable as _, shardtree::error::ShardTreeError,
-        zcash_client_backend::data_api::WalletCommitmentTrees,
-        zcash_protocol::local_consensus::LocalNetwork,
+        ::orchard::tree::MerkleHashOrchard, incrementalmerkletree::Hashable as _,
+        shardtree::error::ShardTreeError, zcash_client_backend::data_api::WalletCommitmentTrees,
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
@@ -8038,6 +8059,117 @@ mod tests {
             table_row_count(st.wallet().conn(), "ironwood_tree_shards"),
             0
         );
+    }
+
+    /// Number of blocks scanned after the block containing the note in the settled-height
+    /// truncation tests.
+    const SETTLED_HEIGHT_TEST_BLOCKS_AFTER_NOTE: u32 = 9;
+    /// Height offset, from the note's block, of the truncation in the settled-height tests.
+    const SETTLED_HEIGHT_TEST_TRUNCATION_OFFSET: u32 = 5;
+
+    /// Builds a wallet holding one Sapling note, with a scanned run of blocks after it, and sets
+    /// the note's settled height to the last scanned block. Returns the note's block height and
+    /// that settled height.
+    fn wallet_with_settled_note() -> (
+        TestState<BlockCache, TestDb, LocalNetwork>,
+        BlockHeight,
+        BlockHeight,
+    ) {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let (note_height, _, _) = st.generate_next_block(
+            &dfvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+        for _ in 0..SETTLED_HEIGHT_TEST_BLOCKS_AFTER_NOTE {
+            st.generate_empty_block();
+        }
+        st.scan_cached_blocks(
+            note_height,
+            SETTLED_HEIGHT_TEST_BLOCKS_AFTER_NOTE as usize + 1,
+        );
+
+        // The wallet has scanned every block through `settled_height`, so this value satisfies
+        // the settled-height invariant. The scan sets a lower value, because the note's shard is
+        // not complete and the note is above the pruning floor.
+        let settled_height = note_height + SETTLED_HEIGHT_TEST_BLOCKS_AFTER_NOTE;
+        st.wallet()
+            .conn()
+            .execute(
+                "UPDATE sapling_received_notes SET witness_settled_height = ?",
+                [u32::from(settled_height)],
+            )
+            .unwrap();
+
+        (st, note_height, settled_height)
+    }
+
+    /// Returns the settled height of every received note of every pool.
+    fn settled_heights(conn: &Connection) -> Vec<Option<BlockHeight>> {
+        let mut heights = vec![];
+        for table in [
+            "sapling_received_notes",
+            "orchard_received_notes",
+            "ironwood_received_notes",
+        ] {
+            let mut stmt = conn
+                .prepare(&format!("SELECT witness_settled_height FROM {table}"))
+                .unwrap();
+            let rows = stmt
+                .query_map([], |row| row.get::<_, Option<u32>>(0))
+                .unwrap();
+            for row in rows {
+                heights.push(row.unwrap().map(BlockHeight::from));
+            }
+        }
+        heights
+    }
+
+    /// A truncation leaves no note with a settled height above the truncation height.
+    #[test]
+    fn truncate_to_height_clears_settled_heights_above_truncation() {
+        let (mut st, note_height, settled_height) = wallet_with_settled_note();
+        let truncation_height = note_height + SETTLED_HEIGHT_TEST_TRUNCATION_OFFSET;
+        assert!(settled_height > truncation_height);
+
+        let result = st.wallet_mut().truncate_to_height(truncation_height);
+        assert_matches!(result, Ok(h) if h == truncation_height);
+
+        let heights = settled_heights(st.wallet().conn());
+        assert!(!heights.is_empty());
+        assert!(
+            heights
+                .iter()
+                .all(|h| h.is_none_or(|h| h <= truncation_height)),
+            "settled heights after truncation to {truncation_height}: {heights:?}"
+        );
+    }
+
+    /// A truncation inside a transaction that fails changes no settled height and no block.
+    #[test]
+    fn truncate_to_height_rolls_back_settled_heights_on_error() {
+        let (mut st, note_height, settled_height) = wallet_with_settled_note();
+        let truncation_height = note_height + SETTLED_HEIGHT_TEST_TRUNCATION_OFFSET;
+        let heights_before = settled_heights(st.wallet().conn());
+        assert_eq!(heights_before, vec![Some(settled_height)]);
+        let tip_before = chain_tip_height(st.wallet().conn()).unwrap();
+
+        let result: Result<(), SqliteClientError> =
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                wdb.truncate_to_height(truncation_height)?;
+                // Fail after the truncation; everything in this transaction must roll back.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+
+        assert_eq!(settled_heights(st.wallet().conn()), heights_before);
+        assert_eq!(chain_tip_height(st.wallet().conn()).unwrap(), tip_before);
     }
 
     /// The name of the received-note table for a pool, written out rather than derived from
