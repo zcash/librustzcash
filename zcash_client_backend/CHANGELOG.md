@@ -62,6 +62,8 @@ workspace.
   create_pczt_from_proposal}`: when no `expiry_height` is given, a transaction that
   is not a ZIP 318 canonical crossing now expires 120 blocks after its target height
   if NU7 is active at that height, instead of 40 blocks.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method
+  `set_account_name`.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`

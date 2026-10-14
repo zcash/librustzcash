@@ -1927,6 +1927,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.delete_account(account_uuid))
     }
 
+    fn set_account_name(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+        name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.set_account_name(account_uuid, name))
+    }
+
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_address(
         &mut self,
@@ -2317,6 +2325,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account_uuid: <Self as WalletRead>::AccountId,
     ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::delete_account(self.conn.0, account_uuid)
+    }
+
+    fn set_account_name(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+        name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::set_account_name(self.conn.0, account_uuid, name)
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -4167,6 +4183,224 @@ mod tests {
             st.wallet().get_wallet_recover_until().unwrap(),
             Some(zcash_protocol::consensus::BlockHeight::from_u32(123456))
         );
+    }
+
+    /// The name given to an account by the `set_account_name` tests.
+    const RENAMED_ACCOUNT_NAME: &str = "Renamed account";
+
+    #[test]
+    fn set_account_name_updates_account_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_replaces_null_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        st.wallet_mut()
+            .conn_mut()
+            .execute("UPDATE accounts SET name = NULL", [])
+            .unwrap();
+        assert_eq!(
+            st.wallet().get_account(account_id).unwrap().unwrap().name(),
+            None
+        );
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_rejects_unknown_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let result = st
+            .wallet_mut()
+            .set_account_name(AccountUuid(Uuid::nil()), RENAMED_ACCOUNT_NAME);
+
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+    }
+
+    #[test]
+    fn set_account_name_preserves_keys_and_birthday() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        let network = *st.network();
+        let before = st.wallet().get_account(account_id).unwrap().unwrap();
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let after = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(
+            after.ufvk().map(|ufvk| ufvk.encode(&network)),
+            before.ufvk().map(|ufvk| ufvk.encode(&network))
+        );
+        assert_eq!(
+            after.uivk().encode(&network),
+            before.uivk().encode(&network)
+        );
+        assert_eq!(after.birthday_height(), before.birthday_height());
+        assert_eq!(after.source(), before.source());
+    }
+
+    /// The length in bytes of the seeds from which the `set_account_name` tests derive
+    /// their accounts.
+    const SET_ACCOUNT_NAME_SEED_LEN: usize = 32;
+
+    /// The fill byte of the seed for the first of two accounts in a `set_account_name` test.
+    const FIRST_ACCOUNT_SEED_BYTE: u8 = 0;
+
+    /// The fill byte of the seed for the second of two accounts in a `set_account_name`
+    /// test; differs from [`FIRST_ACCOUNT_SEED_BYTE`] so the accounts do not collide.
+    const SECOND_ACCOUNT_SEED_BYTE: u8 = 1;
+
+    /// The initial name of the first of two accounts in a `set_account_name` test.
+    const FIRST_ACCOUNT_NAME: &str = "first";
+
+    /// The initial name of the second of two accounts in a `set_account_name` test.
+    const SECOND_ACCOUNT_NAME: &str = "second";
+
+    /// An account name made of non-ASCII characters, including one outside the Basic
+    /// Multilingual Plane.
+    const UNICODE_ACCOUNT_NAME: &str = "Ünïcødé 🔐";
+
+    /// The empty account name.
+    const EMPTY_ACCOUNT_NAME: &str = "";
+
+    #[test]
+    fn set_account_name_only_renames_the_given_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let second_seed = Secret::new(vec![SECOND_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let (first_id, _) = st
+            .wallet_mut()
+            .create_account(FIRST_ACCOUNT_NAME, &first_seed, &birthday, None)
+            .unwrap();
+        let (second_id, _) = st
+            .wallet_mut()
+            .create_account(SECOND_ACCOUNT_NAME, &second_seed, &birthday, None)
+            .unwrap();
+
+        st.wallet_mut()
+            .set_account_name(first_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let first = st.wallet().get_account(first_id).unwrap().unwrap();
+        let second = st.wallet().get_account(second_id).unwrap().unwrap();
+        assert_eq!(first.name(), Some(RENAMED_ACCOUNT_NAME));
+        assert_eq!(second.name(), Some(SECOND_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_allows_duplicate_names() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let second_seed = Secret::new(vec![SECOND_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let (first_id, _) = st
+            .wallet_mut()
+            .create_account(FIRST_ACCOUNT_NAME, &first_seed, &birthday, None)
+            .unwrap();
+        let (second_id, _) = st
+            .wallet_mut()
+            .create_account(SECOND_ACCOUNT_NAME, &second_seed, &birthday, None)
+            .unwrap();
+
+        st.wallet_mut()
+            .set_account_name(first_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+        st.wallet_mut()
+            .set_account_name(second_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let first = st.wallet().get_account(first_id).unwrap().unwrap();
+        let second = st.wallet().get_account(second_id).unwrap().unwrap();
+        assert_eq!(first.name(), Some(RENAMED_ACCOUNT_NAME));
+        assert_eq!(second.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_renames_an_imported_view_only_account_to_any_text() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let usk = UnifiedSpendingKey::from_seed(
+            st.network(),
+            seed.expose_secret(),
+            zip32::AccountId::ZERO,
+        )
+        .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                FIRST_ACCOUNT_NAME,
+                &ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap();
+        let account_id = account.id();
+        assert_matches!(
+            account.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::ViewOnly,
+                ..
+            }
+        );
+
+        // The final step renames the account to the name it already has, which must
+        // still succeed rather than report the account as unknown.
+        for name in [UNICODE_ACCOUNT_NAME, EMPTY_ACCOUNT_NAME, EMPTY_ACCOUNT_NAME] {
+            st.wallet_mut().set_account_name(account_id, name).unwrap();
+
+            let renamed = st.wallet().get_account(account_id).unwrap().unwrap();
+            assert_eq!(renamed.name(), Some(name));
+            assert_eq!(renamed.source(), account.source());
+        }
     }
 
     #[test]

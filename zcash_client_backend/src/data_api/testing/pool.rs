@@ -3764,6 +3764,60 @@ pub fn account_deletion_with_internal_transfer<T: ShieldedPoolTester, DSF>(
     assert!(summary.account_balances().contains_key(&account1));
 }
 
+/// Verifies that [`WalletWrite::set_account_name`] replaces the name of the given account,
+/// leaves the names of other accounts unchanged, and permits two accounts to share a name.
+///
+/// [`WalletWrite::set_account_name`]: crate::data_api::WalletWrite::set_account_name
+pub fn account_rename<T: ShieldedPoolTester, DSF>(ds_factory: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::DataStore: Reset,
+{
+    /// The initial name of the first account.
+    const ACCOUNT1_NAME: &str = "account1";
+    /// The initial name of the second account.
+    const ACCOUNT2_NAME: &str = "account2";
+    /// The name that both accounts are renamed to.
+    const RENAMED_NAME: &str = "renamed";
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .build();
+
+    // Add two accounts to the wallet, derived from the same seed.
+    let seed = Secret::new([0u8; 32].to_vec());
+    let birthday = AccountBirthday::from_sapling_activation(st.network(), BlockHash([0; 32]));
+    let (account1, _) = st
+        .wallet_mut()
+        .create_account(ACCOUNT1_NAME, &seed, &birthday, None)
+        .unwrap();
+    let (account2, _) = st
+        .wallet_mut()
+        .create_account(ACCOUNT2_NAME, &seed, &birthday, None)
+        .unwrap();
+
+    // Renaming account 1 changes only its name.
+    assert_matches!(
+        st.wallet_mut().set_account_name(account1, RENAMED_NAME),
+        Ok(())
+    );
+    let renamed1 = st.wallet().get_account(account1).unwrap().unwrap();
+    let untouched2 = st.wallet().get_account(account2).unwrap().unwrap();
+    assert_eq!(renamed1.name(), Some(RENAMED_NAME));
+    assert_eq!(untouched2.name(), Some(ACCOUNT2_NAME));
+
+    // Account names are not required to be unique.
+    assert_matches!(
+        st.wallet_mut().set_account_name(account2, RENAMED_NAME),
+        Ok(())
+    );
+    let renamed1 = st.wallet().get_account(account1).unwrap().unwrap();
+    let renamed2 = st.wallet().get_account(account2).unwrap().unwrap();
+    assert_eq!(renamed1.name(), Some(RENAMED_NAME));
+    assert_eq!(renamed2.name(), Some(RENAMED_NAME));
+}
+
 pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
