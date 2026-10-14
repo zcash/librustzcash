@@ -11,8 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- Migrated to `zcash_protocol 0.11.0-pre.1` and
-  `zcash_transparent 0.11.0-pre.2`.
+- Migrated to `zcash_primitives 0.31.0-pre.2`, `zcash_protocol 0.11.0-pre.1`,
+  and `zcash_transparent 0.11.0-pre.2`.
 
 ## [0.10.0-pre.1] - 2026-10-06
 
