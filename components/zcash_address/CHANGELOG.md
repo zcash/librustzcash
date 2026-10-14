@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.14.0-pre.2] - 2026-10-13
+
 ### Added
 - `zcash_address::constants` module, containing:
   - `mainnet`, `testnet`, and `regtest` modules, which define the HRP and
@@ -23,6 +25,7 @@ workspace.
 - `zcash_address::unified::MetadataTypecode::is_must_understand`
 
 ### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.1`.
 - `zcash_address::unified::Revision` is now defined in this crate, and is no
   longer a re-export of `zcash_protocol::address::Revision`.
 

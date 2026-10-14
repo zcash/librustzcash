@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.1] - 2026-10-13
+
 ### Deprecated
 - The address encoding prefix constants in
   `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants

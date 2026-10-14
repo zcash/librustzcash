@@ -9,6 +9,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.17.0-pre.2] - 2026-10-13
+
 ### Added
 - `zcash_keys::constants` module, containing:
   - `mainnet`, `testnet`, and `regtest` modules, which define
@@ -19,8 +21,11 @@ workspace.
     and `b58_secret_key_prefix`, which take a `NetworkType`.
 - `zcash_keys::address::UnifiedAddress::prune_retaining`
 - `zcash_keys::address::PruneError`
+- `zcash_keys::keys::UnifiedFullViewingKey::from_p2sh`
 
 ### Changed
+- Migrated to `zcash_address 0.14.0-pre.2`, `zcash_protocol 0.11.0-pre.1`, and
+  `zcash_transparent 0.11.0-pre.2`.
 - `zcash_keys::keys::transparent::Key::{decode_base58, encode_base58}` now take
   a `NetworkType` instead of `&N` where `N: NetworkConstants`. Callers holding
   consensus parameters pass `params.network_type()`.
@@ -112,9 +117,6 @@ This release supports the NU7 upgrade on testnet.
 - `zcash_keys::address::Address::encode_receiver_preserving`
 - `zcash_keys::keys::UnifiedFullViewingKey::p2pkh`
 - `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
-- `zcash_keys::keys::UnifiedFullViewingKey::from_p2sh`, the only public way to
-  construct a unified full viewing key. A P2SH account has no spending key to
-  derive one from, so it must be assembled from its cosigners' keys.
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2pkh`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
 - `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`

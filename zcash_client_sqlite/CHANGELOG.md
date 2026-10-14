@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.0-pre.2] - 2026-10-13
+
 ### Changed
+- Migrated to `pczt 0.10.0-pre.2`, `zcash_address 0.14.0-pre.2`,
+  `zcash_client_backend 0.25.0-pre.2`, `zcash_keys 0.17.0-pre.2`,
+  `zcash_pool_migration 0.2.0-pre.2`, `zcash_primitives 0.31.0-pre.2`,
+  `zcash_protocol 0.11.0-pre.1`, and `zcash_transparent 0.11.0-pre.2`.
 - `WalletRead::list_addresses` now also returns the transparent receiver that
   the wallet tracks at the index of an exposed unified address that omits it,
   as an `Address::Transparent` entry with that diversifier index.

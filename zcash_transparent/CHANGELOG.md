@@ -10,7 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-pre.2] - 2026-10-13
+
 ### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.1`.
 - `zcash_transparent` no longer depends on `zcash_address`.
 
 ### Removed
