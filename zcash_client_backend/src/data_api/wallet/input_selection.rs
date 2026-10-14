@@ -1751,7 +1751,7 @@ impl<NoteRef: Clone> SizeBoundOrder<NoteRef> {
                     ))
                 })
                 .collect::<Result<Vec<_>, BalanceError>>()?;
-            keyed.sort_by(|(a, _), (b, _)| a.cmp(b));
+            keyed.sort_by_key(|(key, _)| *key);
             Ok(keyed.into_iter().map(|(key, note)| (note, key)).unzip())
         }
 
