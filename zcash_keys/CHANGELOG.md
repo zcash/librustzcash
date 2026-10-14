@@ -21,7 +21,8 @@ workspace.
 - `zcash_keys::address::PruneError`
 
 ### Changed
-- Migrated to `zcash_address 0.14.0-pre.2` and `zcash_protocol 0.11.0-pre.1`.
+- Migrated to `zcash_address 0.14.0-pre.2`, `zcash_protocol 0.11.0-pre.1`, and
+  `zcash_transparent 0.11.0-pre.2`.
 - `zcash_keys::keys::transparent::Key::{decode_base58, encode_base58}` now take
   a `NetworkType` instead of `&N` where `N: NetworkConstants`. Callers holding
   consensus parameters pass `params.network_type()`.
