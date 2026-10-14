@@ -1,50 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.pczt]]
-version = "0.10.0-pre.2"
-audited_as = "0.10.0-pre.1"
-
-[[unpublished.zcash_address]]
-version = "0.14.0-pre.2"
-audited_as = "0.14.0-pre.1"
-
-[[unpublished.zcash_client_backend]]
-version = "0.25.0-pre.2"
-audited_as = "0.25.0-pre.1"
-
-[[unpublished.zcash_client_sqlite]]
-version = "0.23.0-pre.2"
-audited_as = "0.23.0-pre.1"
-
-[[unpublished.zcash_keys]]
-version = "0.17.0-pre.2"
-audited_as = "0.17.0-pre.1"
-
-[[unpublished.zcash_pool_migration]]
-version = "0.2.0-pre.2"
-audited_as = "0.2.0-pre.1"
-
-[[unpublished.zcash_primitives]]
-version = "0.31.0-pre.2"
-audited_as = "0.31.0-pre.1"
-
-[[unpublished.zcash_proofs]]
-version = "0.31.0-pre.2"
-audited_as = "0.31.0-pre.1"
-
-[[unpublished.zcash_protocol]]
-version = "0.11.0-pre.1"
-audited_as = "0.11.0-pre.0"
-
-[[unpublished.zcash_transparent]]
-version = "0.11.0-pre.2"
-audited_as = "0.11.0-pre.1"
-
-[[unpublished.zip321]]
-version = "0.10.0-pre.2"
-audited_as = "0.10.0-pre.1"
-
 [[publisher.addchain]]
 version = "0.3.0"
 when = "2026-02-26"
@@ -228,8 +184,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pczt]]
-version = "0.10.0-pre.1"
-when = "2026-10-06"
+version = "0.10.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -591,22 +547,22 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.14.0-pre.1"
-when = "2026-10-06"
+version = "0.14.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.25.0-pre.1"
-when = "2026-10-06"
+version = "0.25.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.23.0-pre.1"
-when = "2026-10-06"
+version = "0.23.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -626,8 +582,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_keys]]
-version = "0.17.0-pre.1"
-when = "2026-10-06"
+version = "0.17.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -640,29 +596,29 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.2.0-pre.1"
-when = "2026-10-06"
+version = "0.2.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.31.0-pre.1"
-when = "2026-10-06"
+version = "0.31.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.31.0-pre.1"
-when = "2026-10-06"
+version = "0.31.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.11.0-pre.0"
-when = "2026-10-01"
+version = "0.11.0-pre.1"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -682,8 +638,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.11.0-pre.1"
-when = "2026-10-06"
+version = "0.11.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -703,8 +659,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.10.0-pre.1"
-when = "2026-10-06"
+version = "0.10.0-pre.2"
+when = "2026-10-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
