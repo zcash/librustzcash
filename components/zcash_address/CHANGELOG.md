@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.14.0-pre.2] - 2026-10-13
+
 ### Added
 - `zcash_address::constants` module, containing:
   - `mainnet`, `testnet`, and `regtest` modules, which define the HRP and
