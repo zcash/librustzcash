@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.25.0-pre.2] - 2026-10-13
+
 ### Changed
 - Migrated to `pczt 0.10.0-pre.2`, `zcash_address 0.14.0-pre.2`,
   `zcash_keys 0.17.0-pre.2`, `zcash_primitives 0.31.0-pre.2`,
