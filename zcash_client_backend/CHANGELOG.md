@@ -11,7 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- Migrated to `zcash_address 0.14.0-pre.2` and `zcash_protocol 0.11.0-pre.1`.
+- Migrated to `zcash_address 0.14.0-pre.2`, `zcash_protocol 0.11.0-pre.1`, and
+  `zip321 0.10.0-pre.2`.
 - `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
   implementation to also return the transparent receiver that the wallet tracks
   at the diversifier index of an exposed unified address that omits it, as an
