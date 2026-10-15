@@ -377,7 +377,7 @@ mod tests {
 
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta,
+            AccountMeta, ChangeReceivers, PoolMeta,
             anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
             testing::MockWalletDb,
             wallet::input_selection::SaplingPayment,
@@ -1752,6 +1752,59 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::DustInputs { sapling, .. }) if sapling == vec![2]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn sapling_only_account_paying_orchard_gets_sapling_change() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+
+        // The account has no Orchard key, so the change from paying an Orchard recipient
+        // goes to the Sapling pool that the transaction spends from.
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(55000),
+                }][..],
+                &[] as &[Infallible],
+            ),
+            &(
+                ::orchard::bundle::BundleVersion::orchard_v2(),
+                &[] as &[Infallible],
+                &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
+            ),
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(
+                true,
+                false,
+                #[cfg(feature = "transparent-inputs")]
+                None,
+            ),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(20000)
         );
     }
 }

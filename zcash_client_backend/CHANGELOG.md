@@ -32,9 +32,13 @@ workspace.
   `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.
 - The change strategies in `zcash_client_backend::fees` size transparent
   change as an output of the account's `TransparentChangeKind` instead of
-  always as a P2PKH output, and fail with `ChangeError::UnsupportedChangePool`
-  when they would send change, or an ephemeral output, to a pool in which the
-  account cannot receive it.
+  always as a P2PKH output.
+- The change strategies in `zcash_client_backend::fees` place shielded change
+  in a pool in which the account can receive it. They prefer a pool that the
+  transaction already uses, then the fallback change pool, then any other pool.
+  They fail with `ChangeError::UnsupportedChangePool` when the account cannot
+  receive the change in any shielded pool, or when transparent change is
+  allowed and the account has no transparent receiver.
 
 ## [0.25.0-pre.2] - 2026-10-13
 
