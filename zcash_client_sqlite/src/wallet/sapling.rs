@@ -471,6 +471,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn create_proposed_transactions_uses_nu7_default_expiry() {
+        testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn scan_full_block_detects_outputs() {
         testing::pool::scan_full_block_detects_outputs::<SaplingPoolTester>()
     }

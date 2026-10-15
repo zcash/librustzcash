@@ -127,7 +127,9 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::{HashSer, read_commitment_tree},
-    transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
+    transaction::{
+        Transaction, TransactionData, builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, fees::zip317,
+    },
 };
 use zcash_protocol::{
     PoolType, ShieldedPool, TxId,
@@ -4051,7 +4053,7 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
                 named_params![
                     ":txid": txid.as_ref(),
                     ":status_type": TxQueryType::Status.code(),
-                    ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA,
+                    ":certainty_depth": PRUNING_DEPTH + BLOSSOM_DEFAULT_TX_EXPIRY_DELTA,
                 ],
             )?;
         }
@@ -5551,7 +5553,7 @@ pub(crate) fn transaction_data_requests(
             named_params![
                 ":status_type": TxQueryType::Status.code(),
                 ":enhancement_type": TxQueryType::Enhancement.code(),
-                ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA
+                ":certainty_depth": PRUNING_DEPTH + BLOSSOM_DEFAULT_TX_EXPIRY_DELTA
             ],
             |row| {
                 let txid = row.get(0).map(TxId::from_bytes)?;

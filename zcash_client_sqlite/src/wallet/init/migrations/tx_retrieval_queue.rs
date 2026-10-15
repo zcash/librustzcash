@@ -5,7 +5,7 @@ use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
 use zcash_protocol::consensus;
 
 use crate::wallet::init::WalletMigrationError;
@@ -108,7 +108,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
              SET target_height = expiry_height - :default_expiry_delta
              WHERE expiry_height > :default_expiry_delta
              AND created IS NOT NULL",
-            named_params![":default_expiry_delta": DEFAULT_TX_EXPIRY_DELTA],
+            named_params![":default_expiry_delta": BLOSSOM_DEFAULT_TX_EXPIRY_DELTA],
         )?;
 
         // Populate the enhancement queues with any transparent history information that we don't

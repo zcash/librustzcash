@@ -45,6 +45,10 @@ workspace.
   `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
   P2PKH address derived from the account's transparent key. An account whose
   transparent change is a P2SH output cannot pay a TEX address.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}`: when no `expiry_height` is given, a transaction that
+  is not a ZIP 318 canonical crossing now expires 120 blocks after its target height
+  if NU7 is active at that height, instead of 40 blocks.
 
 ## [0.25.0-pre.2] - 2026-10-13
 
