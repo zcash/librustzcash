@@ -364,9 +364,7 @@ pub enum ChangeError<E, NoteRefT> {
         /// The total of the inputs provided to change selection
         available: Zatoshis,
         /// The total amount of input value required to fund the requested outputs,
-        /// including the required fees. When returned by
-        /// [`ChangeStrategy::compute_balance`], this exceeds the total value of the inputs
-        /// it was given.
+        /// including the required fees.
         required: Zatoshis,
     },
     /// Some of the inputs provided to the transaction have value less than the
@@ -378,8 +376,7 @@ pub enum ChangeError<E, NoteRefT> {
     /// though in practice they would not cause the fee to increase. Inputs with
     /// value greater than the marginal fee will never be excluded.
     ///
-    /// Every input named is one of the inputs that were provided, and at least one is
-    /// named. The ordering of the inputs in each list is unspecified.
+    /// The ordering of the inputs in each list is unspecified.
     DustInputs {
         /// The outpoints for transparent inputs that could not be determined to
         /// have economic value in the context of this input selection.
@@ -713,13 +710,15 @@ pub trait ChangeStrategy {
     /// The fee computed as part of this operation should take into account the prospective
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
-    /// [`ChangeError::InsufficientFunds`].
+    /// [`ChangeError::InsufficientFunds`], with a `required` value that exceeds the total
+    /// value of the inputs provided.
     ///
     /// If the inputs include notes or UTXOs that are not economic to spend in the context
     /// of this input selection, a [`ChangeError::DustInputs`] error can be returned
     /// indicating inputs that should be removed from the selection (all of which will
-    /// have value less than or equal to the marginal fee). The caller should order the
-    /// inputs from most to least preferred to spend within each pool, so that the most
+    /// have value less than or equal to the marginal fee). Every input it names must be
+    /// one of the inputs provided, and it must name at least one. The caller should order
+    /// the inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
     /// - `ironwood`: the Ironwood bundle view (behind the `orchard` feature). A V6
