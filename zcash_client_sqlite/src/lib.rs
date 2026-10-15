@@ -2456,6 +2456,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                 )?;
                 Ok::<_, SqliteClientError>(AnchorRetention::union(
                     from_height,
+                    zcash_protocol::zip318::BlockSpacing::for_network(&self.params),
                     core::iter::once(self.anchor_retention_interval).chain(committed),
                 ))
             })
@@ -2552,7 +2553,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         // would have to be revisited if `PoolMigrationParams` ever gained a second overridable
         // value.
         #[cfg(feature = "orchard")]
-        let zip318 = self.pool_migration_params();
+        let zip318 = self.pool_migration_params(&self.params);
         #[cfg(feature = "orchard")]
         let chain_tip = chain_tip_height(self.conn.0)?;
 

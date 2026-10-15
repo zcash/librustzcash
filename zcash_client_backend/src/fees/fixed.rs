@@ -196,7 +196,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -241,7 +244,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
