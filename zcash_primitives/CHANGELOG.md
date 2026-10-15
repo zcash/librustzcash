@@ -10,8 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder::POST_NU7_DEFAULT_TX_EXPIRY_DELTA`
+- `zcash_primitives::transaction::builder::default_tx_expiry_delta`
+
 ### Changed
 - MSRV is now 1.89
+- `zcash_primitives::transaction::builder::Builder::new` and
+  `zcash_primitives::transaction::builder::DeferredPcztBuilder::new` now default
+  the expiry height of a non-coinbase transaction to its target height plus
+  `default_tx_expiry_delta` at that height: 120 blocks if NU7 is active at the
+  target height, and 40 blocks (as before) otherwise. To keep a fixed delta,
+  set the expiry height with `with_expiry_height`.
+- `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA` is now the
+  default expiry delta only for target heights before NU7 activation; use
+  `zcash_primitives::transaction::builder::default_tx_expiry_delta` for the
+  default at a given target height.
 
 ## [0.31.0-pre.2] - 2026-10-13
 
