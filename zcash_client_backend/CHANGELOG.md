@@ -39,6 +39,12 @@ workspace.
   They fail with `ChangeError::UnsupportedChangePool` when the account cannot
   receive the change in any shielded pool, or when transparent change is
   allowed and the account has no transparent receiver.
+- The change strategies in `zcash_client_backend::fees` fail with
+  `ChangeError::UnsupportedChangePool` for an ephemeral output (the first
+  transaction of a payment to a ZIP 320 TEX address) unless the account's
+  `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
+  P2PKH address derived from the account's transparent key. An account whose
+  transparent change is a P2SH output cannot pay a TEX address.
 
 ## [0.25.0-pre.2] - 2026-10-13
 

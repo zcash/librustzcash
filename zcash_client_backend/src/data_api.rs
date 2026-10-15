@@ -1582,10 +1582,7 @@ impl ChangeReceivers {
             PoolType::Shielded(ShieldedPool::Sapling) => self.sapling,
             PoolType::Shielded(ShieldedPool::Orchard | ShieldedPool::Ironwood) => self.orchard,
             #[cfg(feature = "transparent-inputs")]
-            PoolType::Transparent => match self.transparent {
-                Some(TransparentChangeKind::P2pkh | TransparentChangeKind::P2sh) => true,
-                None => false,
-            },
+            PoolType::Transparent => self.transparent.is_some(),
             #[cfg(not(feature = "transparent-inputs"))]
             PoolType::Transparent => false,
         }
