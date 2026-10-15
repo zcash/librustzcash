@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::UPGRADES_IN_ORDER`
+
 ### Changed
 - MSRV is now 1.89
 
