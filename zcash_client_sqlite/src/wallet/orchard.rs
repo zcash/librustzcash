@@ -437,13 +437,15 @@ pub(crate) fn ensure_address<
     }
 }
 
-pub(crate) fn select_unspent_note_meta(
+pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
+        params,
         ShieldedPool::Orchard,
         wallet_birthday,
         anchor_height,

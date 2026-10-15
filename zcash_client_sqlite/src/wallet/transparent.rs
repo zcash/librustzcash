@@ -41,8 +41,6 @@ use zcash_keys::{
         transparent::gap_limits::{GapLimits, generate_address_list},
     },
 };
-#[cfg(not(feature = "spend-index"))]
-use zcash_primitives::transaction::builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
 use zcash_primitives::transaction::fees::{
     FeeRule,
     transparent::{InputSize, InputView},
@@ -59,6 +57,11 @@ use zip32::Scope;
 use {
     bip32::{PublicKey, PublicKeyBytes},
     zcash_script::script::Code,
+};
+#[cfg(not(feature = "spend-index"))]
+use {
+    zcash_primitives::transaction::builder::default_tx_expiry_delta,
+    zcash_protocol::consensus::BranchId,
 };
 
 use super::{
@@ -1217,7 +1220,7 @@ fn to_unspent_transparent_output(
 /// # Usage requirements
 /// - The parent must provide `:target_height` as a named argument.
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
-pub(crate) fn spent_utxos_clause() -> String {
+pub(crate) fn spent_utxos_clause<P: consensus::Parameters>(params: &P) -> String {
     format!(
         r#"
         SELECT txo_spends.transparent_received_output_id
@@ -1225,7 +1228,7 @@ pub(crate) fn spent_utxos_clause() -> String {
         JOIN transactions stx ON stx.id_tx = txo_spends.transaction_id
         WHERE {}
         "#,
-        super::common::tx_unexpired_condition("stx")
+        super::common::tx_unexpired_condition(params, "stx")
     )
 }
 
@@ -1340,8 +1343,9 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
-pub(crate) fn get_wallet_transparent_output(
+pub(crate) fn get_wallet_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
 ) -> Result<Option<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
@@ -1371,8 +1375,8 @@ pub(crate) fn get_wallet_transparent_output(
                  AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
              )
          )",
-        tx_unexpired_condition("t"),
-        spent_utxos_clause(),
+        tx_unexpired_condition(params, "t"),
+        spent_utxos_clause(params),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
@@ -1405,7 +1409,8 @@ pub(crate) fn get_wallet_transparent_output(
 /// on a single address, a set of addresses, or an account; and can order by address+index
 /// (per-address determinism) or by value descending (value-bounded selection), optionally prefixed
 /// with a lock-tier preference key.
-fn spendable_transparent_outputs_query(
+fn spendable_transparent_outputs_query<P: consensus::Parameters>(
+    params: &P,
     address_predicate_sql: &str,
     lock_eligible_sql: &str,
     order_by_sql: &str,
@@ -1443,7 +1448,7 @@ fn spendable_transparent_outputs_query(
            -- key material exists with which a spend could be constructed
          ORDER BY {order_by_sql}",
         tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
+        spent_utxos_clause(params),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         excluding_immature_coinbase_outputs("t"),
         foreign_scope = KeyScope::Foreign.encode(),
@@ -1531,6 +1536,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     // This returns all matching outputs (no value target), so only the eligibility filter
     // (Part A) applies; no lock-tier ordering is imposed.
     let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        params,
         "addresses.cached_transparent_receiver_address IN rarray(:addresses)",
         &output_eligible_condition(lock_filter, "u"),
         "addresses.cached_transparent_receiver_address, u.output_index",
@@ -1647,6 +1653,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     // `:coinbase_filter`, so that there is a single query text regardless of whether an
     // allow list is present.
     let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        params,
         "accounts.uuid = :account_uuid
          AND (
              :has_address_allow_list = 0
@@ -1777,7 +1784,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
         tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
+        spent_utxos_clause(params),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
@@ -1837,7 +1844,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
              )
              AND u.id NOT IN ({}) -- and the output is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
-            spent_utxos_clause(),
+            spent_utxos_clause(params),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
         ))?;
 
@@ -1866,9 +1873,10 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     Ok(result)
 }
 
-#[tracing::instrument(skip(conn, account_balances))]
-pub(crate) fn add_transparent_account_balances(
+#[tracing::instrument(skip(conn, params, account_balances))]
+pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
@@ -1895,7 +1903,7 @@ pub(crate) fn add_transparent_account_balances(
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
          GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature",
         tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
+        spent_utxos_clause(params),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
@@ -1974,7 +1982,7 @@ pub(crate) fn add_transparent_account_balances(
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
              GROUP BY accounts.uuid, lock_expiry_height, is_coinbase",
-            spent_utxos_clause(),
+            spent_utxos_clause(params),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         ))?;
 
@@ -2163,8 +2171,15 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     gap_limits: &GapLimits,
     output: &WalletTransparentOutput<AccountUuid>,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
-    let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-    put_transparent_output(conn, params, gap_limits, output, observed_height, true)
+    let observed_height = mempool_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    put_transparent_output(
+        conn,
+        params,
+        gap_limits,
+        output,
+        BlockHeight::from(observed_height),
+        true,
+    )
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -2409,7 +2424,9 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                         .get::<_, Option<u32>>(1)?
                         .map(BlockHeight::from)
                         .unwrap_or(chain_tip_height);
-                    let max_end_height = block_range_start + BLOSSOM_DEFAULT_TX_EXPIRY_DELTA + 1;
+                    let max_end_height = block_range_start
+                        + default_tx_expiry_delta(BranchId::for_height(params, block_range_start))
+                        + 1;
                     Ok::<TransactionDataRequest, SqliteClientError>(
                         TransactionDataRequest::transactions_involving_address(
                             address,
@@ -3021,6 +3038,13 @@ mod tests {
     #[test]
     fn put_received_transparent_utxo() {
         zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn put_received_unmined_utxo_uses_mempool_height_expiry_delta() {
+        zcash_client_backend::data_api::testing::transparent::put_received_unmined_utxo_uses_mempool_height_expiry_delta(
             TestDbFactory::default(),
         );
     }
@@ -4689,7 +4713,10 @@ mod tests {
         };
         use zcash_keys::keys::UnifiedAddressRequest;
         use zcash_primitives::block::BlockHash;
-        use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+        use zcash_protocol::{
+            consensus::{self, BlockHeight},
+            value::Zatoshis,
+        };
 
         use crate::{
             AccountUuid,
@@ -4928,11 +4955,12 @@ mod tests {
         }
 
         /// The funding account the wallet reports for the scenario's transparent output.
-        fn reported_funding_account(
+        fn reported_funding_account<P: consensus::Parameters>(
             conn: &rusqlite::Connection,
+            params: &P,
             outpoint: &OutPoint,
         ) -> Option<AccountUuid> {
-            get_wallet_transparent_output(conn, outpoint, None)
+            get_wallet_transparent_output(conn, params, outpoint, None)
                 .unwrap()
                 .expect("the seeded transparent output is retrievable")
                 .funding_account()
@@ -4964,7 +4992,7 @@ mod tests {
             );
 
             assert_eq!(
-                reported_funding_account(&st.wallet().db().conn, &scenario.outpoint),
+                reported_funding_account(&st.wallet().db().conn, st.network(), &scenario.outpoint),
                 Some(scenario.account_a_uuid),
                 "the bug: an output funded entirely from Ironwood reports no funding account, \
                  because the funding-account query counts no Ironwood value",
@@ -5002,7 +5030,8 @@ mod tests {
                 MIXED_POOL_SAPLING_INPUT_ZATS,
             );
 
-            let reported = reported_funding_account(&st.wallet().db().conn, &scenario.outpoint);
+            let reported =
+                reported_funding_account(&st.wallet().db().conn, st.network(), &scenario.outpoint);
             assert_ne!(
                 reported,
                 Some(scenario.account_b_uuid),

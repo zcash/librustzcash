@@ -18,6 +18,18 @@ workspace.
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
+- `WalletDb::check_witnesses` now requires `P: consensus::Parameters`.
+- A transaction whose expiry height the wallet does not know is now assumed to
+  expire after the default expiry delta for the mempool height at which the wallet
+  first observed it (120 blocks from NU7 activation onward), instead of after 40
+  blocks. This determines when the wallet stops counting such a transaction's
+  spends, and how long it keeps requesting the transaction's status. Without the
+  `spend-index` feature, the block range that the wallet requests when it searches
+  for a spend of a non-ephemeral transparent output likewise uses the default
+  expiry delta for the range's start height.
+- `WalletWrite::put_received_transparent_utxo` now records an unmined output as
+  first observed at the mempool height (the block after the chain tip), instead
+  of at the chain tip.
 
 ## [0.23.0-pre.2] - 2026-10-13
 
