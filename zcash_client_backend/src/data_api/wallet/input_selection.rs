@@ -1083,9 +1083,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // which case input selection reports `InsufficientFunds`.
         pool_preference.retain(|pool| spend_policy.permits_shielded(*pool));
 
-        // This loop is guaranteed to terminate because on each iteration we check that the amount
-        // of funds selected is strictly increasing. The loop will either return a successful
-        // result or the wallet will eventually run out of funds to select.
+        // This loop is guaranteed to terminate because every iteration that continues makes
+        // progress of a kind that cannot repeat indefinitely: the change strategy names as dust
+        // a shielded note that was not excluded before, which can happen at most once per note;
+        // between such exclusions the value of the selected notes strictly increases over a
+        // finite set of notes; or the transparent inputs are re-gathered at a higher bound or
+        // pruned (both bounded, see below). The loop will either return a successful result or
+        // the wallet will eventually run out of funds to select.
         loop {
             #[cfg(not(feature = "orchard"))]
             let sapling_bundle_required = true;
@@ -1303,6 +1307,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let transparent_inputs_changed = false;
             #[cfg(feature = "transparent-inputs")]
             let mut transparent_inputs_changed = false;
+            // Tracks whether this iteration excluded a shielded note that was not excluded
+            // before. The next selection is made without that note and so may hold less value
+            // than this one, yet it has not been balanced, so this too is progress.
+            let mut shielded_dust_excluded = false;
 
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
@@ -1374,6 +1382,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     mut ironwood,
                     ..
                 }) => {
+                    shielded_dust_excluded = sapling.iter().any(|note| !exclude.contains(note));
+                    #[cfg(feature = "orchard")]
+                    {
+                        shielded_dust_excluded |= orchard
+                            .iter()
+                            .chain(ironwood.iter())
+                            .any(|note| !exclude.contains(note));
+                    }
                     exclude.append(&mut sapling);
                     #[cfg(feature = "orchard")]
                     exclude.append(&mut orchard);
@@ -1483,7 +1499,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             };
 
             let new_available = shielded_inputs.total_value()?;
-            if new_available <= prior_available && !transparent_inputs_changed {
+            if new_available <= prior_available
+                && !transparent_inputs_changed
+                && !shielded_dust_excluded
+            {
                 // `amount_required` was computed over the transparent inputs as well as the
                 // notes, so the value reported against it must count both.
                 let transparent_available = transparent_inputs
@@ -1497,9 +1516,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .ok_or(BalanceError::Overflow)?,
                 });
             } else {
-                // If the set of selected shielded notes has grown, or the transparent
-                // input set changed this iteration, we will loop again and see whether
-                // we now have enough funds.
+                // If the set of selected shielded notes has grown, the transparent input set
+                // changed, or a shielded dust note was newly excluded this iteration, we will
+                // loop again and see whether we now have enough funds.
                 prior_available = new_available;
             }
         }
