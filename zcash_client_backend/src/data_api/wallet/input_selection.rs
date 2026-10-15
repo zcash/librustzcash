@@ -1097,10 +1097,20 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // transparent input. Transparent re-gathers and prunes are bounded (see below). So the
         // loop either returns a successful result or the wallet runs out of funds to select.
         loop {
+            // `balance_input_value` is the value of the selected notes in the pools in use: the
+            // value the balance below is computed over, and the one the check at the bottom
+            // measures the next selection against.
             #[cfg(not(feature = "orchard"))]
             let sapling_bundle_required = true;
+            #[cfg(not(feature = "orchard"))]
+            let balance_input_value = shielded_inputs.total_value()?;
             #[cfg(feature = "orchard")]
-            let (sapling_bundle_required, orchard_bundle_required, ironwood_bundle_required) = {
+            let (
+                sapling_bundle_required,
+                orchard_bundle_required,
+                ironwood_bundle_required,
+                balance_input_value,
+            ) = {
                 // Trim the selected notes to the pools that are actually needed: the first
                 // pool (in `pool_preference` order) whose selected notes cover the required
                 // amount is spent alone; otherwise pools are accumulated in preference order
@@ -1118,11 +1128,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("all shielded pools are present in pool_values")
                 };
 
-                let use_pools: Vec<ShieldedPool> = if let Some(single) = pool_preference
+                let (use_pools, trimmed_value) = if let Some(single) = pool_preference
                     .iter()
                     .find(|p| value_of(**p) >= amount_required)
                 {
-                    vec![*single]
+                    (vec![*single], value_of(*single))
                 } else {
                     let mut running = Zatoshis::ZERO;
                     let mut used = vec![];
@@ -1134,13 +1144,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                         used.push(*pool);
                     }
-                    used
+                    (used, running)
                 };
 
                 (
                     use_pools.contains(&ShieldedPool::Sapling),
                     use_pools.contains(&ShieldedPool::Orchard),
                     use_pools.contains(&ShieldedPool::Ironwood),
+                    trimmed_value,
                 )
             };
 
@@ -1187,28 +1198,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 selected_input_ids.chain(ironwood_inputs.iter().map(|(id, _)| id));
 
             let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
-
-            // The value the balance below is computed over: the selected notes trimmed to the
-            // pools in use. Selection has made progress when it offers more than this, even if
-            // the set of selected notes did not grow: a larger requirement draws the pools
-            // trimmed away above into the next iteration.
-            #[cfg(not(feature = "orchard"))]
-            let balance_input_value = shielded_inputs.total_value()?;
-            #[cfg(feature = "orchard")]
-            let balance_input_value = {
-                let overflow = || GreedyInputSelectorError::Balance(BalanceError::Overflow);
-                let mut value = Zatoshis::ZERO;
-                if sapling_bundle_required {
-                    value = (value + shielded_inputs.sapling_value()?).ok_or_else(overflow)?;
-                }
-                if orchard_bundle_required {
-                    value = (value + shielded_inputs.orchard_value()?).ok_or_else(overflow)?;
-                }
-                if ironwood_bundle_required {
-                    value = (value + shielded_inputs.ironwood_value()?).ok_or_else(overflow)?;
-                }
-                value
-            };
 
             let wallet_meta = change_strategy
                 .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
