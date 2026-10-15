@@ -362,7 +362,10 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::fees::TransparentChangePolicy,
+        crate::{
+            data_api::TransparentChangeKind,
+            fees::{EphemeralBalance, TransparentChangePolicy},
+        },
         ::transparent::{address::TransparentAddress, bundle::OutPoint},
     };
 
@@ -390,7 +393,7 @@ mod tests {
     };
     use core::{convert::Infallible, num::NonZeroUsize};
     use zcash_protocol::{
-        ShieldedPool,
+        PoolType, ShieldedPool,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
     };
@@ -1805,6 +1808,211 @@ mod tests {
             Ok(balance) if
                 balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
                 balance.fee_required() == Zatoshis::const_from_u64(20000)
+        );
+    }
+
+    #[test]
+    fn shielded_change_requires_a_shielded_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        // An account with no shielded key cannot receive the change of a shielded spend.
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(55000),
+                }][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(
+                false,
+                false,
+                #[cfg(feature = "transparent-inputs")]
+                Some(TransparentChangeKind::P2pkh),
+            ),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::SAPLING
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_change_requires_a_transparent_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Transparent change is allowed, but the account has no transparent key.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(63000),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                ),
+            }],
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::TRANSPARENT
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_change_is_sized_by_its_kind() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Sixteen 32-byte P2SH payments make 512 bytes of outputs. A 32-byte P2SH change
+        // output brings this to 544 bytes, which is 16 logical actions of 34 bytes. A
+        // 34-byte P2PKH change output brings it to 546 bytes, which is 17 logical actions.
+        let payments = vec![
+            TxOut::new(
+                Zatoshis::const_from_u64(5000),
+                TransparentAddress::ScriptHash([0u8; 20]).script().into(),
+            );
+            16
+        ];
+        let balance = |kind| {
+            change_strategy.compute_balance::<_, Infallible>(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &[TestTransparentInput {
+                    outpoint: OutPoint::fake(),
+                    coin: TxOut::new(
+                        Zatoshis::const_from_u64(200000),
+                        TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                    ),
+                }],
+                &payments[..],
+                &sapling_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                &ChangeReceivers::new(false, false, Some(kind)),
+            )
+        };
+
+        assert_matches!(
+            balance(TransparentChangeKind::P2sh),
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(40000))] &&
+                balance.fee_required() == Zatoshis::const_from_u64(80000)
+        );
+        assert_matches!(
+            balance(TransparentChangeKind::P2pkh),
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(35000))] &&
+                balance.fee_required() == Zatoshis::const_from_u64(85000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn ephemeral_output_requires_a_p2pkh_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        // The first transaction of a ZIP 320 pair sends value to an ephemeral P2PKH
+        // address of the account. An account whose transparent key is a P2SH key has no
+        // such address.
+        let balance = |kind| {
+            change_strategy.compute_balance::<_, Infallible>(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &[TestTransparentInput {
+                    outpoint: OutPoint::fake(),
+                    coin: TxOut::new(
+                        Zatoshis::const_from_u64(100000),
+                        TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                    ),
+                }],
+                &[] as &[TxOut],
+                &sapling_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                Some(EphemeralBalance::Output(Zatoshis::const_from_u64(50000))),
+                &ChangeReceivers::new(true, false, Some(kind)),
+            )
+        };
+
+        assert_matches!(
+            balance(TransparentChangeKind::P2sh),
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::TRANSPARENT
+        );
+        assert_matches!(
+            balance(TransparentChangeKind::P2pkh),
+            Ok(balance) if balance.proposed_change().iter().any(|c| c.is_ephemeral())
         );
     }
 }
