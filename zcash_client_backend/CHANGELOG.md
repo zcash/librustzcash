@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
+- MSRV is now 1.89
+- `zcash_client_backend::tor::Client::{create, create_with_timeouts}` now install
+  the `ring` provider as the process-level `rustls` `CryptoProvider` when the
+  application has not installed one.
+
 ## [0.25.0-pre.2] - 2026-10-13
 
 ### Changed

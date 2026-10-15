@@ -24,7 +24,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 categories = ["cryptography::cryptocurrencies"]
@@ -155,8 +155,8 @@ subtle = { version = "2.2.3", default-features = false }
 #   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
 #   version required for `rusqlite` is a version that is available through CocoaPods.
 rusqlite = { version = "0.37", features = ["bundled"] }
-schemerz = "0.2"
-schemerz-rusqlite = "0.370"
+schemerz = "0.3"
+schemerz-rusqlite = "0.371"
 time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
@@ -167,7 +167,7 @@ static_assertions = "1"
 ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
-proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
+proptest = "1.12"
 rand_chacha = "0.10"
 rand_xorshift = "0.5"
 incrementalmerkletree-testing = "0.4"
@@ -175,16 +175,16 @@ incrementalmerkletree-testing = "0.4"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.35", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.43", default-features = false, features = ["compression", "rustls", "tokio"] }
 dynosaur = "0.3"
-fs-mistrust = "0.12"
+fs-mistrust = "0.14"
 tokio = "1"
-tor-rtcompat = "0.35"
+tor-rtcompat = "0.43"
 tower = "0.5"
 trait-variant = "0.1"
 
 # ZIP 32
-bip0039 = { version = "0.12" }
+bip0039 = { version = "0.14" }
 zip32 = { version = "0.3", default-features = false }
 
 # ZeWIF wallet interchange
