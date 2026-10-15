@@ -36,7 +36,6 @@ use {
     ReceiverRequirement::*,
     transparent::keys::TransparentKeyScope,
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
-    zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
 
@@ -45,6 +44,11 @@ use {
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xc41dfc0e_e870_4859_be47_d2f572f5ca73);
 
 pub(super) const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
+
+/// The default transaction expiry delta, in blocks, that the wallet used when this migration was
+/// written. It is pinned so that the migration's effect does not change with later defaults.
+#[cfg(feature = "transparent-inputs")]
+const PRE_NU7_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 pub(super) struct Migration<P, C, R> {
     pub(super) params: P,
@@ -354,7 +358,7 @@ impl<P: consensus::Parameters, C: Clock, R: Rng> RusqliteMigration for Migration
             )?;
             let rows = ea_query
                 .query_and_then(
-                    named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA },
+                    named_params! {":expiry_delta": PRE_NU7_DEFAULT_TX_EXPIRY_DELTA },
                     |row| {
                         let account_id = AccountRef(row.get("account_id")?);
                         let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
