@@ -412,7 +412,7 @@ where
 
 /// Overwrites `headers`'s `Host` value with `host`.
 ///
-/// Uses [`HeaderMap::insert`], which replaces any existing values, rather than
+/// Uses [`hyper::HeaderMap::insert`], which replaces any existing values, rather than
 /// [`Builder::header`] (used for every other header on the request), which only appends.
 /// This is what lets [`make_http_request`] enforce that `Host` matches the circuit and TLS
 /// connection even if a caller's request-construction closure also set it.
