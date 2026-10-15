@@ -1048,7 +1048,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut transparent_dust: BTreeSet<OutPoint> = BTreeSet::new();
 
         let mut shielded_inputs = ReceivedNotes::empty();
-        let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
@@ -1083,14 +1082,26 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // which case input selection reports `InsufficientFunds`.
         pool_preference.retain(|pool| spend_policy.permits_shielded(*pool));
 
-        // This loop is guaranteed to terminate because on each iteration we check that the amount
-        // of funds selected is strictly increasing. The loop will either return a successful
-        // result or the wallet will eventually run out of funds to select.
+        // Every pass that continues advances a bounded measure: after `InsufficientFunds` the
+        // value of the selection trimmed to the pools in use grows, since the requirement
+        // exceeded it; after `DustInputs` a note is newly excluded or a transparent input
+        // pruned; and transparent inputs are re-gathered only at a higher bound. The arms
+        // return when the change strategy reports none of these.
         loop {
+            // `balance_input_value` is the value of the selected notes in the pools in use: the
+            // value the balance below is computed over, and the one the check at the bottom
+            // measures the next selection against.
             #[cfg(not(feature = "orchard"))]
             let sapling_bundle_required = true;
+            #[cfg(not(feature = "orchard"))]
+            let balance_input_value = shielded_inputs.total_value()?;
             #[cfg(feature = "orchard")]
-            let (sapling_bundle_required, orchard_bundle_required, ironwood_bundle_required) = {
+            let (
+                sapling_bundle_required,
+                orchard_bundle_required,
+                ironwood_bundle_required,
+                balance_input_value,
+            ) = {
                 // Trim the selected notes to the pools that are actually needed: the first
                 // pool (in `pool_preference` order) whose selected notes cover the required
                 // amount is spent alone; otherwise pools are accumulated in preference order
@@ -1108,11 +1119,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("all shielded pools are present in pool_values")
                 };
 
-                let use_pools: Vec<ShieldedPool> = if let Some(single) = pool_preference
+                let (use_pools, trimmed_value) = if let Some(single) = pool_preference
                     .iter()
                     .find(|p| value_of(**p) >= amount_required)
                 {
-                    vec![*single]
+                    (vec![*single], value_of(*single))
                 } else {
                     let mut running = Zatoshis::ZERO;
                     let mut used = vec![];
@@ -1124,13 +1135,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                         used.push(*pool);
                     }
-                    used
+                    (used, running)
                 };
 
                 (
                     use_pools.contains(&ShieldedPool::Sapling),
                     use_pools.contains(&ShieldedPool::Orchard),
                     use_pools.contains(&ShieldedPool::Ironwood),
+                    trimmed_value,
                 )
             };
 
@@ -1291,7 +1303,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // set, either by re-gathering with a corrected value bound (`InsufficientFunds`)
             // or by pruning dust (`DustInputs`). A changed transparent input set is a valid
             // form of progress in its own right (distinct from the shielded-note progress
-            // tracked by `prior_available`/`new_available` below): without this, an account
+            // tracked by `balance_input_value`/`new_available` below): without this, an account
             // with no spendable shielded notes at all (or none beyond what's already
             // excluded) would spuriously report `InsufficientFunds` on the very next check
             // below, even though the changed transparent input set might already be
@@ -1374,6 +1386,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     mut ironwood,
                     ..
                 }) => {
+                    // A note already in `exclude` was not given, so naming it again removes
+                    // nothing from the next selection.
+                    let newly_named = sapling.iter().any(|note| !exclude.contains(note));
+                    #[cfg(feature = "orchard")]
+                    let newly_named = newly_named
+                        || orchard
+                            .iter()
+                            .chain(ironwood.iter())
+                            .any(|note| !exclude.contains(note));
                     exclude.append(&mut sapling);
                     #[cfg(feature = "orchard")]
                     exclude.append(&mut orchard);
@@ -1391,8 +1412,24 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             transparent_inputs_changed = true;
                         }
                     }
+                    // With nothing newly excluded or pruned, the next selection would be the
+                    // one just balanced.
+                    if !newly_named && !transparent_inputs_changed {
+                        return Err(InputSelectorError::InsufficientFunds {
+                            required: amount_required,
+                            available: available_value(balance_input_value, &transparent_inputs)?,
+                        });
+                    }
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
+                    // A requirement the inputs already cover cannot be met by selecting more.
+                    let available = available_value(balance_input_value, &transparent_inputs)?;
+                    if required <= available {
+                        return Err(InputSelectorError::InsufficientFunds {
+                            required,
+                            available,
+                        });
+                    }
                     amount_required = required;
                     // The initial transparent-input gather was bounded by the payouts
                     // alone, but `required` includes the fee. If the bound was too
@@ -1482,28 +1519,31 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     .map_err(InputSelectorError::DataSource)?,
             };
 
+            // Loop again only when selection offers more value than the balance above was
+            // computed over, or the transparent input set changed this iteration.
             let new_available = shielded_inputs.total_value()?;
-            if new_available <= prior_available && !transparent_inputs_changed {
-                // `amount_required` was computed over the transparent inputs as well as the
-                // notes, so the value reported against it must count both.
-                let transparent_available = transparent_inputs
-                    .iter()
-                    .map(|input| input.value())
-                    .sum::<Option<Zatoshis>>()
-                    .ok_or(BalanceError::Overflow)?;
+            if new_available <= balance_input_value && !transparent_inputs_changed {
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
-                    available: (new_available + transparent_available)
-                        .ok_or(BalanceError::Overflow)?,
+                    available: available_value(new_available, &transparent_inputs)?,
                 });
-            } else {
-                // If the set of selected shielded notes has grown, or the transparent
-                // input set changed this iteration, we will loop again and see whether
-                // we now have enough funds.
-                prior_available = new_available;
             }
         }
     }
+}
+
+/// Returns the value input selection reports as available: the shielded value a balance was
+/// computed over plus the transparent inputs it was given.
+fn available_value<AccountId>(
+    shielded: Zatoshis,
+    transparent_inputs: &[WalletTransparentOutput<AccountId>],
+) -> Result<Zatoshis, BalanceError> {
+    let transparent = transparent_inputs
+        .iter()
+        .map(|input| input.value())
+        .sum::<Option<Zatoshis>>()
+        .ok_or(BalanceError::Overflow)?;
+    (shielded + transparent).ok_or(BalanceError::Overflow)
 }
 
 /// Returns the shielded pools from which the greedy input selector may spend at the
@@ -2625,6 +2665,434 @@ mod spend_policy_tests {
         assert_eq!(
             policy.locked_input_policy(),
             &LockedInputPolicy::PreferLocked(owners)
+        );
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod termination_tests {
+    use std::cell::Cell;
+
+    use ::orchard::{
+        keys::{FullViewingKey, SpendingKey},
+        note::{NoteVersion, RandomSeed, Rho},
+    };
+    use ::sapling::{PaymentAddress, Rseed, zip32::ExtendedSpendingKey};
+    use incrementalmerkletree::Position;
+    use zcash_primitives::transaction::fees::{
+        transparent as transparent_fees,
+        zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
+    };
+    use zcash_protocol::{
+        TxId,
+        consensus::{Network, NetworkUpgrade, Parameters},
+    };
+    use zip321::Payment;
+
+    use super::*;
+    use crate::{
+        data_api::{AccountMeta, NoteFilter, anchor_retention::AnchorRetentionInterval},
+        fees::{
+            DustOutputPolicy, MetaSource, orchard::InputView as _, sapling::InputView as _,
+            zip317::SingleOutputChangeStrategy,
+        },
+        wallet::{Note, ReceivedNote},
+    };
+
+    /// The payment the tests propose. The Sapling note covers it alone, with change under the
+    /// ZIP 317 dust threshold, so a standard change strategy draws on the Orchard note as well.
+    const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(47_000);
+    /// The value of the Sapling note, which covers the payment alone.
+    const SAPLING_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(60_000);
+    /// The value of the Orchard note, which does not cover the payment alone.
+    const ORCHARD_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(20_000);
+
+    const SAPLING_NOTE_ID: u32 = 0;
+    const ORCHARD_NOTE_ID: u32 = 1;
+    /// The account the fixture serves; it holds both notes.
+    const ACCOUNT: u32 = 0;
+    /// More selections than any of these tests makes before the selector stops; a run that
+    /// reaches it is looping over the same selection.
+    const SELECTION_LIMIT: usize = 4;
+
+    fn sapling_address() -> PaymentAddress {
+        ExtendedSpendingKey::master(&[])
+            .expect("the master key derived from the empty seed is valid")
+            .default_address()
+            .1
+    }
+
+    fn sapling_note() -> ReceivedNote<u32, ::sapling::Note> {
+        ReceivedNote::from_parts(
+            SAPLING_NOTE_ID,
+            TxId::from_bytes([0; 32]),
+            0,
+            ::sapling::Note::from_parts(
+                sapling_address(),
+                ::sapling::value::NoteValue::from_raw(SAPLING_NOTE_VALUE.into_u64()),
+                Rseed::AfterZip212([0; 32]),
+            ),
+            zip32::Scope::External,
+            Position::from(0),
+            None,
+            None,
+        )
+    }
+
+    fn orchard_note() -> ReceivedNote<u32, ::orchard::Note> {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32]))
+            .expect("the bytes are a valid Orchard spending key");
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let rho = Option::from(Rho::from_bytes(&[0; 32])).expect("the bytes are a canonical rho");
+        let rseed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho))
+            .expect("the bytes are a valid random seed");
+        let note = Option::from(::orchard::Note::from_parts(
+            recipient,
+            ::orchard::value::NoteValue::from_raw(ORCHARD_NOTE_VALUE.into_u64()),
+            rho,
+            rseed,
+            NoteVersion::V2,
+        ))
+        .expect("the parts form a valid Orchard note");
+        ReceivedNote::from_parts(
+            ORCHARD_NOTE_ID,
+            TxId::from_bytes([0; 32]),
+            0,
+            note,
+            zip32::Scope::External,
+            Position::from(0),
+            None,
+            None,
+        )
+    }
+
+    /// The fixture ran out of selections, which means the selector did not stop.
+    #[derive(Debug)]
+    struct SelectionLimitReached;
+
+    /// An `InputSource` holding one Sapling and one Orchard note. Selection takes the notes in
+    /// the order listed, within the pools asked for, until the target value is reached. The
+    /// Orchard note is listed first, so a selection that reaches the Sapling note holds both,
+    /// as a source that orders notes by value returns them.
+    struct TwoPoolNotes {
+        orchard: ReceivedNote<u32, ::orchard::Note>,
+        sapling: ReceivedNote<u32, ::sapling::Note>,
+        selections: Cell<usize>,
+    }
+
+    impl TwoPoolNotes {
+        fn new() -> Self {
+            Self {
+                orchard: orchard_note(),
+                sapling: sapling_note(),
+                selections: Cell::new(0),
+            }
+        }
+    }
+
+    impl InputSource for TwoPoolNotes {
+        type Error = SelectionLimitReached;
+        type AccountId = u32;
+        type NoteRef = u32;
+
+        fn get_spendable_note(
+            &self,
+            _txid: &TxId,
+            _protocol: ShieldedPool,
+            _index: u32,
+            _target_height: TargetHeight,
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+            unreachable!("proposing a transfer does not look up notes by outpoint")
+        }
+
+        fn anchor_computable(
+            &self,
+            _protocol: ShieldedPool,
+            _height: BlockHeight,
+        ) -> Result<bool, Self::Error> {
+            unreachable!("proposing a transfer does not check the anchor")
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            target_value: TargetValue,
+            sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            let selections = self.selections.get() + 1;
+            if selections > SELECTION_LIMIT {
+                return Err(SelectionLimitReached);
+            }
+            self.selections.set(selections);
+
+            let TargetValue::AtLeast(target) = target_value else {
+                unreachable!("the greedy selector always asks for a lower bound")
+            };
+            let notes_in_selection_order = [
+                (ShieldedPool::Orchard, ORCHARD_NOTE_ID, ORCHARD_NOTE_VALUE),
+                (ShieldedPool::Sapling, SAPLING_NOTE_ID, SAPLING_NOTE_VALUE),
+            ];
+            let mut selected_value = Zatoshis::ZERO;
+            let mut selected_ids = vec![];
+            for (pool, note_id, value) in notes_in_selection_order {
+                if selected_value >= target {
+                    break;
+                }
+                if !sources.contains(&pool) || exclude.contains(&note_id) {
+                    continue;
+                }
+                selected_value = (selected_value + value).expect("no overflow");
+                selected_ids.push(note_id);
+            }
+            let sapling = selected_ids
+                .contains(&SAPLING_NOTE_ID)
+                .then(|| self.sapling.clone());
+            let orchard = selected_ids
+                .contains(&ORCHARD_NOTE_ID)
+                .then(|| self.orchard.clone());
+            Ok(ReceivedNotes::new(
+                sapling.into_iter().collect(),
+                orchard.into_iter().collect(),
+                vec![],
+            ))
+        }
+
+        fn select_unspent_notes(
+            &self,
+            _account: Self::AccountId,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            unreachable!("proposing a transfer does not list every unspent note")
+        }
+
+        fn get_account_metadata(
+            &self,
+            _account: Self::AccountId,
+            _selector: &NoteFilter,
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<AccountMeta, Self::Error> {
+            unreachable!("the change strategies of these tests need no account metadata")
+        }
+    }
+
+    /// The total value of the shielded inputs a change strategy was given.
+    fn given_value<NoteRefT>(
+        sapling: &impl sapling::BundleView<NoteRefT>,
+        orchard: &impl orchard_fees::BundleView<NoteRefT>,
+        ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+    ) -> Zatoshis {
+        let sapling = sapling.inputs().iter().map(|input| input.value());
+        let orchard = orchard.inputs().iter().map(|input| input.value());
+        let ironwood = ironwood.inputs().iter().map(|input| input.value());
+        sapling
+            .chain(orchard)
+            .chain(ironwood)
+            .sum::<Option<Zatoshis>>()
+            .expect("no overflow")
+    }
+
+    /// A change strategy that reports the payment as its requirement whatever it is given, as
+    /// one that forgot the fee would: once the inputs cover the payment, the requirement no
+    /// longer exceeds them.
+    struct FeeBlindStrategy {
+        fee_rule: Zip317FeeRule,
+    }
+
+    impl ChangeStrategy for FeeBlindStrategy {
+        type FeeRule = Zip317FeeRule;
+        type Error = Zip317FeeError;
+        type MetaSource = TwoPoolNotes;
+        type AccountMetaT = ();
+
+        fn fee_rule(&self) -> &Self::FeeRule {
+            &self.fee_rule
+        }
+
+        fn fetch_wallet_meta(
+            &self,
+            _meta_source: &Self::MetaSource,
+            _account: <Self::MetaSource as MetaSource>::AccountId,
+            _target_height: TargetHeight,
+            _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
+        ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
+            Ok(())
+        }
+
+        fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
+            &self,
+            _params: &P,
+            _target_height: TargetHeight,
+            _anchor_height: BlockHeight,
+            _zip318: &PoolMigrationParams,
+            _transparent_inputs: &[impl transparent_fees::InputView],
+            _transparent_outputs: &[impl transparent_fees::OutputView],
+            sapling: &impl sapling::BundleView<NoteRefT>,
+            orchard: &impl orchard_fees::BundleView<NoteRefT>,
+            ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+            _ephemeral_balance: Option<EphemeralBalance>,
+            _wallet_meta: &Self::AccountMetaT,
+        ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+            Err(ChangeError::InsufficientFunds {
+                available: given_value(sapling, orchard, ironwood),
+                required: PAYMENT_VALUE,
+            })
+        }
+    }
+
+    /// A change strategy that reports the payment as its requirement when given nothing, and a
+    /// `DustInputs` error naming no input otherwise.
+    struct EmptyDustInputsStrategy {
+        fee_rule: Zip317FeeRule,
+    }
+
+    impl ChangeStrategy for EmptyDustInputsStrategy {
+        type FeeRule = Zip317FeeRule;
+        type Error = Zip317FeeError;
+        type MetaSource = TwoPoolNotes;
+        type AccountMetaT = ();
+
+        fn fee_rule(&self) -> &Self::FeeRule {
+            &self.fee_rule
+        }
+
+        fn fetch_wallet_meta(
+            &self,
+            _meta_source: &Self::MetaSource,
+            _account: <Self::MetaSource as MetaSource>::AccountId,
+            _target_height: TargetHeight,
+            _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
+        ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
+            Ok(())
+        }
+
+        fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
+            &self,
+            _params: &P,
+            _target_height: TargetHeight,
+            _anchor_height: BlockHeight,
+            _zip318: &PoolMigrationParams,
+            _transparent_inputs: &[impl transparent_fees::InputView],
+            _transparent_outputs: &[impl transparent_fees::OutputView],
+            sapling: &impl sapling::BundleView<NoteRefT>,
+            orchard: &impl orchard_fees::BundleView<NoteRefT>,
+            ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+            _ephemeral_balance: Option<EphemeralBalance>,
+            _wallet_meta: &Self::AccountMetaT,
+        ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+            let given = given_value(sapling, orchard, ironwood);
+            if given == Zatoshis::ZERO {
+                Err(ChangeError::InsufficientFunds {
+                    available: given,
+                    required: PAYMENT_VALUE,
+                })
+            } else {
+                Err(ChangeError::DustInputs {
+                    transparent: vec![],
+                    sapling: vec![],
+                    orchard: vec![],
+                    ironwood: vec![],
+                })
+            }
+        }
+    }
+
+    /// Proposes the payment to a Sapling address from `wallet` with `change_strategy`, returning
+    /// the ids of the notes spent, or `(available, required)` when input selection reports
+    /// insufficient funds.
+    fn propose_payment<S>(
+        wallet: &TwoPoolNotes,
+        change_strategy: &S,
+    ) -> Result<Vec<u32>, (Zatoshis, Zatoshis)>
+    where
+        S: ChangeStrategy<MetaSource = TwoPoolNotes>,
+        S::Error: Debug,
+    {
+        let params = Network::TestNetwork;
+        let anchor_height = params
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("NU5 is active on testnet");
+        let recipient = Address::from(sapling_address()).to_zcash_address(&params);
+        let request =
+            TransactionRequest::new(vec![Payment::without_memo(recipient, PAYMENT_VALUE)])
+                .expect("a single payment is a valid request");
+
+        GreedyInputSelector::new()
+            .propose_transaction(
+                &params,
+                wallet,
+                TargetHeight::from(anchor_height + 1),
+                anchor_height,
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                ConfirmationsPolicy::default(),
+                ACCOUNT,
+                request,
+                change_strategy,
+                &SpendPolicy::default(),
+                None,
+            )
+            .map(|proposal| {
+                proposal
+                    .steps()
+                    .iter()
+                    .flat_map(|step| step.shielded_inputs())
+                    .flat_map(|inputs| inputs.notes().iter().map(|n| *n.internal_note_id()))
+                    .collect()
+            })
+            .map_err(|e| match e {
+                InputSelectorError::InsufficientFunds {
+                    available,
+                    required,
+                } => (available, required),
+                other => panic!("unexpected input selection error: {other:?}"),
+            })
+    }
+
+    #[test]
+    fn a_standard_strategy_spends_both_notes_at_a_dust_shortfall() {
+        let change_strategy = SingleOutputChangeStrategy::<_, TwoPoolNotes>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        assert_eq!(
+            propose_payment(&TwoPoolNotes::new(), &change_strategy),
+            Ok(vec![SAPLING_NOTE_ID, ORCHARD_NOTE_ID])
+        );
+    }
+
+    #[test]
+    fn a_requirement_the_inputs_cover_reports_insufficient_funds() {
+        let change_strategy = FeeBlindStrategy {
+            fee_rule: Zip317FeeRule::standard(),
+        };
+
+        assert_eq!(
+            propose_payment(&TwoPoolNotes::new(), &change_strategy),
+            Err((SAPLING_NOTE_VALUE, PAYMENT_VALUE))
+        );
+    }
+
+    #[test]
+    fn dust_inputs_naming_nothing_reports_insufficient_funds() {
+        let change_strategy = EmptyDustInputsStrategy {
+            fee_rule: Zip317FeeRule::standard(),
+        };
+
+        assert_eq!(
+            propose_payment(&TwoPoolNotes::new(), &change_strategy),
+            Err((SAPLING_NOTE_VALUE, PAYMENT_VALUE))
         );
     }
 }
