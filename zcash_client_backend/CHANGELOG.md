@@ -17,6 +17,13 @@ workspace.
   the `ring` provider as the process-level `rustls` `CryptoProvider` when the
   application has not installed one.
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  no longer returns `InsufficientFunds` when the change strategy reports a
+  selected shielded note as dust and the notes selected without it can fund the
+  transaction. Previously it reported insufficient funds, with `available`
+  above `required`.
+
 ## [0.25.0-pre.2] - 2026-10-13
 
 ### Changed
