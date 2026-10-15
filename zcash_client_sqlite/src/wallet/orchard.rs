@@ -930,6 +930,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn account_rename() {
+        testing::pool::account_rename::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             OrchardPoolTester,

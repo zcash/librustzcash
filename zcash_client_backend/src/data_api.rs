@@ -3754,6 +3754,22 @@ pub trait WalletWrite:
         account: <Self as WalletRead>::AccountId,
     ) -> Result<(), <Self as WalletRead>::Error>;
 
+    /// Sets the human-readable name of the specified account, replacing any existing name.
+    ///
+    /// Only the account's name is changed; its keys, birthday, and all other wallet state are
+    /// left unchanged. The new name is subsequently returned by [`Account::name`].
+    ///
+    /// Account names carry no uniqueness guarantee: the wallet does not reject a name that is
+    /// already used by another account. Applications that require distinct names must enforce
+    /// that themselves.
+    ///
+    /// Returns an error if the specified account is not known to the wallet.
+    fn set_account_name(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error>;
+
     /// Imports the given transparent address into the account as a watch-only address, without
     /// any associated key material.
     ///
