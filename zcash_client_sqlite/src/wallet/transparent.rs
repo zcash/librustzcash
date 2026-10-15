@@ -42,7 +42,7 @@ use zcash_keys::{
     },
 };
 #[cfg(not(feature = "spend-index"))]
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::builder::default_tx_expiry_delta;
 use zcash_primitives::transaction::fees::{
     FeeRule,
     transparent::{InputSize, InputView},
@@ -2316,6 +2316,20 @@ pub(crate) fn mark_transparent_addresses_exposed<P: consensus::Parameters>(
     Ok(())
 }
 
+/// Returns the exclusive end of the block range searched, without a spend index, for the spend of
+/// a transparent output when the search starts at `block_range_start`: the block after the
+/// default expiry height of a transaction targeting `block_range_start` (see
+/// [`default_tx_expiry_delta`]), or the block after `chain_tip_height` if that is lower.
+#[cfg(not(feature = "spend-index"))]
+fn spend_search_range_end<P: consensus::Parameters>(
+    params: &P,
+    block_range_start: BlockHeight,
+    chain_tip_height: BlockHeight,
+) -> BlockHeight {
+    let max_end_height = block_range_start + default_tx_expiry_delta(params, block_range_start) + 1;
+    std::cmp::min(chain_tip_height + 1, max_end_height)
+}
+
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
 ///
@@ -2415,12 +2429,15 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                         .get::<_, Option<u32>>(1)?
                         .map(BlockHeight::from)
                         .unwrap_or(chain_tip_height);
-                    let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
                     Ok::<TransactionDataRequest, SqliteClientError>(
                         TransactionDataRequest::transactions_involving_address(
                             address,
                             block_range_start,
-                            Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
+                            Some(spend_search_range_end(
+                                params,
+                                block_range_start,
+                                chain_tip_height,
+                            )),
                             None,
                             TransactionStatusFilter::Mined,
                             OutputStatusFilter::All,
@@ -3022,6 +3039,13 @@ mod tests {
         std::collections::HashSet,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+    };
+    #[cfg(not(feature = "spend-index"))]
+    use {
+        zcash_primitives::transaction::builder::{
+            DEFAULT_TX_EXPIRY_DELTA, POST_NU7_DEFAULT_TX_EXPIRY_DELTA,
+        },
+        zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork},
     };
 
     #[test]
@@ -4186,6 +4210,38 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
+    }
+
+    /// Without a spend index, the search for the spend of a transparent output covers the
+    /// default expiry delta at the start of the search range, and never extends past the block
+    /// after the chain tip.
+    #[test]
+    #[cfg(not(feature = "spend-index"))]
+    fn spend_search_range_end_follows_the_default_expiry_delta() {
+        /// The NU7 activation height of the test network.
+        const NU7_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+        /// A chain tip far enough above every range start below not to cap the range.
+        const DISTANT_TIP: BlockHeight = BlockHeight::from_u32(300_000);
+        let network = LocalNetwork {
+            nu7: Some(NU7_ACTIVATION),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let pre_nu7_start = NU7_ACTIVATION - 1;
+        assert_eq!(
+            super::spend_search_range_end(&network, pre_nu7_start, DISTANT_TIP),
+            pre_nu7_start + DEFAULT_TX_EXPIRY_DELTA + 1
+        );
+        assert_eq!(
+            super::spend_search_range_end(&network, NU7_ACTIVATION, DISTANT_TIP),
+            NU7_ACTIVATION + POST_NU7_DEFAULT_TX_EXPIRY_DELTA + 1
+        );
+
+        let near_tip = NU7_ACTIVATION + DEFAULT_TX_EXPIRY_DELTA;
+        assert_eq!(
+            super::spend_search_range_end(&network, NU7_ACTIVATION, near_tip),
+            near_tip + 1
+        );
     }
 
     /// Importing a standalone (`Foreign`) receiver whose address is already present as a derived

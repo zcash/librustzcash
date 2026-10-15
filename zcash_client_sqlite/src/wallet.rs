@@ -127,7 +127,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::{HashSer, read_commitment_tree},
-    transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
+    transaction::{Transaction, TransactionData, fees::zip317},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool, TxId,
@@ -4006,9 +4006,24 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     Ok(tx_ref)
 }
 
+/// Generates a parenthesized SQL expression for the chain height at which the wallet stops
+/// querying the status of the unmined transaction `tx` whose expiry height it does not know: the
+/// expiry height guessed for it (see [`common::tx_unexpired_condition`]) plus [`PRUNING_DEPTH`]
+/// blocks.
+///
+/// # Usage requirements
+/// - `tx` must be set to the SQL variable name for the transaction in the parent.
+fn unknown_expiry_status_horizon<P: consensus::Parameters>(params: &P, tx: &str) -> String {
+    let min_observed_height = format!("{tx}.min_observed_height");
+    format!(
+        "({min_observed_height} + {} + {PRUNING_DEPTH})",
+        common::default_tx_expiry_delta_expr(params, &min_observed_height),
+    )
+}
+
 pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
-    _params: &P,
+    params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     txid: TxId,
     status: TransactionStatus,
@@ -4033,31 +4048,32 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
             // confirmed to be terminal.
             delete_retrieval_queue_entry(conn, txid, TxQueryType::Enhancement)?;
             conn.execute(
-                "DELETE FROM tx_retrieval_queue
-                 WHERE txid = :txid
-                 AND query_type = :status_type
-                 AND NOT EXISTS (
-                    SELECT 1
-                    FROM transactions t
-                    WHERE t.txid = :txid
-                    AND t.mined_height IS NULL
-                    AND (
-                        t.expiry_height = 0
-                        OR (
-                            t.expiry_height > 0
-                            AND t.confirmed_unmined_at_height < t.expiry_height
+                &format!(
+                    "DELETE FROM tx_retrieval_queue
+                     WHERE txid = :txid
+                     AND query_type = :status_type
+                     AND NOT EXISTS (
+                        SELECT 1
+                        FROM transactions t
+                        WHERE t.txid = :txid
+                        AND t.mined_height IS NULL
+                        AND (
+                            t.expiry_height = 0
+                            OR (
+                                t.expiry_height > 0
+                                AND t.confirmed_unmined_at_height < t.expiry_height
+                            )
+                            OR (
+                                t.expiry_height IS NULL
+                                AND t.confirmed_unmined_at_height < {}
+                            )
                         )
-                        OR (
-                            t.expiry_height IS NULL
-                            AND t.confirmed_unmined_at_height
-                                < t.min_observed_height + :certainty_depth
-                        )
-                    )
-                 )",
+                     )",
+                    unknown_expiry_status_horizon(params, "t"),
+                ),
                 named_params![
                     ":txid": txid.as_ref(),
                     ":status_type": TxQueryType::Status.code(),
-                    ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA,
                 ],
             )?;
         }
@@ -4094,7 +4110,7 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
             )?;
 
             #[cfg(feature = "transparent-inputs")]
-            transparent::update_gap_limits(conn, _params, gap_limits, txid, height)?;
+            transparent::update_gap_limits(conn, params, gap_limits, txid, height)?;
 
             delete_retrieval_queue_entry(conn, txid, TxQueryType::Enhancement)?;
         }
@@ -5525,10 +5541,11 @@ pub(crate) fn queue_tx_status(
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
-pub(crate) fn transaction_data_requests(
+pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    let mut tx_retrieval_stmt = conn.prepare_cached(
+    let mut tx_retrieval_stmt = conn.prepare_cached(&format!(
         "SELECT q.txid, q.query_type
          FROM tx_retrieval_queue q
          LEFT JOIN transactions t ON t.txid = q.txid
@@ -5545,19 +5562,18 @@ pub(crate) fn transaction_data_requests(
                 )
                 OR (
                     t.expiry_height IS NULL
-                    AND t.confirmed_unmined_at_height
-                        < t.min_observed_height + :certainty_depth
+                    AND t.confirmed_unmined_at_height < {}
                 )
             )
          )",
-    )?;
+        unknown_expiry_status_horizon(params, "t"),
+    ))?;
 
     let result = tx_retrieval_stmt
         .query_and_then(
             named_params![
                 ":status_type": TxQueryType::Status.code(),
                 ":enhancement_type": TxQueryType::Enhancement.code(),
-                ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA
             ],
             |row| {
                 let txid = row.get(0).map(TxId::from_bytes)?;
@@ -6320,17 +6336,21 @@ mod tests {
         wallet::OvkPolicy,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
-    use zcash_primitives::block::BlockHash;
+    use zcash_primitives::{
+        block::BlockHash,
+        transaction::builder::{DEFAULT_TX_EXPIRY_DELTA, POST_NU7_DEFAULT_TX_EXPIRY_DELTA},
+    };
     use zcash_protocol::{
         TxId,
         consensus::{BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters},
+        local_consensus::LocalNetwork,
         value::{ZatBalance, Zatoshis},
         zip318::{Zip318Classification, Zip318TxKind},
     };
     use zip321::{Payment, TransactionRequest};
 
     use crate::{
-        AccountUuid,
+        AccountUuid, PRUNING_DEPTH,
         error::SqliteClientError,
         testing::{BlockCache, db::TestDbFactory},
     };
@@ -6348,7 +6368,6 @@ mod tests {
         crate::testing::db::TestDb, ::orchard::tree::MerkleHashOrchard,
         incrementalmerkletree::Hashable as _, shardtree::error::ShardTreeError,
         zcash_client_backend::data_api::WalletCommitmentTrees,
-        zcash_protocol::local_consensus::LocalNetwork,
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
@@ -6789,6 +6808,188 @@ mod tests {
         let requests = st.wallet().transaction_data_requests().unwrap();
         assert!(requests.contains(&TransactionDataRequest::GetStatus(unexpired_txid)));
         assert!(requests.contains(&TransactionDataRequest::Enhancement(unexpired_txid)));
+    }
+
+    /// The wallet keeps querying the status of an unmined transaction whose expiry height it does
+    /// not know until the chain is [`PRUNING_DEPTH`] blocks past the expiry height guessed from
+    /// the default expiry delta at the height at which it first observed the transaction.
+    #[test]
+    fn unknown_expiry_status_queries_follow_the_default_expiry_delta() {
+        /// The NU7 activation height of the test network.
+        const NU7_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+        /// Txid of a transaction first observed in the block before NU7 activation.
+        const PRE_NU7_TXID: TxId = TxId::from_bytes([1; 32]);
+        /// Txid of a transaction first observed at NU7 activation.
+        const POST_NU7_TXID: TxId = TxId::from_bytes([2; 32]);
+
+        // Only the NU7 activation height affects the expiry heuristics under test.
+        let network = LocalNetwork {
+            nu7: Some(NU7_ACTIVATION),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let pre_nu7_observed = NU7_ACTIVATION - 1;
+        let post_nu7_observed = NU7_ACTIVATION;
+        for (txid, min_observed_height) in [
+            (PRE_NU7_TXID, pre_nu7_observed),
+            (POST_NU7_TXID, post_nu7_observed),
+        ] {
+            st.wallet()
+                .conn()
+                .execute(
+                    "INSERT INTO transactions (txid, min_observed_height)
+                     VALUES (:txid, :min_observed_height)",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":min_observed_height": u32::from(min_observed_height),
+                    ],
+                )
+                .unwrap();
+            st.wallet()
+                .conn()
+                .execute(
+                    "INSERT INTO tx_retrieval_queue (txid, query_type)
+                     VALUES (:txid, :query_type)",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":query_type": TxQueryType::Status.code(),
+                    ],
+                )
+                .unwrap();
+        }
+
+        // Advances the chain tip, reports both transactions as not in the main chain there, and
+        // returns whether the wallet still requests the status of each.
+        let mut status_requested_at = |tip: BlockHeight| -> [bool; 2] {
+            st.wallet_mut().update_chain_tip(tip).unwrap();
+            for txid in [PRE_NU7_TXID, POST_NU7_TXID] {
+                st.wallet_mut()
+                    .set_transaction_status(txid, TransactionStatus::NotInMainChain)
+                    .unwrap();
+            }
+            let requests = st.wallet().transaction_data_requests().unwrap();
+            [PRE_NU7_TXID, POST_NU7_TXID]
+                .map(|txid| requests.contains(&TransactionDataRequest::GetStatus(txid)))
+        };
+
+        let pre_nu7_horizon = pre_nu7_observed + DEFAULT_TX_EXPIRY_DELTA + PRUNING_DEPTH;
+        let post_nu7_horizon = post_nu7_observed + POST_NU7_DEFAULT_TX_EXPIRY_DELTA + PRUNING_DEPTH;
+
+        assert_eq!(status_requested_at(pre_nu7_horizon - 1), [true, true]);
+        // The transaction first observed before NU7 activation keeps the pre-NU7 horizon.
+        assert_eq!(status_requested_at(pre_nu7_horizon), [false, true]);
+        // Where the pre-NU7 guess would stop, the wallet keeps querying the other transaction.
+        assert_eq!(
+            status_requested_at(post_nu7_observed + DEFAULT_TX_EXPIRY_DELTA + PRUNING_DEPTH),
+            [false, true]
+        );
+        assert_eq!(status_requested_at(post_nu7_horizon - 1), [false, true]);
+        assert_eq!(status_requested_at(post_nu7_horizon), [false, false]);
+    }
+
+    /// The writes of [`WalletWrite::set_transaction_status`] roll back with the enclosing
+    /// database transaction when it fails.
+    #[test]
+    fn set_transaction_status_rolls_back_on_error() {
+        /// The NU7 activation height of the test network.
+        const NU7_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+        /// Txid of an unmined transaction of unknown expiry height, first observed at NU7
+        /// activation.
+        const TXID: TxId = TxId::from_bytes([1; 32]);
+
+        let network = LocalNetwork {
+            nu7: Some(NU7_ACTIVATION),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        // This chain tip is the transaction's status-query horizon, so each of the three writes
+        // of `set_transaction_status` changes a row: it sets the transaction's
+        // `confirmed_unmined_at_height` to the tip, and deletes its queued enhancement and status
+        // requests.
+        let status_horizon = NU7_ACTIVATION + POST_NU7_DEFAULT_TX_EXPIRY_DELTA + PRUNING_DEPTH;
+        st.wallet_mut().update_chain_tip(status_horizon).unwrap();
+        st.wallet()
+            .conn()
+            .execute(
+                "INSERT INTO transactions (txid, min_observed_height)
+                 VALUES (:txid, :min_observed_height)",
+                named_params![
+                    ":txid": TXID.as_ref(),
+                    ":min_observed_height": u32::from(NU7_ACTIVATION),
+                ],
+            )
+            .unwrap();
+        let queued_query_types = [TxQueryType::Status, TxQueryType::Enhancement];
+        for query_type in &queued_query_types {
+            st.wallet()
+                .conn()
+                .execute(
+                    "INSERT INTO tx_retrieval_queue (txid, query_type)
+                     VALUES (:txid, :query_type)",
+                    named_params![
+                        ":txid": TXID.as_ref(),
+                        ":query_type": query_type.code(),
+                    ],
+                )
+                .unwrap();
+        }
+
+        // Returns the number of rows queued in `tx_retrieval_queue` for the transaction.
+        let queued_requests = |conn: &Connection| -> usize {
+            conn.query_row(
+                "SELECT COUNT(*) FROM tx_retrieval_queue WHERE txid = :txid",
+                named_params![":txid": TXID.as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        // Returns the height at which the transaction was confirmed to be unmined, if any.
+        let confirmed_unmined_at_height = |conn: &Connection| -> Option<u32> {
+            conn.query_row(
+                "SELECT confirmed_unmined_at_height FROM transactions WHERE txid = :txid",
+                named_params![":txid": TXID.as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let queued_before = queued_requests(st.wallet().conn());
+        assert_eq!(queued_before, queued_query_types.len());
+        let requests_before = st.wallet().transaction_data_requests().unwrap();
+        assert!(requests_before.contains(&TransactionDataRequest::GetStatus(TXID)));
+        assert!(requests_before.contains(&TransactionDataRequest::Enhancement(TXID)));
+
+        let result: Result<(), SqliteClientError> =
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                WalletWrite::set_transaction_status(wdb, TXID, TransactionStatus::NotInMainChain)?;
+                // All three writes took effect within the transaction.
+                assert_eq!(queued_requests(wdb.conn.0), 0);
+                assert_eq!(
+                    confirmed_unmined_at_height(wdb.conn.0),
+                    Some(u32::from(status_horizon))
+                );
+                assert!(wdb.transaction_data_requests()?.is_empty());
+                // Fail after the writes; everything in this transaction must roll back.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+
+        // None of the writes persisted: both requests are still queued, and the transaction is
+        // still not confirmed to be unmined at any height.
+        assert_eq!(queued_requests(st.wallet().conn()), queued_before);
+        assert_eq!(
+            st.wallet().transaction_data_requests().unwrap(),
+            requests_before
+        );
+        assert_eq!(confirmed_unmined_at_height(st.wallet().conn()), None);
     }
 
     /// Returns a minimal serialized v1 transparent coinbase-style transaction: one input
