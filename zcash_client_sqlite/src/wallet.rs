@@ -2728,8 +2728,10 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         })
         .collect::<Result<HashMap<AccountUuid, AccountBalance>, _>>()?;
 
-    fn with_pool_balances<F>(
+    #[allow(clippy::too_many_arguments)]
+    fn with_pool_balances<P: consensus::Parameters, F>(
         tx: &rusqlite::Transaction,
+        params: &P,
         target_height: TargetHeight,
         anchor_height: Option<BlockHeight>,
         confirmations_policy: ConfirmationsPolicy,
@@ -2804,8 +2806,8 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
              WHERE ({}) -- the transaction is unexpired
              AND rn.id NOT IN ({}) -- and the received note is unspent
              GROUP BY rn.id",
-            common::tx_unexpired_condition("t"),
-            common::spent_notes_clause(table_prefix),
+            common::tx_unexpired_condition(params, "t"),
+            common::spent_notes_clause(params, table_prefix),
         ))?;
 
         let mut rows = stmt_select_notes.query(named_params![
@@ -2930,6 +2932,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let orchard_trace = tracing::info_span!("orchard_balances").entered();
         with_pool_balances(
             tx,
+            params,
             target_height,
             anchor_height,
             confirmations_policy,
@@ -2959,6 +2962,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let ironwood_trace = tracing::info_span!("ironwood_balances").entered();
         with_pool_balances(
             tx,
+            params,
             target_height,
             anchor_height,
             confirmations_policy,
@@ -2986,6 +2990,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
     with_pool_balances(
         tx,
+        params,
         target_height,
         anchor_height,
         confirmations_policy,
@@ -3012,6 +3017,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")]
     transparent::add_transparent_account_balances(
         tx,
+        params,
         target_height,
         confirmations_policy,
         &mut account_balances,

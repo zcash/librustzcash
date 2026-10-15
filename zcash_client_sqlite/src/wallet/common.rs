@@ -12,10 +12,14 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
+use zcash_primitives::transaction::{
+    TxId,
+    builder::{DEFAULT_TX_EXPIRY_DELTA, POST_NU7_DEFAULT_TX_EXPIRY_DELTA},
+    fees::zip317,
+};
 use zcash_protocol::{
     PoolType, ShieldedPool,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, NetworkUpgrade},
     value::{BalanceError, Zatoshis},
 };
 
@@ -97,6 +101,26 @@ pub(crate) fn table_constants<E: ErrUnsupportedPool>(
     }
 }
 
+/// Generates an SQL expression for the default expiry delta, in blocks, of a transaction
+/// targeting the block height given by the SQL expression `height`, as
+/// [`default_tx_expiry_delta`] computes it.
+///
+/// The NU7 activation height of `params` is embedded in the expression as an integer literal.
+///
+/// [`default_tx_expiry_delta`]: zcash_primitives::transaction::builder::default_tx_expiry_delta
+pub(crate) fn default_tx_expiry_delta_expr<P: consensus::Parameters>(
+    params: &P,
+    height: &str,
+) -> String {
+    match params.activation_height(NetworkUpgrade::Nu7) {
+        Some(nu7_activation) => format!(
+            "(CASE WHEN {height} >= {} THEN {POST_NU7_DEFAULT_TX_EXPIRY_DELTA} ELSE {DEFAULT_TX_EXPIRY_DELTA} END)",
+            u32::from(nu7_activation),
+        ),
+        None => DEFAULT_TX_EXPIRY_DELTA.to_string(),
+    }
+}
+
 /// Generates an SQL condition that a transaction is unexpired.
 ///
 /// # Usage requirements
@@ -104,14 +128,18 @@ pub(crate) fn table_constants<E: ErrUnsupportedPool>(
 /// - The parent must provide `:target_height` as a named argument.
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
 ///
-/// If the wallet doesn't know an actual mined height or expiry height for a transaction, it will
-/// be treated as unexpired _only_ if we just observed it in the last DEFAULT_TX_EXPIRY_DELTA
-/// blocks, guessing that the wallet creating the transaction used the same expiry delta as our
-/// default. If our guess is wrong (and the wallet used a larger expiry delta or disabled expiry),
-/// then the transaction will be treated as unexpired when it shouldn't be for as long as it takes
-/// this wallet to either observe the transaction being mined, or enhance it to learn its expiry
-/// height.
-pub(crate) fn tx_unexpired_condition(tx: &str) -> String {
+/// If the wallet knows neither a mined height nor an expiry height for a transaction, it guesses
+/// that the transaction's creator used the default expiry delta ([`default_tx_expiry_delta`]) at
+/// the height at which this wallet first observed the transaction, and treats the transaction as
+/// unexpired only up to that guessed expiry height. If the guess is wrong, the transaction is
+/// misclassified until this wallet observes it being mined or enhances it to learn its expiry
+/// height: a creator that used a larger expiry delta (or disabled expiry) leaves it treated as
+/// expired while it can still be mined, and one that used a smaller delta leaves it treated as
+/// unexpired after it has expired.
+///
+/// [`default_tx_expiry_delta`]: zcash_primitives::transaction::builder::default_tx_expiry_delta
+pub(crate) fn tx_unexpired_condition<P: consensus::Parameters>(params: &P, tx: &str) -> String {
+    let expiry_delta = default_tx_expiry_delta_expr(params, &format!("{tx}.min_observed_height"));
     format!(
         r#"
         {tx}.mined_height < :target_height  -- the transaction is mined
@@ -119,7 +147,7 @@ pub(crate) fn tx_unexpired_condition(tx: &str) -> String {
         OR {tx}.expiry_height >= :target_height  -- the tx is unexpired
         OR (
             {tx}.expiry_height IS NULL -- the expiry height is unknown
-            AND {tx}.min_observed_height + {DEFAULT_TX_EXPIRY_DELTA} >= :target_height
+            AND {tx}.min_observed_height + {expiry_delta} >= :target_height
         )
         "#
     )
@@ -132,7 +160,10 @@ pub(crate) fn tx_unexpired_condition(tx: &str) -> String {
 ///   query is being performed.
 /// - The parent must provide `:target_height` as a named argument.
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
-pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
+pub(crate) fn spent_notes_clause<P: consensus::Parameters>(
+    params: &P,
+    table_prefix: &str,
+) -> String {
     format!(
         r#"
         SELECT rns.{table_prefix}_received_note_id
@@ -140,7 +171,7 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
         JOIN transactions stx ON stx.id_tx = rns.transaction_id
         WHERE {}
         "#,
-        tx_unexpired_condition("stx")
+        tx_unexpired_condition(params, "stx")
     )
 }
 
@@ -285,7 +316,7 @@ where
              AND rn.id NOT IN ({}) -- the note is unspent
              AND ({}) -- the note is eligible under the lock filter
              GROUP BY rn.id",
-            spent_notes_clause(table_prefix),
+            spent_notes_clause(params, table_prefix),
             output_eligible_condition(lock_filter, "rn"),
         ),
         &sql_params[..],
@@ -509,8 +540,8 @@ where
          AND rn.id NOT IN ({})  -- the note is unspent
          AND ({}) -- the note is eligible under the lock filter
          GROUP BY rn.id",
-        tx_unexpired_condition("t"),
-        spent_notes_clause(table_prefix),
+        tx_unexpired_condition(params, "t"),
+        spent_notes_clause(params, table_prefix),
         output_eligible_condition(lock_filter, "rn")
     ))?;
 
@@ -789,7 +820,7 @@ where
              GROUP BY rn.id
          )
          {selection_tail}",
-        spent_notes_clause(table_prefix),
+        spent_notes_clause(params, table_prefix),
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -910,8 +941,9 @@ impl UnspentNoteMeta {
     }
 }
 
-pub(crate) fn select_unspent_note_meta(
+pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     protocol: ShieldedPool,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
@@ -946,7 +978,7 @@ pub(crate) fn select_unspent_note_meta(
             -- exclude unscanned ranges that end below the wallet birthday
             AND unscanned.block_range_end > :wallet_birthday
          )",
-         spent_notes_clause(table_prefix)
+         spent_notes_clause(params, table_prefix)
     ))?;
 
     let res = stmt
@@ -972,8 +1004,10 @@ pub(crate) fn select_unspent_note_meta(
     Ok(res)
 }
 
-pub(crate) fn unspent_notes_meta(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn unspent_notes_meta<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     protocol: ShieldedPool,
     target_height: TargetHeight,
     account: AccountUuid,
@@ -1030,7 +1064,7 @@ pub(crate) fn unspent_notes_meta(
                  AND rn.id NOT IN rarray(:exclude)
                  AND rn.id NOT IN ({}) -- the note is unspent
                  AND ({eligible_condition}) -- the note is eligible under the lock filter",
-                spent_notes_clause(table_prefix),
+                spent_notes_clause(params, table_prefix),
             ),
             &sql_params[..],
             |row| {
@@ -1044,8 +1078,9 @@ pub(crate) fn unspent_notes_meta(
 
     // Evaluates the provided note filter conditions against the wallet database in order to
     // determine the minimum value of notes to be produced by note splitting.
-    fn min_note_value(
+    fn min_note_value<P: consensus::Parameters>(
         conn: &rusqlite::Connection,
+        params: &P,
         account: AccountUuid,
         filter: &NoteFilter,
         target_height: TargetHeight,
@@ -1106,7 +1141,7 @@ pub(crate) fn unspent_notes_meta(
                             JOIN transactions stx ON stx.id_tx = rns.transaction_id
                             WHERE ({})  -- the spending transaction is unexpired
                          )",
-                        tx_unexpired_condition("stx")
+                        tx_unexpired_condition(params, "stx")
                     ),
                     named_params![
                         ":account_uuid": account.0,
@@ -1127,8 +1162,8 @@ pub(crate) fn unspent_notes_meta(
             NoteFilter::Combine(a, b) => {
                 // All the existing note selectors set lower bounds on note value, so the "and"
                 // operation is just taking the maximum of the two lower bounds.
-                let a_min_value = min_note_value(conn, account, a.as_ref(), target_height)?;
-                let b_min_value = min_note_value(conn, account, b.as_ref(), target_height)?;
+                let a_min_value = min_note_value(conn, params, account, a.as_ref(), target_height)?;
+                let b_min_value = min_note_value(conn, params, account, b.as_ref(), target_height)?;
                 Ok(a_min_value
                     .zip(b_min_value)
                     .map(|(av, bv)| std::cmp::max(av, bv))
@@ -1139,9 +1174,10 @@ pub(crate) fn unspent_notes_meta(
                 condition,
                 fallback,
             } => {
-                let cond = min_note_value(conn, account, condition.as_ref(), target_height)?;
+                let cond =
+                    min_note_value(conn, params, account, condition.as_ref(), target_height)?;
                 if cond.is_none() {
-                    min_note_value(conn, account, fallback, target_height)
+                    min_note_value(conn, params, account, fallback, target_height)
                 } else {
                     Ok(cond)
                 }
@@ -1151,7 +1187,7 @@ pub(crate) fn unspent_notes_meta(
 
     // TODO: Simplify the query before executing it. Not worrying about this now because queries
     // will be developer-configured, not end-user defined.
-    if let Some(min_value) = min_note_value(conn, account, filter, target_height)? {
+    if let Some(min_value) = min_note_value(conn, params, account, filter, target_height)? {
         let (note_count, total_value) = run_selection(min_value)?;
 
         Ok(Some(PoolMeta::new(
@@ -1165,13 +1201,33 @@ pub(crate) fn unspent_notes_meta(
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::{Connection, named_params};
     use zcash_client_backend::data_api::testing::{
         AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
-    use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedPool, value::Zatoshis};
+    use zcash_primitives::{
+        block::BlockHash,
+        transaction::builder::{
+            DEFAULT_TX_EXPIRY_DELTA, POST_NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
+        },
+    };
+    use zcash_protocol::{
+        ShieldedPool, TxId, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+    };
 
     use crate::testing::{BlockCache, db::TestDbFactory};
+
+    /// The NU7 activation height of [`nu7_network`].
+    const NU7_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+
+    /// The default test network with NU7 activating at [`NU7_ACTIVATION`]. Only the NU7
+    /// activation height affects the expiry heuristics under test.
+    fn nu7_network() -> LocalNetwork {
+        LocalNetwork {
+            nu7: Some(NU7_ACTIVATION),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    }
 
     #[test]
     fn select_unspent_note_meta() {
@@ -1192,6 +1248,7 @@ mod tests {
 
         let unspent_note_meta = super::select_unspent_note_meta(
             st.wallet().conn(),
+            st.network(),
             ShieldedPool::Sapling,
             birthday_height,
             h,
@@ -1199,5 +1256,125 @@ mod tests {
         .unwrap();
 
         assert_eq!(unspent_note_meta.len(), 1);
+    }
+
+    #[test]
+    fn default_tx_expiry_delta_expr_matches_default_tx_expiry_delta() {
+        let conn = Connection::open_in_memory().unwrap();
+        let without_nu7 = LocalNetwork {
+            nu7: None,
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        for network in [nu7_network(), without_nu7] {
+            for height in [
+                BlockHeight::from_u32(0),
+                NU7_ACTIVATION - 1,
+                NU7_ACTIVATION,
+                NU7_ACTIVATION + 1,
+                BlockHeight::from_u32(u32::MAX),
+            ] {
+                let expr =
+                    super::default_tx_expiry_delta_expr(&network, &u32::from(height).to_string());
+                let from_sql = conn
+                    .query_row(&format!("SELECT {expr}"), [], |row| row.get::<_, u32>(0))
+                    .unwrap();
+                assert_eq!(
+                    from_sql,
+                    default_tx_expiry_delta(&network, height),
+                    "height {height}, network {network:?}"
+                );
+            }
+        }
+    }
+
+    /// An unmined transaction whose expiry height the wallet does not know is treated as
+    /// unexpired up to the default expiry delta at the height at which the wallet first observed
+    /// it.
+    #[test]
+    fn unknown_expiry_tx_is_unexpired_for_the_default_delta_at_first_observation() {
+        /// A target-height offset past the pre-NU7 default expiry delta but within the post-NU7
+        /// one.
+        const BETWEEN_DEFAULT_DELTAS: u32 = 100;
+        const _: () = assert!(
+            DEFAULT_TX_EXPIRY_DELTA < BETWEEN_DEFAULT_DELTAS
+                && BETWEEN_DEFAULT_DELTAS <= POST_NU7_DEFAULT_TX_EXPIRY_DELTA
+        );
+        /// Txid of a transaction first observed in the block before NU7 activation.
+        const PRE_NU7_TXID: TxId = TxId::from_bytes([1; 32]);
+        /// Txid of a transaction first observed at NU7 activation.
+        const POST_NU7_TXID: TxId = TxId::from_bytes([2; 32]);
+
+        let network = nu7_network();
+        let st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let conn = st.wallet().conn();
+
+        let pre_nu7_observed = NU7_ACTIVATION - 1;
+        let post_nu7_observed = NU7_ACTIVATION;
+        for (txid, min_observed_height) in [
+            (PRE_NU7_TXID, pre_nu7_observed),
+            (POST_NU7_TXID, post_nu7_observed),
+        ] {
+            conn.execute(
+                "INSERT INTO transactions (txid, min_observed_height)
+                 VALUES (:txid, :min_observed_height)",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":min_observed_height": u32::from(min_observed_height),
+                ],
+            )
+            .unwrap();
+        }
+
+        let is_unexpired = |txid: TxId, target_height: BlockHeight| -> bool {
+            conn.query_row(
+                &format!(
+                    "SELECT EXISTS (
+                         SELECT 1 FROM transactions t
+                         WHERE t.txid = :txid
+                         AND ({})
+                     )",
+                    super::tx_unexpired_condition(&network, "t"),
+                ),
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":target_height": u32::from(target_height),
+                ],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        };
+
+        // First observed before NU7 activation: the pre-NU7 delta applies, even at target
+        // heights past NU7 activation.
+        assert!(is_unexpired(
+            PRE_NU7_TXID,
+            pre_nu7_observed + DEFAULT_TX_EXPIRY_DELTA
+        ));
+        assert!(!is_unexpired(
+            PRE_NU7_TXID,
+            pre_nu7_observed + DEFAULT_TX_EXPIRY_DELTA + 1
+        ));
+
+        // First observed at NU7 activation: the post-NU7 delta applies, so the transaction is
+        // still unexpired where the pre-NU7 guess expired it.
+        assert!(is_unexpired(
+            POST_NU7_TXID,
+            post_nu7_observed + DEFAULT_TX_EXPIRY_DELTA + 1
+        ));
+        assert!(is_unexpired(
+            POST_NU7_TXID,
+            post_nu7_observed + BETWEEN_DEFAULT_DELTAS
+        ));
+        assert!(is_unexpired(
+            POST_NU7_TXID,
+            post_nu7_observed + POST_NU7_DEFAULT_TX_EXPIRY_DELTA
+        ));
+        assert!(!is_unexpired(
+            POST_NU7_TXID,
+            post_nu7_observed + POST_NU7_DEFAULT_TX_EXPIRY_DELTA + 1
+        ));
     }
 }

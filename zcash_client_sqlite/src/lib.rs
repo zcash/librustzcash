@@ -774,10 +774,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// rescanned in order to correct missing witness data.
     ///
     /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
-    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError>
+    where
+        P: consensus::Parameters,
+    {
         self.transactionally(|wdb| {
             if let Some(anchor_height) = chain_tip_height(wdb.conn.0)? {
-                wallet::commitment_tree::check_witnesses(wdb.conn.0, anchor_height)
+                wallet::commitment_tree::check_witnesses(wdb.conn.0, wdb.params, anchor_height)
             } else {
                 Ok(vec![])
             }
@@ -1112,6 +1115,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             Some(target_height),
         )
@@ -1203,6 +1207,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Sapling,
             target_height,
             account_id,
@@ -1214,6 +1219,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Orchard,
             target_height,
             account_id,
@@ -1227,6 +1233,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let ironwood_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Ironwood,
             target_height,
             account_id,
@@ -1754,6 +1761,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     > {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             target_height,
         )
@@ -2843,6 +2851,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             target_height,
         )

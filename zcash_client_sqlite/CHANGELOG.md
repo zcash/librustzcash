@@ -18,6 +18,16 @@ workspace.
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
+- `zcash_client_sqlite::WalletDb::check_witnesses` now requires
+  `P: zcash_protocol::consensus::Parameters`.
+- For an unmined transaction whose expiry height it does not know, the wallet
+  now assumes the default expiry delta at the height at which it first observed
+  the transaction (see
+  `zcash_primitives::transaction::builder::default_tx_expiry_delta`): 120 blocks
+  if that height is at or after NU7 activation, and 40 blocks otherwise.
+  Previously it always assumed 40 blocks. This determines whether such a
+  transaction's spends and outputs count toward wallet balances and note and
+  UTXO selection.
 
 ## [0.23.0-pre.2] - 2026-10-13
 
