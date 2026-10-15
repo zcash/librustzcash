@@ -860,35 +860,37 @@ impl PositionTracker {
         #[cfg(feature = "orchard")]
         assert_eq!(self.ironwood_tree_position, self.ironwood_final_tree_size);
 
-        if let Some(chain_meta) = chain_metadata {
-            if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedPool::Sapling,
-                    at_height,
-                    given: chain_meta.sapling_commitment_tree_size,
-                    computed: self.sapling_tree_position,
-                });
-            }
+        let Some(chain_meta) = chain_metadata else {
+            return Ok(());
+        };
 
-            #[cfg(feature = "orchard")]
-            if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedPool::Orchard,
-                    at_height,
-                    given: chain_meta.orchard_commitment_tree_size,
-                    computed: self.orchard_tree_position,
-                });
-            }
+        if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Sapling,
+                at_height,
+                given: chain_meta.sapling_commitment_tree_size,
+                computed: self.sapling_tree_position,
+            });
+        }
 
-            #[cfg(feature = "orchard")]
-            if chain_meta.ironwood_commitment_tree_size != self.ironwood_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedPool::Ironwood,
-                    at_height,
-                    given: chain_meta.ironwood_commitment_tree_size,
-                    computed: self.ironwood_tree_position,
-                });
-            }
+        #[cfg(feature = "orchard")]
+        if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Orchard,
+                at_height,
+                given: chain_meta.orchard_commitment_tree_size,
+                computed: self.orchard_tree_position,
+            });
+        }
+
+        #[cfg(feature = "orchard")]
+        if chain_meta.ironwood_commitment_tree_size != self.ironwood_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Ironwood,
+                at_height,
+                given: chain_meta.ironwood_commitment_tree_size,
+                computed: self.ironwood_tree_position,
+            });
         }
 
         Ok(())
