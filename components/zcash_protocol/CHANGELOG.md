@@ -10,8 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::{PRE_BLOSSOM_POW_TARGET_SPACING,
+  POST_BLOSSOM_POW_TARGET_SPACING, POST_NU7_POW_TARGET_SPACING,
+  NU7_POW_TARGET_SPACING_RATIO}`
+- `zcash_protocol::consensus::{pow_target_spacing, target_time_between}`
+
 ### Changed
 - MSRV is now 1.89
+
+### Deprecated
+- `zcash_protocol::consensus::{SECONDS_PER_BLOCK, BLOCKS_PER_HOUR}`. The target
+  block spacing depends on the block height; use
+  `zcash_protocol::consensus::pow_target_spacing` or
+  `zcash_protocol::consensus::target_time_between` instead.
 
 ## [0.11.0-pre.1] - 2026-10-13
 
