@@ -267,9 +267,10 @@ mod tests {
     /// The canonical rolling-window expiry for a transaction scheduled at the build height, as the
     /// engine embeds it.
     fn test_expiry() -> u32 {
-        u32::from(crate::scheduling::expiry_height(BlockHeight::from_u32(
-            TARGET_HEIGHT,
-        )))
+        u32::from(crate::scheduling::expiry_height(
+            &crate::scheduling::BlockSpacing::UNIFORM,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+        ))
     }
 
     /// The number of Orchard actions in the built transaction.

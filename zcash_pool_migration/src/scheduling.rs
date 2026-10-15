@@ -90,18 +90,13 @@ use zcash_protocol::consensus::BlockHeight;
 /// See [`draw_anchor_boundary`] for how a boundary is chosen from this grid.
 pub use zcash_protocol::zip318::AnchorBucketInterval;
 
-/// [`AnchorBucketInterval::boundary_at_or_below`] on the raw `u32` representation, for the boundary
-/// arithmetic below. The public API is `BlockHeight`-typed; the scheduling arithmetic works in `u32`
-/// spans, so it converts once here rather than at every call site.
-fn boundary_at_or_below_u32(interval: &AnchorBucketInterval, height: u32) -> u32 {
-    u32::from(interval.boundary_at_or_below(BlockHeight::from_u32(height)))
-}
-
-/// [`AnchorBucketInterval::boundary_at_or_above`] on the raw `u32` representation. See
-/// [`boundary_at_or_below_u32`].
-fn boundary_at_or_above_u32(interval: &AnchorBucketInterval, height: u32) -> u32 {
-    u32::from(interval.boundary_at_or_above(BlockHeight::from_u32(height)))
-}
+/// The boundaries of an [`AnchorBucketInterval`] on a chain, and the block spacing that converts
+/// [ZIP 318] durations into block counts.
+///
+/// Re-exported from [`zcash_protocol::zip318`].
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub use zcash_protocol::zip318::{AnchorGrid, BlockSpacing};
 
 // There is no conversion in either direction, because there is nothing to convert: the wallet's
 // retention interval and a migration's bucket interval are one type. The wallet remains the
@@ -522,10 +517,12 @@ fn gen_index<R: Rng>(rng: &mut R, bound: usize) -> usize {
 
 /// The cumulative-heights core shared by [`schedule_broadcast_heights`] and
 /// [`schedule_prep_broadcast_heights`]: starting at `start`, advance a running height by an
-/// independently drawn delay for each of the `n` entries. The returned vector has length `n`, is
+/// independently drawn delay, in reference blocks converted by `spacing`, for each of the `n`
+/// entries. The returned vector has length `n`, is
 /// non-decreasing, and every entry is `>= start`; heights saturate at `u32::MAX` rather than
 /// overflowing (`BlockHeight`'s delta addition saturates).
 fn cumulative_broadcast_heights<R: Rng>(
+    spacing: &BlockSpacing,
     start: BlockHeight,
     n: usize,
     draw: impl Fn(&mut R) -> u32,
@@ -534,7 +531,7 @@ fn cumulative_broadcast_heights<R: Rng>(
     let mut heights = Vec::with_capacity(n);
     let mut height = start;
     for _ in 0..n {
-        height = height + draw(rng);
+        height = spacing.advance(height, draw(rng));
         heights.push(height);
     }
     heights
@@ -542,33 +539,44 @@ fn cumulative_broadcast_heights<R: Rng>(
 
 /// Compute the per-part scheduled broadcast heights: starting at `commit_height`, advance a running
 /// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
-/// (ZIP 318 CUMULATIVE MUST). The returned vector has length `n_parts`, is non-decreasing, and every
-/// entry is `>= commit_height`. Heights saturate at `u32::MAX` rather than overflowing.
+/// (ZIP 318 CUMULATIVE MUST). Each delay is a number of reference blocks, which `spacing` converts
+/// into blocks, so the schedule spans the same time on either side of NU7 activation. The returned
+/// vector has length `n_parts`, is non-decreasing, and every entry is `>= commit_height`. Heights
+/// saturate at `u32::MAX` rather than overflowing.
 pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
+    spacing: &BlockSpacing,
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
 ) -> Vec<BlockHeight> {
     let delay = params.transfer_delay();
-    cumulative_broadcast_heights(commit_height, n_parts, |rng| delay.draw_inner(rng), rng)
+    cumulative_broadcast_heights(
+        spacing,
+        commit_height,
+        n_parts,
+        |rng| delay.draw_inner(rng),
+        rng,
+    )
 }
 
 /// Compute per-transaction scheduled broadcast heights for one PREPARATION layer: starting at
-/// `start`, advance a running height by an independently drawn `params.preparation_delay()` for
-/// each of the `n_txs` transactions. The returned vector has length `n_txs`, is non-decreasing, and
+/// `start`, advance a running height by an independently drawn `params.preparation_delay()`, in
+/// reference blocks converted by `spacing`, for each of the `n_txs` transactions. The returned
+/// vector has length `n_txs`, is non-decreasing, and
 /// every entry is `>= start`; heights saturate at `u32::MAX`. The caller (the engine) bases each
 /// later layer's `start` past the previous layer's last scheduled height plus a mining margin, so
 /// layers stay serialized while the transactions within and across layers remain temporally
 /// decoupled.
 pub fn schedule_prep_broadcast_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
+    spacing: &BlockSpacing,
     start: BlockHeight,
     n_txs: usize,
     rng: &mut R,
 ) -> Vec<BlockHeight> {
     let delay = params.preparation_delay();
-    cumulative_broadcast_heights(start, n_txs, |rng| delay.draw_inner(rng), rng)
+    cumulative_broadcast_heights(spacing, start, n_txs, |rng| delay.draw_inner(rng), rng)
 }
 
 /// The canonical rolling EXPIRY height for a transfer at `current_height` (ZIP 318 EXPIRY MUST):
@@ -721,19 +729,21 @@ pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
 }
 
 /// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
-/// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`]. Returns
-/// one [`Schedule`] per part, in the (already shuffled) part order the caller passes.
+/// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`], both on
+/// a chain with the given `spacing`. Returns one [`Schedule`] per part, in the (already shuffled)
+/// part order the caller passes.
 pub fn schedule<R: Rng + CryptoRng>(
     params: &SchedulingParams,
+    spacing: &BlockSpacing,
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
 ) -> Vec<Schedule> {
-    schedule_broadcast_heights(params, commit_height, n_parts, rng)
+    schedule_broadcast_heights(params, spacing, commit_height, n_parts, rng)
         .into_iter()
         .map(|broadcast_height| Schedule {
             broadcast_height,
-            expiry_height: expiry_height(broadcast_height),
+            expiry_height: expiry_height(spacing, broadcast_height),
         })
         .collect()
 }
@@ -769,39 +779,35 @@ fn draw_anchor_age<R: Rng>(rng: &mut R) -> u32 {
 /// set is empty. The wallet backend later resolves the actual tree state at that height (out of
 /// scope here).
 ///
-/// The CANDIDATE ANCHOR SET is the boundaries of `interval` that are simultaneously:
+/// The CANDIDATE ANCHOR SET is the boundaries of `grid` that are simultaneously:
 /// - (a) strictly above `nu63_activation` (the NU6.3 activation height),
 /// - (b) at or after `funding_creation_height` (the funding note's creation height), and
 /// - (c) at or before the most recent boundary at or below `chain_tip_height` (the chain tip the
 ///   wallet has observed at proving time).
 ///
-/// The most recent boundary is derived internally via
-/// [`AnchorBucketInterval::boundary_at_or_below`], so `chain_tip_height` may be any observed
-/// height; it need not itself be a boundary. A recency-weighted age `a` in `[1, ANCHOR_AGE_CAP]` is
-/// drawn (`Geometric(1/2)`) and the candidate is `most_recent - a * interval`; a draw exceeding
-/// [`ANCHOR_AGE_CAP`] or landing outside the candidate set is discarded and redrawn. Because age is
-/// always `>= 1`, the chosen boundary is always strictly below the most recent boundary.
+/// The most recent boundary is derived internally via [`AnchorGrid::boundary_at_or_below`], so
+/// `chain_tip_height` may be any observed height; it need not itself be a boundary. A
+/// recency-weighted age `a` in `[1, ANCHOR_AGE_CAP]` is drawn (`Geometric(1/2)`) and the candidate
+/// is the boundary `a` boundaries before the most recent one; a draw exceeding [`ANCHOR_AGE_CAP`] or
+/// landing outside the candidate set is discarded and redrawn. Because age is always `>= 1`, the
+/// chosen boundary is always strictly below the most recent boundary.
 pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
-    interval: AnchorBucketInterval,
+    grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
     chain_tip_height: BlockHeight,
     rng: &mut R,
 ) -> Option<BlockHeight> {
-    let most_recent = boundary_at_or_below_u32(&interval, u32::from(chain_tip_height));
-    let (lowest, highest) = candidate_boundary_bounds(
-        interval,
-        u32::from(nu63_activation),
-        u32::from(funding_creation_height),
-        most_recent,
-    )?;
-    Some(BlockHeight::from_u32(sample_recency_weighted_boundary(
-        interval,
+    let most_recent = grid.boundary_at_or_below(chain_tip_height);
+    let (lowest, highest) =
+        candidate_boundary_bounds(grid, nu63_activation, funding_creation_height, most_recent)?;
+    Some(sample_recency_weighted_boundary(
+        grid,
         lowest,
         highest,
         most_recent,
         rng,
-    )))
+    ))
 }
 
 /// Select a REPLACEMENT boundary for a transfer whose broadcast schedule has moved out from under
@@ -830,54 +836,52 @@ pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
 ///
 /// [`prove_transfer`]: crate::engine::prove_transfer
 pub fn redraw_anchor_boundary<R: Rng + CryptoRng>(
-    interval: AnchorBucketInterval,
+    grid: AnchorGrid,
     prior_boundary: BlockHeight,
     broadcast_height: BlockHeight,
     rng: &mut R,
 ) -> Option<BlockHeight> {
-    let most_recent = boundary_at_or_below_u32(&interval, u32::from(broadcast_height));
-    // Highest candidate: strictly below the most recent boundary (age >= 1), one interval down.
-    let highest = most_recent.checked_sub(interval.block_count().get())?;
-    let lowest = boundary_at_or_above_u32(&interval, u32::from(prior_boundary));
+    let most_recent = grid.boundary_at_or_below(broadcast_height);
+    // Highest candidate: strictly below the most recent boundary (age >= 1).
+    let highest = grid.boundary_before(most_recent)?;
+    let lowest = grid.boundary_at_or_above(prior_boundary);
     if lowest > highest {
         return None;
     }
-    Some(BlockHeight::from_u32(sample_recency_weighted_boundary(
-        interval,
+    Some(sample_recency_weighted_boundary(
+        grid,
         lowest,
         highest,
         most_recent,
         rng,
-    )))
+    ))
 }
 
 /// The rejection-sampling core shared by [`draw_anchor_boundary`] and
-/// [`redraw_anchor_boundary`]: draw recency-weighted ages until `most_recent - age * interval`
-/// lands in `[lowest, highest]`, and return that candidate. The caller guarantees
-/// `lowest <= highest` and `highest = most_recent - interval` (both grid boundaries), so age 1
+/// [`redraw_anchor_boundary`]: draw recency-weighted ages until the boundary that many boundaries
+/// before `most_recent` lands in `[lowest, highest]`, and return that candidate. The caller
+/// guarantees `lowest <= highest` and that `highest` is the boundary before `most_recent`, so age 1
 /// always yields `highest` and the loop terminates.
 fn sample_recency_weighted_boundary<R: Rng>(
-    interval: AnchorBucketInterval,
-    lowest: u32,
-    highest: u32,
-    most_recent: u32,
+    grid: AnchorGrid,
+    lowest: BlockHeight,
+    highest: BlockHeight,
+    most_recent: BlockHeight,
     rng: &mut R,
-) -> u32 {
+) -> BlockHeight {
     loop {
         let age = draw_anchor_age(rng);
         if age > ANCHOR_AGE_CAP {
             continue;
         }
-        // age * interval, guarding the overflow a large interval could produce (too-old anchor ->
-        // redraw, the same outcome the underflow check below gives).
-        let candidate = match age
-            .checked_mul(interval.block_count().get())
-            .and_then(|offset| most_recent.checked_sub(offset))
+        // Step back `age` boundaries. Running out of boundaries below the grid's origin means the
+        // anchor would be too old, which redraws, as a candidate below `lowest` does.
+        let candidate =
+            (0..age).try_fold(most_recent, |boundary, _| grid.boundary_before(boundary));
+        if let Some(candidate) = candidate
+            && candidate >= lowest
+            && candidate <= highest
         {
-            Some(c) => c,
-            None => continue,
-        };
-        if candidate >= lowest && candidate <= highest {
             return candidate;
         }
     }
@@ -889,15 +893,15 @@ fn sample_recency_weighted_boundary<R: Rng>(
 /// lowest is the first boundary that is both strictly above `nu63_activation` and at or after
 /// `funding_creation_height`. `most_recent` is the boundary derived from the observed chain tip.
 fn candidate_boundary_bounds(
-    interval: AnchorBucketInterval,
-    nu63_activation: u32,
-    funding_creation_height: u32,
-    most_recent: u32,
-) -> Option<(u32, u32)> {
-    // Highest candidate: strictly below the most recent boundary, i.e. one interval down.
-    let highest = most_recent.checked_sub(interval.block_count().get())?;
+    grid: AnchorGrid,
+    nu63_activation: BlockHeight,
+    funding_creation_height: BlockHeight,
+    most_recent: BlockHeight,
+) -> Option<(BlockHeight, BlockHeight)> {
+    // Highest candidate: strictly below the most recent boundary.
+    let highest = grid.boundary_before(most_recent)?;
 
-    let lowest = lowest_candidate_boundary(interval, nu63_activation, funding_creation_height);
+    let lowest = lowest_candidate_boundary(grid, nu63_activation, funding_creation_height);
 
     (lowest <= highest).then_some((lowest, highest))
 }
@@ -906,33 +910,31 @@ fn candidate_boundary_bounds(
 /// first boundary strictly ABOVE `nu63_activation`, and the first boundary at or AFTER
 /// `funding_creation_height`, whichever is higher. Saturates at `u32::MAX`.
 fn lowest_candidate_boundary(
-    interval: AnchorBucketInterval,
-    nu63_activation: u32,
-    funding_creation_height: u32,
-) -> u32 {
-    let above_activation = boundary_at_or_below_u32(&interval, nu63_activation)
-        .saturating_add(interval.block_count().get());
-    let at_or_after_funding = boundary_at_or_above_u32(&interval, funding_creation_height);
+    grid: AnchorGrid,
+    nu63_activation: BlockHeight,
+    funding_creation_height: BlockHeight,
+) -> BlockHeight {
+    let above_activation = grid.boundary_after(nu63_activation);
+    let at_or_after_funding = grid.boundary_at_or_above(funding_creation_height);
     above_activation.max(at_or_after_funding)
 }
 
 /// The first chain height at which a transfer's candidate anchor set (see
-/// [`draw_anchor_boundary`]) is non-empty: one full boundary interval past the LOWEST candidate,
-/// which is the first boundary strictly above `nu63_activation` and at or after
-/// `funding_creation_height`. A transfer whose observed chain tip is at or after this height always
-/// has at least one boundary to anchor to, so a schedule that places every broadcast at or after it
-/// never needs an anchor fallback; the scheduler MUST NOT place a transfer before it.
+/// [`draw_anchor_boundary`]) is non-empty: the boundary after the LOWEST candidate, which is the
+/// first boundary strictly above `nu63_activation` and at or after `funding_creation_height`. A
+/// transfer whose observed chain tip is at or after this height always has at least one boundary
+/// to anchor to, so a schedule that places every broadcast at or after it never needs an anchor
+/// fallback; the scheduler MUST NOT place a transfer before it.
 pub fn earliest_broadcast_height(
-    interval: AnchorBucketInterval,
+    grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
 ) -> BlockHeight {
-    let lowest = lowest_candidate_boundary(
-        interval,
-        u32::from(nu63_activation),
-        u32::from(funding_creation_height),
-    );
-    BlockHeight::from_u32(lowest.saturating_add(interval.block_count().get()))
+    grid.boundary_after(lowest_candidate_boundary(
+        grid,
+        nu63_activation,
+        funding_creation_height,
+    ))
 }
 
 #[cfg(test)]
@@ -975,8 +977,8 @@ mod tests {
         #[test]
         fn boundary_at_or_below_props(h in 0u32..5_000_000, blocks in 1u32..10_000) {
             let i = interval(blocks);
-            let b = u32::from(i.boundary_at_or_below(bh(h)));
-            prop_assert!(i.is_boundary(bh(b)));
+            let b = u32::from(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).boundary_at_or_below(bh(h)));
+            prop_assert!(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).is_boundary(bh(b)));
             prop_assert!(b <= h);
             prop_assert!(h - b < blocks);
         }
@@ -985,8 +987,8 @@ mod tests {
         #[test]
         fn boundary_at_or_above_props(h in 0u32..5_000_000, blocks in 1u32..10_000) {
             let i = interval(blocks);
-            let b = u32::from(i.boundary_at_or_above(bh(h)));
-            prop_assert!(i.is_boundary(bh(b)));
+            let b = u32::from(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).boundary_at_or_above(bh(h)));
+            prop_assert!(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).is_boundary(bh(b)));
             prop_assert!(b >= h);
             prop_assert!(b - h < blocks);
         }
@@ -996,9 +998,16 @@ mod tests {
     /// invariants (a boundary, `<= height`, and within one interval of it) at the ZIP 318 interval.
     fn check_most_recent_boundary_golden(height: u32, expected: u32) {
         let i = P.anchor_bucket_interval();
-        let b = u32::from(i.boundary_at_or_below(bh(height)));
+        let b = u32::from(
+            crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM)
+                .boundary_at_or_below(bh(height)),
+        );
         assert_eq!(b, expected, "boundary_at_or_below({height})");
-        assert!(i.is_boundary(bh(b)), "not a boundary");
+        assert!(
+            crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM)
+                .is_boundary(bh(b)),
+            "not a boundary"
+        );
         assert!(b <= height, "boundary {b} above height {height}");
         assert!(
             height - b < i.block_count().get(),
@@ -1644,7 +1653,7 @@ mod tests {
                                       n in 0usize..40,
                                       seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_broadcast_heights(&P, bh(commit), n, &mut r);
+            let hs = schedule_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(commit);
             for h in hs {
@@ -1660,11 +1669,20 @@ mod tests {
     /// the invariant checks keep each vector auditable by eye, since each per-step GAP is the drawn
     /// inter-arrival delay and must be a valid `[0, TRANSFER_DELAY_CAP]` value.
     fn check_schedule_golden(commit: u32, n: usize, seed: u64, expected: &[u32]) {
-        let hs: Vec<u32> = schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
-            .into_iter()
-            .map(u32::from)
-            .collect();
-        assert_eq!(hs, expected, "schedule({commit}, {n}, seed={seed})");
+        let hs: Vec<u32> = schedule_broadcast_heights(
+            &P,
+            &crate::scheduling::BlockSpacing::UNIFORM,
+            bh(commit),
+            n,
+            &mut rng(seed),
+        )
+        .into_iter()
+        .map(u32::from)
+        .collect();
+        assert_eq!(
+            hs, expected,
+            "schedule({commit}, &crate::scheduling::BlockSpacing::UNIFORM, {n}, seed={seed})"
+        );
         assert_eq!(hs.len(), n);
         let cap = TRANSFER_DELAY_CAP.get();
         let mut prev = commit;
@@ -1718,7 +1736,7 @@ mod tests {
                                             n in 0usize..40,
                                             seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_prep_broadcast_heights(&P, bh(start), n, &mut r);
+            let hs = schedule_prep_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(start), n, &mut r);
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(start);
             for h in hs {
@@ -1762,7 +1780,7 @@ mod tests {
         /// anchoring point (expiry - EXPIRY_WINDOW) is a multiple of EXPIRY_MODULUS (EXPIRY MUST).
         #[test]
         fn expiry_in_rolling_window(current in 0u32..(u32::MAX - EXPIRY_WINDOW)) {
-            let e = u32::from(expiry_height(bh(current)));
+            let e = u32::from(expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(current)));
             prop_assert!(e > current, "expiry {e} must exceed current {current}");
             prop_assert!(e <= current + EXPIRY_WINDOW);
             // The anchor is a multiple of EXPIRY_MODULUS.
@@ -1775,14 +1793,23 @@ mod tests {
     #[test]
     fn expiry_examples() {
         // At an exact modulus boundary the window is the full 2 * EXPIRY_MODULUS.
-        assert_eq!(expiry_height(bh(0)), bh(EXPIRY_WINDOW));
         assert_eq!(
-            expiry_height(bh(EXPIRY_MODULUS)),
+            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(0)),
+            bh(EXPIRY_WINDOW)
+        );
+        assert_eq!(
+            expiry_height(
+                &crate::scheduling::BlockSpacing::UNIFORM,
+                bh(EXPIRY_MODULUS)
+            ),
             bh(EXPIRY_MODULUS + EXPIRY_WINDOW)
         );
         // Just before the next modulus, validity is just over one modulus.
         let just_before = EXPIRY_MODULUS - 1;
-        assert_eq!(expiry_height(bh(just_before)), bh(EXPIRY_WINDOW));
+        assert_eq!(
+            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(just_before)),
+            bh(EXPIRY_WINDOW)
+        );
     }
 
     // --- draw_anchor_age ----------------------------------------------------------------------
@@ -1822,8 +1849,11 @@ mod tests {
         (0u32..1000u32, 2u32..40u32, 1u32..500u32, 0u32..1000u32).prop_flat_map(
             |(act, span_boundaries, blocks, tip_offset)| {
                 let i = interval(blocks);
-                let most_recent =
-                    (boundary_at_or_below_u32(&i, act) + span_boundaries * blocks).max(blocks);
+                let most_recent = (u32::from(
+                    crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM)
+                        .boundary_at_or_below(bh(act)),
+                ) + span_boundaries * blocks)
+                    .max(blocks);
                 let tip = most_recent + (tip_offset % blocks);
                 // funding creation anywhere from activation up to the highest candidate boundary.
                 let highest = most_recent - blocks;
@@ -1842,11 +1872,11 @@ mod tests {
                                    seed in any::<u64>()) {
             let mut r = rng(seed);
             let blocks = i.block_count().get();
-            let most_recent = boundary_at_or_below_u32(&i, tip);
-            let chosen = draw_anchor_boundary(i, bh(act), bh(funding), bh(tip), &mut r);
+            let most_recent = u32::from(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).boundary_at_or_below(bh(tip)));
+            let chosen = draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(tip), &mut r);
             prop_assert!(chosen.is_some());
             let b = u32::from(chosen.unwrap());
-            prop_assert!(i.is_boundary(bh(b)));
+            prop_assert!(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).is_boundary(bh(b)));
             prop_assert!(b < most_recent, "boundary {b} must be below most_recent {most_recent}");
             prop_assert!(b > act, "boundary {b} must be strictly above activation {act}");
             prop_assert!(b >= funding, "boundary {b} must be at/after funding {funding}");
@@ -1870,10 +1900,8 @@ mod tests {
             let mut r_boundary = rng(seed);
             for _ in 0..16 {
                 prop_assert_eq!(
-                    draw_anchor_boundary(
-                        i, bh(act), bh(funding), bh(boundary_tip + offset), &mut r_offset,
-                    ),
-                    draw_anchor_boundary(i, bh(act), bh(funding), bh(boundary_tip), &mut r_boundary)
+                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(boundary_tip + offset), &mut r_offset),
+                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(boundary_tip), &mut r_boundary)
                 );
             }
         }
@@ -1886,14 +1914,35 @@ mod tests {
             let mut r = rng(1);
             // Chain tip below the second boundary: no candidate strictly below the derived boundary
             // that is also above activation.
-            assert_eq!(draw_anchor_boundary(i, bh(0), bh(0), bh(0), &mut r), None);
             assert_eq!(
-                draw_anchor_boundary(i, bh(0), bh(0), bh(blocks), &mut r),
+                draw_anchor_boundary(
+                    crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
+                    bh(0),
+                    bh(0),
+                    bh(0),
+                    &mut r
+                ),
+                None
+            );
+            assert_eq!(
+                draw_anchor_boundary(
+                    crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
+                    bh(0),
+                    bh(0),
+                    bh(blocks),
+                    &mut r
+                ),
                 None
             );
             // A non-boundary tip derives the same (first) boundary, so the set is still empty.
             assert_eq!(
-                draw_anchor_boundary(i, bh(0), bh(0), bh(2 * blocks - 1), &mut r),
+                draw_anchor_boundary(
+                    crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
+                    bh(0),
+                    bh(0),
+                    bh(2 * blocks - 1),
+                    &mut r
+                ),
                 None
             );
         }
@@ -1909,15 +1958,15 @@ mod tests {
                                                                seed in any::<u64>()) {
             let i = interval(blocks);
             let funding = act + funding_offset;
-            let earliest = earliest_broadcast_height(i, bh(act), bh(funding));
+            let earliest = earliest_broadcast_height(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding));
             let mut r = rng(seed);
             prop_assert!(
-                draw_anchor_boundary(i, bh(act), bh(funding), earliest, &mut r).is_some(),
+                draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest, &mut r).is_some(),
                 "a tip at the earliest broadcast height must have a candidate boundary"
             );
             let mut r = rng(seed);
             prop_assert!(
-                draw_anchor_boundary(i, bh(act), bh(funding), earliest - 1, &mut r).is_none(),
+                draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest - 1, &mut r).is_none(),
                 "a tip below the earliest broadcast height must not"
             );
         }
@@ -1933,7 +1982,13 @@ mod tests {
             let tip = 10 * blocks;
             let funding = tip + blocks;
             assert_eq!(
-                draw_anchor_boundary(i, bh(0), bh(funding), bh(tip), &mut r),
+                draw_anchor_boundary(
+                    crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
+                    bh(0),
+                    bh(funding),
+                    bh(tip),
+                    &mut r
+                ),
                 None
             );
         }
@@ -1946,19 +2001,36 @@ mod tests {
     /// `[1, ANCHOR_AGE_CAP]`.
     fn check_anchor_golden(act: u32, funding: u32, chain_tip: u32, seed: u64, expected: &[u32]) {
         let i = P.anchor_bucket_interval();
-        let most_recent = boundary_at_or_below_u32(&i, chain_tip);
+        let most_recent = u32::from(
+            crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM)
+                .boundary_at_or_below(bh(chain_tip)),
+        );
         let mut r = rng(seed);
         let got: Vec<u32> = (0..expected.len())
             .map(|_| {
                 u32::from(
-                    draw_anchor_boundary(i, bh(act), bh(funding), bh(chain_tip), &mut r).unwrap(),
+                    draw_anchor_boundary(
+                        crate::scheduling::AnchorGrid::new(
+                            i,
+                            crate::scheduling::BlockSpacing::UNIFORM,
+                        ),
+                        bh(act),
+                        bh(funding),
+                        bh(chain_tip),
+                        &mut r,
+                    )
+                    .unwrap(),
                 )
             })
             .collect();
-        assert_eq!(got, expected, "draw_anchor_boundary(seed={seed})");
+        assert_eq!(
+            got, expected,
+            "draw_anchor_boundary(crate::scheduling::AnchorGrid::new(seed={seed}, crate::scheduling::BlockSpacing::UNIFORM))"
+        );
         for &b in &got {
             assert!(
-                i.is_boundary(bh(b)),
+                crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM)
+                    .is_boundary(bh(b)),
                 "boundary {b} not a multiple of the interval"
             );
             assert!(
@@ -2022,12 +2094,12 @@ mod tests {
         ) {
             let i = interval(blocks);
             let prior = prior_bucket.saturating_mul(blocks);
-            let chosen = redraw_anchor_boundary(i, bh(prior), bh(broadcast), &mut rng(seed));
+            let chosen = redraw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(prior), bh(broadcast), &mut rng(seed));
             let most_recent = broadcast - (broadcast % blocks);
             match chosen {
                 Some(b) => {
                     let b = u32::from(b);
-                    prop_assert!(i.is_boundary(bh(b)));
+                    prop_assert!(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).is_boundary(bh(b)));
                     prop_assert!(b >= prior, "replacement {b} regressed below the prior {prior}");
                     prop_assert!(b < most_recent, "age >= 1: strictly below {most_recent}");
                     prop_assert!(
@@ -2051,7 +2123,10 @@ mod tests {
         // Broadcast 1_900: most recent boundary 1_872, highest candidate 1_728.
         assert_eq!(
             redraw_anchor_boundary(
-                AnchorBucketInterval::ZIP_318,
+                crate::scheduling::AnchorGrid::new(
+                    AnchorBucketInterval::ZIP_318,
+                    crate::scheduling::BlockSpacing::UNIFORM
+                ),
                 bh(1_872),
                 bh(1_900),
                 &mut rng(1)
@@ -2061,7 +2136,10 @@ mod tests {
         );
         assert_eq!(
             redraw_anchor_boundary(
-                AnchorBucketInterval::ZIP_318,
+                crate::scheduling::AnchorGrid::new(
+                    AnchorBucketInterval::ZIP_318,
+                    crate::scheduling::BlockSpacing::UNIFORM
+                ),
                 bh(1_728),
                 bh(1_900),
                 &mut rng(1)
@@ -2075,37 +2153,151 @@ mod tests {
     /// interval moves the boundary grid without perturbing the drawn delays, so a test network can
     /// shorten the grid alone. (Shortening the delays as well is what compresses the schedule; see
     /// [`delay_scales_with_configured_mean`].)
+    /// The NU7 spacing ratio, as the `u32` the expected heights below are computed in.
+    const R: u32 = zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO;
+
+    proptest! {
+        /// A transfer schedule committed after NU7 activation covers the same time as one
+        /// committed before it: every gap from the commit height is the ratio times as many
+        /// blocks, for the same draws.
+        #[test]
+        fn schedule_after_nu7_keeps_its_duration(
+            commit in 0u32..2_000_000,
+            n in 1usize..40,
+            seed in any::<u64>(),
+        ) {
+            let p = SchedulingParams::ZIP_318;
+            let after = BlockSpacing::with_nu7_activation(bh(0));
+            let uniform = schedule_broadcast_heights(
+                &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
+            );
+            let scaled = schedule_broadcast_heights(&p, &after, bh(commit), n, &mut rng(seed));
+            for (u, s) in uniform.iter().zip(&scaled) {
+                prop_assert_eq!(u32::from(*s) - commit, R * (u32::from(*u) - commit));
+            }
+        }
+
+        /// A schedule that crosses NU7 activation keeps its exact duration: the part of each
+        /// span before activation counts one block per reference block, and the part after it
+        /// counts the ratio.
+        #[test]
+        fn schedule_across_nu7_keeps_its_duration(
+            commit in 0u32..2_000_000,
+            to_activation in 0u32..5_000,
+            n in 1usize..40,
+            seed in any::<u64>(),
+        ) {
+            let p = SchedulingParams::ZIP_318;
+            let activation = commit + to_activation;
+            let spacing = BlockSpacing::with_nu7_activation(bh(activation));
+            let uniform = schedule_broadcast_heights(
+                &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
+            );
+            let crossing =
+                schedule_broadcast_heights(&p, &spacing, bh(commit), n, &mut rng(seed));
+            for (u, c) in uniform.iter().zip(&crossing) {
+                let u = u32::from(*u);
+                let expected = if u <= activation { u } else { activation + R * (u - activation) };
+                prop_assert_eq!(u32::from(*c), expected);
+            }
+        }
+
+        /// After NU7 activation, drawn anchors lie on the scaled grid, at most
+        /// [`ANCHOR_AGE_CAP`] scaled intervals below the most recent boundary.
+        #[test]
+        fn anchors_after_nu7_lie_on_the_scaled_grid(
+            tip in 1_000_000u32..2_000_000,
+            seed in any::<u64>(),
+        ) {
+            let activation = 500_000u32;
+            let grid = AnchorGrid::new(
+                AnchorBucketInterval::ZIP_318,
+                BlockSpacing::with_nu7_activation(bh(activation)),
+            );
+            let scaled = R * AnchorBucketInterval::ZIP_318.block_count().get();
+            let b = u32::from(
+                draw_anchor_boundary(grid, bh(activation), bh(activation), bh(tip), &mut rng(seed))
+                    .expect("candidates exist far above activation"),
+            );
+            let most_recent = u32::from(grid.boundary_at_or_below(bh(tip)));
+            prop_assert_eq!(b % scaled, 0);
+            prop_assert!(b < most_recent && most_recent - b <= ANCHOR_AGE_CAP * scaled);
+        }
+    }
+
     #[test]
     fn interval_moves_the_grid_without_touching_the_delays() {
         let short = params_with_interval(12);
 
         // Identical delay draws under the same seed: only the grid differs.
         assert_eq!(
-            schedule_broadcast_heights(&short, bh(2_000_000), 8, &mut rng(5)),
-            schedule_broadcast_heights(&P, bh(2_000_000), 8, &mut rng(5)),
+            schedule_broadcast_heights(
+                &short,
+                &crate::scheduling::BlockSpacing::UNIFORM,
+                bh(2_000_000),
+                8,
+                &mut rng(5)
+            ),
+            schedule_broadcast_heights(
+                &P,
+                &crate::scheduling::BlockSpacing::UNIFORM,
+                bh(2_000_000),
+                8,
+                &mut rng(5)
+            ),
         );
 
         // The anchor floor and every drawn anchor sit on the SHORT grid, not the ZIP 318 one.
         let (act, funding) = (bh(1_000), bh(1_100));
-        let earliest = earliest_broadcast_height(short.anchor_bucket_interval(), act, funding);
-        assert!(short.anchor_bucket_interval().is_boundary(earliest));
+        let earliest = earliest_broadcast_height(
+            crate::scheduling::AnchorGrid::new(
+                short.anchor_bucket_interval(),
+                crate::scheduling::BlockSpacing::UNIFORM,
+            ),
+            act,
+            funding,
+        );
+        assert!(
+            crate::scheduling::AnchorGrid::new(
+                short.anchor_bucket_interval(),
+                crate::scheduling::BlockSpacing::UNIFORM
+            )
+            .is_boundary(earliest)
+        );
         assert_eq!(u32::from(earliest), 1_116); // 1_104 (first boundary >= funding) + 12
         assert!(
-            earliest < earliest_broadcast_height(P.anchor_bucket_interval(), act, funding),
+            earliest
+                < earliest_broadcast_height(
+                    crate::scheduling::AnchorGrid::new(
+                        P.anchor_bucket_interval(),
+                        crate::scheduling::BlockSpacing::UNIFORM
+                    ),
+                    act,
+                    funding
+                ),
             "a shorter interval must reach anchor viability sooner"
         );
 
         let mut r = rng(5);
         for _ in 0..64 {
             let b = draw_anchor_boundary(
-                short.anchor_bucket_interval(),
+                crate::scheduling::AnchorGrid::new(
+                    short.anchor_bucket_interval(),
+                    crate::scheduling::BlockSpacing::UNIFORM,
+                ),
                 act,
                 funding,
                 bh(5_000),
                 &mut r,
             )
             .expect("the candidate set is non-empty");
-            assert!(short.anchor_bucket_interval().is_boundary(b));
+            assert!(
+                crate::scheduling::AnchorGrid::new(
+                    short.anchor_bucket_interval(),
+                    crate::scheduling::BlockSpacing::UNIFORM
+                )
+                .is_boundary(b)
+            );
             assert!(b >= funding && b > act);
         }
     }
@@ -2122,7 +2314,16 @@ mod tests {
             // Only 2*interval qualifies.
             for _ in 0..50 {
                 assert_eq!(
-                    draw_anchor_boundary(i, bh(act), bh(funding), bh(tip), &mut r),
+                    draw_anchor_boundary(
+                        crate::scheduling::AnchorGrid::new(
+                            i,
+                            crate::scheduling::BlockSpacing::UNIFORM
+                        ),
+                        bh(act),
+                        bh(funding),
+                        bh(tip),
+                        &mut r
+                    ),
                     Some(bh(2 * blocks))
                 );
             }
@@ -2142,7 +2343,13 @@ mod tests {
         expected_broadcast: &[u32],
         expected_expiry: &[u32],
     ) {
-        let schedules = schedule(&P, bh(commit), n, &mut rng(seed));
+        let schedules = schedule(
+            &P,
+            &crate::scheduling::BlockSpacing::UNIFORM,
+            bh(commit),
+            n,
+            &mut rng(seed),
+        );
         let broadcast: Vec<u32> = schedules
             .iter()
             .map(|s| u32::from(s.broadcast_height()))
@@ -2153,19 +2360,25 @@ mod tests {
             .collect();
         assert_eq!(
             broadcast, expected_broadcast,
-            "schedule({commit}, {n}, seed={seed}) broadcast"
+            "schedule({commit}, &crate::scheduling::BlockSpacing::UNIFORM, {n}, seed={seed}) broadcast"
         );
         assert_eq!(
             expiry, expected_expiry,
-            "schedule({commit}, {n}, seed={seed}) expiry"
+            "schedule({commit}, &crate::scheduling::BlockSpacing::UNIFORM, {n}, seed={seed}) expiry"
         );
         // Broadcast heights equal the cumulative-delay schedule for the same seed.
         assert_eq!(
             broadcast,
-            schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
-                .into_iter()
-                .map(u32::from)
-                .collect::<Vec<u32>>(),
+            schedule_broadcast_heights(
+                &P,
+                &crate::scheduling::BlockSpacing::UNIFORM,
+                bh(commit),
+                n,
+                &mut rng(seed)
+            )
+            .into_iter()
+            .map(u32::from)
+            .collect::<Vec<u32>>(),
             "broadcast heights must match the cumulative rule"
         );
         // Each expiry is the canonical rolling window of its broadcast height, and broadcast >= commit.
@@ -2173,15 +2386,18 @@ mod tests {
             assert!(b >= commit, "broadcast {b} below commit {commit}");
             assert_eq!(
                 e,
-                u32::from(expiry_height(bh(b))),
-                "expiry {e} != expiry_height({b})"
+                u32::from(expiry_height(
+                    &crate::scheduling::BlockSpacing::UNIFORM,
+                    bh(b)
+                )),
+                "expiry {e} != expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, {b})"
             );
         }
     }
 
     /// Golden vectors for [`schedule`]: the exact `(broadcast, expiry)` height pairs for fixed
     /// `(commit, n, seed)` triples. Broadcast heights reuse the cumulative delays pinned in
-    /// [`schedule_broadcast_heights_golden`]; every expiry equals `expiry_height(broadcast)`, and all
+    /// [`schedule_broadcast_heights_golden`]; every expiry equals `expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, broadcast)`, and all
     /// broadcasts here fall inside one `EXPIRY_MODULUS` period so they share a single expiry height.
     #[test]
     fn schedule_golden() {
@@ -2223,20 +2439,20 @@ mod tests {
                                                n in 0usize..24,
                                                seed in any::<u64>()) {
             let mut r = rng(seed);
-            let schedules = schedule(&P, bh(commit), n, &mut r);
+            let schedules = schedule(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
             prop_assert_eq!(schedules.len(), n);
             // Broadcast heights follow the cumulative delay rule (same RNG => same heights).
             let broadcast: Vec<BlockHeight> =
                 schedules.iter().map(|s| s.broadcast_height()).collect();
             prop_assert_eq!(
                 &broadcast,
-                &schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
+                &schedule_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed))
             );
             let mut prev = bh(commit);
             for s in &schedules {
                 prop_assert!(s.broadcast_height() >= prev, "broadcast heights must be non-decreasing");
                 prev = s.broadcast_height();
-                prop_assert_eq!(s.expiry_height(), expiry_height(s.broadcast_height()));
+                prop_assert_eq!(s.expiry_height(), expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, s.broadcast_height()));
             }
         }
     }
