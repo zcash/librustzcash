@@ -2628,3 +2628,297 @@ mod spend_policy_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod dust_exclusion_tests {
+    use ::sapling::{PaymentAddress, Rseed, value::NoteValue, zip32::ExtendedSpendingKey};
+    use incrementalmerkletree::Position;
+    use zcash_primitives::transaction::fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE};
+    use zcash_protocol::{
+        TxId,
+        consensus::{Network, NetworkUpgrade, Parameters},
+        value::COIN,
+    };
+    use zip321::Payment;
+
+    use super::*;
+    use crate::{
+        data_api::{AccountMeta, NoteFilter, anchor_retention::AnchorRetentionInterval},
+        fees::{DustOutputPolicy, zip317::SingleOutputChangeStrategy},
+        wallet::{Note, ReceivedNote},
+    };
+
+    /// A note of exactly the marginal fee, which the ZIP 317 change strategy reports as
+    /// uneconomic once the transaction has more spends than outputs, counting the change
+    /// output.
+    const DUST_NOTE_VALUE: Zatoshis = MARGINAL_FEE;
+    /// The value of each of the two notes that fund the payment. One of them, even with the
+    /// dust note, falls short of a payment of this value plus its fee; both together cover it.
+    const FUNDING_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(COIN);
+
+    const DUST_NOTE_ID: u32 = 0;
+    const FIRST_FUNDING_NOTE_ID: u32 = 1;
+    const SECOND_FUNDING_NOTE_ID: u32 = 2;
+    /// The account the fixture serves; it holds every note.
+    const ACCOUNT: u32 = 0;
+
+    fn sapling_address() -> PaymentAddress {
+        ExtendedSpendingKey::master(&[])
+            .expect("the master key derived from the empty seed is valid")
+            .default_address()
+            .1
+    }
+
+    /// The ZIP 317 fee of a transaction with two logical actions.
+    fn two_action_fee() -> Zatoshis {
+        (MARGINAL_FEE + MARGINAL_FEE).expect("no overflow")
+    }
+
+    /// Whether the fixture honors the `exclude` argument of `select_spendable_notes`. The
+    /// selector must still terminate against a source that ignores it.
+    #[derive(Clone, Copy)]
+    enum ExcludeHandling {
+        Honored,
+        Ignored,
+    }
+
+    /// An `InputSource` holding fixed Sapling notes, which it selects in the order given,
+    /// accumulating until the target value is reached. Unlike `zcash_client_sqlite`, it does
+    /// not withhold notes at or below the marginal fee.
+    struct FixedSaplingNotes {
+        notes: Vec<ReceivedNote<u32, ::sapling::Note>>,
+        exclude_handling: ExcludeHandling,
+    }
+
+    impl FixedSaplingNotes {
+        /// Holds one note per value, each received in its own output of a single transaction.
+        fn new(values: &[(u32, Zatoshis)]) -> Self {
+            let recipient = sapling_address();
+            let notes = values
+                .iter()
+                .zip(0u16..)
+                .map(|((note_id, value), output_index)| {
+                    ReceivedNote::from_parts(
+                        *note_id,
+                        TxId::from_bytes([0; 32]),
+                        output_index,
+                        ::sapling::Note::from_parts(
+                            recipient,
+                            NoteValue::from_raw(value.into_u64()),
+                            Rseed::AfterZip212([0; 32]),
+                        ),
+                        zip32::Scope::External,
+                        Position::from(u64::from(output_index)),
+                        None,
+                        None,
+                    )
+                })
+                .collect();
+            Self {
+                notes,
+                exclude_handling: ExcludeHandling::Honored,
+            }
+        }
+
+        fn ignoring_exclude(self) -> Self {
+            Self {
+                exclude_handling: ExcludeHandling::Ignored,
+                ..self
+            }
+        }
+    }
+
+    impl InputSource for FixedSaplingNotes {
+        type Error = ();
+        type AccountId = u32;
+        type NoteRef = u32;
+
+        fn get_spendable_note(
+            &self,
+            _txid: &TxId,
+            _protocol: ShieldedPool,
+            _index: u32,
+            _target_height: TargetHeight,
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+            unreachable!("proposing a transfer does not look up notes by outpoint")
+        }
+
+        fn anchor_computable(
+            &self,
+            _protocol: ShieldedPool,
+            _height: BlockHeight,
+        ) -> Result<bool, Self::Error> {
+            unreachable!("proposing a transfer does not check the anchor")
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            target_value: TargetValue,
+            sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            let TargetValue::AtLeast(target) = target_value else {
+                unreachable!("the greedy selector always asks for a lower bound")
+            };
+            let excluded = |note_id: &u32| match self.exclude_handling {
+                ExcludeHandling::Honored => exclude.contains(note_id),
+                ExcludeHandling::Ignored => false,
+            };
+            let mut selected = vec![];
+            let mut selected_value = Zatoshis::ZERO;
+            if sources.contains(&ShieldedPool::Sapling) {
+                for note in &self.notes {
+                    if selected_value >= target {
+                        break;
+                    }
+                    if excluded(note.internal_note_id()) {
+                        continue;
+                    }
+                    selected_value =
+                        (selected_value + note.note_value().map_err(|_| ())?).ok_or(())?;
+                    selected.push(note.clone());
+                }
+            }
+            Ok(ReceivedNotes::new(
+                selected,
+                #[cfg(feature = "orchard")]
+                vec![],
+                #[cfg(feature = "orchard")]
+                vec![],
+            ))
+        }
+
+        fn select_unspent_notes(
+            &self,
+            _account: Self::AccountId,
+            _sources: &[ShieldedPool],
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            unreachable!("proposing a transfer does not list every unspent note")
+        }
+
+        fn get_account_metadata(
+            &self,
+            _account: Self::AccountId,
+            _selector: &NoteFilter,
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+            _lock_filter: LockFilter<'_>,
+        ) -> Result<AccountMeta, Self::Error> {
+            unreachable!("a single-output change strategy needs no account metadata")
+        }
+    }
+
+    /// A dust note followed by the two funding notes, in selection order.
+    fn dust_then_funding_notes() -> FixedSaplingNotes {
+        FixedSaplingNotes::new(&[
+            (DUST_NOTE_ID, DUST_NOTE_VALUE),
+            (FIRST_FUNDING_NOTE_ID, FUNDING_NOTE_VALUE),
+            (SECOND_FUNDING_NOTE_ID, FUNDING_NOTE_VALUE),
+        ])
+    }
+
+    /// Proposes a Sapling payment of `payment` from `wallet`, returning the ids of the notes
+    /// spent, or `(available, required)` when input selection reports insufficient funds.
+    fn propose_payment(
+        wallet: &FixedSaplingNotes,
+        payment: Zatoshis,
+    ) -> Result<Vec<u32>, (Zatoshis, Zatoshis)> {
+        let params = Network::TestNetwork;
+        let anchor_height = params
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("NU5 is active on testnet");
+        let recipient = Address::from(sapling_address()).to_zcash_address(&params);
+        let request = TransactionRequest::new(vec![Payment::without_memo(recipient, payment)])
+            .expect("a single payment is a valid request");
+        let change_strategy = SingleOutputChangeStrategy::<_, FixedSaplingNotes>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        GreedyInputSelector::new()
+            .propose_transaction(
+                &params,
+                wallet,
+                TargetHeight::from(anchor_height + 1),
+                anchor_height,
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                ConfirmationsPolicy::default(),
+                ACCOUNT,
+                request,
+                &change_strategy,
+                &SpendPolicy::default(),
+                None,
+            )
+            .map(|proposal| {
+                proposal
+                    .steps()
+                    .iter()
+                    .flat_map(|step| step.shielded_inputs())
+                    .flat_map(|inputs| inputs.notes().iter().map(|n| *n.internal_note_id()))
+                    .collect()
+            })
+            .map_err(|e| match e {
+                InputSelectorError::InsufficientFunds {
+                    available,
+                    required,
+                } => (available, required),
+                other => panic!("unexpected input selection error: {other:?}"),
+            })
+    }
+
+    #[test]
+    fn excluding_a_dust_note_retries_the_remaining_selection() {
+        assert_eq!(
+            propose_payment(&dust_then_funding_notes(), FUNDING_NOTE_VALUE),
+            Ok(vec![FIRST_FUNDING_NOTE_ID, SECOND_FUNDING_NOTE_ID])
+        );
+    }
+
+    #[test]
+    fn excluding_a_dust_note_still_reports_a_real_shortfall() {
+        let funding_value = (FUNDING_NOTE_VALUE + FUNDING_NOTE_VALUE).expect("no overflow");
+        // Two spends and one output cost the ZIP 317 minimum of two logical actions, so the
+        // funding notes fall one marginal fee short of the payment and its fee. Spending the
+        // dust note as well adds one marginal fee of value and one of fee, so nothing covers
+        // the payment.
+        let payment = (funding_value - MARGINAL_FEE).expect("no underflow");
+
+        assert_eq!(
+            propose_payment(&dust_then_funding_notes(), payment),
+            Err((
+                funding_value,
+                (payment + two_action_fee()).expect("no overflow")
+            ))
+        );
+    }
+
+    #[test]
+    fn excluding_a_dust_note_the_source_keeps_returning_still_terminates() {
+        let wallet = dust_then_funding_notes().ignoring_exclude();
+        // The first pass, with no inputs, asks for the payment plus the ZIP 317 minimum fee of
+        // two logical actions. Every selection after that returns all three notes, dust
+        // included, so the dust note is named once, excluded, and then named again without
+        // being new.
+        let every_note = (FUNDING_NOTE_VALUE + FUNDING_NOTE_VALUE)
+            .and_then(|funding| funding + DUST_NOTE_VALUE)
+            .expect("no overflow");
+
+        assert_eq!(
+            propose_payment(&wallet, FUNDING_NOTE_VALUE),
+            Err((
+                every_note,
+                (FUNDING_NOTE_VALUE + two_action_fee()).expect("no overflow")
+            ))
+        );
+    }
+}
