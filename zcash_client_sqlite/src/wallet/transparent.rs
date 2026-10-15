@@ -42,7 +42,7 @@ use zcash_keys::{
     },
 };
 #[cfg(not(feature = "spend-index"))]
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
 use zcash_primitives::transaction::fees::{
     FeeRule,
     transparent::{InputSize, InputView},
@@ -2409,7 +2409,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                         .get::<_, Option<u32>>(1)?
                         .map(BlockHeight::from)
                         .unwrap_or(chain_tip_height);
-                    let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+                    let max_end_height = block_range_start + BLOSSOM_DEFAULT_TX_EXPIRY_DELTA + 1;
                     Ok::<TransactionDataRequest, SqliteClientError>(
                         TransactionDataRequest::transactions_involving_address(
                             address,

@@ -73,7 +73,7 @@ use zcash_keys::{
 };
 use zcash_primitives::transaction::{
     Transaction, TxId, TxVersion,
-    builder::{BuildConfig, BuildResult, Builder, BundlePadding, DEFAULT_TX_EXPIRY_DELTA},
+    builder::{BuildConfig, BuildResult, Builder, BundlePadding},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
@@ -2031,14 +2031,8 @@ where
         builder = builder.with_expiry_height(expiry_height);
     }
 
-    // The expiry height the built transaction will carry: the caller's override (with
-    // `H0` disabling expiry), the ZIP 318 rolling expiry for a canonical crossing, or
-    // the builder's default of the target height plus `DEFAULT_TX_EXPIRY_DELTA`.
-    let tx_expiry_height = match expiry_height {
-        Some(h) if h == consensus::H0 => None,
-        Some(h) => Some(h),
-        None => Some(BlockHeight::from(min_target_height) + DEFAULT_TX_EXPIRY_DELTA),
-    };
+    // The expiry height the built transaction will carry, or `None` if it does not expire.
+    let tx_expiry_height = Some(builder.expiry_height()).filter(|h| *h != consensus::H0);
 
     if let Some(version) = proposed_version {
         builder.propose_version(version)?;

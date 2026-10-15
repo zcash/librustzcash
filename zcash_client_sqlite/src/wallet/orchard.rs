@@ -780,6 +780,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn create_proposed_transactions_uses_nu7_default_expiry() {
+        testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn create_pczt_uses_nu7_default_expiry() {
+        testing::pool::create_pczt_uses_nu7_default_expiry::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_full_block_detects_outputs() {
         testing::pool::scan_full_block_detects_outputs::<OrchardPoolTester>()
     }

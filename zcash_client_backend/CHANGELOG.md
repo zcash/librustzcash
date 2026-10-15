@@ -58,6 +58,10 @@ workspace.
   strategy reports a requirement its inputs already cover or dust inputs it was
   not given, or when the data source returns a note it was asked to exclude or
   a note from a pool it was not asked for.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}`: when no `expiry_height` is given, a transaction that
+  is not a ZIP 318 canonical crossing now expires 120 blocks after its target height
+  if NU7 is active at that height, instead of 40 blocks.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
