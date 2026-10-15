@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- Migrated to `bip0039 0.14`.
 - MSRV is now 1.89
 
 ## [0.23.0-pre.2] - 2026-10-13

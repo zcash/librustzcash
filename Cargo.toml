@@ -184,7 +184,7 @@ tower = "0.5"
 trait-variant = "0.1"
 
 # ZIP 32
-bip0039 = { version = "0.12" }
+bip0039 = { version = "0.14" }
 zip32 = { version = "0.3", default-features = false }
 
 # ZeWIF wallet interchange
