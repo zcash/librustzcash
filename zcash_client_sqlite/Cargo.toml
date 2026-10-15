@@ -115,7 +115,7 @@ proptest.workspace = true
 rand = { workspace = true, features = ["sys_rng"] }
 rand_chacha.workspace = true
 rand_core.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1.workspace = true
 tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
