@@ -18,6 +18,29 @@ workspace.
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
+- `zcash_client_sqlite::WalletDb::check_witnesses` now requires
+  `P: zcash_protocol::consensus::Parameters`.
+- For an unmined transaction whose expiry height it does not know, the wallet
+  now assumes the default expiry delta at the height at which it first observed
+  the transaction (see
+  `zcash_primitives::transaction::builder::default_tx_expiry_delta`): 120 blocks
+  if that height is at or after NU7 activation, and 40 blocks otherwise.
+  Previously it always assumed 40 blocks. This determines whether such a
+  transaction's spends and outputs count toward wallet balances and note and
+  UTXO selection.
+- `WalletRead::transaction_data_requests` (as implemented by `WalletDb`) keeps
+  returning `TransactionDataRequest::GetStatus` for an unmined transaction whose
+  expiry height the wallet does not know until the chain is 100 blocks past the
+  expiry height assumed for it as above. Previously it stopped 140 blocks after
+  the height at which the wallet first observed the transaction.
+- Without the `spend-index` feature, each
+  `TransactionDataRequest::TransactionsInvolvingAddress` that
+  `WalletRead::transaction_data_requests` returns to detect the spend of a
+  transparent output now spans
+  `zcash_primitives::transaction::builder::default_tx_expiry_delta` + 1 blocks
+  from its start height (121 blocks if NU7 is active at that height); previously
+  it always spanned 41 blocks. It still ends no later than the block after the
+  chain tip.
 
 ## [0.23.0-pre.2] - 2026-10-13
 

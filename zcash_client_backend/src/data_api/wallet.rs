@@ -73,7 +73,7 @@ use zcash_keys::{
 };
 use zcash_primitives::transaction::{
     Transaction, TxId, TxVersion,
-    builder::{BuildConfig, BuildResult, Builder, BundlePadding, DEFAULT_TX_EXPIRY_DELTA},
+    builder::{BuildConfig, BuildResult, Builder, BundlePadding, default_tx_expiry_delta},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
@@ -1753,6 +1753,26 @@ fn check_recipient_expiry(
     Ok(())
 }
 
+/// Returns the expiry height of a non-coinbase transaction that [`Builder`] builds for
+/// `target_height`, given the caller's `expiry_height` override: `None` if the override is
+/// [`consensus::H0`], which disables expiry; the override if there is one; and otherwise the
+/// [`Builder::new`] default of `target_height` plus [`default_tx_expiry_delta`] at
+/// `target_height`.
+fn resolve_tx_expiry_height<P: consensus::Parameters>(
+    params: &P,
+    target_height: TargetHeight,
+    expiry_height: Option<BlockHeight>,
+) -> Option<BlockHeight> {
+    match expiry_height {
+        Some(h) if h == consensus::H0 => None,
+        Some(h) => Some(h),
+        None => {
+            let target_height = BlockHeight::from(target_height);
+            Some(target_height + default_tx_expiry_delta(params, target_height))
+        }
+    }
+}
+
 // `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
 // that have not been consumed so far, to the corresponding pair of
 // `TransparentAddress` and `Outpoint`.
@@ -2033,12 +2053,8 @@ where
 
     // The expiry height the built transaction will carry: the caller's override (with
     // `H0` disabling expiry), the ZIP 318 rolling expiry for a canonical crossing, or
-    // the builder's default of the target height plus `DEFAULT_TX_EXPIRY_DELTA`.
-    let tx_expiry_height = match expiry_height {
-        Some(h) if h == consensus::H0 => None,
-        Some(h) => Some(h),
-        None => Some(BlockHeight::from(min_target_height) + DEFAULT_TX_EXPIRY_DELTA),
-    };
+    // the builder's default.
+    let tx_expiry_height = resolve_tx_expiry_height(params, min_target_height, expiry_height);
 
     if let Some(version) = proposed_version {
         builder.propose_version(version)?;
@@ -4167,7 +4183,10 @@ where
 mod tests {
     use super::*;
 
-    use zcash_protocol::zip318::AnchorBucketInterval;
+    use zcash_primitives::transaction::builder::{
+        DEFAULT_TX_EXPIRY_DELTA, POST_NU7_DEFAULT_TX_EXPIRY_DELTA,
+    };
+    use zcash_protocol::{local_consensus::LocalNetwork, zip318::AnchorBucketInterval};
 
     fn policy(confirmations: u32) -> ConfirmationsPolicy {
         ConfirmationsPolicy::new_symmetrical_unchecked(
@@ -4268,5 +4287,46 @@ mod tests {
         assert!(interval.is_boundary(anchor));
         // Most recent boundary at or below 997 is 996; age 1 steps back to 984.
         assert_eq!(u32::from(anchor), 984);
+    }
+
+    /// Without an override, a transaction's expiry height is its target height plus the default
+    /// expiry delta at that height, which grows at NU7 activation; an override is used as given,
+    /// and `H0` disables expiry.
+    #[test]
+    fn resolve_tx_expiry_height_follows_nu7_activation() {
+        /// The NU7 activation height of the test network.
+        const NU7_ACTIVATION: BlockHeight = BlockHeight::from_u32(200_000);
+        let network = LocalNetwork {
+            nu7: Some(NU7_ACTIVATION),
+            ..crate::data_api::testing::TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        let pre_nu7 = NU7_ACTIVATION - 1;
+
+        assert_eq!(
+            resolve_tx_expiry_height(&network, TargetHeight::from(pre_nu7), None),
+            Some(pre_nu7 + DEFAULT_TX_EXPIRY_DELTA)
+        );
+        assert_eq!(
+            resolve_tx_expiry_height(&network, TargetHeight::from(NU7_ACTIVATION), None),
+            Some(NU7_ACTIVATION + POST_NU7_DEFAULT_TX_EXPIRY_DELTA)
+        );
+
+        let requested = NU7_ACTIVATION + DEFAULT_TX_EXPIRY_DELTA;
+        assert_eq!(
+            resolve_tx_expiry_height(
+                &network,
+                TargetHeight::from(NU7_ACTIVATION),
+                Some(requested)
+            ),
+            Some(requested)
+        );
+        assert_eq!(
+            resolve_tx_expiry_height(
+                &network,
+                TargetHeight::from(NU7_ACTIVATION),
+                Some(consensus::H0)
+            ),
+            None
+        );
     }
 }

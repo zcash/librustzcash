@@ -21,7 +21,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
-        builder::DEFAULT_TX_EXPIRY_DELTA,
+        builder::default_tx_expiry_delta,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -121,7 +121,10 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_keys::keys::transparent::gap_limits::GapLimits,
-    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
+    zcash_primitives::transaction::{
+        builder::DEFAULT_TX_EXPIRY_DELTA,
+        fees::{FeeRule, transparent::InputSize, zip317},
+    },
     zcash_protocol::{
         TxId,
         value::{BalanceError, MAX_MONEY, ZatBalance},
@@ -10087,9 +10090,13 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
 
     // The transaction's expiry height may equal the address's expiry height; only a
     // transaction expiry strictly greater than the address's is forbidden. The default
-    // transaction expiry is the target height plus `DEFAULT_TX_EXPIRY_DELTA`, and the
-    // target height is the block after the chain tip.
-    let recipient = with_expiry(Some(chain_tip + 1 + DEFAULT_TX_EXPIRY_DELTA), None);
+    // transaction expiry is the target height, which is the block after the chain tip, plus
+    // `default_tx_expiry_delta` at that height.
+    let target_height = chain_tip + 1;
+    let recipient = with_expiry(
+        Some(target_height + default_tx_expiry_delta(st.network(), target_height)),
+        None,
+    );
     let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
         Address::from(recipient).to_zcash_address(st.network()),
         payment_value,
