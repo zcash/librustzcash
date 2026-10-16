@@ -25,7 +25,7 @@ use zcash_protocol::consensus::BlockHeight;
 use crate::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use crate::scheduling::{DelayDistribution, PROVABLE_ANCHOR_DEPTH, SchedulingParams};
+use crate::scheduling::{BlockSpacing, DelayDistribution, PROVABLE_ANCHOR_DEPTH, SchedulingParams};
 use crate::state::{AdvanceStep, StepKind};
 
 /// The share of planned transfer value (an integer percent) above which a migration with
@@ -335,11 +335,11 @@ pub fn classify_input_observations(
     StepSatisfiability::Satisfiable { as_of_height }
 }
 
-/// How many blocks a named step's scheduled height may lag the SERVED target
+/// How many reference blocks a named step's scheduled height may lag the SERVED target
 /// ([`DuenessTargets::effective`]) before [`advance_migration`] re-spreads the remaining
 /// schedule: a quarter of `transfer_delay`'s mean inter-broadcast gap, clamped to at least one
-/// block. Under the ZIP 318 parameters (a 66-block mean) that is 16 blocks, about 20 minutes at
-/// the target block spacing.
+/// reference block. Under the ZIP 318 parameters (a 66-reference-block mean) that is 16 reference
+/// blocks, about 20 minutes: 16 blocks before NU7 activation, 48 blocks from activation.
 ///
 /// A lag within the tolerance is ordinary wake-up slop (an OS timer delivered late, a block or
 /// two of estimation error), and the step is served as scheduled. A larger lag means the wallet
@@ -368,21 +368,32 @@ pub fn overdue_shift_tolerance(transfer_delay: &DelayDistribution) -> u32 {
 #[derive(Clone, Copy, Debug)]
 pub struct AdvanceConfig {
     reorg_settle_depth: ReorgSettleDepth,
+    block_spacing: BlockSpacing,
 }
 
 impl AdvanceConfig {
-    /// Drive-level policy under the caller's reorg-settlement policy.
+    /// Drive-level policy under the caller's reorg-settlement policy, on a chain with the given
+    /// block spacing.
     ///
     /// The settle depth is explicitly required — no `Default` — because the right value tracks the
     /// chain's block spacing, and keeping it current is the caller's responsibility, not this
-    /// crate's.
-    pub const fn new(reorg_settle_depth: ReorgSettleDepth) -> Self {
-        Self { reorg_settle_depth }
+    /// crate's. The block spacing is that of the network the migration runs on
+    /// ([`BlockSpacing::for_network`]).
+    pub const fn new(reorg_settle_depth: ReorgSettleDepth, block_spacing: BlockSpacing) -> Self {
+        Self {
+            reorg_settle_depth,
+            block_spacing,
+        }
     }
 
     /// The caller's reorg-settlement policy; see [`ReorgSettleDepth`].
     pub const fn reorg_settle_depth(&self) -> ReorgSettleDepth {
         self.reorg_settle_depth
+    }
+
+    /// The block spacing of the chain, which converts the schedule's durations into blocks.
+    pub const fn block_spacing(&self) -> BlockSpacing {
+        self.block_spacing
     }
 }
 
@@ -1012,9 +1023,14 @@ pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
                 })
                 .min();
             if let Some((overdue_from, scheduled)) = most_overdue {
-                let served = u32::from(targets.effective());
-                if overdue_from.saturating_add(overdue_tolerance) < served {
-                    state.shift_schedule(served - scheduled, rng);
+                let served = targets.effective();
+                let spacing = config.block_spacing();
+                if spacing.exceeds(
+                    BlockHeight::from_u32(overdue_from),
+                    served,
+                    overdue_tolerance,
+                ) {
+                    state.shift_schedule(&spacing, BlockHeight::from_u32(scheduled), served, rng);
                     dirty = true;
                     continue;
                 }
@@ -1423,7 +1439,7 @@ mod advance_tests {
     }
 
     fn config() -> AdvanceConfig {
-        AdvanceConfig::new(ReorgSettleDepth::new(10))
+        AdvanceConfig::new(ReorgSettleDepth::new(10), BlockSpacing::UNIFORM)
     }
 
     /// A fresh seeded RNG per drive call; only the overdue shift's anchor redraw consumes it, so
@@ -2766,6 +2782,63 @@ mod advance_tests {
             1_050 + tolerance + 1,
         );
         assert_eq!(store.replaced.get(), 1);
+    }
+
+    /// After NU7 activation the overdue tolerance spans the spacing ratio times as many blocks,
+    /// and the shift moves the pending schedule by the same number of blocks the trigger lagged.
+    #[test]
+    fn overdue_shift_tolerance_scales_from_nu7() {
+        let ratio = zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO;
+        let tolerance =
+            ratio * overdue_shift_tolerance(&SchedulingParams::ZIP_318.transfer_delay());
+        let nu7_config = AdvanceConfig::new(
+            ReorgSettleDepth::new(10),
+            BlockSpacing::with_nu7_activation(BlockHeight::from_u32(0)),
+        );
+        let make = || {
+            state_with_crossings(
+                &[50_000_000, 50_000_000],
+                vec![
+                    tx(0, prep(0, 0), mined(10)),
+                    scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                    scheduled_transfer(2, 1, 720, 1_050, MigrationTxState::Signed),
+                ],
+            )
+        };
+
+        // A lag of the scaled tolerance holds the schedule, though it exceeds the unscaled one.
+        let mut state = make();
+        let mut store = TestStore::new(1_000 + tolerance, []);
+        advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance)),
+            &nu7_config,
+            &mut rng(),
+        )
+        .expect("the store never fails");
+        assert_eq!(u32::from(state.transactions()[1].scheduled_height()), 1_000);
+        assert_eq!(store.replaced.get(), 0);
+
+        // One block past it, the pending schedule shifts by the lag.
+        let mut state = make();
+        let mut store = TestStore::new(1_000 + tolerance + 1, []);
+        advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance + 1)),
+            &nu7_config,
+            &mut rng(),
+        )
+        .expect("the store never fails");
+        assert_eq!(
+            u32::from(state.transactions()[1].scheduled_height()),
+            1_000 + tolerance + 1,
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            1_050 + tolerance + 1,
+        );
     }
 
     /// The tolerance is a function of the schedule's own scale: a quarter of the mean transfer

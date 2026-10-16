@@ -76,7 +76,11 @@ use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver, Walle
 
 /// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
 /// the satisfiability oracle judges anchor displacements under.
-const ADVANCE: AdvanceConfig = AdvanceConfig::new(ReorgSettleDepth::new(10));
+/// The test network does not activate NU7, so its block spacing is uniform.
+const ADVANCE: AdvanceConfig = AdvanceConfig::new(
+    ReorgSettleDepth::new(10),
+    zcash_pool_migration::scheduling::BlockSpacing::UNIFORM,
+);
 
 /// A cap on the empty blocks a drive loop will mine waiting for the migration's schedule, so a
 /// migration that can never make progress fails the test rather than spinning. The privacy
@@ -1609,7 +1613,11 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
                 .anchor_boundary()
                 .expect("every committed transfer carries its boundary");
             assert!(
-                interval.is_boundary(boundary),
+                zcash_pool_migration::scheduling::AnchorGrid::new(
+                    interval,
+                    zcash_pool_migration::scheduling::BlockSpacing::UNIFORM,
+                )
+                .is_boundary(boundary),
                 "anchor {boundary:?} is not on the wallet's {}-block retention grid",
                 interval.block_count(),
             );

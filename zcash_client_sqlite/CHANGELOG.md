@@ -30,6 +30,8 @@ workspace.
 - `WalletWrite::put_received_transparent_utxo` now records an unmined output as
   first observed at the mempool height (the block after the chain tip), instead
   of at the chain tip.
+- From NU7 activation, the wallet retains anchor checkpoints on the scaled ZIP 318
+  anchor grid (every 432 blocks rather than every 144).
 
 ## [0.23.0-pre.2] - 2026-10-13
 
