@@ -10,6 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::NetworkUpgrade::Nu8` and
+  `zcash_protocol::consensus::BranchId::Nu8`, the network upgrade that deploys
+  the [ZIP 248] transaction format, and
+  `zcash_protocol::local_consensus::LocalNetwork::nu8` (all require
+  `zcash_unstable="nu8"`). The consensus branch ID is a placeholder until one
+  is assigned, as for `NuTachyon`.
+
+### Changed
+- `zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID}` are now
+  gated on `zcash_unstable="nu8"` rather than `zcash_unstable="nutachyon"`.
+
+[ZIP 248]: https://zips.z.cash/zip-0248
+
 ## [0.11.0] - 2026-10-21
 
 This release sets the NU7 mainnet activation height to 3543405.
@@ -213,10 +227,6 @@ Mainnet activation will be set in the 0.10.0 final release.
 ## [0.8.0] - 2026-04-23
 
 ### Added
-- `zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID}`, for the
-  ZIP 248 transaction format (unstable; requires `zcash_unstable = "nu7"` or
-  `"zfuture"`). The version group ID is a placeholder until ZIP 248 assigns
-  one.
 - `zcash_protocol::consensus::TxIndex`
 - `zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS`
 - `zcash_protocol::consensus::BranchId::{has_sprout, has_sapling, has_orchard}`
