@@ -534,6 +534,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_rejects_oversized_transaction_at_proposal() {
+        testing::pool::send_max_rejects_oversized_transaction_at_proposal::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn send_max_proposal_fails_when_unconfirmed_funds_present() {
         testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<SaplingPoolTester>()
     }
