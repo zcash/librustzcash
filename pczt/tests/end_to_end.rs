@@ -1570,6 +1570,8 @@ fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: None,
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
@@ -1589,16 +1591,18 @@ fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: Some(BlockHeight::from_u32(10)),
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
 }
 
-/// A regtest network with NuTachyon activated, for exercising v7 transactions.
-#[cfg(zcash_unstable = "nutachyon")]
-fn nu_tachyon_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+/// A regtest network with NU8 activated, for exercising v7 transactions.
+#[cfg(zcash_unstable = "nu8")]
+fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
     zcash_protocol::local_consensus::LocalNetwork {
-        nu_tachyon: Some(BlockHeight::from_u32(11)),
+        nu8: Some(BlockHeight::from_u32(11)),
         ..nu6_3_test_network()
     }
 }
@@ -1681,7 +1685,7 @@ fn assert_shielded_sighash_is_txid(pczt: Pczt) {
 
     // A v7 transaction extracted from a PCZT must satisfy ZIP 248 value
     // conservation, which needs the fee delta the bundles alone cannot supply.
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     if effects.version() == zcash_primitives::transaction::TxVersion::V7 {
         effects
             .check_v7_consensus_rules()
@@ -1698,10 +1702,10 @@ fn v6_ironwood_pczt_signs_over_its_txid() {
 }
 
 #[test]
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 fn v7_ironwood_pczt_signs_over_its_zip248_txid() {
     assert_shielded_sighash_is_txid(orchard_to_ironwood_pczt(
-        nu_tachyon_test_network(),
+        nu8_test_network(),
         BlockHeight::from_u32(11),
     ));
 }

@@ -23,7 +23,7 @@ use zcash_protocol::{
 
 use super::GROTH_PROOF_SIZE;
 use crate::transaction::Transaction;
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 use crate::transaction::zip248::{V7_SIGHASH_V0_INFO_WIRE, consume_v7_sighash_v0_info};
 
 /// The size in bytes of a Sapling spend description in its v4 (pre-NU5) serialized form, as
@@ -561,7 +561,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
 /// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
 /// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn read_v7_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
@@ -663,7 +663,7 @@ pub(crate) fn read_v7_bundle(
 ///
 /// The anchor is not part of the effecting data; it is written by
 /// [`write_v7_auth`].
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn write_v7_effects<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
@@ -695,7 +695,7 @@ pub(crate) fn write_v7_effects<W: Write>(
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),
 ///         bindingSigSapling (SaplingSignature with sighashInfo).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,

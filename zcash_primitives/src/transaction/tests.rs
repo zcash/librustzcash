@@ -27,10 +27,10 @@ use {
     zcash_script::script,
 };
 
-#[cfg(all(test, zcash_unstable = "nutachyon"))]
+#[cfg(all(test, zcash_unstable = "nu8"))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
-#[cfg(all(test, zcash_unstable = "nutachyon"))]
+#[cfg(all(test, zcash_unstable = "nu8"))]
 use super::sighash_v7::v7_signature_hash;
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -243,33 +243,100 @@ fn suggested_version_for_v5_branches_is_not_v6() {
     );
 }
 
+/// Cross-checks the v7 digest tree against values computed independently of this
+/// implementation, directly from the [ZIP 248] text with Python's
+/// `hashlib.blake2b` (see `.plans/zip248_vectors.py`):
+///
+/// ```text
+/// header_digest            = BLAKE2b-256("ZTxIdHeadersHash",
+///                              version || nVersionGroupId || nConsensusBranchId
+///                                      || lock_time || nExpiryHeight)   [T.1]
+/// value_pool_deltas_digest = BLAKE2b-256("ZTxIdVPDeltaHash", [])        [T.2]
+/// effects_bundles_digest   = BLAKE2b-256("ZTxIdEffBnd_Hash", [])        [T.3]
+/// txid                     = BLAKE2b-256("ZcashTxHash_" || branch_id,
+///                              header_digest || value_pool_deltas_digest
+///                                            || effects_bundles_digest)
+/// auth_bundles_digest      = BLAKE2b-256("ZTxAuthBnd__Hash", [])        [A.1]
+/// auth_digest              = BLAKE2b-256("ZTxAuthHash_" || branch_id,
+///                              auth_bundles_digest)
+/// ```
+///
+/// These pin the personalizations, the field encodings and the shape of the
+/// tree, none of which the roundtrip and consistency tests can observe.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
 #[test]
-#[cfg(zcash_unstable = "nutachyon")]
-fn v7_is_enabled_by_nu_tachyon_and_roundtrips() {
-    assert_eq!(
-        TxVersion::suggested_for_branch(BranchId::NuTachyon),
-        TxVersion::V7
-    );
-    assert!(TxVersion::V7.valid_in_branch(BranchId::NuTachyon));
-    assert!(!TxVersion::V7.valid_in_branch(BranchId::Nu6_3));
-
+#[cfg(zcash_unstable = "nu8")]
+fn v7_empty_transaction_matches_zip248_digests() {
     let tx =
-        TransactionData::from_parts_v7(BranchId::NuTachyon, 0, 0u32.into(), None, None, None, None)
+        TransactionData::from_parts_v7(BranchId::Nu8, 0, 100u32.into(), None, None, None, None)
             .freeze()
             .unwrap();
+
+    assert_eq!(
+        hex::encode(tx.txid().as_ref()),
+        "7d0e9f1bc9f2a1d34760306861a89a2886059ab3e5b31967b4c1d006338f42eb",
+    );
+    assert_eq!(
+        hex::encode(tx.auth_commitment().as_bytes()),
+        "d3a128d379cd32a6ec49acb8e5da337ed38e80c068fa0e33e4baf2786867241a",
+    );
+}
+
+/// As [`v7_empty_transaction_matches_zip248_digests`], for a transaction whose
+/// only value pool delta is the fee. This pins [ZIP 248]'s per-entry encoding
+/// of `mValuePoolDeltas` — `compactSize(bundleType) ||
+/// compactSize(bundleVariant) || assetClass || value` — which is specific to
+/// this format and has no ZIP 244 counterpart.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_fee_delta_matches_zip248_digests() {
+    use super::zip248;
+
+    let mut deltas = zip248::ValuePoolDeltas::empty();
+    deltas.set_fee(Zatoshis::const_from_u64(10_000));
+    let tx = TransactionData::<super::Authorized>::from_parts_with_bundles(
+        TxVersion::V7,
+        BranchId::Nu8,
+        0,
+        100u32.into(),
+        deltas,
+        zip248::BundleMap::new(),
+    )
+    .freeze()
+    .unwrap();
+
+    assert_eq!(
+        hex::encode(tx.txid().as_ref()),
+        "0c4f2e403c749ce18dcb26051e713ef6be72bc3ceda790029700e48c584fbda6",
+    );
+}
+
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_is_enabled_by_nu8_and_roundtrips() {
+    assert_eq!(
+        TxVersion::suggested_for_branch(BranchId::Nu8),
+        TxVersion::V7
+    );
+    assert!(TxVersion::V7.valid_in_branch(BranchId::Nu8));
+    assert!(!TxVersion::V7.valid_in_branch(BranchId::Nu6_3));
+
+    let tx = TransactionData::from_parts_v7(BranchId::Nu8, 0, 0u32.into(), None, None, None, None)
+        .freeze()
+        .unwrap();
 
     let mut encoded = Vec::new();
     tx.write(&mut encoded).unwrap();
     assert_eq!(&encoded[..4], &(V7_TX_VERSION | (1 << 31)).to_le_bytes());
     assert_eq!(&encoded[4..8], &V7_VERSION_GROUP_ID.to_le_bytes());
-    assert_eq!(
-        &encoded[8..12],
-        &u32::from(BranchId::NuTachyon).to_le_bytes()
-    );
+    assert_eq!(&encoded[8..12], &u32::from(BranchId::Nu8).to_le_bytes());
 
     let decoded = Transaction::read(&encoded[..], BranchId::Sprout).unwrap();
     assert_eq!(decoded.version(), TxVersion::V7);
-    assert_eq!(decoded.consensus_branch_id(), BranchId::NuTachyon);
+    assert_eq!(decoded.consensus_branch_id(), BranchId::Nu8);
     let mut reencoded = Vec::new();
     decoded.write(&mut reencoded).unwrap();
     assert_eq!(reencoded, encoded);
@@ -1100,11 +1167,11 @@ proptest! {
     }
 }
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
-    fn tx_serialization_roundtrip_nu_tachyon(tx in arb_tx(BranchId::NuTachyon)) {
+    fn tx_serialization_roundtrip_nu8(tx in arb_tx(BranchId::Nu8)) {
         check_roundtrip(tx)?;
     }
 }
@@ -1355,11 +1422,7 @@ fn zip_0244() {
 
 /// Roundtrip test for ZIP 233 NSM + fee VP deltas in ZIP 248 format.
 // TODO: regenerate cross-implementation test vectors from zcash-hackworks/zcash-test-vectors
-#[cfg(all(
-    zcash_unstable = "nutachyon",
-    feature = "zip-233",
-    zcash_unstable = "zip233"
-))]
+#[cfg(all(zcash_unstable = "nu8", feature = "zip-233", zcash_unstable = "zip233"))]
 #[test]
 #[ignore = "Historical vectors for the withdrawn ZIP 233 v6-header experiment; \
             current ZIP 233 requires ZIP 248 value-pool deltas, which are not implemented."]
@@ -1373,7 +1436,7 @@ fn zip_0233() {
         vp.set_zip233(Zatoshis::from_u64(nsm).unwrap());
         TransactionData::<super::Authorized>::from_parts_with_bundles(
             super::TxVersion::V7,
-            BranchId::NuTachyon,
+            BranchId::Nu8,
             0,
             BlockHeight::from_u32(100),
             vp,
@@ -1387,7 +1450,7 @@ fn zip_0233() {
     let tx = make_tx(10_000, 50_000);
     let mut buf = Vec::new();
     tx.write(&mut buf).unwrap();
-    let tx = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+    let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
     assert_eq!(
         tx.value_pool_deltas().fee(),
         Some(Zatoshis::from_u64(10_000).unwrap())
@@ -1410,7 +1473,7 @@ fn zip_0233() {
 /// "For transactions that have no transparent inputs, the v0 signature digest
 /// is identical to the transaction identifier digest."
 #[test]
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     use super::zip248;
     use zcash_protocol::consensus::BlockHeight;
@@ -1422,7 +1485,7 @@ fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     // signature hash requires; this transaction has no transparent bundle.
     let tx = TransactionData::<TestUnauthorized>::from_parts_with_bundles(
         super::TxVersion::V7,
-        BranchId::NuTachyon,
+        BranchId::Nu8,
         0,
         BlockHeight::from_u32(100),
         vp,
@@ -1520,14 +1583,15 @@ mod zip248_tests {
         use super::super::Authorized;
 
         let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-        map.insert_unknown(99, 0, test_unknown_bundle(&[]));
+        map.insert_unknown(99, 0, test_unknown_bundle(&[])).unwrap();
         assert_eq!(
             map.unknown_bundles()
                 .map(|(&(bt, _), _)| bt)
                 .collect::<Vec<_>>(),
             vec![99],
         );
-        map.insert_unknown(50, 0, test_unknown_bundle(&[1]));
+        map.insert_unknown(50, 0, test_unknown_bundle(&[1]))
+            .unwrap();
         assert_eq!(
             map.unknown_bundles()
                 .map(|(&(bt, _), _)| bt)
@@ -1538,7 +1602,7 @@ mod zip248_tests {
 
     /// Verifies that a v7 transaction with an unknown bundle type can be
     /// parsed and re-serialized (ZIP 248 forward compatibility).
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     #[test]
     fn unknown_bundle_roundtrip() {
         use super::super::{Authorized, Transaction, TransactionData, TxVersion};
@@ -1548,11 +1612,13 @@ mod zip248_tests {
         vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
 
         let mut bundles: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-        bundles.insert_unknown(42, 0, test_unknown_bundle(&[0xDE, 0xAD, 0xBE, 0xEF]));
+        bundles
+            .insert_unknown(42, 0, test_unknown_bundle(&[0xDE, 0xAD, 0xBE, 0xEF]))
+            .unwrap();
 
         let txdata = TransactionData::<Authorized>::from_parts_with_bundles(
             TxVersion::V7,
-            BranchId::NuTachyon,
+            BranchId::Nu8,
             0,
             BlockHeight::from_u32(100),
             vp,
@@ -1565,7 +1631,7 @@ mod zip248_tests {
         tx.write(&mut buf).unwrap();
 
         // Parse back.
-        let tx2 = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+        let tx2 = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
 
         // The unknown bundle should be preserved.
         let unknowns: Vec<_> = tx2.bundles().unknown_bundles().collect();
@@ -1582,7 +1648,7 @@ mod zip248_tests {
 
     // -- Consensus rule tests --------------------------------------------------
 
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     mod consensus_rules {
         use super::super::super::{
             Authorized, TransactionData, TxVersion, V7ConsensusError, ZatBalance, zip248,
@@ -1593,7 +1659,7 @@ mod zip248_tests {
         fn make_v7(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
             TransactionData::from_parts_with_bundles(
                 TxVersion::V7,
-                BranchId::NuTachyon,
+                BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(100),
                 vp,
@@ -1643,7 +1709,7 @@ mod zip248_tests {
             bundles.insert_coinbase(coinbase);
             TransactionData::from_parts_with_bundles(
                 TxVersion::V7,
-                BranchId::NuTachyon,
+                BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(100),
                 vp,
@@ -1788,7 +1854,7 @@ mod zip248_tests {
 
     // -- Parsing rule rejection tests ------------------------------------------
 
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     mod parsing_rules {
         use super::super::super::{Transaction, zip248};
         use alloc::vec::Vec;
@@ -1842,7 +1908,7 @@ mod zip248_tests {
 
         /// A v7 transaction carrying a single `mEffectBundles` entry.
         fn v7_with_effect_bundle(bundle_type: u64, variant: u64, data: &[u8]) -> Vec<u8> {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut buf, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut buf, 1).unwrap(); // nEffectBundles
             write_bundle_entry(&mut buf, bundle_type, variant, data);
@@ -1868,21 +1934,21 @@ mod zip248_tests {
             let variant = zip248::BundleVariant::Default.to_u64();
             let buf = v7_with_effect_bundle(transparent, variant, &effects);
 
-            let tx = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+            let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
             assert!(tx.transparent_bundle().is_some());
             let mut reserialized = Vec::new();
             tx.write(&mut reserialized).unwrap();
             assert_eq!(reserialized, buf);
 
             // The same transaction with an empty auth entry must be rejected.
-            let mut with_empty_auth = v7_header(BranchId::NuTachyon);
+            let mut with_empty_auth = v7_header(BranchId::Nu8);
             CompactSize::write(&mut with_empty_auth, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nEffectBundles
             write_bundle_entry(&mut with_empty_auth, transparent, variant, &effects);
             CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nAuthBundles
             write_bundle_entry(&mut with_empty_auth, transparent, variant, &[]);
 
-            let err = Transaction::read(&with_empty_auth[..], BranchId::NuTachyon).unwrap_err();
+            let err = Transaction::read(&with_empty_auth[..], BranchId::Nu8).unwrap_err();
             let msg = alloc::format!("{err:?}");
             assert!(msg.contains("must be omitted"), "unexpected error: {msg}");
         }
@@ -1902,7 +1968,7 @@ mod zip248_tests {
                 &effects,
             );
 
-            let err = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap_err();
+            let err = Transaction::read(&buf[..], BranchId::Nu8).unwrap_err();
             let msg = alloc::format!("{err:?}");
             assert!(
                 msg.contains("empty transparent bundle"),
@@ -1922,14 +1988,14 @@ mod zip248_tests {
                 &effects,
             );
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         /// A bundle payload longer than a block cannot be part of a valid
         /// transaction, and must be rejected before it is allocated.
         #[test]
         fn rejects_bundle_data_longer_than_a_block() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut buf, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut buf, 1).unwrap(); // nEffectBundles
             CompactSize::write(&mut buf, zip248::BundleType::Transparent.to_u64() as usize)
@@ -1937,7 +2003,7 @@ mod zip248_tests {
             CompactSize::write(&mut buf, 0).unwrap(); // bundleVariant
             CompactSize::write(&mut buf, MAX_BLOCK_BYTES + 1).unwrap(); // claimed length
 
-            let err = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap_err();
+            let err = Transaction::read(&buf[..], BranchId::Nu8).unwrap_err();
             let msg = alloc::format!("{err:?}");
             assert!(
                 msg.contains("maximum block size"),
@@ -1958,7 +2024,7 @@ mod zip248_tests {
                 &opaque,
             );
 
-            let tx = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+            let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
             assert!(
                 tx.sapling_bundle().is_none(),
                 "a variant this implementation does not understand must not parse as Sapling"
@@ -1972,7 +2038,7 @@ mod zip248_tests {
 
         #[test]
         fn rejects_out_of_order_vp_deltas() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             // 2 VP delta entries: Orchard (3) then Sapling (2) — wrong order.
             CompactSize::write(&mut *buf, 2).unwrap();
             write_vp_entry(&mut buf, 3, 0, 100_000); // Orchard first (wrong)
@@ -1980,24 +2046,24 @@ mod zip248_tests {
             CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
             CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_duplicate_vp_deltas() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 2).unwrap();
             write_vp_entry(&mut buf, 2, 0, 50_000);
             write_vp_entry(&mut buf, 2, 0, 50_000);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_coinbase_in_auth_bundles() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
             // A coinbase effect bundle, and an auth bundle for it: the
             // registry marks the coinbase mAuthBundles column as prohibited.
@@ -2006,7 +2072,7 @@ mod zip248_tests {
             CompactSize::write(&mut *buf, 1).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 1, 0, &[0xAA]).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
@@ -2017,41 +2083,41 @@ mod zip248_tests {
             CompactSize::write(&mut effects, zip248::MAX_COINBASE_DATA_LEN + 1).unwrap();
             effects.extend_from_slice(&[0u8; zip248::MAX_COINBASE_DATA_LEN + 1]);
 
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 1, 0, &effects).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_zero_vp_delta_value() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 0);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_fee_in_effect_bundles() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
             // bundleType 5 is the fee bundle, which is value-only.
             zip248::write_bundle_data_framing(&mut buf, 5, 0, &[0xAA]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_mismatched_variant_across_maps() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 100_000);
             // Effect bundle says bundleType 2 variant 1 — mismatch.
@@ -2059,25 +2125,25 @@ mod zip248_tests {
             zip248::write_bundle_data_framing(&mut buf, 2, 1, &[]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap(); // no auth
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn rejects_auth_without_effect() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 2, 0, &[0xBB]).unwrap();
 
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
         fn accepts_empty_v7_transaction() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             append_empty_body(&mut buf);
-            let tx = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+            let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
             assert!(tx.transparent_bundle().is_none());
             assert!(tx.sapling_bundle().is_none());
             assert!(tx.orchard_bundle().is_none());
@@ -2085,20 +2151,20 @@ mod zip248_tests {
 
         #[test]
         fn rejects_out_of_order_effect_bundles() {
-            let mut buf = v7_header(BranchId::NuTachyon);
+            let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
             // Effect bundles: Orchard (3) before Transparent (0) — wrong order.
             CompactSize::write(&mut *buf, 2).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 3, 0, &[0xAA]).unwrap();
             zip248::write_bundle_data_framing(&mut buf, 0, 0, &[0xBB]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap(); // no auth
-            assert!(Transaction::read(&buf[..], BranchId::NuTachyon).is_err());
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
     }
 
     // -- Whole-transaction roundtrips for the v7 bundle types ------------------
 
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     mod bundle_roundtrips {
         use proptest::prelude::*;
 
@@ -2116,8 +2182,7 @@ mod zip248_tests {
             let mut buf = Vec::new();
             tx.write(&mut buf)
                 .expect("v7 transactions are serializable");
-            Transaction::read(&buf[..], BranchId::NuTachyon)
-                .expect("the encoding just written parses")
+            Transaction::read(&buf[..], BranchId::Nu8).expect("the encoding just written parses")
         }
 
         #[test]
@@ -2141,7 +2206,7 @@ mod zip248_tests {
 
             let tx = TransactionData::<Authorized>::from_parts_with_bundles(
                 TxVersion::V7,
-                BranchId::NuTachyon,
+                BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(1_500_100),
                 vp,
@@ -2192,7 +2257,7 @@ mod zip248_tests {
 
                     TransactionData::<Authorized>::from_parts_with_bundles(
                         TxVersion::V7,
-                        BranchId::NuTachyon,
+                        BranchId::Nu8,
                         0,
                         BlockHeight::from_u32(100),
                         vp,
@@ -2221,7 +2286,7 @@ mod zip248_tests {
 
     // -- Wire order and roundtrip tests ----------------------------------------
 
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     mod wire_order {
         use super::super::super::zip248;
         use alloc::vec::Vec;
@@ -2234,7 +2299,8 @@ mod zip248_tests {
             vp.set_orchard(ZatBalance::from_i64(50_000).unwrap());
             vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
             // Unknown: bundleType 8 (sorts after all known types)
-            vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(99_000).unwrap());
+            vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(99_000).unwrap())
+                .unwrap();
 
             let entries = vp.to_wire_entries();
             let types: Vec<u64> = entries.iter().map(|e| e.bundle_type).collect();
@@ -2245,7 +2311,7 @@ mod zip248_tests {
 
     // -- Sighash version info error tests --------------------------------------
 
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     mod sighash_info {
         use super::super::super::zip248;
 

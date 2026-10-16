@@ -11,12 +11,13 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent};
 use orchard::bundle::{self as orchard};
 use sapling::bundle::{self as sapling};
-use zcash_encoding::CompactSize;
+use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
 use zcash_protocol::constants::MAX_BLOCK_BYTES;
 use zcash_protocol::value::{ZatBalance, Zatoshis};
 
@@ -206,8 +207,22 @@ pub struct UnknownBundle {
     pub effect_digest: blake2b_simd::Hash,
     /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
-    /// Digest of the authorizing data. `None` when parsed from the wire;
-    /// set via [`BundleMap::get_unknown_mut`] before computing the auth commitment.
+    /// Digest of the authorizing data, or `None` if it is not known.
+    ///
+    /// Parsing leaves this `None`: ZIP 248 defines no digest for the
+    /// authorizing data of a bundle whose type the client does not
+    /// understand, and this implementation deliberately does not invent one
+    /// (unlike `effect_digest`, which has an implementation-defined flat hash
+    /// so that the txid stays computable). A caller that does understand the
+    /// bundle type can supply the digest through
+    /// [`BundleMap::get_unknown_mut`] before computing the authorizing data
+    /// commitment.
+    ///
+    /// The consequence is that a transaction parsed here carries unknown
+    /// bundles' authorizing data on the wire without committing to it, so this
+    /// implementation cannot detect that data being altered. It cannot
+    /// validate such a bundle either, which is why the omission is tolerable;
+    /// a node that does understand the type must supply the digest.
     pub auth_digest: Option<blake2b_simd::Hash>,
 }
 
@@ -548,8 +563,53 @@ impl<A: Authorization> BundleMap<A> {
     }
 
     /// Insert an opaque bundle whose type is not recognized.
-    pub fn insert_unknown(&mut self, raw_type: u64, raw_variant: u64, bundle: UnknownBundle) {
+    /// Returns an error if the raw key has no `compactSize` encoding, which
+    /// would make the bundle impossible to serialize or digest.
+    pub fn insert_unknown(
+        &mut self,
+        raw_type: u64,
+        raw_variant: u64,
+        bundle: UnknownBundle,
+    ) -> Result<(), WireKeyError> {
+        check_wire_key(raw_type, raw_variant)?;
         self.unknown.insert((raw_type, raw_variant), bundle);
+        Ok(())
+    }
+
+    /// Removes and returns the Sapling bundle, if present.
+    ///
+    /// Lets the transaction builder move a bundle out to authorize it, rather
+    /// than cloning one it is about to replace.
+    pub(crate) fn take_sapling(&mut self) -> Option<sapling::Bundle<A::SaplingAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::SAPLING)? {
+            TypedBundle::Sapling(bundle) => Some(bundle),
+            other => {
+                self.known.insert(BundleId::SAPLING, other);
+                None
+            }
+        }
+    }
+
+    /// Removes and returns the Orchard bundle, if present.
+    pub(crate) fn take_orchard(&mut self) -> Option<orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::ORCHARD)? {
+            TypedBundle::Orchard(bundle) => Some(*bundle),
+            other => {
+                self.known.insert(BundleId::ORCHARD, other);
+                None
+            }
+        }
+    }
+
+    /// Removes and returns the Ironwood bundle, if present.
+    pub(crate) fn take_ironwood(&mut self) -> Option<orchard::Bundle<A::OrchardAuth, ZatBalance>> {
+        match self.known.remove(&BundleId::IRONWOOD)? {
+            TypedBundle::Ironwood(bundle) => Some(*bundle),
+            other => {
+                self.known.insert(BundleId::IRONWOOD, other);
+                None
+            }
+        }
     }
 
     /// Returns a mutable reference to an unknown bundle, if present.
@@ -846,6 +906,8 @@ impl ValuePoolDeltas {
     }
 
     /// Insert an unknown-type entry. Used during v7 deserialization.
+    /// Returns an error if the raw key has no `compactSize` encoding, which
+    /// would make the entry impossible to serialize or digest.
     pub fn insert_unknown(
         &mut self,
         bundle_type: u64,
@@ -853,9 +915,11 @@ impl ValuePoolDeltas {
         asset_uuid: [u8; 64],
         variant: u64,
         value: ZatBalance,
-    ) {
+    ) -> Result<(), WireKeyError> {
+        check_wire_key(bundle_type, variant)?;
         self.unknown
             .insert((bundle_type, asset_class, asset_uuid), (variant, value));
+        Ok(())
     }
 
     /// Produce all VP delta entries (known and unknown) in canonical wire
@@ -1055,6 +1119,50 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
     p
 }
 
+/// A raw `(bundleType, bundleVariant)` pair with no `compactSize` encoding.
+///
+/// Both are `compactSize`-encoded on the wire and in the v7 bundle digests, so
+/// a value above [`MAX_COMPACT_SIZE`] could be neither serialized nor
+/// committed to. Parsed transactions cannot carry one, because `compactSize`
+/// decoding enforces the same bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WireKeyError {
+    /// The raw `bundleType` is out of range.
+    BundleType(u64),
+    /// The raw `bundleVariant` is out of range.
+    BundleVariant(u64),
+}
+
+impl fmt::Display for WireKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WireKeyError::BundleType(value) => write!(
+                f,
+                "bundleType {value} exceeds the maximum compactSize value {MAX_COMPACT_SIZE}"
+            ),
+            WireKeyError::BundleVariant(value) => write!(
+                f,
+                "bundleVariant {value} exceeds the maximum compactSize value {MAX_COMPACT_SIZE}"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for WireKeyError {}
+
+/// Checks that a raw wire key can be `compactSize`-encoded.
+fn check_wire_key(raw_type: u64, raw_variant: u64) -> Result<(), WireKeyError> {
+    if raw_type > u64::from(MAX_COMPACT_SIZE) {
+        return Err(WireKeyError::BundleType(raw_type));
+    }
+    if raw_variant > u64::from(MAX_COMPACT_SIZE) {
+        return Err(WireKeyError::BundleVariant(raw_variant));
+    }
+    Ok(())
+}
+
 /// The wire encoding of a sighash version 0 `sighashInfo` prefix, shared by
 /// `TransparentSighashInfo`, `SaplingSignature` and `OrchardSignature`.
 ///
@@ -1062,7 +1170,7 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
 /// sighash version 0 has empty `associatedData` for every bundle type, so
 /// `sighashInfo = [0x00]` and the wire encoding is `compactSize(1) || [0x00]`.
 /// Version 0 is the only defined version.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
@@ -1070,7 +1178,7 @@ pub(crate) const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 ///
 /// Sighash version 0 encodes as `[0x01, 0x00]` on the wire: compactSize(1) for the
 /// info length, then `0x00` for the version byte. This is the only defined version.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
     reader: &mut R,
     _context: &'static str,
@@ -1116,7 +1224,7 @@ pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
 ///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub fn write_v7_transparent_effects<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
@@ -1139,7 +1247,7 @@ pub fn write_v7_transparent_effects<W: Write>(
 /// [ZIP 248 §Transparent Authorizing Data](https://zips.z.cash/zip-0248#transparent-authorizing-data)
 ///
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub fn write_v7_transparent_auth<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
@@ -1281,7 +1389,8 @@ mod tests {
                         .hash(&[4, 5, 6]),
                 ),
             },
-        );
+        )
+        .unwrap();
 
         assert!(!map.is_empty());
         let unknowns: Vec<_> = map.unknown_bundles().collect();

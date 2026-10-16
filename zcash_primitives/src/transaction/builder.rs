@@ -920,8 +920,8 @@ impl<P, U> Builder<P, U> {
             let ironwood_branch = match self.consensus_branch_id {
                 BranchId::Nu6_3 => true,
                 BranchId::Nu7 => true,
-                #[cfg(zcash_unstable = "nutachyon")]
-                BranchId::NuTachyon => true,
+                #[cfg(zcash_unstable = "nu8")]
+                BranchId::Nu8 => true,
                 _ => false,
             };
             let ironwood_available = version.has_ironwood() && ironwood_branch;
@@ -1629,7 +1629,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             bundles.insert_ironwood(b);
         }
 
-        let unauthed_tx: TransactionData<A> = TransactionData::from_parts_with_bundles(
+        let mut unauthed_tx: TransactionData<A> = TransactionData::from_parts_with_bundles(
             self.tx_version,
             self.consensus_branch_id,
             0,
@@ -1660,8 +1660,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map(|extsk| extsk.expsk().ask().clone())
             .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
-            .sapling_bundle()
-            .cloned()
+            .bundles
+            .take_sapling()
             .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
             .map_err(Error::SaplingBuild)?;
@@ -1699,8 +1699,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_proving_key_storage.as_ref();
 
         let orchard_bundle = unauthed_tx
-            .orchard_bundle()
-            .cloned()
+            .bundles
+            .take_orchard()
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
@@ -1715,8 +1715,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map_err(Error::OrchardBuild)?;
 
         let ironwood_bundle = unauthed_tx
-            .ironwood_bundle()
-            .cloned()
+            .bundles
+            .take_ironwood()
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
@@ -2040,6 +2040,8 @@ mod tests {
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
             nu7: None,
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
@@ -2059,6 +2061,8 @@ mod tests {
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
             nu7: Some(BlockHeight::from_u32(11)),
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
@@ -2598,10 +2602,10 @@ mod tests {
     /// A padded Orchard bundle and an unpadded Ironwood bundle can be combined in
     /// one transaction: one real Orchard spend pads to 2 actions while the single
     /// Ironwood output stays at 1.
-    #[cfg(all(feature = "circuits", zcash_unstable = "nutachyon"))]
-    fn nu_tachyon_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu8"))]
+    fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         zcash_protocol::local_consensus::LocalNetwork {
-            nu_tachyon: Some(BlockHeight::from_u32(11)),
+            nu8: Some(BlockHeight::from_u32(11)),
             ..nu6_3_test_network()
         }
     }
@@ -2617,7 +2621,7 @@ mod tests {
     #[cfg(all(
         feature = "circuits",
         feature = "transparent-inputs",
-        zcash_unstable = "nutachyon"
+        zcash_unstable = "nu8"
     ))]
     fn v7_build_balances_the_transparent_value_pool() {
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
@@ -2638,7 +2642,7 @@ mod tests {
         );
 
         let mut builder = Builder::new(
-            nu_tachyon_test_network(),
+            nu8_test_network(),
             BlockHeight::from_u32(11),
             BuildConfig::Standard {
                 sapling_anchor: None,
@@ -2677,7 +2681,7 @@ mod tests {
     ///
     /// [ZIP 248 § Signature Digest]: https://zips.z.cash/zip-0248
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nutachyon"))]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu8"))]
     fn v7_build_signs_shielded_bundles_over_the_zip248_txid() {
         let spend_sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
         let spend_fvk = orchard::keys::FullViewingKey::from(&spend_sk);
@@ -2699,7 +2703,7 @@ mod tests {
         let orchard_anchor = merkle_path.root(note.commitment().into());
 
         let mut builder = Builder::new(
-            nu_tachyon_test_network(),
+            nu8_test_network(),
             BlockHeight::from_u32(11),
             BuildConfig::Standard {
                 sapling_anchor: None,

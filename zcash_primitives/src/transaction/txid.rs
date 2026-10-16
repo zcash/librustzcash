@@ -50,14 +50,21 @@ const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTrans
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
 const ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliH_v6";
 
+/// [ZIP 244 §T.3a.ii] and [ZIP 248 §T.3.2a.ii] both hash `cv || anchor || rk`
+/// per spend under `ZTxIdSSpendNHash`; [ZIP 229] changed what v6 hashes, so v6
+/// alone uses its own personalization.
+///
+/// [ZIP 229]: https://zips.z.cash/zip-0229
+/// [ZIP 244 §T.3a.ii]: https://zips.z.cash/zip-0244#t-3a-ii-sapling-spends-noncompact-digest
+/// [ZIP 248 §T.3.2a.ii]: https://zips.z.cash/zip-0248
 fn sapling_spends_noncompact_personalization(version: TxVersion) -> &'static [u8; 16] {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
             ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
         }
         TxVersion::V6 => ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
-        #[cfg(zcash_unstable = "nutachyon")]
-        TxVersion::V7 => ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
+        #[cfg(zcash_unstable = "nu8")]
+        TxVersion::V7 => ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION,
     }
 }
 
@@ -67,8 +74,10 @@ fn sapling_auth_personalization(version: TxVersion) -> &'static [u8; 16] {
             ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION
         }
         TxVersion::V6 => ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION,
-        #[cfg(zcash_unstable = "nutachyon")]
-        TxVersion::V7 => ZCASH_SAPLING_V6_SIGS_HASH_PERSONALIZATION,
+        // Unreachable for v7, whose authorizing data commitment is built by
+        // `hash_v7_sapling_auth` under `ZTxAuthSapliH_v7`.
+        #[cfg(zcash_unstable = "nu8")]
+        TxVersion::V7 => ZCASH_V7_SAPLING_AUTH_HASH_PERSONALIZATION,
     }
 }
 
@@ -76,7 +85,7 @@ fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
         TxVersion::V6 => true,
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
         TxVersion::V7 => true,
     }
 }
@@ -92,7 +101,7 @@ fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion
             (ValuePool::Orchard, OrchardTxVersion::V5)
         }
         TxVersion::V6 => (ValuePool::Orchard, OrchardTxVersion::V6),
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
         TxVersion::V7 => (ValuePool::Orchard, OrchardTxVersion::V6),
     }
 }
@@ -107,25 +116,25 @@ fn ironwood_v6_domain() -> (ValuePool, OrchardTxVersion) {
 // ZIP 244 counterparts because what they hash has changed: the value balance
 // moved to `value_pool_deltas_digest`, and the anchor moved from the effecting
 // data to the authorizing data.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) const ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_COINBASE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdCoinbasHash";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingH_v7";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_SAPLING_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliH_v7";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardH_v7";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaH_v7";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_IRONWOOD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdIronwd_Hash";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ZCASH_V7_IRONWOOD_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthIrnwdHash";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) const ZCASH_V7_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBnd_Hash";
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) const ZCASH_V7_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBnd__Hash";
 
 pub(crate) fn hasher(personal: &[u8; 16]) -> StateWrite {
@@ -205,11 +214,14 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
             ch.write_all(s_spend.nullifier().as_ref()).unwrap();
 
             nh.write_all(&s_spend.cv().to_bytes()).unwrap();
+            // [ZIP 248 §T.3.2a.ii]: "The anchor is hashed for _each_ spend
+            // (even though it is shared in the encoding)", as in ZIP 244. Only
+            // v6 (ZIP 229) omits it, having moved it to the auth digest.
             let write_anchor = match version {
                 TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => true,
                 TxVersion::V6 => false,
-                #[cfg(zcash_unstable = "nutachyon")]
-                TxVersion::V7 => false,
+                #[cfg(zcash_unstable = "nu8")]
+                TxVersion::V7 => true,
             };
             if write_anchor {
                 nh.write_all(&s_spend.anchor().to_repr()).unwrap();
@@ -343,7 +355,7 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
 ///
 /// Fields committed: `header || nVersionGroupId || nConsensusBranchId ||
 /// lock_time || nExpiryHeight`.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_header(
     version: TxVersion,
     consensus_branch_id: BranchId,
@@ -377,7 +389,7 @@ pub(crate) fn hash_v7_header(
 /// Each entry is serialized as `bundleType || bundleVariant || assetClass ||
 /// assetUuid || value` using the wire encoding (compactSize for type/variant,
 /// 0 or 64 bytes for assetUuid depending on assetClass).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> Blake2bHash {
     let mut h = hasher(ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION);
     for entry in vp.to_wire_entries() {
@@ -395,7 +407,7 @@ pub(crate) fn hash_v7_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
 /// Unlike the other per-bundle digests there is no empty-bundle sentinel: a
 /// transaction that has no coinbase bundle contributes no entry for it to
 /// `effects_bundles_digest` at all.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_coinbase_effects(bundle: &super::zip248::CoinbaseBundle) -> Blake2bHash {
     use zcash_encoding::CompactSize;
 
@@ -435,7 +447,7 @@ pub(crate) fn hash_v7_coinbase_effects(bundle: &super::zip248::CoinbaseBundle) -
 /// bytes hashed under it are the same; the formats stay distinguishable
 /// through this function's own `ZCASH_V7_SAPLING_HASH_PERSONALIZATION` and
 /// through the version-tagged header digest.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
 ) -> Blake2bHash {
@@ -474,7 +486,7 @@ pub(crate) fn hash_v7_sapling_effects<A: sapling::bundle::Authorization>(
 /// Instead we re-derive the per-action sub-hashes inline using the same
 /// BLAKE2b personalizations so the sub-digests are byte-identical to
 /// ZIP 244 -- only the final composition differs (no value balance appended).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_orchard_effects(
     bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
 ) -> Blake2bHash {
@@ -488,7 +500,7 @@ pub(crate) fn hash_v7_orchard_effects(
 /// with each personalization string replaced by its Ironwood counterpart.
 /// The strings differ so that the digest of a bundle acting on one pool
 /// cannot be reused as the digest of a bundle acting on the other.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_ironwood_effects(
     bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
 ) -> Blake2bHash {
@@ -500,7 +512,7 @@ pub(crate) fn hash_v7_ironwood_effects(
 /// The *Orchard pool* and the *Ironwood pool* are acted on by bundle types
 /// that share an encoding, and so share a digest shape; only these strings
 /// distinguish them.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 struct OrchardPoolPersonalizations {
     effects: &'static [u8; 16],
     actions_compact: &'static [u8; 16],
@@ -509,7 +521,7 @@ struct OrchardPoolPersonalizations {
     auth: &'static [u8; 16],
 }
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const ORCHARD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPersonalizations {
     effects: ZCASH_V7_ORCHARD_HASH_PERSONALIZATION,
     actions_compact: b"ZTxIdOrcActCHash",
@@ -518,7 +530,7 @@ const ORCHARD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPe
     auth: ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION,
 };
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 const IRONWOOD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPersonalizations {
     effects: ZCASH_V7_IRONWOOD_HASH_PERSONALIZATION,
     actions_compact: b"ZTxIdIrnActCHash",
@@ -527,7 +539,7 @@ const IRONWOOD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolP
     auth: ZCASH_V7_IRONWOOD_AUTH_HASH_PERSONALIZATION,
 };
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 fn hash_v7_orchard_protocol_effects(
     bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
     personalizations: &OrchardPoolPersonalizations,
@@ -600,7 +612,7 @@ fn hash_v7_orchard_protocol_effects(
 /// sighash algorithm was used to produce each signature. Without this
 /// prefix, a transaction produced under sighash v1 could be confused with
 /// one produced under v0 (if such a version were ever defined).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_transparent_auth(
     transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
 ) -> Blake2bHash {
@@ -628,7 +640,7 @@ pub(crate) fn hash_v7_transparent_auth(
 /// Grouping proofs separately from signatures allows a verifier to batch-
 /// verify all Groth16 proofs in one pass without interleaving signature
 /// checks -- a significant performance win for nodes processing blocks.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_sapling_auth(
     sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
@@ -682,7 +694,7 @@ pub(crate) fn hash_v7_sapling_auth(
 /// single aggregated proof for all actions. The ordering is still proof-
 /// first so that a verifier can process the proof before checking any
 /// signatures.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_orchard_auth(
     orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
@@ -694,14 +706,14 @@ pub(crate) fn hash_v7_orchard_auth(
 /// Computed over the Ironwood bundle's authorizing data exactly as
 /// `orchard_auth_digest` is, including its commitment to the anchor, with the
 /// `ZTxAuthIrnwdHash` personalization in place of `ZTxAuthOrchaH_v7`.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_ironwood_auth(
     ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
     hash_v7_orchard_protocol_auth(ironwood_bundle, &IRONWOOD_POOL_PERSONALIZATIONS)
 }
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 fn hash_v7_orchard_protocol_auth(
     orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
     personalizations: &OrchardPoolPersonalizations,
@@ -733,7 +745,7 @@ fn hash_v7_orchard_protocol_auth(
     h.finalize()
 }
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 /// Hashes a sequence of tagged per-bundle digests under the given personalization.
 ///
 /// Each entry is serialized as:
@@ -759,15 +771,18 @@ where
         // Each tagged entry: bundleType || bundleVariant || 32-byte digest.
         // bundleType and bundleVariant are compactSize-encoded so that small
         // values (all currently defined types) use a single byte each.
-        CompactSize::write(&mut h, bt as usize).unwrap();
-        CompactSize::write(&mut h, bv as usize).unwrap();
-        h.write_all(digest.as_bytes()).unwrap();
+        // Infallible: writing to a hasher cannot fail, and both keys are
+        // checked against MAX_COMPACT_SIZE when their bundle is inserted or
+        // parsed (see `zip248::WireKeyError`).
+        CompactSize::write(&mut h, bt as usize).expect("wire key is in range");
+        CompactSize::write(&mut h, bv as usize).expect("wire key is in range");
+        h.write_all(digest.as_bytes()).expect("infallible");
     }
     h.finalize()
 }
 
 /// v7 effects bundles digest per ZIP 248 §T.3 `effects_bundles_digest`.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_effects_bundles<'a, I>(entries: I) -> Blake2bHash
 where
     I: IntoIterator<Item = ((u64, u64), &'a Blake2bHash)>,
@@ -776,7 +791,7 @@ where
 }
 
 /// v7 auth bundles digest per ZIP 248 §A.1 `auth_bundles_digest`.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_auth_bundles<'a, I>(entries: I) -> Blake2bHash
 where
     I: IntoIterator<Item = ((u64, u64), &'a Blake2bHash)>,
@@ -871,13 +886,13 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             // The fields below are populated by the v7-specific `digest_v7()`
             // path; the legacy `TransactionDigest::combine` path used for
             // pre-v7 transactions leaves them empty.
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             coinbase_digest: None,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             value_pool_deltas_digest: None,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             unknown_effect_digests: alloc::vec::Vec::new(),
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             unknown_auth_digests: alloc::vec::Vec::new(),
         }
     }
@@ -974,7 +989,7 @@ pub fn to_txid(
     digests: &TxDigests<Blake2bHash>,
 ) -> TxId {
     let txid_digest = match txversion {
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
         TxVersion::V7 => to_hash_v7(consensus_branch_id, digests),
         // v6 (ZIP 229) commits to the Ironwood bundle as a fourth
         // shielded digest alongside transparent, Sapling and Orchard.
@@ -1015,7 +1030,7 @@ pub fn to_txid(
 ///
 /// Personalization is `"ZcashTxHash_" || LE32(consensus_branch_id)`, the
 /// same scheme as ZIP 244 so that txids are fork-specific.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -> Blake2bHash {
     let personal = tx_hash_personalization(consensus_branch_id);
 
@@ -1077,7 +1092,7 @@ fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -
 ///
 /// Absent bundles (e.g. a transaction with no transparent component) are
 /// simply omitted -- they do not contribute a zero-digest entry.
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub(crate) fn v7_bundle_digest_entries<'a>(
     transparent_digest: Option<&'a Blake2bHash>,
     coinbase_digest: Option<&'a Blake2bHash>,
@@ -1250,5 +1265,45 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         }
 
         h.finalize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION,
+        ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
+        sapling_spends_noncompact_personalization,
+    };
+    use crate::transaction::TxVersion;
+
+    /// [ZIP 244 §T.3a.ii] and [ZIP 248 §T.3.2a.ii] specify the same
+    /// personalization and the same per-spend fields, `cv || anchor || rk`;
+    /// only v6 ([ZIP 229]) hashes something different, having moved the anchor
+    /// to the authorizing data digest.
+    ///
+    /// Selecting v6's personalization for v7 produces a transaction identifier
+    /// that no other implementation agrees with, and nothing else in the test
+    /// suite can see it, so assert the mapping directly.
+    ///
+    /// [ZIP 229]: https://zips.z.cash/zip-0229
+    /// [ZIP 244 §T.3a.ii]: https://zips.z.cash/zip-0244#t-3a-ii-sapling-spends-noncompact-digest
+    /// [ZIP 248 §T.3.2a.ii]: https://zips.z.cash/zip-0248
+    #[test]
+    fn sapling_spends_personalization_follows_the_transaction_version() {
+        assert_eq!(
+            sapling_spends_noncompact_personalization(TxVersion::V5),
+            ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION,
+        );
+        assert_eq!(
+            sapling_spends_noncompact_personalization(TxVersion::V6),
+            ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION,
+        );
+        #[cfg(zcash_unstable = "nu8")]
+        assert_eq!(
+            sapling_spends_noncompact_personalization(TxVersion::V7),
+            ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION,
+            "v7 shares ZIP 244's Sapling spends personalization, not v6's",
+        );
     }
 }

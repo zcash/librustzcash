@@ -18,7 +18,7 @@ workspace.
 - Extracting a V7 transaction from a PCZT now records the transparent pool's
   value balance and the fee as [ZIP 248] value pool deltas, so the result
   balances and has the same transaction identifier as the same transaction
-  built directly. Requires `zcash_unstable="nutachyon"`.
+  built directly. Requires `zcash_unstable="nu8"`.
 
 [ZIP 248]: https://zips.z.cash/zip-0248
 

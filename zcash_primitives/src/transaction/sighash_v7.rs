@@ -1,5 +1,5 @@
 use blake2b_simd::Hash as Blake2bHash;
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 use corez::io::Write;
 
 use ::transparent::sighash::TransparentAuthorizingContext;
@@ -25,7 +25,7 @@ use crate::transaction::{
 /// effects bundles is replaced with `transparent_sig_digest`.
 ///
 /// Sapling and Orchard sighash uses `SIGHASH_ALL` (`hash_type = 0x01`).
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 pub fn v7_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
