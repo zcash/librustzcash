@@ -150,6 +150,9 @@ use {
 pub mod dsl;
 use dsl::{TestDsl, TestNoteConfig};
 
+pub mod expire_unmined;
+pub use expire_unmined::*;
+
 pub mod locking;
 pub use locking::*;
 

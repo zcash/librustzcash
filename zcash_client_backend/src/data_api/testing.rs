@@ -88,10 +88,11 @@ use {
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
-    NullifierQuery, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
-    SeedRelevance, SentTransaction, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
+    AddressInfo, BlockMetadata, ChangeReceivers, DecryptedTransaction, ExpireUnminedOutcome,
+    InputSource, NoteFilter, NullifierQuery, ReceivedNotes, ReceivedTransactionOutput,
+    SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TransactionDataRequest,
+    TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    Zip32Derivation,
     anchor_retention::AnchorRetentionInterval,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
@@ -3765,6 +3766,13 @@ impl WalletWrite for MockWalletDb {
         _status: TransactionStatus,
     ) -> Result<(), <Self as WalletRead>::Error> {
         Ok(())
+    }
+
+    fn expire_unmined_transaction(
+        &mut self,
+        _txid: TxId,
+    ) -> Result<ExpireUnminedOutcome, <Self as WalletRead>::Error> {
+        Ok(ExpireUnminedOutcome::Unknown)
     }
 
     #[cfg(feature = "transparent-inputs")]

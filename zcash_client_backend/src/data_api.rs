@@ -1475,6 +1475,21 @@ pub enum TransactionStatus {
     Mined(BlockHeight),
 }
 
+/// The result of a call to [`WalletWrite::expire_unmined_transaction`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpireUnminedOutcome {
+    /// The transaction was unmined and unexpired, and is now treated as expired as of the
+    /// wallet's chain tip.
+    Expired,
+    /// The transaction is unmined and was already expired as of the wallet's chain tip; nothing
+    /// was changed.
+    AlreadyExpired,
+    /// The wallet records the transaction as mined; nothing was changed.
+    Mined,
+    /// The wallet has no record of the transaction; nothing was changed.
+    Unknown,
+}
+
 /// Metadata about the structure of unspent outputs in a single pool within a wallet account.
 ///
 /// This type is often used to represent a filtered view of outputs in the account that were
@@ -4306,6 +4321,27 @@ pub trait WalletWrite:
         _txid: TxId,
         _status: TransactionStatus,
     ) -> Result<(), <Self as WalletRead>::Error>;
+
+    /// Treats the specified unmined transaction as having expired as of the wallet's current
+    /// chain tip, as though its expiry height had passed.
+    ///
+    /// This is for use when the caller has determined that the transaction will not be mined, for
+    /// example because every node to which it was submitted rejected it. The outputs that the
+    /// transaction spends then cease to be considered spent by it, and become available for
+    /// selection as inputs to new transactions.
+    ///
+    /// This does not prevent the transaction from being mined. If the wallet subsequently observes
+    /// it as mined (through scanning, or via [`Self::set_transaction_status`]), the outputs it
+    /// spends are again treated as spent. Any transaction created in the meantime that spends one
+    /// of those outputs can then not be mined, while one that spends different outputs may be
+    /// mined in addition to it. Transactions that spend outputs of this transaction are not
+    /// affected, and should be expired separately.
+    ///
+    /// Returns an error if the wallet's chain tip height is unknown.
+    fn expire_unmined_transaction(
+        &mut self,
+        txid: TxId,
+    ) -> Result<ExpireUnminedOutcome, <Self as WalletRead>::Error>;
 
     /// Schedules a UTXO check for the given address at a random time that has an expected value of
     /// `offset_seconds` from the current system time.

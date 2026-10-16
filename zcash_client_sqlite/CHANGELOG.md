@@ -14,10 +14,16 @@ workspace.
 - `WalletDb` implements
   `zcash_client_backend::data_api::InputSource::get_change_receivers`, from the
   items of the account's unified incoming viewing key.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::expire_unmined_transaction`.
 
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
+- After `WalletWrite::expire_unmined_transaction` expires a transaction, the
+  `expiry_height` that the `v_transactions` view reports for it is the wallet's
+  chain tip height at the time of the call, until the transaction is stored
+  again.
 
 ## [0.23.0-pre.2] - 2026-10-13
 
