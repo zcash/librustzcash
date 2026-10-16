@@ -12,6 +12,9 @@ workspace.
 
 ### Changed
 - MSRV is now 1.89
+- The parser now matches the ZIP 321 ABNF: the `zcash:` scheme is accepted
+  case-insensitively, value-less and empty `otherparam` segments are permitted,
+  and parameter values containing malformed pct-escapes are rejected.
 
 ## [0.10.0-pre.2] - 2026-10-13
 
