@@ -2105,6 +2105,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| WalletWrite::set_transaction_status(wdb, txid, status))
     }
 
+    fn expire_unmined_transaction(
+        &mut self,
+        txid: TxId,
+    ) -> Result<data_api::ExpireUnminedOutcome, <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.expire_unmined_transaction(txid))
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn schedule_next_check(
         &mut self,
@@ -2678,6 +2685,13 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             txid,
             status,
         )
+    }
+
+    fn expire_unmined_transaction(
+        &mut self,
+        txid: TxId,
+    ) -> Result<data_api::ExpireUnminedOutcome, <Self as WalletRead>::Error> {
+        wallet::expire_unmined_transaction(self.conn.0, txid)
     }
 
     #[cfg(feature = "transparent-inputs")]

@@ -14,6 +14,8 @@ workspace.
 - `zcash_client_backend::data_api::{ChangeReceivers, TransparentChangeKind}`
   (the latter under the `transparent-inputs` feature)
 - `zcash_client_backend::data_api::AccountMeta::change_receivers`
+- `zcash_client_backend::data_api::ExpireUnminedOutcome`
+- `zcash_client_backend::data_api::WalletWrite::expire_unmined_transaction`
 - `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
 
 ### Changed
@@ -27,6 +29,8 @@ workspace.
   required method `change_receivers`, which returns it for an `InputSource`.
 - `zcash_client_backend::data_api::AccountMeta::new` takes an additional
   `change_receivers: ChangeReceivers` argument.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method
+  `expire_unmined_transaction`.
 - The `AccountMetaT` of `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy`
   and `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy` is now
   `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.

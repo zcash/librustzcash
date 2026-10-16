@@ -104,9 +104,9 @@ use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, ChangeReceivers, Progress, Ratio, ReceivedTransactionOutput,
-        SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
-        TransactionStatus, WalletSummary, Zip32Derivation,
+        AddressSource, BlockMetadata, ChangeReceivers, ExpireUnminedOutcome, Progress, Ratio,
+        ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput,
+        TransactionDataRequest, TransactionStatus, WalletSummary, Zip32Derivation,
         anchor_retention::AnchorRetentionInterval,
         chain::ChainState,
         defaults::address_receiver_matches_ua,
@@ -182,6 +182,8 @@ pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
 pub(crate) mod encoding;
+#[cfg(test)]
+mod expire_unmined_tests;
 pub mod init;
 pub(crate) mod locking;
 #[cfg(feature = "orchard")]
@@ -4095,6 +4097,61 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     }
 
     Ok(())
+}
+
+/// Treats the unmined transaction with the given txid as expired as of the wallet's chain tip, by
+/// setting its expiry height to the chain tip height.
+///
+/// Every query that decides whether an unmined transaction is still pending compares its expiry
+/// height against the target height, so this releases the outputs it spends without any further
+/// record. Storing the transaction again restores its expiry height from the transaction data.
+pub(crate) fn expire_unmined_transaction(
+    conn: &rusqlite::Transaction,
+    txid: TxId,
+) -> Result<ExpireUnminedOutcome, SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    let heights = conn
+        .query_row(
+            "SELECT mined_height, expiry_height
+             FROM transactions
+             WHERE txid = :txid",
+            named_params![":txid": txid.as_ref()],
+            |row| {
+                Ok((
+                    row.get::<_, Option<u32>>("mined_height")?,
+                    row.get::<_, Option<u32>>("expiry_height")?
+                        .map(BlockHeight::from),
+                ))
+            },
+        )
+        .optional()?;
+
+    match heights {
+        None => Ok(ExpireUnminedOutcome::Unknown),
+        Some((Some(_), _)) => Ok(ExpireUnminedOutcome::Mined),
+        // An expiry height of zero means that the transaction does not expire.
+        Some((None, Some(expiry_height)))
+            if expiry_height > BlockHeight::from(0) && expiry_height <= chain_tip =>
+        {
+            Ok(ExpireUnminedOutcome::AlreadyExpired)
+        }
+        Some((None, _)) => {
+            // A transaction whose expiry height is the chain tip cannot be mined in any block
+            // after it, and so is expired at every target height.
+            conn.execute(
+                "UPDATE transactions
+                 SET expiry_height = :chain_tip
+                 WHERE txid = :txid
+                 AND mined_height IS NULL",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":chain_tip": u32::from(chain_tip),
+                ],
+            )?;
+            Ok(ExpireUnminedOutcome::Expired)
+        }
+    }
 }
 
 /// Returns the minimum checkpoint height that exists in all note commitment trees that contain
