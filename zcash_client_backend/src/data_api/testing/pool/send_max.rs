@@ -10,9 +10,7 @@ use std::convert::Infallible;
 use assert_matches::assert_matches;
 use zcash_keys::address::Address;
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
-use zcash_protocol::{
-    ShieldedPool, constants::MAX_BLOCK_BYTES, local_consensus::LocalNetwork, value::Zatoshis,
-};
+use zcash_protocol::{ShieldedPool, local_consensus::LocalNetwork, value::Zatoshis};
 
 use crate::{
     data_api::{
@@ -21,11 +19,11 @@ use crate::{
         testing::{DataStoreFactory, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, LockRequest, ProposeSendMaxErrT, SendMaxProposal,
-            input_selection::LockedInputPolicy, propose_send_max_transfer_within_size_limit,
+            input_selection::LockedInputPolicy, propose_send_max_transfer_within,
         },
     },
     fees::StandardFeeRule,
-    proposal::{Proposal, ProposalError},
+    proposal::{Proposal, ProposalError, SizeBoundViolation, TransactionSizeBound},
     wallet::LockOwner,
 };
 
@@ -96,7 +94,7 @@ fn spent_notes<NoteRef>(
 }
 
 /// Proposes a ZIP 317 send-max transfer of the Sapling and Orchard funds of `account_id` to `to`,
-/// with the minimum confirmations and the transaction size bound set to `size_limit` bytes.
+/// with the minimum confirmations, such that each transaction satisfies `bound`.
 #[allow(clippy::type_complexity)]
 fn propose_send_max<Cache, DbT>(
     st: &mut TestState<Cache, DbT, LocalNetwork>,
@@ -104,7 +102,7 @@ fn propose_send_max<Cache, DbT>(
     to: &Address,
     mode: MaxSpendMode,
     lock_inputs: Option<LockRequest>,
-    size_limit: usize,
+    bound: &TransactionSizeBound,
 ) -> Result<
     SendMaxProposal<StandardFeeRule, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, Infallible, StandardFeeRule>,
@@ -113,7 +111,7 @@ where
     DbT: WalletTest + WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
 {
     let network = *st.network();
-    propose_send_max_transfer_within_size_limit::<_, _, _, Infallible>(
+    propose_send_max_transfer_within::<_, _, _, Infallible>(
         st.wallet_mut(),
         &network,
         account_id,
@@ -125,8 +123,14 @@ where
         ConfirmationsPolicy::MIN,
         &LockedInputPolicy::Exclude,
         lock_inputs,
-        size_limit,
+        bound,
     )
+}
+
+/// Returns the consensus bound with each transaction's estimated serialized size limited to
+/// `size_limit` bytes.
+fn bytes(size_limit: usize) -> TransactionSizeBound {
+    TransactionSizeBound::CONSENSUS.with_max_bytes(size_limit)
 }
 
 /// Funds the test account with the early notes in one block, measures the size of a send-max
@@ -142,6 +146,23 @@ where
     Cache: TestCache,
     Dsf: DataStoreFactory,
 {
+    first_step_size(&fund_notes_and_measure(st, to))
+}
+
+/// Funds the test account with the early notes in one block, proposes a send-max transfer to
+/// `to` spending exactly those notes, then funds the late notes in a second block.
+///
+/// Returns the proposal, whose size and action counts admit exactly as many notes as there are
+/// early notes.
+fn fund_notes_and_measure<T, Cache, Dsf>(
+    st: &mut TestDsl<super::dsl::TestScenario<T, Cache, Dsf>>,
+    to: &Address,
+) -> Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
     let account_id = st.get_account().id();
     st.add_notes_checking_balance([EARLY_NOTE_FEE_MULTIPLES.map(fee_multiple)]);
     let measured = propose_send_max(
@@ -150,7 +171,7 @@ where
         to,
         MaxSpendMode::MaxSpendable,
         None,
-        MAX_BLOCK_BYTES,
+        &TransactionSizeBound::CONSENSUS,
     )
     .unwrap();
     assert_eq!(
@@ -163,7 +184,24 @@ where
         Some(EARLY_NOTE_FEE_MULTIPLES.len())
     );
     st.add_notes_checking_balance([LATE_NOTE_FEE_MULTIPLES.map(fee_multiple)]);
-    first_step_size(measured.proposal())
+    measured.into_parts().0
+}
+
+/// Returns the estimated number of shielded actions, over all pools, of the first step of
+/// `proposal`.
+fn first_step_actions<NoteRef>(proposal: &Proposal<StandardFeeRule, NoteRef>) -> usize {
+    [
+        ShieldedPool::Sapling,
+        ShieldedPool::Orchard,
+        ShieldedPool::Ironwood,
+    ]
+    .into_iter()
+    .map(|pool| {
+        proposal.steps().first().estimated_pool_actions(pool, &|_| {
+            unreachable!("the first step spends no prior outputs")
+        })
+    })
+    .sum()
 }
 
 /// Tests that a size-bounded send-max proposal spends the largest-value notes that fit within the
@@ -192,7 +230,7 @@ pub fn send_max_within_size_bound_spends_largest_notes_that_fit<T: ShieldedPoolT
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap();
     let (proposal, remainder) = send_max.into_parts();
@@ -241,7 +279,7 @@ pub fn send_max_within_size_bound_is_max_spendable_when_everything_fits<T: Shiel
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        MAX_BLOCK_BYTES,
+        &TransactionSizeBound::CONSENSUS,
     )
     .unwrap();
     let max_spendable = propose_send_max(
@@ -250,7 +288,7 @@ pub fn send_max_within_size_bound_is_max_spendable_when_everything_fits<T: Shiel
         &to,
         MaxSpendMode::MaxSpendable,
         None,
-        MAX_BLOCK_BYTES,
+        &TransactionSizeBound::CONSENSUS,
     )
     .unwrap();
 
@@ -273,7 +311,7 @@ pub fn send_max_without_size_bound_rejects_oversized<T: ShieldedPoolTester>(
     let funded_count = EARLY_NOTE_FEE_MULTIPLES.len() + LATE_NOTE_FEE_MULTIPLES.len();
 
     for mode in [MaxSpendMode::MaxSpendable, MaxSpendMode::Everything] {
-        let result = propose_send_max(&mut st, account_id, &to, mode, None, size_limit);
+        let result = propose_send_max(&mut st, account_id, &to, mode, None, &bytes(size_limit));
         assert_matches!(
             result,
             Err(Error::Proposal(ProposalError::TransactionTooLarge { estimated_size, limit, .. }))
@@ -289,7 +327,7 @@ pub fn send_max_without_size_bound_rejects_oversized<T: ShieldedPoolTester>(
         &to,
         MaxSpendMode::Everything,
         None,
-        MAX_BLOCK_BYTES,
+        &TransactionSizeBound::CONSENSUS,
     )
     .unwrap();
     assert_eq!(spent_notes(unbounded.proposal()).len(), funded_count);
@@ -312,7 +350,7 @@ pub fn send_max_within_size_bound_remainder_is_spendable_afterwards<T: ShieldedP
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap()
     .into_parts();
@@ -330,7 +368,7 @@ pub fn send_max_within_size_bound_remainder_is_spendable_afterwards<T: ShieldedP
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap()
     .into_parts();
@@ -366,7 +404,7 @@ pub fn send_max_within_size_bound_locks_only_selected_notes<T: ShieldedPoolTeste
         &to,
         MaxSpendMode::WithinSizeBound,
         Some(LockRequest::new(owner, LOCK_BLOCKS)),
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap();
     assert_eq!(
@@ -381,7 +419,7 @@ pub fn send_max_within_size_bound_locks_only_selected_notes<T: ShieldedPoolTeste
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap()
     .into_parts();
@@ -412,7 +450,7 @@ pub fn send_max_within_size_bound_to_tex_bounds_the_first_step<T: ShieldedPoolTe
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap()
     .into_parts();
@@ -504,7 +542,7 @@ pub fn send_max_within_size_bound_drops_by_value_across_pools<
             &to,
             MaxSpendMode::MaxSpendable,
             None,
-            MAX_BLOCK_BYTES,
+            &TransactionSizeBound::CONSENSUS,
         )
         .unwrap()
         .proposal(),
@@ -517,7 +555,7 @@ pub fn send_max_within_size_bound_drops_by_value_across_pools<
         &to,
         MaxSpendMode::WithinSizeBound,
         None,
-        size_limit,
+        &bytes(size_limit),
     )
     .unwrap()
     .into_parts();
@@ -546,4 +584,58 @@ pub fn send_max_within_size_bound_drops_by_value_across_pools<
         LATE.1.len()
     );
     assert_eq!(remainder.note_count(), LATE.0.len() + LATE.1.len());
+}
+
+/// Tests that a send-max proposal honours a limit on the number of shielded actions per
+/// transaction, as it does the byte limit.
+///
+/// The test:
+/// - Funds the wallet with more notes than the action limit admits, where the largest notes are
+///   neither the oldest nor the newest.
+/// - Verifies that `MaxSpendMode::MaxSpendable` and `MaxSpendMode::Everything` reject the
+///   proposal with `ProposalError::ExceedsSizeBound`.
+/// - Verifies that `MaxSpendMode::WithinSizeBound` spends exactly the largest notes that fit
+///   within the limit, and builds the transaction.
+pub fn send_max_within_size_bound_honours_action_limit<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account_id = st.get_account().id();
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let actions = first_step_actions(&fund_notes_and_measure(&mut st, &to));
+    let bound = TransactionSizeBound::CONSENSUS.with_max_shielded_actions(actions);
+
+    for mode in [MaxSpendMode::MaxSpendable, MaxSpendMode::Everything] {
+        let result = propose_send_max(&mut st, account_id, &to, mode, None, &bound);
+        assert_matches!(
+            result,
+            Err(Error::Proposal(ProposalError::ExceedsSizeBound {
+                step_index: 0,
+                violation: SizeBoundViolation::ShieldedActions { count, limit },
+            })) if limit == actions && count > actions,
+            "{mode:?}"
+        );
+    }
+
+    let (proposal, remainder) = propose_send_max(
+        &mut st,
+        account_id,
+        &to,
+        MaxSpendMode::WithinSizeBound,
+        None,
+        &bound,
+    )
+    .unwrap()
+    .into_parts();
+    assert_eq!(
+        spent_notes(&proposal),
+        FITTING_NOTE_FEE_MULTIPLES
+            .map(|m| (fee_multiple(m), T::SHIELDED_PROTOCOL))
+            .to_vec()
+    );
+    assert!(first_step_actions(&proposal) <= actions);
+    assert_eq!(remainder.value(), total_of(&REMAINING_NOTE_FEE_MULTIPLES));
+
+    st.create_proposed_expecting(&proposal, 1);
 }

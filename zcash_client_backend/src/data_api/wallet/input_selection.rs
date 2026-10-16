@@ -45,7 +45,7 @@ use crate::{
         anchor_retention::PoolMigrationParams, wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
-    proposal::{Proposal, ProposalError, ShieldedInputs},
+    proposal::{Proposal, ProposalError, ShieldedInputs, TransactionSizeBound},
     wallet::{ReceivedNote, WalletTransparentOutput},
 };
 
@@ -1590,8 +1590,8 @@ type SendMaxErrT<DbErrT, FeeRuleT, NoteRef> =
 
 /// Proposes sending the maximum value of the account's notes in `spend_pools` that are selected
 /// under `mode` to `recipient`. Under [`MaxSpendMode::WithinSizeBound`], the proposal spends the
-/// largest prefix of those notes in [`SizeBoundOrder`] whose transactions are each at most
-/// `size_limit` bytes; otherwise it spends all of them, whatever its size.
+/// largest prefix of those notes in [`SizeBoundOrder`] whose transactions each satisfy `bound`;
+/// otherwise it spends all of them, whatever its size.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     params: &ParamsT,
@@ -1606,7 +1606,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     recipient: ZcashAddress,
     memo: Option<MemoBytes>,
     locked_input_policy: &LockedInputPolicy,
-    size_limit: usize,
+    bound: &TransactionSizeBound,
 ) -> Result<
     SendMaxProposal<FeeRuleT, InputSourceT::NoteRef>,
     SendMaxErrT<InputSourceT::Error, FeeRuleT, InputSourceT::NoteRef>,
@@ -1652,21 +1652,22 @@ where
             SendMaxRemainder::ZERO,
         )),
         MaxSpendMode::WithinSizeBound => {
-            propose_largest_fitting_send_max(spendable_notes, size_limit, propose)
+            propose_largest_fitting_send_max(spendable_notes, bound, propose)
         }
     }
 }
 
 /// Proposes a send-max transaction spending the largest prefix of `notes`, in
-/// [`SizeBoundOrder`], for which `propose` yields a proposal whose transactions are each at most
-/// `size_limit` bytes, and reports the notes after that prefix as the remainder.
+/// [`SizeBoundOrder`], for which `propose` yields a proposal whose transactions each satisfy
+/// `bound`, and reports the notes after that prefix as the remainder.
 ///
-/// A proposal spending more notes is never smaller, so the prefix is found by binary search.
+/// A proposal spending more notes is never smaller, in bytes or in any count that `bound` may
+/// limit, so the prefix is found by binary search.
 /// A prefix for which `propose` fails, such as one that cannot cover its fee, is not treated as
 /// exceeding the bound; if the largest fitting prefix is such a prefix, its error is returned.
 fn propose_largest_fitting_send_max<FeeRuleT, NoteRef, DbErrT>(
     notes: ReceivedNotes<NoteRef>,
-    size_limit: usize,
+    bound: &TransactionSizeBound,
     propose: impl Fn(
         ReceivedNotes<NoteRef>,
     ) -> Result<Proposal<FeeRuleT, NoteRef>, SendMaxErrT<DbErrT, FeeRuleT, NoteRef>>,
@@ -1677,7 +1678,7 @@ where
 {
     let balance_error = |e| InputSelectorError::Selection(GreedyInputSelectorError::Balance(e));
     let fits = |proposal: &Proposal<FeeRuleT, NoteRef>| {
-        proposal.check_transaction_size_within(size_limit).is_ok()
+        proposal.check_transaction_size_within(bound).is_ok()
     };
 
     let ordered = SizeBoundOrder::new(&notes).map_err(balance_error)?;

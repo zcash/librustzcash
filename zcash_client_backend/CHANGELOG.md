@@ -13,6 +13,21 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::MaxSpendMode::WithinSizeBound`
 - `zcash_client_backend::data_api::wallet::{SendMaxProposal, SendMaxRemainder}`
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer_within`
+- `zcash_client_backend::proposal`:
+  - `TransactionSizeBound`
+  - `SizeBoundViolation`
+  - `ProposalError::ExceedsSizeBound`
+  - `Proposal::check_transaction_size_within`
+  - `Step::estimated_pool_actions`
+
+  These let a wallet bound a proposal below consensus, for example to a relay
+  policy, to the memory available for proving, or to the per-transaction limits
+  of an external signer. `TransactionSizeBound` limits each transaction's
+  estimated serialized size and, optionally, its number of shielded actions
+  (in total and per pool), transparent inputs and outputs, and shielded payment
+  outputs. The library default is unchanged: `TransactionSizeBound::CONSENSUS`,
+  which limits only the serialized size, to `MAX_BLOCK_BYTES`.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now

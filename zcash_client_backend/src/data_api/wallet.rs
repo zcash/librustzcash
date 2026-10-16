@@ -57,7 +57,7 @@ use crate::{
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
-    proposal::{Proposal, ProposalError, Step, StepOutputIndex},
+    proposal::{Proposal, ProposalError, Step, StepOutputIndex, TransactionSizeBound},
     util::Clock,
     wallet::{Note, OvkPolicy, Recipient},
 };
@@ -80,7 +80,6 @@ use zcash_primitives::transaction::{
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
-    constants::MAX_BLOCK_BYTES,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     zip318::AnchorBucketInterval,
@@ -1226,7 +1225,8 @@ where
 /// The wallet must have been scanned far enough to establish target and anchor heights;
 /// otherwise [`InputSelectorError::SyncRequired`] is returned. If a transaction of the
 /// proposal would exceed the size a block may carry, [`ProposalError::TransactionTooLarge`]
-/// is returned and no inputs are locked.
+/// is returned and no inputs are locked. To bound the proposal more tightly than the consensus
+/// rules do, use [`propose_send_max_transfer_within`].
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database.
@@ -1247,7 +1247,7 @@ where
 ///   the rest; [`MaxSpendMode::Everything`] returns an error instead, so that a caller who
 ///   needs the pools genuinely emptied cannot be handed a partial result that looks like a
 ///   complete one. [`MaxSpendMode::WithinSizeBound`] selects notes as `MaxSpendable` does but,
-///   where spending all of them would exceed the transaction size bound, spends the largest
+///   where spending all of them would exceed the block size limit, spends the largest
 ///   prefix of them, ordered by value descending, whose transactions fit, and reports the
 ///   rest as the [`SendMaxProposal::remainder`]; if that prefix cannot cover its own fee,
 ///   [`InputSelectorError::InsufficientFunds`] is returned.
@@ -1287,7 +1287,7 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule + Clone,
 {
-    propose_send_max_transfer_within_size_limit(
+    propose_send_max_transfer_within(
         wallet_db,
         params,
         spend_from_account,
@@ -1299,20 +1299,34 @@ where
         confirmations_policy,
         locked_input_policy,
         lock_inputs,
-        MAX_BLOCK_BYTES,
+        &TransactionSizeBound::CONSENSUS,
     )
 }
 
-/// [`propose_send_max_transfer`], with the transaction size bound set to `size_limit` bytes
-/// rather than [`MAX_BLOCK_BYTES`].
+/// Proposes spending the maximum available value from the given shielded pools, sending it
+/// to a single recipient, such that each transaction of the proposal satisfies `bound`.
+///
+/// This is [`propose_send_max_transfer`], which uses [`TransactionSizeBound::CONSENSUS`],
+/// with a caller-chosen bound. A wallet may need to bound its transactions below what the
+/// consensus rules allow, for example to meet a relay policy, the memory available for
+/// proving, or the per-transaction limits of an external signer.
+///
+/// Under [`MaxSpendMode::WithinSizeBound`], the proposal spends the largest prefix of the
+/// selected notes, ordered by value descending, whose transactions satisfy `bound`, and
+/// reports the rest as the [`SendMaxProposal::remainder`]. Under the other modes, a proposal
+/// that does not satisfy `bound` is rejected with [`ProposalError::TransactionTooLarge`] if it
+/// exceeds [`TransactionSizeBound::max_bytes`], or with [`ProposalError::ExceedsSizeBound`] if
+/// it exceeds another limit; in either case no inputs are locked.
+///
+/// A limit that does not depend on the number of notes spent, such as a limit on transparent
+/// outputs that a transparent recipient exceeds or a zero limit on the actions of the
+/// recipient's pool, cannot be met by spending fewer notes; such a proposal fails in every
+/// mode.
+///
+/// See [`propose_send_max_transfer`] for the other parameters.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub(crate) fn propose_send_max_transfer_within_size_limit<
-    DbT,
-    ParamsT,
-    FeeRuleT,
-    CommitmentTreeErrT,
->(
+pub fn propose_send_max_transfer_within<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_from_account: <DbT as InputSource>::AccountId,
@@ -1324,7 +1338,7 @@ pub(crate) fn propose_send_max_transfer_within_size_limit<
     confirmations_policy: ConfirmationsPolicy,
     locked_input_policy: &input_selection::LockedInputPolicy,
     lock_inputs: Option<LockRequest>,
-    size_limit: usize,
+    bound: &TransactionSizeBound,
 ) -> Result<
     SendMaxProposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
@@ -1357,12 +1371,10 @@ where
         recipient,
         memo,
         locked_input_policy,
-        size_limit,
+        bound,
     )?;
 
-    send_max
-        .proposal()
-        .check_transaction_size_within(size_limit)?;
+    send_max.proposal().check_transaction_size_within(bound)?;
 
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();

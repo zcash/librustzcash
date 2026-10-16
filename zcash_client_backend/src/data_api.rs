@@ -217,8 +217,10 @@ pub enum MaxSpendMode {
     /// unspendable funds in the wallet or if the wallet is not yet synced.
     Everything,
     /// `WithinSizeBound` selects the same notes as `MaxSpendable`. When a transaction spending
-    /// all of them would exceed the transaction size bound, it spends the largest-value subset
-    /// of them that fits instead of failing, and leaves the rest unspent.
+    /// all of them would exceed the transaction size bound (a
+    /// [`TransactionSizeBound`](crate::proposal::TransactionSizeBound), by default the block
+    /// size limit), it spends the largest-value subset of them that fits instead of failing,
+    /// and leaves the rest unspent.
     WithinSizeBound,
 }
 /// Balance information for a value within a single pool in an account.

@@ -3,14 +3,15 @@
 use std::convert::Infallible;
 
 use ::sapling::{Rseed, value::NoteValue, zip32::ExtendedSpendingKey};
+use assert_matches::assert_matches;
 use incrementalmerkletree::Position;
 use proptest::prelude::*;
+use transparent::address::TransparentAddress;
 use zcash_keys::address::Address;
 use zcash_primitives::transaction::{TxId, fees::zip317::MARGINAL_FEE};
 use zcash_protocol::{
     ShieldedPool,
     consensus::{MainNetwork, NetworkUpgrade, Parameters},
-    constants::MAX_BLOCK_BYTES,
     value::Zatoshis,
 };
 use zip32::Scope;
@@ -25,7 +26,7 @@ use crate::{
         wallet::{ConfirmationsPolicy, SendMaxRemainder, TargetHeight},
     },
     fees::StandardFeeRule,
-    proposal::Proposal,
+    proposal::{Proposal, ProposalError, SizeBoundViolation, Step, TransactionSizeBound},
     wallet::ReceivedNote,
 };
 
@@ -47,12 +48,13 @@ fn fee_multiple(multiple: u64) -> Zatoshis {
     (MARGINAL_FEE * multiple).unwrap()
 }
 
-/// Wraps `note` as a received note at the given note commitment tree position.
+/// Wraps `note` as a received note at the given note commitment tree position, received in an
+/// output whose index is that position, so that distinct notes have distinct outputs.
 fn received<NoteT>(note: NoteT, position: u64) -> ReceivedNote<u64, NoteT> {
     ReceivedNote::from_parts(
         position,
         TxId::from_bytes([0; 32]),
-        0,
+        u16::try_from(position).expect("test positions are small"),
         note,
         Scope::External,
         Position::from(position),
@@ -149,16 +151,32 @@ fn order_keys(notes: &ReceivedNotes<u64>) -> Vec<(Zatoshis, ShieldedPool, Positi
     keys
 }
 
+/// The result of proposing a send-max transfer in these tests.
+type ProposalResult =
+    Result<Proposal<StandardFeeRule, u64>, SendMaxErrT<Infallible, StandardFeeRule, u64>>;
+
 /// Proposes a ZIP 317 send-max transfer of `notes` to a Sapling address on mainnet at the NU5
 /// activation height.
-fn propose(
-    notes: ReceivedNotes<u64>,
-) -> Result<Proposal<StandardFeeRule, u64>, SendMaxErrT<Infallible, StandardFeeRule, u64>> {
-    let params = MainNetwork;
-    let target_height = params.activation_height(NetworkUpgrade::Nu5).unwrap();
+fn propose(notes: ReceivedNotes<u64>) -> ProposalResult {
     let (_, recipient) = ExtendedSpendingKey::master(&[0x5a])
         .expect("the derivation path yields a valid key")
         .default_address();
+    propose_to(notes, &Address::from(recipient))
+}
+
+/// Proposes a ZIP 317 send-max transfer of `notes` to a transparent P2PKH address.
+fn propose_to_transparent(notes: ReceivedNotes<u64>) -> ProposalResult {
+    propose_to(
+        notes,
+        &Address::Transparent(TransparentAddress::PublicKeyHash([0x7; 20])),
+    )
+}
+
+/// Proposes a ZIP 317 send-max transfer of `notes` to `recipient` on mainnet at the NU5
+/// activation height.
+fn propose_to(notes: ReceivedNotes<u64>, recipient: &Address) -> ProposalResult {
+    let params = MainNetwork;
+    let target_height = params.activation_height(NetworkUpgrade::Nu5).unwrap();
     propose_send_max_from_notes(
         &params,
         &StandardFeeRule::Zip317,
@@ -166,9 +184,39 @@ fn propose(
         TargetHeight::from(target_height),
         target_height - 1,
         ConfirmationsPolicy::MIN,
-        Address::from(recipient).to_zcash_address(&params),
+        recipient.to_zcash_address(&params),
         None,
     )
+}
+
+/// Returns the number of actions the first step of `proposal` is estimated to carry in `pool`.
+fn first_step_actions(proposal: &Proposal<StandardFeeRule, u64>, pool: ShieldedPool) -> usize {
+    first_step(proposal).estimated_pool_actions(pool, &|_| {
+        unreachable!("the first step spends no prior outputs")
+    })
+}
+
+/// Returns the first step of `proposal`.
+fn first_step(proposal: &Proposal<StandardFeeRule, u64>) -> &Step<u64> {
+    proposal.steps().first()
+}
+
+/// Returns the funded notes, all Sapling notes of the [`NOTE_FEE_MULTIPLES`].
+fn funded() -> ReceivedNotes<u64> {
+    sapling_only(sapling_notes(&NOTE_FEE_MULTIPLES.map(fee_multiple)))
+}
+
+/// Returns the values of the `count` largest funded notes, from largest to smallest.
+fn largest(count: usize) -> Vec<Zatoshis> {
+    let mut sorted = NOTE_FEE_MULTIPLES.map(fee_multiple).to_vec();
+    sorted.sort_by(|a, b| b.cmp(a));
+    sorted.truncate(count);
+    sorted
+}
+
+/// Returns a send-max proposal spending the `count` largest funded notes.
+fn proposal_of_largest(count: usize) -> Proposal<StandardFeeRule, u64> {
+    propose(sapling_only(sapling_notes(&largest(count)))).unwrap()
 }
 
 /// Returns the values of the notes spent by `proposal`, from largest to smallest.
@@ -231,7 +279,7 @@ fn size_bound_order_is_value_descending_then_pool_then_position() {
 }
 
 #[test]
-fn check_transaction_size_within_max_block_bytes_is_check_transaction_size() {
+fn check_transaction_size_within_consensus_is_check_transaction_size() {
     let proposal = propose(sapling_only(sapling_notes(
         &NOTE_FEE_MULTIPLES.map(fee_multiple),
     )))
@@ -241,11 +289,129 @@ fn check_transaction_size_within_max_block_bytes_is_check_transaction_size() {
     assert!(proposal.check_transaction_size().is_ok());
     assert!(
         proposal
-            .check_transaction_size_within(MAX_BLOCK_BYTES)
+            .check_transaction_size_within(&TransactionSizeBound::CONSENSUS)
             .is_ok()
     );
-    assert!(proposal.check_transaction_size_within(size).is_ok());
-    assert!(proposal.check_transaction_size_within(size - 1).is_err());
+    assert!(
+        proposal
+            .check_transaction_size_within(&TransactionSizeBound::default())
+            .is_ok()
+    );
+    let bytes = |n| TransactionSizeBound::CONSENSUS.with_max_bytes(n);
+    assert!(proposal.check_transaction_size_within(&bytes(size)).is_ok());
+    assert_matches!(
+        proposal.check_transaction_size_within(&bytes(size - 1)),
+        Err(ProposalError::TransactionTooLarge { estimated_size, limit, .. })
+            if estimated_size == size && limit == size - 1
+    );
+}
+
+#[test]
+fn check_transaction_size_within_checks_each_count_limit() {
+    let proposal = propose(sapling_only(sapling_notes(
+        &NOTE_FEE_MULTIPLES.map(fee_multiple),
+    )))
+    .unwrap();
+    let actions = first_step_actions(&proposal, ShieldedPool::Sapling);
+    assert!(actions >= NOTE_FEE_MULTIPLES.len());
+    let check = |bound: TransactionSizeBound| proposal.check_transaction_size_within(&bound);
+    let violation = |violation| {
+        move |result: Result<(), ProposalError>| {
+            matches!(
+                result,
+                Err(ProposalError::ExceedsSizeBound { step_index: 0, violation: v }) if v == violation
+            )
+        }
+    };
+    let consensus = TransactionSizeBound::CONSENSUS;
+
+    assert!(check(consensus.with_max_shielded_actions(actions)).is_ok());
+    assert!(violation(SizeBoundViolation::ShieldedActions {
+        count: actions,
+        limit: actions - 1
+    })(check(
+        consensus.with_max_shielded_actions(actions - 1)
+    )));
+
+    assert!(check(consensus.with_max_pool_actions(ShieldedPool::Sapling, actions)).is_ok());
+    assert!(violation(SizeBoundViolation::PoolActions {
+        pool: ShieldedPool::Sapling,
+        count: actions,
+        limit: actions - 1
+    })(check(
+        consensus.with_max_pool_actions(ShieldedPool::Sapling, actions - 1)
+    )));
+    // The proposal has no bundle in the other pools.
+    for pool in [ShieldedPool::Orchard, ShieldedPool::Ironwood] {
+        assert!(check(consensus.with_max_pool_actions(pool, 0)).is_ok());
+    }
+
+    // The proposal pays one shielded output and has no transparent inputs or outputs.
+    assert!(check(consensus.with_max_shielded_payment_outputs(1)).is_ok());
+    assert!(violation(SizeBoundViolation::ShieldedPaymentOutputs {
+        count: 1,
+        limit: 0
+    })(check(
+        consensus.with_max_shielded_payment_outputs(0)
+    )));
+    assert!(
+        check(
+            consensus
+                .with_max_transparent_inputs(0)
+                .with_max_transparent_outputs(0)
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn check_transaction_size_within_checks_transparent_outputs() {
+    let proposal = propose_to_transparent(sapling_only(sapling_notes(
+        &NOTE_FEE_MULTIPLES.map(fee_multiple),
+    )))
+    .unwrap();
+    let consensus = TransactionSizeBound::CONSENSUS;
+    assert!(
+        proposal
+            .check_transaction_size_within(
+                &consensus
+                    .with_max_transparent_outputs(1)
+                    .with_max_shielded_payment_outputs(0)
+            )
+            .is_ok()
+    );
+    assert_matches!(
+        proposal.check_transaction_size_within(&consensus.with_max_transparent_outputs(0)),
+        Err(ProposalError::ExceedsSizeBound {
+            step_index: 0,
+            violation: SizeBoundViolation::TransparentOutputs { count: 1, limit: 0 },
+        })
+    );
+}
+
+#[cfg(feature = "transparent-inputs")]
+#[test]
+fn check_transaction_size_within_checks_prior_step_transparent_inputs() {
+    let proposal = propose_to(
+        sapling_only(sapling_notes(&NOTE_FEE_MULTIPLES.map(fee_multiple))),
+        &Address::Tex([0x4; 20]),
+    )
+    .unwrap();
+    assert_eq!(proposal.steps().len(), 2);
+    let consensus = TransactionSizeBound::CONSENSUS;
+    assert!(
+        proposal
+            .check_transaction_size_within(&consensus.with_max_transparent_inputs(1))
+            .is_ok()
+    );
+    // The second step spends the ephemeral output of the first.
+    assert_matches!(
+        proposal.check_transaction_size_within(&consensus.with_max_transparent_inputs(0)),
+        Err(ProposalError::ExceedsSizeBound {
+            step_index: 1,
+            violation: SizeBoundViolation::TransparentInputs { count: 1, limit: 0 },
+        })
+    );
 }
 
 #[test]
@@ -260,14 +426,15 @@ fn propose_largest_fitting_send_max_spends_the_largest_notes_that_fit() {
         .unwrap()
         .estimated_serialized_size();
 
+    let bound = TransactionSizeBound::CONSENSUS.with_max_bytes(size_limit);
     let send_max =
-        propose_largest_fitting_send_max(sapling_only(sapling_notes(&values)), size_limit, propose)
+        propose_largest_fitting_send_max(sapling_only(sapling_notes(&values)), &bound, propose)
             .unwrap();
     assert_eq!(spent_values(send_max.proposal()), fitting);
     assert!(
         send_max
             .proposal()
-            .check_transaction_size_within(size_limit)
+            .check_transaction_size_within(&bound)
             .is_ok()
     );
 
@@ -289,7 +456,8 @@ fn propose_largest_fitting_send_max_spends_the_largest_notes_that_fit() {
 #[test]
 fn propose_largest_fitting_send_max_spends_everything_that_fits() {
     let notes = sapling_only(sapling_notes(&NOTE_FEE_MULTIPLES.map(fee_multiple)));
-    let send_max = propose_largest_fitting_send_max(notes, MAX_BLOCK_BYTES, propose).unwrap();
+    let send_max =
+        propose_largest_fitting_send_max(notes, &TransactionSizeBound::CONSENSUS, propose).unwrap();
     assert_eq!(*send_max.remainder(), SendMaxRemainder::ZERO);
     assert_eq!(
         send_max,
@@ -301,4 +469,131 @@ fn propose_largest_fitting_send_max_spends_everything_that_fits() {
             SendMaxRemainder::ZERO,
         )
     );
+}
+
+/// Returns the notes that a size-bounded send-max of `notes` under `bound` spends, from largest
+/// to smallest, and its remainder's note count.
+fn spent_within(notes: ReceivedNotes<u64>, bound: &TransactionSizeBound) -> (Vec<Zatoshis>, usize) {
+    let send_max = propose_largest_fitting_send_max(notes, bound, propose).unwrap();
+    assert!(
+        send_max
+            .proposal()
+            .check_transaction_size_within(bound)
+            .is_ok()
+    );
+    (
+        spent_values(send_max.proposal()),
+        send_max.remainder().note_count(),
+    )
+}
+
+#[test]
+fn propose_largest_fitting_send_max_honours_action_limits() {
+    let actions = first_step_actions(
+        &proposal_of_largest(FITTING_NOTE_COUNT),
+        ShieldedPool::Sapling,
+    );
+    let leftover = NOTE_FEE_MULTIPLES.len() - FITTING_NOTE_COUNT;
+
+    for bound in [
+        TransactionSizeBound::CONSENSUS.with_max_shielded_actions(actions),
+        TransactionSizeBound::CONSENSUS.with_max_pool_actions(ShieldedPool::Sapling, actions),
+    ] {
+        assert_eq!(
+            spent_within(funded(), &bound),
+            (largest(FITTING_NOTE_COUNT), leftover)
+        );
+    }
+}
+
+#[test]
+fn propose_largest_fitting_send_max_honours_the_intersection() {
+    let leftover = NOTE_FEE_MULTIPLES.len() - FITTING_NOTE_COUNT;
+
+    // A byte limit that admits one note more than the fitting notes, and an action limit that
+    // admits exactly the fitting notes: the intersection admits exactly the fitting notes,
+    // whichever way round it is taken.
+    let bytes = TransactionSizeBound::CONSENSUS
+        .with_max_bytes(proposal_of_largest(FITTING_NOTE_COUNT + 1).estimated_serialized_size());
+    let actions = TransactionSizeBound::CONSENSUS.with_max_shielded_actions(first_step_actions(
+        &proposal_of_largest(FITTING_NOTE_COUNT),
+        ShieldedPool::Sapling,
+    ));
+    assert_eq!(
+        spent_within(funded(), &bytes),
+        (largest(FITTING_NOTE_COUNT + 1), leftover - 1)
+    );
+    for bound in [bytes.intersect(&actions), actions.intersect(&bytes)] {
+        assert_eq!(
+            spent_within(funded(), &bound),
+            (largest(FITTING_NOTE_COUNT), leftover)
+        );
+    }
+}
+
+#[test]
+fn propose_largest_fitting_send_max_honours_transparent_limits() {
+    let consensus = TransactionSizeBound::CONSENSUS;
+
+    // A limit that the recipient's output satisfies leaves nothing unspent.
+    let send_max = propose_largest_fitting_send_max(
+        funded(),
+        &consensus.with_max_transparent_outputs(1),
+        propose_to_transparent,
+    )
+    .unwrap();
+    assert_eq!(*send_max.remainder(), SendMaxRemainder::ZERO);
+    assert_eq!(
+        spent_values(send_max.proposal()).len(),
+        NOTE_FEE_MULTIPLES.len()
+    );
+
+    // A limit that the recipient's output exceeds does not depend on the number of notes
+    // spent, so no number of notes satisfies it.
+    assert!(
+        propose_largest_fitting_send_max(
+            funded(),
+            &consensus.with_max_transparent_outputs(0),
+            propose_to_transparent,
+        )
+        .is_err()
+    );
+}
+
+/// A zero limit on a pool's actions keeps a size-bounded send-max from spending any note of
+/// that pool, stopping at the first such note in [`SizeBoundOrder`].
+#[cfg(feature = "orchard")]
+#[test]
+fn propose_largest_fitting_send_max_honours_a_zero_pool_limit() {
+    /// The fee multiples of the Sapling notes, all larger than the Orchard notes.
+    const SAPLING: [u64; 3] = [9, 8, 7];
+    /// The fee multiples of the Orchard notes.
+    const ORCHARD: [u64; 2] = [4, 3];
+    let notes = || {
+        ReceivedNotes::new(
+            sapling_notes(&SAPLING.map(fee_multiple)),
+            orchard_notes(&ORCHARD.map(fee_multiple), NoteVersion::V2),
+            vec![],
+        )
+    };
+
+    let unbounded = propose(notes()).unwrap();
+    assert!(first_step_actions(&unbounded, ShieldedPool::Orchard) > 0);
+
+    let bound = TransactionSizeBound::CONSENSUS.with_max_pool_actions(ShieldedPool::Orchard, 0);
+    let send_max = propose_largest_fitting_send_max(notes(), &bound, propose).unwrap();
+    assert_eq!(
+        spent_values(send_max.proposal()),
+        SAPLING.map(fee_multiple).to_vec()
+    );
+    assert_eq!(
+        first_step_actions(send_max.proposal(), ShieldedPool::Orchard),
+        0
+    );
+    let remainder = send_max.remainder();
+    assert_eq!(
+        remainder.note_count_in_pool(ShieldedPool::Orchard),
+        ORCHARD.len()
+    );
+    assert_eq!(remainder.note_count(), ORCHARD.len());
 }

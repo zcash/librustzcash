@@ -564,6 +564,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_within_size_bound_honours_action_limit() {
+        testing::pool::send_max_within_size_bound_honours_action_limit::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn send_max_within_size_bound_locks_only_selected_notes() {
         testing::pool::send_max_within_size_bound_locks_only_selected_notes::<SaplingPoolTester>()
     }

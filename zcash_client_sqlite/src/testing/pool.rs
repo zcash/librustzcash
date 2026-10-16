@@ -180,6 +180,12 @@ pub(crate) fn send_max_within_size_bound_remainder_is_spendable_afterwards<
     )
 }
 
+pub(crate) fn send_max_within_size_bound_honours_action_limit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_honours_action_limit::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn send_max_within_size_bound_locks_only_selected_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_max_within_size_bound_locks_only_selected_notes::<T>(
         TestDbFactory::default(),
