@@ -10,6 +10,14 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.89
 
+### Fixed
+- `pczt_txid` and `stored_pczt_txid` returned an incorrect identifier for a V7
+  PCZT, having computed it from the [ZIP 244] digests rather than the
+  [ZIP 248] ones. Requires `zcash_unstable="nu8"`.
+
+[ZIP 244]: https://zips.z.cash/zip-0244
+[ZIP 248]: https://zips.z.cash/zip-0248
+
 ## [0.2.0-pre.2] - 2026-10-13
 
 ### Changed

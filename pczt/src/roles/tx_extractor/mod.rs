@@ -8,7 +8,6 @@ use rand_core::{CryptoRng, Rng};
 use zcash_primitives::transaction::{
     Authorization, Transaction,
     sighash::{SignableInput, signature_hash},
-    txid::TxIdDigester,
 };
 
 use crate::Pczt;
@@ -101,7 +100,7 @@ impl<'a> TransactionExtractor<'a> {
         )?;
 
         // The commitment being signed is shared across all shielded inputs.
-        let txid_parts = tx_data.digest(TxIdDigester);
+        let txid_parts = tx_data.txid_digests();
         let shielded_sighash = signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         // Create the binding signatures. The bundle mappers each need the RNG, and

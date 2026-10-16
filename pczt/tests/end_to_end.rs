@@ -37,7 +37,7 @@ use zcash_primitives::transaction::{
     fees::zip317,
     sighash::SignableInput,
     sighash_v5::v5_signature_hash,
-    txid::TxIdDigester,
+    txid::{TxIdDigester, to_txid},
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
@@ -1570,6 +1570,8 @@ fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: None,
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
@@ -1589,9 +1591,123 @@ fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: Some(BlockHeight::from_u32(10)),
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
+}
+
+/// A regtest network with NU8 activated, for exercising v7 transactions.
+#[cfg(zcash_unstable = "nu8")]
+fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+    zcash_protocol::local_consensus::LocalNetwork {
+        nu8: Some(BlockHeight::from_u32(11)),
+        ..nu6_3_test_network()
+    }
+}
+
+/// Builds an I/O-finalized PCZT that spends an Orchard note into an Ironwood
+/// output, with no transparent inputs.
+fn orchard_to_ironwood_pczt(
+    params: zcash_protocol::local_consensus::LocalNetwork,
+    target_height: BlockHeight,
+) -> Pczt {
+    let spend_fvk = orchard::keys::FullViewingKey::from(
+        &orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap(),
+    );
+    let recipient = spend_fvk.address_at(0u32, orchard::keys::Scope::External);
+    let rho = orchard::note::Rho::from_bytes(&[1; 32]).unwrap();
+    let rseed = (0u8..=255)
+        .find_map(|b| orchard::note::RandomSeed::from_bytes([b; 32], &rho).into_option())
+        .expect("at least one test rseed is valid");
+    let note = orchard::Note::from_parts(
+        recipient,
+        orchard::value::NoteValue::from_raw(100_000),
+        rho,
+        rseed,
+        orchard::note::NoteVersion::V2,
+    )
+    .unwrap();
+    let zero = MerkleHashOrchard::from_bytes(&[0; 32]).unwrap();
+    let merkle_path = orchard::tree::MerklePath::from_parts(0, [zero; 32]);
+    let orchard_anchor = merkle_path.root(note.commitment().into());
+
+    let mut builder = Builder::new(
+        params,
+        target_height,
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard_anchor),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::UNPADDED,
+        },
+    );
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(spend_fvk, note, merkle_path)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            None,
+            recipient,
+            Zatoshis::const_from_u64(85_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+        .unwrap();
+
+    IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap()
+}
+
+/// With no transparent inputs, a transaction's shielded sighash is its txid, so
+/// the effects a Signer signs over must carry every bundle of the transaction and
+/// be digested under the rules of its version.
+fn assert_shielded_sighash_is_txid(pczt: Pczt) {
+    let sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let effects = pczt.into_effects().unwrap();
+    assert!(effects.transparent_bundle().is_none());
+    assert!(
+        effects.ironwood_bundle().is_some(),
+        "extracting the PCZT's effects must keep its Ironwood bundle",
+    );
+
+    let txid = to_txid(
+        effects.version(),
+        effects.consensus_branch_id(),
+        &effects.txid_digests(),
+    );
+    assert_eq!(&sighash, txid.as_ref());
+
+    // A v7 transaction extracted from a PCZT must satisfy ZIP 248 value
+    // conservation, which needs the fee delta the bundles alone cannot supply.
+    #[cfg(zcash_unstable = "nu8")]
+    if effects.version() == zcash_primitives::transaction::TxVersion::V7 {
+        effects
+            .check_v7_consensus_rules()
+            .expect("the extracted transaction's value pool deltas must balance");
+    }
+}
+
+#[test]
+fn v6_ironwood_pczt_signs_over_its_txid() {
+    assert_shielded_sighash_is_txid(orchard_to_ironwood_pczt(
+        nu6_3_test_network(),
+        BlockHeight::from_u32(10),
+    ));
+}
+
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_ironwood_pczt_signs_over_its_zip248_txid() {
+    assert_shielded_sighash_is_txid(orchard_to_ironwood_pczt(
+        nu8_test_network(),
+        BlockHeight::from_u32(11),
+    ));
 }
 
 #[test]

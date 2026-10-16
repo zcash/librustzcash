@@ -62,9 +62,7 @@ use orchard::primitives::redpallas;
 use rand_core::{CryptoRng, Rng};
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
-use zcash_primitives::transaction::{
-    TransactionData, TxDigests, sighash::SignableInput, txid::TxIdDigester,
-};
+use zcash_primitives::transaction::{TransactionData, TxDigests, sighash::SignableInput};
 
 use crate::{
     ExtractError, ParsedPczt, Pczt,
@@ -199,7 +197,7 @@ impl Signer {
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
             |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
-        let txid_parts = tx_data.digest(TxIdDigester);
+        let txid_parts = tx_data.txid_digests();
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         Ok(Self {

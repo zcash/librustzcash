@@ -151,37 +151,24 @@ pub fn v4_signature_hash<
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            prevout_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            prevout_hash(tx.transparent_bundle().map_or(&[], |b| b.vin.as_slice()))
         );
         update_hash!(
             h,
             (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            sequence_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            sequence_hash(tx.transparent_bundle().map_or(&[], |b| b.vin.as_slice()))
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
             h.update(
-                outputs_hash(
-                    tx.transparent_bundle
-                        .as_ref()
-                        .map_or(&[], |b| b.vout.as_slice()),
-                )
-                .as_bytes(),
+                outputs_hash(tx.transparent_bundle().map_or(&[], |b| b.vout.as_slice())).as_bytes(),
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match (tx.transparent_bundle.as_ref(), signable_input) {
+            match (tx.transparent_bundle(), signable_input) {
                 (Some(b), SignableInput::Transparent(input)) if input.index() < &b.vout.len() => {
                     h.update(single_output_hash(&b.vout[*input.index()]).as_bytes())
                 }
@@ -193,11 +180,9 @@ pub fn v4_signature_hash<
 
         update_hash!(
             h,
-            !tx.sprout_bundle
-                .as_ref()
-                .is_none_or(|b| b.joinsplits.is_empty()),
+            !tx.sprout_bundle().is_none_or(|b| b.joinsplits.is_empty()),
             {
-                let bundle = tx.sprout_bundle.as_ref().unwrap();
+                let bundle = tx.sprout_bundle().unwrap();
                 joinsplits_hash(
                     tx.consensus_branch_id,
                     &bundle.joinsplits,
@@ -209,17 +194,15 @@ pub fn v4_signature_hash<
         if tx.version.has_sapling() {
             update_hash!(
                 h,
-                !tx.sapling_bundle
-                    .as_ref()
+                !tx.sapling_bundle()
                     .is_none_or(|b| b.shielded_spends().is_empty()),
-                sapling_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
+                sapling_spends_hash(tx.sapling_bundle().unwrap().shielded_spends())
             );
             update_hash!(
                 h,
-                !tx.sapling_bundle
-                    .as_ref()
+                !tx.sapling_bundle()
                     .is_none_or(|b| b.shielded_outputs().is_empty()),
-                sapling_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
+                sapling_outputs_hash(tx.sapling_bundle().unwrap().shielded_outputs())
             );
         }
         h.update(&tx.lock_time.to_le_bytes());
@@ -232,7 +215,7 @@ pub fn v4_signature_hash<
         match signable_input {
             SignableInput::Shielded => (),
             SignableInput::Transparent(input) => {
-                if let Some(bundle) = tx.transparent_bundle.as_ref() {
+                if let Some(bundle) = tx.transparent_bundle() {
                     let mut data = vec![];
                     bundle.vin[*input.index()]
                         .prevout()
