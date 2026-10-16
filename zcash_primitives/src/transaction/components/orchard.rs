@@ -24,7 +24,7 @@ use zcash_protocol::{
 };
 
 use crate::transaction::Transaction;
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 use crate::transaction::zip248::consume_v7_sighash_v0_info;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
@@ -243,7 +243,7 @@ pub fn read_v6_bundle<R: Read>(
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
 /// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 pub fn read_v7_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
@@ -349,7 +349,7 @@ pub fn read_v7_bundle(
 
 /// Writes the effecting data for an Orchard bundle in v7 format.
 /// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 pub fn write_v7_effects<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
@@ -370,7 +370,7 @@ pub fn write_v7_effects<W: Write>(
 ///
 /// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
 /// (version 0: `[0x01, 0x00]`).
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 pub fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,

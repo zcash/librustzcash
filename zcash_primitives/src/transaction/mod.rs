@@ -6,7 +6,7 @@ pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
 pub mod sighash_v6;
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 pub mod sighash_v7;
 
 pub mod txid;
@@ -16,16 +16,16 @@ pub mod zip248;
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 use alloc::collections::BTreeMap;
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
 use core::fmt::Debug;
 use core::ops::Deref;
 use corez::io::{self, Read, Write};
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 use zcash_encoding::Array;
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
@@ -55,7 +55,7 @@ use zcash_protocol::constants::{
 };
 
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
 pub use zcash_protocol::TxId;
@@ -874,13 +874,13 @@ impl<A: Authorization> TransactionData<A> {
     /// [ZIP 248]: https://zips.z.cash/zip-0248
     pub fn txid_digests(&self) -> TxDigests<blake2b_simd::Hash> {
         match self.version {
-            #[cfg(zcash_v7)]
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => self.digest_v7(),
             _ => self.digest(txid::TxIdDigester),
         }
     }
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub fn digest_v7(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
             TxIdDigester, hash_v7_coinbase_effects, hash_v7_header, hash_v7_ironwood_effects,
@@ -1094,7 +1094,7 @@ struct V6HeaderFragment {
 
 /// The v7 (ZIP 248) header fragment. Unlike v6, v7 has no `zip233_amount`
 /// header field; ZIP 233 NSM lives in `mValuePoolDeltas`.
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 struct V7HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
@@ -1108,7 +1108,7 @@ impl Transaction {
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
             // v7 is the ZIP 248 extensible format, not v6's flat layout.
-            #[cfg(zcash_v7)]
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => Ok(Self::from_data_v7(data)),
         }
     }
@@ -1144,7 +1144,7 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn from_data_v7(data: TransactionData<Authorized>) -> Self {
         let txid = to_txid(data.version, data.consensus_branch_id, &data.digest_v7());
 
@@ -1169,7 +1169,7 @@ impl Transaction {
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
-            #[cfg(zcash_v7)]
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => Self::read_v7(reader.into_base_reader(), version),
         }
     }
@@ -1275,7 +1275,7 @@ impl Transaction {
     /// decodes to nothing is a second encoding of the same transaction. Both
     /// would re-serialize to the omitted form, giving a transaction whose
     /// txid does not commit to the bytes it was parsed from.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn empty_v7_effect_bundle(pool: &str) -> io::Error {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1286,7 +1286,7 @@ impl Transaction {
         )
     }
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn read_v7_transparent_bundle(
         effects: &[u8],
         auth: Option<&[u8]>,
@@ -1422,7 +1422,7 @@ impl Transaction {
     ///   4. **Auth bundles** (`mAuthBundles`) -- per-protocol witness/auth
     ///      data, ordered by `bundleType`. These are excluded from the txid
     ///      but commit to the auth digest.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn read_v7<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         // --- Section 1: Header (5 x u32) ---
         let V7HeaderFragment {
@@ -1833,7 +1833,7 @@ impl Transaction {
     /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
     /// v7 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
     /// `mValuePoolDeltas`.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn read_v7_header_fragment<R: Read>(mut reader: R) -> io::Result<V7HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1857,7 +1857,7 @@ impl Transaction {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
             TxVersion::V5 => self.write_v5(writer),
             TxVersion::V6 => self.write_v6(writer),
-            #[cfg(zcash_v7)]
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => self.write_v7(writer),
         }
     }
@@ -1962,7 +1962,7 @@ impl Transaction {
     /// `to_wire_entries()` is used for VP deltas because it merges known
     /// (typed) and unknown (opaque) entries into a single sorted sequence,
     /// preserving the canonical wire order required by the spec.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub fn write_v7<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
@@ -2123,7 +2123,7 @@ impl Transaction {
     /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
     /// amount is not included here; it lives in `mValuePoolDeltas` under
     /// `bundleType = 5`.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub fn write_v7_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
@@ -2147,7 +2147,7 @@ impl Transaction {
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
         match self.data.version {
-            #[cfg(zcash_v7)]
+            #[cfg(zcash_unstable = "nutachyon")]
             TxVersion::V7 => self.auth_commitment_v7(),
             _ => self.data.digest(BlockTxCommitmentDigester),
         }
@@ -2163,7 +2163,7 @@ impl Transaction {
     ///
     /// Structure: `BLAKE2b-256(auth_bundles_digest)` with a personalization
     /// tag that embeds the consensus branch ID.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     fn auth_commitment_v7(&self) -> Blake2bHash {
         use txid::{
             hash_v7_auth_bundles, hash_v7_ironwood_auth, hash_v7_orchard_auth,
@@ -2247,23 +2247,23 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     /// v7 (ZIP 248): digest of the coinbase bundle's effecting data. Present
     /// only for coinbase transactions.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub coinbase_digest: Option<A>,
     /// Digest of the Ironwood bundle's effecting data. Present from v6
     /// (ZIP 229) onward; under v7 it is carried as a ZIP 248 bundle digest.
     pub ironwood_digest: Option<A>,
     /// v7 (ZIP 248): digest of the value pool deltas map.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub value_pool_deltas_digest: Option<A>,
     /// v7 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub unknown_effect_digests: Vec<((u64, u64), A)>,
     /// v7 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     pub unknown_auth_digests: Vec<((u64, u64), A)>,
 }
 
@@ -2340,7 +2340,7 @@ pub enum DigestError {
 /// be enforced by the consumer when validating a block.
 ///
 /// [ZIP 248]: https://zips.z.cash/zip-0248
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum V7ConsensusError {
     /// `mValuePoolDeltas` contains an entry with `bundleType = FeeBundleId`
@@ -2393,7 +2393,7 @@ pub enum V7ConsensusError {
     ValueDeltaSumOverflow,
 }
 
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 impl core::fmt::Display for V7ConsensusError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -2455,10 +2455,10 @@ impl core::fmt::Display for V7ConsensusError {
     }
 }
 
-#[cfg(all(zcash_v7, feature = "std"))]
+#[cfg(all(zcash_unstable = "nutachyon", feature = "std"))]
 impl std::error::Error for V7ConsensusError {}
 
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 impl<A: Authorization> TransactionData<A> {
     /// Checks the transaction-local consensus rules from
     /// [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules).

@@ -30,7 +30,7 @@ use {
 #[cfg(all(test, zcash_unstable = "nutachyon"))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
-#[cfg(all(test, zcash_v7))]
+#[cfg(all(test, zcash_unstable = "nutachyon"))]
 use super::sighash_v7::v7_signature_hash;
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -1347,7 +1347,11 @@ fn zip_0244() {
 
 /// Roundtrip test for ZIP 233 NSM + fee VP deltas in ZIP 248 format.
 // TODO: regenerate cross-implementation test vectors from zcash-hackworks/zcash-test-vectors
-#[cfg(all(zcash_v7, feature = "zip-233", zcash_unstable = "zip233"))]
+#[cfg(all(
+    zcash_unstable = "nutachyon",
+    feature = "zip-233",
+    zcash_unstable = "zip233"
+))]
 #[test]
 #[ignore = "Historical vectors for the withdrawn ZIP 233 v6-header experiment; \
             current ZIP 233 requires ZIP 248 value-pool deltas, which are not implemented."]
@@ -1398,7 +1402,7 @@ fn zip_0233() {
 /// "For transactions that have no transparent inputs, the v0 signature digest
 /// is identical to the transaction identifier digest."
 #[test]
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     use super::zip248;
     use zcash_protocol::consensus::BlockHeight;
@@ -1526,7 +1530,7 @@ mod zip248_tests {
 
     /// Verifies that a v7 transaction with an unknown bundle type can be
     /// parsed and re-serialized (ZIP 248 forward compatibility).
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     #[test]
     fn unknown_bundle_roundtrip() {
         use super::super::{Authorized, Transaction, TransactionData, TxVersion};
@@ -1570,7 +1574,7 @@ mod zip248_tests {
 
     // -- Consensus rule tests --------------------------------------------------
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     mod consensus_rules {
         use super::super::super::{
             Authorized, TransactionData, TxVersion, V7ConsensusError, ZatBalance, zip248,
@@ -1776,7 +1780,7 @@ mod zip248_tests {
 
     // -- Parsing rule rejection tests ------------------------------------------
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     mod parsing_rules {
         use super::super::super::{Transaction, zip248};
         use alloc::vec::Vec;
@@ -2049,7 +2053,7 @@ mod zip248_tests {
 
     // -- Whole-transaction roundtrips for the v7 bundle types ------------------
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     mod bundle_roundtrips {
         use proptest::prelude::*;
 
@@ -2172,7 +2176,7 @@ mod zip248_tests {
 
     // -- Wire order and roundtrip tests ----------------------------------------
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     mod wire_order {
         use super::super::super::zip248;
         use alloc::vec::Vec;
@@ -2196,7 +2200,7 @@ mod zip248_tests {
 
     // -- Sighash version info error tests --------------------------------------
 
-    #[cfg(zcash_v7)]
+    #[cfg(zcash_unstable = "nutachyon")]
     mod sighash_info {
         use super::super::super::zip248;
 

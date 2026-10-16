@@ -1060,7 +1060,7 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
 ///
 /// Sighash version 0 encodes as `[0x01, 0x00]` on the wire: compactSize(1) for the
 /// info length, then `0x00` for the version byte. This is the only defined version.
-#[cfg(zcash_v7)]
+#[cfg(zcash_unstable = "nutachyon")]
 pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
     reader: &mut R,
     _context: &'static str,
