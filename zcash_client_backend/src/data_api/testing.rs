@@ -88,10 +88,10 @@ use {
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance,
-    SentTransaction, TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
-    WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
+    AddressInfo, BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
+    NullifierQuery, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
+    SeedRelevance, SentTransaction, TransactionDataRequest, TransactionStatus,
+    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
     anchor_retention::AnchorRetentionInterval,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
@@ -3291,6 +3291,13 @@ impl InputSource for MockWalletDb {
         _lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Err(())
+    }
+
+    fn get_change_receivers(&self, account: Self::AccountId) -> Result<ChangeReceivers, ()> {
+        self.ufvks_by_account
+            .get(&account)
+            .map(|ufvk| ChangeReceivers::from_uivk(&ufvk.to_unified_incoming_viewing_key()))
+            .ok_or(())
     }
 
     fn get_account_metadata(
