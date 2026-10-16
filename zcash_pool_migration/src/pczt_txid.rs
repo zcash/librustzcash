@@ -23,7 +23,7 @@
 use core::fmt;
 
 use pczt::Pczt;
-use zcash_primitives::transaction::txid::{TxIdDigester, to_txid};
+use zcash_primitives::transaction::txid::to_txid;
 use zcash_protocol::TxId;
 
 /// A stored PCZT whose transaction id cannot be derived.
@@ -62,7 +62,7 @@ pub fn pczt_txid(pczt: &Pczt) -> Result<TxId, TxIdError> {
         .clone()
         .into_effects()
         .map_err(|_| TxIdError::Effects)?;
-    let digests = tx_data.digest(TxIdDigester);
+    let digests = tx_data.txid_digests();
     Ok(
         to_txid(tx_data.version(), tx_data.consensus_branch_id(), &digests)
             .expect("version compatibility checked by Pczt::into_effects"),
