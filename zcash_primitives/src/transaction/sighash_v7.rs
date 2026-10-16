@@ -36,7 +36,12 @@ pub fn v7_signature_hash<
 ) -> Blake2bHash {
     let personal = tx_hash_personalization(tx.consensus_branch_id());
 
-    // VP deltas digest (same as txid)
+    // VP deltas digest (same as txid). As in `to_hash_v7`, `None` means the
+    // caller supplied a ZIP 244 digest tree rather than a v7 one.
+    debug_assert!(
+        txid_parts.value_pool_deltas_digest.is_some(),
+        "v7 digests must come from TransactionData::{{digest_v7, txid_digests}}"
+    );
     let vp_deltas_digest = txid_parts
         .value_pool_deltas_digest
         .unwrap_or_else(|| hasher(ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION).finalize());

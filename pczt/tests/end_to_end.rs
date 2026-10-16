@@ -1678,6 +1678,15 @@ fn assert_shielded_sighash_is_txid(pczt: Pczt) {
         &effects.txid_digests(),
     );
     assert_eq!(&sighash, txid.as_ref());
+
+    // A v7 transaction extracted from a PCZT must satisfy ZIP 248 value
+    // conservation, which needs the fee delta the bundles alone cannot supply.
+    #[cfg(zcash_unstable = "nutachyon")]
+    if effects.version() == zcash_primitives::transaction::TxVersion::V7 {
+        effects
+            .check_v7_consensus_rules()
+            .expect("the extracted transaction's value pool deltas must balance");
+    }
 }
 
 #[test]

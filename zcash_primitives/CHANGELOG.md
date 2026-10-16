@@ -10,8 +10,39 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::zip248`, the [ZIP 248] extensible transaction
+  format: `BundleType`, `BundleVariant`, `BundleId`, `BundleMap`, `TypedBundle`,
+  `CoinbaseBundle`, `UnknownBundle`, `ValuePoolDeltas`, `ValuePoolDeltaKey`,
+  `ValuePoolDeltaEntry`, `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`,
+  `MAX_COINBASE_DATA_LEN`, `opaque_effects_personalization`,
+  `read_bundle_data_framing` and `write_bundle_data_framing`.
+- `zcash_primitives::transaction::TransactionData::{from_parts_with_bundles,
+  bundles, value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
+- `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
+  (requires `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::TransactionData::{digest_v7,
+  check_v7_consensus_rules}`, `zcash_primitives::transaction::V7ConsensusError`,
+  `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`,
+  `zcash_primitives::transaction::TxDigests::{coinbase_digest,
+  value_pool_deltas_digest, unknown_effect_digests}` and
+  `zcash_primitives::transaction::sighash_v7` (all require
+  `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::components::orchard::{read_v7_bundle,
+  write_v7_effects, write_v7_auth}` (require `zcash_unstable="nutachyon"`)
+
 ### Changed
 - MSRV is now 1.89
+- `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
+  the V6 body and digest structure. V6 (ZIP 229) is unchanged; the Ironwood
+  bundle is now an entry in the ZIP 248 bundle map, still reached through
+  `TransactionData::ironwood_bundle`.
+- `zcash_primitives::transaction::TransactionData` stores its bundles as a
+  `zip248::BundleMap` and its value balances as `zip248::ValuePoolDeltas`. The
+  `from_parts*` constructors and the per-protocol bundle accessors are
+  unchanged; `bundles` and `value_pool_deltas` expose the new representation.
+
+[ZIP 248]: https://zips.z.cash/zip-0248
 
 ## [0.31.0-pre.2] - 2026-10-13
 
@@ -33,33 +64,9 @@ workspace.
 This release supports the NU7 upgrade on testnet.
 
 ### Added
-- Experimental `TxVersion::V7`, the [ZIP 248] extensible transaction format,
-  behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon.
-- `zcash_primitives::transaction::zip248` (requires
-  `zcash_unstable="nutachyon"` for the V7 wire format and digests)
-- `zcash_primitives::transaction::sighash_v7` (requires
-  `zcash_unstable="nutachyon"`)
-- `zcash_primitives::transaction::TransactionData::{from_parts_v7,
-  from_parts_with_bundles, bundles, value_pool_deltas, coinbase_bundle,
-  fee_amount, txid_digests}`
-- `zcash_primitives::transaction::TransactionData::{digest_v7,
-  check_v7_consensus_rules}` (require `zcash_unstable="nutachyon"`)
-- `zcash_primitives::transaction::V7ConsensusError` (requires
-  `zcash_unstable="nutachyon"`)
-- `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`
-  (require `zcash_unstable="nutachyon"`)
-- `zcash_primitives::transaction::TxDigests::{coinbase_digest,
-  value_pool_deltas_digest, unknown_effect_digests}` (require
-  `zcash_unstable="nutachyon"`)
-
-### Changed
-- `zcash_primitives::transaction::TransactionData::from_parts` now takes a
-  `zip248::ValuePoolDeltas` in place of the `zip233_amount` argument (which was
-  present only under `zcash_unstable="nu7"` with the `zip-233` feature). Pass
-  `ValuePoolDeltas::empty()` to preserve the previous behavior; set a ZIP 233
-  amount with `ValuePoolDeltas::set_zip233`.
-
-[ZIP 248]: https://zips.z.cash/zip-0248
+- Experimental `TxVersion::V7` and `TransactionData::from_parts_v7` support
+  behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon and initially
+  uses the V6 transaction body and digest structure.
 
 ### Changed
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `group 0.14`,

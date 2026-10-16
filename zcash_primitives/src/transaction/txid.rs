@@ -427,11 +427,14 @@ pub(crate) fn hash_v7_coinbase_effects(bundle: &super::zip248::CoinbaseBundle) -
 /// bundle digests. Including `valueBalanceSapling` here would double-commit
 /// and create a consensus mismatch with the spec.
 ///
-/// `anchorSapling` is likewise excluded: it is authorizing data in v7, and
-/// is committed by [`hash_v7_sapling_auth`]. (The anchor is still hashed
-/// per spend inside `sapling_spends_noncompact_digest`, exactly as in
-/// ZIP 244.) The personalization differs from ZIP 244's `ZTxIdSaplingHash`
-/// because what is directly hashed has changed.
+/// `anchorSapling` is likewise excluded, in two senses: the bundle-wide
+/// anchor is authorizing data in v7 and is committed by
+/// [`hash_v7_sapling_auth`], and the per-spend anchor is not hashed either
+/// (see the version switch in [`hash_sapling_spends`], which omits it from
+/// v6 onward). v7 therefore shares v6's spends personalization, because the
+/// bytes hashed under it are the same; the formats stay distinguishable
+/// through this function's own `ZCASH_V7_SAPLING_HASH_PERSONALIZATION` and
+/// through the version-tagged header digest.
 #[cfg(zcash_unstable = "nutachyon")]
 pub(crate) fn hash_v7_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
@@ -583,16 +586,6 @@ fn hash_v7_orchard_protocol_effects(
     h.finalize()
 }
 
-/// The wire encoding of a sighash version 0 `TransparentSighashInfo` /
-/// `SaplingSignature` / `OrchardSignature` sighashInfo prefix.
-///
-/// Per ZIP 248 §"Sighash Versioning", sighash version 0 has empty
-/// `associatedData` for every bundle type, so `sighashInfo = [0x00]` (a single
-/// version byte) and the wire encoding is `compactSize(1) || [0x00]` =
-/// `[0x01, 0x00]`. Sighash version 0 is currently the only defined version.
-#[cfg(zcash_unstable = "nutachyon")]
-const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
-
 /// Implements [ZIP 248 §A.1.0](https://zips.z.cash/zip-0248#a-1-0-transparent-auth-digest).
 ///
 /// Hashes, for each transparent input, the `TransparentSighashInfo` field
@@ -600,7 +593,7 @@ const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 /// prefixed byte array). When there are no transparent inputs, returns
 /// `BLAKE2b-256("ZTxAuthTransHash", [])`.
 ///
-/// The `sighashInfo` prefix (`V7_SIGHASH_V0_INFO_WIRE = [0x01, 0x00]`) is
+/// The `sighashInfo` prefix (`[0x01, 0x00]`) is
 /// prepended to every input's scriptSig so that the auth digest commits to
 /// the sighash version in use. This enables future sighash versions to be
 /// introduced without ambiguity -- a verifier can always determine which
@@ -614,7 +607,8 @@ pub(crate) fn hash_v7_transparent_auth(
     let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
     if let Some(bundle) = transparent_bundle {
         for txin in &bundle.vin {
-            h.write_all(V7_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(super::zip248::V7_SIGHASH_V0_INFO_WIRE)
+                .expect("infallible");
             txin.script_sig().write(&mut h).expect("infallible");
         }
     }
@@ -654,7 +648,8 @@ pub(crate) fn hash_v7_sapling_auth(
         // [ZIP 248 §A.1.2c]: each spend-auth signature, prefixed with
         // sighashInfo to bind it to sighash version 0.
         for spend in bundle.shielded_spends() {
-            h.write_all(V7_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(super::zip248::V7_SIGHASH_V0_INFO_WIRE)
+                .expect("infallible");
             h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
                 .expect("infallible");
         }
@@ -666,7 +661,8 @@ pub(crate) fn hash_v7_sapling_auth(
         // Only present when the bundle has at least one spend or output,
         // because an empty bundle has no value flow to bind.
         if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-            h.write_all(V7_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(super::zip248::V7_SIGHASH_V0_INFO_WIRE)
+                .expect("infallible");
             h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
                 .expect("infallible");
         }
@@ -721,12 +717,14 @@ fn hash_v7_orchard_protocol_auth(
         // [ZIP 248 §A.1.3c]: each per-action spend-auth signature, prefixed
         // with sighashInfo to bind it to sighash version 0.
         for action in bundle.actions().iter() {
-            h.write_all(V7_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(super::zip248::V7_SIGHASH_V0_INFO_WIRE)
+                .expect("infallible");
             h.write_all(&<[u8; 64]>::from(action.authorization()))
                 .expect("infallible");
         }
         // [ZIP 248 §A.1.3d]: binding signature, also prefixed with sighashInfo.
-        h.write_all(V7_SIGHASH_V0_INFO_WIRE).expect("infallible");
+        h.write_all(super::zip248::V7_SIGHASH_V0_INFO_WIRE)
+            .expect("infallible");
         h.write_all(&<[u8; 64]>::from(
             bundle.authorization().binding_signature(),
         ))
@@ -1021,9 +1019,14 @@ pub fn to_txid(
 fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -> Blake2bHash {
     let personal = tx_hash_personalization(consensus_branch_id);
 
-    // If there are no value-pool deltas (e.g. a coinbase-only transaction),
-    // fall back to the empty-hash sentinel so the three-part structure is
-    // always present.
+    // `digest_v7` always populates this, so `None` means the caller built the
+    // tree with `TxIdDigester` instead -- a v7 txid computed from ZIP 244
+    // digests. Fall back to the empty-map hash so the three-part structure is
+    // present, but catch the misuse wherever debug assertions run.
+    debug_assert!(
+        digests.value_pool_deltas_digest.is_some(),
+        "v7 digests must come from TransactionData::{{digest_v7, txid_digests}}"
+    );
     let vp_deltas_digest = digests
         .value_pool_deltas_digest
         .unwrap_or_else(|| hasher(ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION).finalize());

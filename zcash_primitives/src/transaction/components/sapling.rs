@@ -24,7 +24,7 @@ use zcash_protocol::{
 use super::GROTH_PROOF_SIZE;
 use crate::transaction::Transaction;
 #[cfg(zcash_unstable = "nutachyon")]
-use crate::transaction::zip248::consume_v7_sighash_v0_info;
+use crate::transaction::zip248::{V7_SIGHASH_V0_INFO_WIRE, consume_v7_sighash_v0_info};
 
 /// The size in bytes of a Sapling spend description in its v4 (pre-NU5) serialized form, as
 /// written by the internal `write_spend_v4` encoder.
@@ -715,8 +715,7 @@ pub(crate) fn write_v7_auth<W: Write>(
 
     // Spend auth sigs with sighashInfo prefix
     for spend in bundle.shielded_spends() {
-        CompactSize::write(&mut writer, 1)?; // sighashInfo length
-        writer.write_all(&[0x00])?; // sighash version 0
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
         writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))?;
     }
 
@@ -729,8 +728,7 @@ pub(crate) fn write_v7_auth<W: Write>(
 
     // Binding sig with sighashInfo prefix (only if nSpends + nOutputs > 0)
     if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-        CompactSize::write(&mut writer, 1)?;
-        writer.write_all(&[0x00])?;
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
         writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
     }
 

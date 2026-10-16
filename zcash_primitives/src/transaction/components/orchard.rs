@@ -25,7 +25,7 @@ use zcash_protocol::{
 
 use crate::transaction::Transaction;
 #[cfg(zcash_unstable = "nutachyon")]
-use crate::transaction::zip248::consume_v7_sighash_v0_info;
+use crate::transaction::zip248::{V7_SIGHASH_V0_INFO_WIRE, consume_v7_sighash_v0_info};
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -385,14 +385,11 @@ pub fn write_v7_auth<W: Write>(
     )?;
     // vSpendAuthSigsOrchard with sighashInfo prefix
     for auth in bundle.actions().iter().map(|a| a.authorization()) {
-        // sighashInfo: version 0, empty associated data
-        CompactSize::write(&mut writer, 1)?; // info length = 1
-        writer.write_all(&[0x00])?; // version 0
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
         writer.write_all(&<[u8; 64]>::from(auth))?;
     }
     // bindingSigOrchard with sighashInfo prefix
-    CompactSize::write(&mut writer, 1)?;
-    writer.write_all(&[0x00])?;
+    writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
     writer.write_all(&<[u8; 64]>::from(
         bundle.authorization().binding_signature(),
     ))?;

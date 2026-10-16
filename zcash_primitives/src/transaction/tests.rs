@@ -979,6 +979,14 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     tx.write(&mut txn_bytes).unwrap();
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
+    // Re-serializing must reproduce the bytes it was parsed from. Comparing
+    // fields and digests cannot see an encoding the parser accepts but the
+    // serializer would not produce, which would give one transaction two wire
+    // forms under a single txid.
+    let mut reserialized = vec![];
+    txo.write(&mut reserialized).unwrap();
+    prop_assert_eq!(&txn_bytes, &reserialized);
+
     prop_assert_eq!(tx.version(), txo.version());
     prop_assert_eq!(tx.lock_time(), txo.lock_time());
     prop_assert_eq!(tx.transparent_bundle(), txo.transparent_bundle());
@@ -1840,6 +1848,43 @@ mod zip248_tests {
             write_bundle_entry(&mut buf, bundle_type, variant, data);
             CompactSize::write(&mut buf, 0).unwrap(); // nAuthBundles
             buf
+        }
+
+        /// A transparent bundle holding only outputs has nothing to authorize,
+        /// so its `mAuthBundles` entry is omitted. The serializer, the parser
+        /// and `auth_commitment` must agree: a present-but-empty entry would be
+        /// a second encoding, and a commitment over an entry absent from the
+        /// wire would diverge from a validator digesting the parsed map.
+        #[test]
+        fn transparent_outputs_only_omit_the_auth_entry() {
+            // nIn = 0, then one 1000-zatoshi output with an empty script.
+            let mut effects = Vec::new();
+            CompactSize::write(&mut effects, 0).unwrap();
+            CompactSize::write(&mut effects, 1).unwrap();
+            effects.extend_from_slice(&1_000u64.to_le_bytes());
+            CompactSize::write(&mut effects, 0).unwrap();
+
+            let transparent = zip248::BundleType::Transparent.to_u64();
+            let variant = zip248::BundleVariant::Default.to_u64();
+            let buf = v7_with_effect_bundle(transparent, variant, &effects);
+
+            let tx = Transaction::read(&buf[..], BranchId::NuTachyon).unwrap();
+            assert!(tx.transparent_bundle().is_some());
+            let mut reserialized = Vec::new();
+            tx.write(&mut reserialized).unwrap();
+            assert_eq!(reserialized, buf);
+
+            // The same transaction with an empty auth entry must be rejected.
+            let mut with_empty_auth = v7_header(BranchId::NuTachyon);
+            CompactSize::write(&mut with_empty_auth, 0).unwrap(); // nValuePoolDeltas
+            CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nEffectBundles
+            write_bundle_entry(&mut with_empty_auth, transparent, variant, &effects);
+            CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nAuthBundles
+            write_bundle_entry(&mut with_empty_auth, transparent, variant, &[]);
+
+            let err = Transaction::read(&with_empty_auth[..], BranchId::NuTachyon).unwrap_err();
+            let msg = alloc::format!("{err:?}");
+            assert!(msg.contains("must be omitted"), "unexpected error: {msg}");
         }
 
         /// ZIP 248 encodes an absent bundle by omitting its entry. An entry

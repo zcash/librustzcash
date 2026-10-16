@@ -1055,6 +1055,16 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
     p
 }
 
+/// The wire encoding of a sighash version 0 `sighashInfo` prefix, shared by
+/// `TransparentSighashInfo`, `SaplingSignature` and `OrchardSignature`.
+///
+/// Per [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning),
+/// sighash version 0 has empty `associatedData` for every bundle type, so
+/// `sighashInfo = [0x00]` and the wire encoding is `compactSize(1) || [0x00]`.
+/// Version 0 is the only defined version.
+#[cfg(zcash_unstable = "nutachyon")]
+pub(crate) const V7_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
+
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
 /// [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning)
 ///
@@ -1106,6 +1116,7 @@ pub(crate) fn consume_v7_sighash_v0_info<R: Read>(
 ///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
+#[cfg(zcash_unstable = "nutachyon")]
 pub fn write_v7_transparent_effects<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
@@ -1128,14 +1139,13 @@ pub fn write_v7_transparent_effects<W: Write>(
 /// [ZIP 248 §Transparent Authorizing Data](https://zips.z.cash/zip-0248#transparent-authorizing-data)
 ///
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
+#[cfg(zcash_unstable = "nutachyon")]
 pub fn write_v7_transparent_auth<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
     for txin in &bundle.vin {
-        // sighashInfo: version 0
-        CompactSize::write(&mut writer, 1)?;
-        writer.write_all(&[0x00])?;
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
         // scriptSig with compactSize length prefix
         txin.script_sig().write(&mut writer)?;
     }
