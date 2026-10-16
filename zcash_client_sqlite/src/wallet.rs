@@ -104,7 +104,7 @@ use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
+        AddressSource, BlockMetadata, ChangeReceivers, Progress, Ratio, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
         TransactionStatus, WalletSummary, Zip32Derivation,
         anchor_retention::AnchorRetentionInterval,
@@ -1881,6 +1881,19 @@ pub(crate) fn get_account<P: Parameters>(
     )?;
 
     rows.next().transpose()
+}
+
+/// Returns the outputs in which the given account can receive change.
+///
+/// Returns [`SqliteClientError::AccountUnknown`] if the account does not exist.
+pub(crate) fn get_change_receivers<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_uuid: AccountUuid,
+) -> Result<ChangeReceivers, SqliteClientError> {
+    let account =
+        get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+    Ok(ChangeReceivers::from_uivk(&account.uivk()))
 }
 
 #[cfg(feature = "transparent-inputs")]

@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.89
+
 ## [0.11.0-pre.1] - 2026-10-13
 
 ### Deprecated

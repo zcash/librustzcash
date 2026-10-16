@@ -10,6 +10,42 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::{ChangeReceivers, TransparentChangeKind}`
+  (the latter under the `transparent-inputs` feature)
+- `zcash_client_backend::data_api::AccountMeta::change_receivers`
+- `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+
+### Changed
+- Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
+- MSRV is now 1.89
+- `zcash_client_backend::tor::Client::{create, create_with_timeouts}` now install
+  the `ring` provider as the process-level `rustls` `CryptoProvider` when the
+  application has not installed one.
+- `zcash_client_backend::data_api::InputSource` has a new required method
+  `get_change_receivers`, and `zcash_client_backend::fees::MetaSource` a new
+  required method `change_receivers`, which returns it for an `InputSource`.
+- `zcash_client_backend::data_api::AccountMeta::new` takes an additional
+  `change_receivers: ChangeReceivers` argument.
+- The `AccountMetaT` of `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy`
+  and `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy` is now
+  `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.
+- The change strategies in `zcash_client_backend::fees` size transparent
+  change as an output of the account's `TransparentChangeKind` instead of
+  always as a P2PKH output.
+- The change strategies in `zcash_client_backend::fees` place shielded change
+  in a pool in which the account can receive it. They prefer a pool that the
+  transaction already uses, then the fallback change pool, then any other pool.
+  They fail with `ChangeError::UnsupportedChangePool` when the account cannot
+  receive the change in any shielded pool, or when they propose transparent
+  change and the account has no transparent receiver.
+- The change strategies in `zcash_client_backend::fees` fail with
+  `ChangeError::UnsupportedChangePool` for an ephemeral output (the first
+  transaction of a payment to a ZIP 320 TEX address) unless the account's
+  `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
+  P2PKH address derived from the account's transparent key. An account whose
+  transparent change is a P2SH output cannot pay a TEX address.
+
 ### Fixed
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
   returns `Error::Proposal(ProposalError::TransactionTooLarge)` when a
