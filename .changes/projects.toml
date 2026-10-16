@@ -17,6 +17,10 @@ tag_prefix = "zcash_client_sqlite-"
 changelog = "zcash_keys/CHANGELOG.md"
 tag_prefix = "zcash_keys-"
 
+[zcash_pool_migration]
+changelog = "zcash_pool_migration/CHANGELOG.md"
+tag_prefix = "zcash_pool_migration-"
+
 [zcash_primitives]
 changelog = "zcash_primitives/CHANGELOG.md"
 tag_prefix = "zcash_primitives-"
