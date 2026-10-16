@@ -23,7 +23,7 @@ use {
 #[cfg(feature = "orchard")]
 use crate::orchard::bundle_version_for_revision;
 
-#[cfg(zcash_unstable = "nutachyon")]
+#[cfg(zcash_unstable = "nu8")]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 use zcash_protocol::{
     consensus::BranchId,
@@ -122,8 +122,12 @@ impl Creator {
             | BranchId::Nu6_2 => (V5_TX_VERSION, V5_VERSION_GROUP_ID),
             BranchId::Nu6_3 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
             BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
+            BranchId::Nu8 => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
+            #[cfg(all(zcash_unstable = "nutachyon", zcash_unstable = "nu8"))]
             BranchId::NuTachyon => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
+            #[cfg(all(zcash_unstable = "nutachyon", not(zcash_unstable = "nu8")))]
+            BranchId::NuTachyon => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
         };
 
         Ok(Self {
@@ -192,7 +196,7 @@ impl Creator {
     pub fn with_ironwood_anchor(mut self, ironwood_anchor: [u8; 32]) -> Result<Self, Error> {
         let supports_ironwood = match self.tx_version {
             V6_TX_VERSION => true,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             V7_TX_VERSION => true,
             _ => false,
         };
@@ -304,7 +308,7 @@ impl Creator {
             zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             zcash_primitives::transaction::TxVersion::V7 => Some(V7_TX_VERSION),
         }?;
 
@@ -352,7 +356,7 @@ impl Creator {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(zcash_unstable = "nutachyon")]
+    #[cfg(zcash_unstable = "nu8")]
     use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
     use zcash_protocol::{
         consensus::BranchId,
@@ -389,10 +393,10 @@ mod tests {
         assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V6_VERSION_GROUP_ID);
 
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
         {
             let pczt = Creator::new(
-                BranchId::NuTachyon.into(),
+                BranchId::Nu8.into(),
                 10_000_000,
                 133,
                 Some([0; 32]),

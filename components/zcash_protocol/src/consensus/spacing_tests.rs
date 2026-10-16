@@ -34,6 +34,8 @@ fn spacing_test_network(
         nu6_2: nu7,
         nu6_3: nu7,
         nu7,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }

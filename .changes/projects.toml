@@ -25,6 +25,10 @@ tag_prefix = "zcash_pool_migration-"
 changelog = "zcash_primitives/CHANGELOG.md"
 tag_prefix = "zcash_primitives-"
 
+[zcash_protocol]
+changelog = "components/zcash_protocol/CHANGELOG.md"
+tag_prefix = "zcash_protocol-"
+
 [zcash_transparent]
 changelog = "zcash_transparent/CHANGELOG.md"
 tag_prefix = "zcash_transparent-"

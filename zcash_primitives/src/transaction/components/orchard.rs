@@ -303,7 +303,11 @@ pub fn read_v7_bundle(
     //                   vSpendAuthSigsOrchard (OrchardSignature per action) ||
     //                   bindingSigOrchard (OrchardSignature).
     let anchor = read_anchor(&mut auth_reader)?;
-    let proof_bytes = Vector::read(&mut auth_reader, |r| r.read_u8())?;
+    let proof_bytes = Vector::read(&mut auth_reader, |mut r| {
+        let mut byte = [0u8; 1];
+        r.read_exact(&mut byte)?;
+        Ok(byte[0])
+    })?;
     let actions = NonEmpty::from_vec(
         actions_without_auth
             .into_iter()

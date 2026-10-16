@@ -1344,6 +1344,8 @@ mod tests {
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
             nu7,
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }

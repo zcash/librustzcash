@@ -7,10 +7,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{Pczt, common::Global};
 
-#[cfg(all(
-    any(feature = "sapling", feature = "orchard"),
-    zcash_unstable = "nutachyon"
-))]
+#[cfg(all(any(feature = "sapling", feature = "orchard"), zcash_unstable = "nu8"))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::{
@@ -237,7 +234,7 @@ fn ensure_no_orchard_proof_for_witness(
 fn ensure_anchor_update_supported(global: &Global) -> Result<(), AnchorUpdateError> {
     let supported_format = match (global.tx_version, global.version_group_id) {
         (V6_TX_VERSION, V6_VERSION_GROUP_ID) => true,
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
         (V7_TX_VERSION, V7_VERSION_GROUP_ID) => true,
         _ => false,
     };
@@ -248,7 +245,9 @@ fn ensure_anchor_update_supported(global: &Global) -> Result<(), AnchorUpdateErr
     match BranchId::try_from(global.consensus_branch_id) {
         Ok(BranchId::Nu6_3) => Ok(()),
         Ok(BranchId::Nu7) => Ok(()),
-        #[cfg(zcash_unstable = "nutachyon")]
+        #[cfg(zcash_unstable = "nu8")]
+        Ok(BranchId::Nu8) => Ok(()),
+        #[cfg(all(zcash_unstable = "nutachyon", zcash_unstable = "nu8"))]
         Ok(BranchId::NuTachyon) => Ok(()),
         Ok(_) => Err(AnchorUpdateError::UnsupportedConsensusBranchId),
         Err(_) => Err(AnchorUpdateError::UnknownConsensusBranchId),
