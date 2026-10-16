@@ -367,6 +367,7 @@ mod tests {
             fees::{EphemeralBalance, TransparentChangePolicy},
         },
         ::transparent::{address::TransparentAddress, bundle::OutPoint},
+        zcash_primitives::transaction::fees::zip317::MINIMUM_FEE,
     };
 
     #[cfg(feature = "orchard")]
@@ -1901,6 +1902,92 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::TRANSPARENT
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn missing_transparent_receiver_does_not_hide_insufficient_funds() {
+        /// The value of the transparent payment.
+        const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(40000);
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Input selection starts with no inputs. A shielded-only account that pays a
+        // transparent address must learn that it needs more funds, so that shielded notes
+        // can be selected.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[] as &[TestTransparentInput],
+            &[TxOut::new(PAYMENT_VALUE, Script::default())],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::InsufficientFunds { available, required })
+                if available == Zatoshis::ZERO && required == (PAYMENT_VALUE + MINIMUM_FEE).unwrap()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn changeless_transparent_transaction_needs_no_transparent_receiver() {
+        /// The value of the transparent payment.
+        const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(40000);
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // The second transaction of a ZIP 320 pair spends the ephemeral output exactly, so it
+        // has no change output. The account needs no transparent receiver for it.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &[] as &[TestTransparentInput],
+            &[TxOut::new(PAYMENT_VALUE, Script::default())],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            Some(EphemeralBalance::Input(
+                (PAYMENT_VALUE + MINIMUM_FEE).unwrap(),
+            )),
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if balance.proposed_change().is_empty() && balance.fee_required() == MINIMUM_FEE
         );
     }
 

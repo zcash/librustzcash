@@ -402,18 +402,14 @@ where
     let wants_transparent_change = false;
 
     // The size of the transparent change output, which depends on the kind of address the
-    // account receives it at.
+    // account receives it at. An account with no transparent receiver has no size here. Any
+    // transparent change proposed for such an account is rejected below, when the change is
+    // known. An earlier rejection would hide insufficient funds and changeless transactions.
     #[cfg(feature = "transparent-inputs")]
-    let transparent_change_size = if wants_transparent_change {
-        Some(
-            change_receivers
-                .transparent()
-                .ok_or(ChangeError::UnsupportedChangePool(PoolType::Transparent))?
-                .output_size(),
-        )
-    } else {
-        None
-    };
+    let transparent_change_size = change_receivers
+        .transparent()
+        .filter(|_| wants_transparent_change)
+        .map(|kind| kind.output_size());
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_change_size = None;
 
