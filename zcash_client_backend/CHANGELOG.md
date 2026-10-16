@@ -37,8 +37,8 @@ workspace.
   in a pool in which the account can receive it. They prefer a pool that the
   transaction already uses, then the fallback change pool, then any other pool.
   They fail with `ChangeError::UnsupportedChangePool` when the account cannot
-  receive the change in any shielded pool, or when transparent change is
-  allowed and the account has no transparent receiver.
+  receive the change in any shielded pool, or when they propose transparent
+  change and the account has no transparent receiver.
 - The change strategies in `zcash_client_backend::fees` fail with
   `ChangeError::UnsupportedChangePool` for an ephemeral output (the first
   transaction of a payment to a ZIP 320 TEX address) unless the account's
