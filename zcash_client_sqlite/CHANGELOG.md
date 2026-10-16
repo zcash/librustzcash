@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb` implements
+  `zcash_client_backend::data_api::InputSource::get_change_receivers`, from the
+  items of the account's unified incoming viewing key.
+
 ### Changed
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
