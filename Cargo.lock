@@ -7722,7 +7722,6 @@ dependencies = [
  "assert_matches",
  "blake2b_simd",
  "bls12_381",
- "cfg_aliases",
  "corez",
  "criterion",
  "document-features",
