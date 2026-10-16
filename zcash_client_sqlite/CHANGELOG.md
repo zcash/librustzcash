@@ -19,6 +19,12 @@ workspace.
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
 
+### Fixed
+- Importing or creating an account whose default address has a transparent
+  receiver that the wallet already tracks as a standalone import no longer
+  fails with a database constraint error. The account adopts the standalone
+  address, together with the outputs received at it.
+
 ## [0.23.0-pre.2] - 2026-10-13
 
 ### Changed

@@ -1610,6 +1610,10 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
 
 /// Adds the given external address and diversifier index to the addresses table.
 ///
+/// If the wallet tracks the transparent receiver of the address as a standalone import, that
+/// row becomes the address, and outputs received at it move to `account_id`. This issues
+/// several writes, which the caller must apply in one transaction.
+///
 /// Returns the primary key identifier for the newly-inserted address.
 ///
 /// ## Parameters
@@ -1715,13 +1719,25 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     let (transparent_child_index, cached_taddr) = {
-        let idx = NonHardenedChildIndex::try_from(diversifier_index)
-            .ok()
-            .map(|i| i.index());
+        let idx = NonHardenedChildIndex::try_from(diversifier_index).ok();
 
         // This upholds the `transparent_index_consistency` check on the `addresses` table.
         match (idx, address.transparent()) {
-            (Some(idx), Some(r)) => Ok((Some(idx), Some(r.encode(params)))),
+            (Some(idx), Some(r)) => {
+                // A transparent receiver that the wallet tracks as a standalone import becomes
+                // this address, rather than conflicting with it.
+                transparent::adopt_standalone_receiver(
+                    conn,
+                    params,
+                    account_id,
+                    KeyScope::EXTERNAL,
+                    idx,
+                    &address.encode(params),
+                    ReceiverFlags::from(address),
+                    r,
+                )?;
+                Ok((Some(idx.index()), Some(r.encode(params))))
+            }
             (_, None) => Ok((None, None)),
             (None, Some(addr)) => Err(SqliteClientError::AddressNotRecognized(*addr)),
         }
