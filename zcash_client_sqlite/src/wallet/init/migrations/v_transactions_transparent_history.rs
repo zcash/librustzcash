@@ -10,9 +10,11 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::sapling_memo_consistency;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xaa0a4168_b41b_44c5_a47d_c4c66603cfab);
+/// This migration reworks transaction history views to correctly include history of transparent
+/// utxos for which we lack complete transaction information.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xaa0a4168_b41b_44c5_a47d_c4c66603cfab);
 
-const DEPENDENCIES: &[Uuid] = &[sapling_memo_consistency::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[sapling_memo_consistency::MIGRATION_ID];
 
 pub(super) struct Migration;
 

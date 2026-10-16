@@ -15,7 +15,9 @@ use super::{
     spend_key_available,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
+/// Adds tables for tracking transactions to be downloaded for transparent output and/or memo
+/// retrieval.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -36,7 +38,7 @@ use {
     },
 };
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     orchard_shardtree::MIGRATION_ID,
     ensure_orchard_ua_receiver::MIGRATION_ID,
     ephemeral_addresses::MIGRATION_ID,
@@ -167,10 +169,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                                 &self._params,
                                                 &uivk_str,
                                             )?
+                                            && legacy_taddr == address
                                         {
-                                            if legacy_taddr == address {
-                                                return Ok(Some(account_id));
-                                            }
+                                            return Ok(Some(account_id));
                                         }
                                     }
 
@@ -194,6 +195,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let d_tx = DecryptedTransaction::<Transaction, Infallible>::new(
                         mined_height,
                         &tx,
+                        vec![],
+                        #[cfg(feature = "orchard")]
                         vec![],
                         #[cfg(feature = "orchard")]
                         vec![],
@@ -252,15 +255,15 @@ fn queue_transparent_input_retrieval<AccountId>(
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
-    if let Some(b) = d_tx.tx().transparent_bundle() {
-        if !b.is_coinbase() {
-            // queue the transparent inputs for enhancement
-            queue_tx_retrieval(
-                conn,
-                b.vin.iter().map(|txin| *txin.prevout().txid()),
-                Some(tx_ref),
-            )?;
-        }
+    if let Some(b) = d_tx.tx().transparent_bundle()
+        && !b.is_coinbase()
+    {
+        // queue the transparent inputs for enhancement
+        queue_tx_retrieval(
+            conn,
+            b.vin.iter().map(|txin| *txin.prevout().txid()),
+            Some(tx_ref),
+        )?;
     }
 
     Ok(())
@@ -389,7 +392,6 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
-            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(

@@ -9,6 +9,7 @@ CRATES_IN_GRAPH = set([
     'eip681',
     'equihash',
     'f4jumble',
+    'payment_uri',
     'zcash_address',
     'zcash_encoding',
     'zcash_protocol',
@@ -16,11 +17,10 @@ CRATES_IN_GRAPH = set([
     # ./
     'pczt',
     'zcash_client_backend',
-    'zcash_client_memory',
     'zcash_client_sqlite',
-    'zcash_extensions',
     'zcash_history',
     'zcash_keys',
+    'zcash_pool_migration',
     'zcash_primitives',
     'zcash_proofs',
     'zcash_transparent',
@@ -45,11 +45,13 @@ def main():
             line = f.readline()
         line = f.readline()
         while not 'END mermaid-dependency-graph' in line:
-            if '-->' in line:
+            if '-->' in line or '-.->' in line:
                 # Include commented-out edges for linting purposes.
                 line = line.strip()
                 if line.startswith('%% '):
                     line = line[3:]
+                # Treat dashed (feature-gated) edges the same as solid ones.
+                line = line.replace(' -.-> ', ' --> ')
                 (crate, dependency) = line.strip().split(' --> ', 1)
                 if crate in CRATES_IN_GRAPH and dependency in CRATES_IN_GRAPH:
                     readme_edges.append((crate, dependency))

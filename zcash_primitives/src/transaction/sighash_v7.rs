@@ -1,6 +1,6 @@
 use blake2b_simd::Hash as Blake2bHash;
 #[cfg(zcash_v7)]
-use core2::io::Write;
+use corez::io::Write;
 
 use ::transparent::sighash::TransparentAuthorizingContext;
 

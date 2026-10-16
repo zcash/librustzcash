@@ -500,6 +500,12 @@ criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.4.5"
 notes = "New uses of unsafe look reasonable."
 
+[[audits.num-conv]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.2.1 -> 0.2.2"
+notes = "No changes to unsafe code, straightforward refactoring and cleanup."
+
 [[audits.num_enum]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -933,6 +939,12 @@ criteria = "safe-to-deploy"
 delta = "0.5.6 -> 0.5.7"
 notes = "The new uses of unsafe to access getsockopt/setsockopt look reasonable."
 
+[[audits.spin]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.9.8 -> 0.9.9"
+notes = "Fix for https://rustsec.org/advisories/RUSTSEC-2023-0031.html"
+
 [[audits.strum]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -998,6 +1010,12 @@ delta = "1.0.60 -> 1.0.61"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "1.0.61 -> 1.0.63"
+
+[[audits.time-core]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.1.8 -> 0.1.9"
+notes = "No unsafe code; macro additions are straightforward refactoring changes."
 
 [[audits.tokio-stream]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -1896,6 +1914,30 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.6.0 -> 1.7.0"
 
+[[trusted.addchain]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2019-12-19"
+end = "2027-09-26"
+
+[[trusted.bellman]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-06-04"
+end = "2027-09-26"
+
+[[trusted.bls12_381]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-06-03"
+end = "2027-09-26"
+
+[[trusted.eip681]]
+criteria = "safe-to-deploy"
+user-id = 67525 # Schell Carl Scivally (schell)
+start = "2026-03-30"
+end = "2027-04-17"
+
 [[trusted.equihash]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1906,7 +1948,13 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2025-02-21"
-end = "2026-02-21"
+end = "2027-04-24"
+
+[[trusted.f4jumble]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-10-06"
+end = "2027-10-06"
 
 [[trusted.f4jumble]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -1914,15 +1962,45 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2021-09-22"
 end = "2025-04-22"
 
+[[trusted.ff]]
+criteria = "safe-to-deploy"
+user-id = 1244 # Sean Bowe (ebfull)
+start = "2019-10-08"
+end = "2027-09-26"
+
+[[trusted.ff_derive]]
+criteria = "safe-to-deploy"
+user-id = 1244 # Sean Bowe (ebfull)
+start = "2019-10-08"
+end = "2027-09-26"
+
+[[trusted.fpe]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2019-07-22"
+end = "2027-10-01"
+
+[[trusted.groth16]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2024-07-15"
+end = "2027-09-26"
+
+[[trusted.group]]
+criteria = "safe-to-deploy"
+user-id = 1244 # Sean Bowe (ebfull)
+start = "2019-10-08"
+end = "2027-09-26"
+
 [[trusted.halo2_gadgets]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2022-02-15"
-end = "2025-12-16"
+end = "2027-06-05"
 
 [[trusted.halo2_gadgets]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-05-10"
 end = "2025-04-22"
 
@@ -1936,7 +2014,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-12-13"
-end = "2025-12-16"
+end = "2027-10-01"
 
 [[trusted.halo2_proofs]]
 criteria = "safe-to-deploy"
@@ -1946,13 +2024,13 @@ end = "2026-12-05"
 
 [[trusted.halo2_proofs]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-05-10"
 end = "2025-04-22"
 
 [[trusted.incrementalmerkletree]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2021-06-24"
 end = "2025-04-22"
 
@@ -1966,19 +2044,31 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2023-02-28"
-end = "2025-04-22"
+end = "2027-10-01"
 
 [[trusted.incrementalmerkletree-testing]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-09-25"
-end = "2025-10-02"
+end = "2027-10-01"
+
+[[trusted.jubjub]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-06-03"
+end = "2027-09-26"
 
 [[trusted.memuse]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-09-03"
 end = "2025-12-16"
+
+[[trusted.orchard]]
+criteria = "safe-to-deploy"
+user-id = 1244 # Sean Bowe (ebfull)
+start = "2022-10-19"
+end = "2027-06-30"
 
 [[trusted.orchard]]
 criteria = "safe-to-deploy"
@@ -1990,11 +2080,11 @@ end = "2026-12-05"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-12"
-end = "2025-08-12"
+end = "2027-04-17"
 
 [[trusted.orchard]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2010,6 +2100,18 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-12"
 end = "2025-08-12"
 
+[[trusted.pairing]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2022-12-06"
+end = "2027-09-26"
+
+[[trusted.pasta_curves]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-03-03"
+end = "2027-09-26"
+
 [[trusted.pczt]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -2021,6 +2123,18 @@ criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2027-02-27"
+
+[[trusted.reddsa]]
+criteria = "safe-to-deploy"
+user-id = 159631 # Conrado (conradoplg)
+start = "2023-03-09"
+end = "2027-09-26"
+
+[[trusted.redjubjub]]
+criteria = "safe-to-deploy"
+user-id = 159631 # Conrado (conradoplg)
+start = "2025-02-18"
+end = "2027-09-26"
 
 [[trusted.redjubjub]]
 criteria = "safe-to-deploy"
@@ -2038,7 +2152,7 @@ end = "2026-12-05"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-12"
-end = "2025-08-12"
+end = "2027-04-17"
 
 [[trusted.sapling-crypto]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -2074,7 +2188,7 @@ end = "2027-02-23"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-12-13"
-end = "2025-12-16"
+end = "2027-09-26"
 
 [[trusted.windows]]
 criteria = "safe-to-deploy"
@@ -2204,7 +2318,7 @@ end = "2025-07-19"
 
 [[trusted.zcash_address]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2230,7 +2344,7 @@ end = "2026-09-25"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_client_sqlite]]
 criteria = "safe-to-deploy"
@@ -2242,11 +2356,11 @@ end = "2027-02-02"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_encoding]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2260,17 +2374,11 @@ end = "2025-12-13"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-19"
-end = "2026-02-21"
-
-[[trusted.zcash_extensions]]
-criteria = "safe-to-deploy"
-user-id = 6289 # Jack Grigg (str4d)
-start = "2020-04-24"
-end = "2025-04-23"
+end = "2027-04-24"
 
 [[trusted.zcash_history]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2020-03-04"
 end = "2025-04-22"
 
@@ -2279,6 +2387,12 @@ criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-03-01"
 end = "2025-04-22"
+
+[[trusted.zcash_history]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-07-01"
+end = "2027-07-01"
 
 [[trusted.zcash_keys]]
 criteria = "safe-to-deploy"
@@ -2290,13 +2404,25 @@ end = "2026-09-25"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2026-05-12"
+end = "2027-06-05"
+
+[[trusted.zcash_note_encryption]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2023-03-22"
+end = "2027-09-26"
 
 [[trusted.zcash_note_encryption]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2023-03-22"
 end = "2025-04-22"
+
+[[trusted.zcash_pool_migration]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-07-24"
+end = "2027-07-24"
 
 [[trusted.zcash_primitives]]
 criteria = "safe-to-deploy"
@@ -2312,7 +2438,7 @@ end = "2026-10-24"
 
 [[trusted.zcash_primitives]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2019-10-08"
 end = "2025-04-22"
 
@@ -2350,7 +2476,7 @@ end = "2025-12-13"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-27"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_script]]
 criteria = "safe-to-deploy"
@@ -2360,9 +2486,15 @@ end = "2026-10-24"
 
 [[trusted.zcash_script]]
 criteria = "safe-to-deploy"
-user-id = 159631
+user-id = 159631 # Conrado (conradoplg)
 start = "2022-08-31"
 end = "2026-09-19"
+
+[[trusted.zcash_script]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-10-01"
+end = "2027-10-01"
 
 [[trusted.zcash_spec]]
 criteria = "safe-to-deploy"
@@ -2388,6 +2520,12 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2026-12-18"
 
+[[trusted.zewif]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-05-30"
+end = "2027-07-11"
+
 [[trusted.zip32]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -2398,10 +2536,10 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2025-02-20"
-end = "2026-02-21"
+end = "2027-10-01"
 
 [[trusted.zip321]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2026-07-16"
+end = "2027-08-19"

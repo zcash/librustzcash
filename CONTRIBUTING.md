@@ -25,6 +25,7 @@ contributions. 🎉
 - [Suggesting Enhancements](#suggesting-enhancements)
 - [Styleguides](#styleguides)
 - [Git Usage](#git-usage)
+- [Changelog Entries](#changelog-entries)
 - [Coding Style](#coding-style)
 
 ## Code of Conduct
@@ -264,11 +265,14 @@ to aid with PR stacking.
 - We have a strong preference for a clean commit history. We will actively
   rebase PRs to squash changes (such as bugfixes or responses to review
   comments) into the relevant earlier commits on the PR branch. We recommend
-  the use of the `git revise` tool to help maintain such a clean history within
-  the context of a single PR.
+  the use of the [git revise](https://github.com/mystor/git-revise) tool, which
+  is **extremely** useful for applying a review comment to the commit it
+  concerns, to help maintain such a clean history within the context of a
+  single PR.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
-  crates' `CHANGELOG.md` files to clearly document the change.
+  crates' `CHANGELOG.md` files to clearly document the change. See
+  [Changelog Entries](#changelog-entries) for what belongs in those entries.
 - Updated or added members of the public API MUST include complete `rustdoc`
   documentation comments.
 - It is acceptable and desirable to open pull requests in "Draft" status. Only
@@ -307,8 +311,11 @@ To get around this GitHub UI limitation, the general process we follow is:
   the PR, they avoid rebasing or force-pushing.
 - The PR author adjusts the branch as necessary to address any comments. They
   may always add new commits. If `S-please-do-not-rebase` is not present then
-  they can also force-push or rebase previous commits. In any case they push
-  the result to the branch.
+  they can also force-push or rebase previous commits; in that case, applying
+  each change to the commit that introduced the code under discussion is
+  preferred over accumulating separate "addressed review comments" commits, as
+  described under [Branch History](#branch-history). In any case they push the
+  result to the branch.
 - In cases where it is likely to aid reviewers, the PR author also posts a
   comment to the PR with a diff link between the previous branch tip and the
   new branch tip. When submitting a review for a PR, reviewers note the commit
@@ -358,26 +365,85 @@ the old PR.
   the commit message to include everyone who is responsible for the contents of
   the commit; this is important for determining who has the most complete
   understanding of the changes.
+- If a maintainer or other user uses the GitHub `suggestion` feature to suggest
+  explicit code changes, it's usually best to accept those changes via the
+  "Apply Suggested Changes" GitHub workflow, and then to amend the resulting
+  commit to fix any related compilation or test errors or formatting/lint-related
+  changes; this ensures that correct co-author metadata is included in the
+  commit. If the changes are substantial enough that it makes more sense to
+  rewrite the original commit, make sure to include co-author metadata in the
+  commit message when doing so (squashing the GitHub-generated suggestion
+  acceptance commit(s) together with the original commit in an interactive
+  rebase can make this easy).
 
-#### Pull Request Review
+### Changelog Entries
 
-- It is acceptable and desirable to use a rebase-based workflow within the
-  context of a single pull request in order to produce a clean commit history.
-  Two important points:
-  - When changes are requested in pull request review, it is desirable to apply
-    those changes to the affected commit in order to avoid excessive noise in the
-    commit history. The [git revise](https://github.com/mystor/git-revise) plugin
-    is **extremely** useful for this purpose.
-  - If a maintainer or other user uses the GitHub `suggestion` feature to
-    suggest explicit code changes, it's usually best to accept those changes
-    via the "Apply Suggested Changes" GitHub workflow, and then to amend the
-    resulting commit to fix any related compilation or test errors or
-    formatting/lint-related changes; this ensures that correct co-author
-    metadata is included in the commit. If the changes are substantial enough
-    that it makes more sense to rewrite the original commit, make sure to
-    include co-author metadata in the commit message when doing so (squashing
-    the GitHub-generate suggestion acceptance commit(s) together with the
-    original commit in an interactive rebase can make this easy).
+Each crate maintains its own `CHANGELOG.md`. These files are how downstream
+users discover what they must do in order to upgrade, so we hold them to the
+same standard as the code.
+
+An entry is required for any change to a crate's public API, any bug fix, and
+any change to the semantics of existing behavior — including changes that leave
+type signatures untouched but alter what a caller can expect, such as stricter
+validation, different equality or ordering semantics, or a previously fixed
+value becoming configurable. An update to the version of a dependency whose
+types appear in the public API requires an entry as well: types from two
+semver-incompatible versions of a crate do not unify, so a consumer has to
+upgrade that dependency in lockstep. Privacy, security, and cost properties of
+a public API count as user-facing in this sense even when they are documented
+only in code comments. A crate that has never been released is the exception:
+its changelog should contain only a line recording the initial release.
+
+#### The entry accompanies the change
+
+The entry MUST be part of the same commit that makes the change it describes,
+not a separate "update changelogs" commit at the end of a branch. A public API
+change is not a complete semantic change until the documentation of it exists,
+and keeping the two together means the entry travels with the commit when it is
+cherry-picked or forward-merged. If you have already committed the code, use
+`git revise` to fold the entry into that commit rather than appending a
+follow-up.
+
+#### Entries describe the change since the last release
+
+An entry describes the difference between the **last released version of the
+crate** and the state your change produces — not the difference from the
+previous commit, and not the difference from whatever the affected function
+last looked like.
+
+This matters whenever an API is touched more than once between releases, which
+is common in a stacked-PR workflow. An unreleased API introduced under one name
+and renamed before release yields a single entry naming the final name; the
+intermediate name was never visible to a user. An API added and then removed
+again before release leaves no entry at all. Update an existing
+`## [Unreleased]` entry in place to reflect the new net state rather than
+adding a second entry describing the delta from the first.
+
+The reference point is the last release *on the branch you are targeting*: a
+fix branched from a `maint/` branch describes its change relative to that
+branch's most recent release, which may be older than the most recent release
+on `main`.
+
+#### Entries are written for users
+
+An entry carries only what a consumer of the public API needs in order to
+adapt. `Added` entries are pointers — name the new item and let its `rustdoc`
+explain it. `Changed` entries say what a caller must do differently.
+Implementation details, internal refactors, test-fixture reworks, and contracts
+that are not observable through the public API do not belong in a changelog at
+all.
+
+#### Published sections record what shipped
+
+A released `## [x.y.z] - DATE` section is the historical record of what that
+release shipped. Correct an entry there if it was wrong when written — an
+inaccurate record is worse than an edited one — but do not use it to record
+anything that happened afterwards, such as a later re-export or a clarification
+prompted by a subsequent change. That belongs under `## [Unreleased]`, where
+the users who need it will look.
+
+The `## [Unreleased]` heading itself is permanent: it stays at the top of the
+file even when it is empty following a release.
 
 ### Coding Style
 

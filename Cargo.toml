@@ -3,6 +3,7 @@ members = [
     "components/eip681",
     "components/equihash",
     "components/f4jumble",
+    "components/payment_uri",
     "components/zcash_address",
     "components/zcash_encoding",
     "components/zcash_protocol",
@@ -10,11 +11,10 @@ members = [
     "pczt",
     "zcash",
     "zcash_client_backend",
-    "zcash_client_memory",
     "zcash_client_sqlite",
-    "zcash_extensions",
     "zcash_history",
     "zcash_keys",
+    "zcash_pool_migration",
     "zcash_primitives",
     "zcash_proofs",
     "zcash_transparent",
@@ -24,7 +24,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.85.1"
+rust-version = "1.89"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 categories = ["cryptography::cryptocurrencies"]
@@ -36,59 +36,64 @@ categories = ["cryptography::cryptocurrencies"]
 # part of a public API, and which can be updated without a SemVer bump.
 [workspace.dependencies]
 # Intra-workspace dependencies
-equihash = { version = "0.2", path = "components/equihash", default-features = false }
-zcash_address = { version = "0.10", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.21", path = "zcash_client_backend" }
-zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.12", path = "zcash_keys", default-features = false  }
-zcash_protocol = { version = "0.7.2", path = "components/zcash_protocol", default-features = false }
-zip321 = { version = "0.6", path = "components/zip321" }
+eip681 = { version = "0.1.0", path = "components/eip681" }
+equihash = { version = "0.3", path = "components/equihash", default-features = false }
+f4jumble = { version = "0.1.2", path = "components/f4jumble", default-features = false }
+zcash_address = { version = "=0.14.0-pre.2", path = "components/zcash_address", default-features = false }
+zcash_client_backend = { version = "=0.25.0-pre.2", path = "zcash_client_backend", default-features = false }
+zcash_encoding = { version = "0.5", path = "components/zcash_encoding", default-features = false }
+zcash_keys = { version = "=0.17.0-pre.2", path = "zcash_keys", default-features = false  }
+zcash_pool_migration = { version = "=0.2.0-pre.2", path = "zcash_pool_migration" }
+zcash_protocol = { version = "=0.11.0-pre.1", path = "components/zcash_protocol", default-features = false }
+zip321 = { version = "=0.10.0-pre.2", path = "components/zip321" }
 
-zcash_note_encryption = "0.4.1"
-zcash_primitives = { version = "0.26", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.26", path = "zcash_proofs", default-features = false }
+zcash_note_encryption = "0.5.1"
+zcash_primitives = { version = "=0.31.0-pre.2", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "=0.31.0-pre.2", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.5", path = "pczt" }
+pczt = { version = "=0.10.0-pre.2", path = "pczt", default-features = false }
 
 # Shielded protocols
-bellman = { version = "0.14", default-features = false, features = ["groth16"] }
-ff = { version = "0.13", default-features = false }
-group = "0.13"
-incrementalmerkletree = { version = "0.8.2", default-features = false }
-shardtree = "0.6.2"
+bellman = { version = "0.15", default-features = false }
+groth16 = { version = "0.2", default-features = false }
+ff = { version = "0.14", default-features = false }
+group = "0.14"
+incrementalmerkletree = { version = "0.9", default-features = false }
+shardtree = "0.8"
+tempfile = "3.5.0"
 zcash_spec = "0.2"
 
 # Payment protocols
 # - Sapling
 bitvec = { version = "1", default-features = false, features = ["alloc"] }
 blake2s_simd = { version = "1", default-features = false }
-bls12_381 = "0.8"
-jubjub = "0.10"
-redjubjub = { version = "0.8", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.6.2", default-features = false }
+bls12_381 = "0.9"
+jubjub = "0.11"
+redjubjub = { version = "0.9", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.9", default-features = false }
 
 # - Orchard
-orchard = { version = "0.12", default-features = false }
-pasta_curves = "0.5"
+orchard = { version = "0.16", default-features = false }
+pasta_curves = "0.6"
 
 # - Transparent
-bip32 = { version = "=0.6.0-pre.1", default-features = false, features = ["alloc"] }
-block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
-crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
+bip32 = { version = "0.6", default-features = false, features = ["alloc"] }
 ripemd = { version = "0.1", default-features = false }
-secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
-transparent = { package = "zcash_transparent", version = "0.6.2", path = "zcash_transparent", default-features = false }
-zcash_script = { version = "0.4.3", default-features = false }
+secp256k1 = { version = "0.33", default-features = false, features = ["alloc"] }
+transparent = { package = "zcash_transparent", version = "=0.11.0-pre.2", path = "zcash_transparent", default-features = false }
+zcash_script = { version = "0.6", default-features = false }
 zeroize = { version = "1.7", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
+libm = "0.2"
 nonempty = { version = "0.11", default-features = false }
+pastey = "0.2"
 
 # CSPRNG
-rand = { version = "0.8", default-features = false }
-rand_core = { version = "0.6", default-features = false }
-rand_distr = { version = "0.4", default-features = false }
+rand = { version = "0.10", default-features = false }
+rand_core = { version = "0.10", default-features = false }
+rand_distr = { version = "0.6", default-features = false }
 
 # Currency conversions
 rust_decimal = { version = "1.35", default-features = false, features = ["serde"] }
@@ -126,10 +131,10 @@ memuse = { version = "0.2.2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 
 # No-std support
-core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+corez = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Parallel processing
-crossbeam-channel = "0.5"
+flume = "0.11"
 maybe-rayon = { version = "0.1.0", default-features = false }
 rayon = "1.5"
 
@@ -150,8 +155,8 @@ subtle = { version = "2.2.3", default-features = false }
 #   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
 #   version required for `rusqlite` is a version that is available through CocoaPods.
 rusqlite = { version = "0.37", features = ["bundled"] }
-schemerz = "0.2"
-schemerz-rusqlite = "0.370"
+schemerz = "0.3"
+schemerz-rusqlite = "0.371"
 time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
@@ -162,30 +167,28 @@ static_assertions = "1"
 ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
-proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
-rand_chacha = "0.3"
-rand_xorshift = "0.3"
-incrementalmerkletree-testing = "0.3"
+proptest = "1.12"
+rand_chacha = "0.10"
+rand_xorshift = "0.5"
+incrementalmerkletree-testing = "0.4"
 
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.35", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.43", default-features = false, features = ["compression", "rustls", "tokio"] }
 dynosaur = "0.3"
-fs-mistrust = "0.12"
+fs-mistrust = "0.14"
 tokio = "1"
-tor-rtcompat = "0.35"
+tor-rtcompat = "0.43"
 tower = "0.5"
 trait-variant = "0.1"
 
 # ZIP 32
-aes = "0.8"
-bip0039 = { version = "0.12" }
-fpe = { version = "0.6", default-features = false, features = ["alloc"] }
-zip32 = { version = "0.2", default-features = false }
+bip0039 = { version = "0.14" }
+zip32 = { version = "0.3", default-features = false }
 
-# Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
-time-core = "=0.1.2"
+# ZeWIF wallet interchange
+zewif = "1.0.0-rc.3"
 
 [workspace.metadata.release]
 consolidate-commits = false
@@ -225,10 +228,7 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(zcash_unstable, values("zfuture", "nu7"))',
+  'cfg(tokio_unstable)',
+  'cfg(zcash_unstable, values("nutachyon", "zip233"))',
   'cfg(live_network_tests)',
 ] }
-
-[patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "e99f38a8f4685c381bb4cca94874092e50e3f7e9" }
-orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }

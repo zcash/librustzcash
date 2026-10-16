@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::{Global, Zip32Derivation},
+    common::{Global, SecretKeyBytes, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// PCZT fields that are specific to producing the transaction's Sapling bundle (if any).
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
     pub(crate) spends: Vec<Spend>,
@@ -36,18 +36,32 @@ pub struct Bundle {
     ///
     /// Set by the Creator.
     #[getset(get = "pub")]
-    pub(crate) anchor: [u8; 32],
+    pub(crate) anchor: Option<[u8; 32]>,
 
     /// The Sapling binding signature signing key.
     ///
     /// - This is `None` until it is set by the IO Finalizer.
     /// - The Transaction Extractor uses this to produce the binding signature.
-    pub(crate) bsk: Option<[u8; 32]>,
+    pub(crate) bsk: Option<SecretKeyBytes>,
 }
+
+/// The canonical empty Sapling bundle: the form the Sapling bundle of a PCZT takes
+/// when it carries no Sapling data.
+pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
+    spends: Vec::new(),
+    outputs: Vec::new(),
+    value_sum: 0,
+    anchor: None,
+    bsk: None,
+};
+
+/// The default anchor used as a parse-time placeholder for redacted empty
+/// Sapling bundles.
+pub(crate) const DEFAULT_ANCHOR: [u8; 32] = [0; 32];
 
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Spend {
     //
     // SpendDescription effecting data.
@@ -132,6 +146,7 @@ pub struct Spend {
     ///
     /// - This is set by the Updater.
     /// - This is required by the Prover.
+    #[getset(get = "pub")]
     pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
 
     /// The spend authorization randomizer.
@@ -151,7 +166,7 @@ pub struct Spend {
     /// - This is chosen by the Constructor.
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_ask` values.
-    pub(crate) dummy_ask: Option<[u8; 32]>,
+    pub(crate) dummy_ask: Option<SecretKeyBytes>,
 
     /// Proprietary fields related to the note being spent.
     #[getset(get = "pub")]
@@ -160,7 +175,7 @@ pub struct Spend {
 
 /// Information about a Sapling output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Output {
     //
     // OutputDescription effecting data.
@@ -349,13 +364,13 @@ impl Bundle {
             }
         }
 
-        if self.anchor != anchor {
+        if !merge_optional(&mut self.anchor, anchor) {
             return None;
         }
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.
-        for (lhs, rhs) in self.spends.iter_mut().zip(spends.into_iter()) {
+        for (lhs, rhs) in self.spends.iter_mut().zip(spends) {
             // Destructure `rhs` to ensure we handle everything.
             let Spend {
                 cv,
@@ -398,7 +413,7 @@ impl Bundle {
             }
         }
 
-        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
+        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Output {
                 cv,
@@ -444,9 +459,99 @@ impl Bundle {
     }
 }
 
+/// Types for the v1 Sapling PCZT encoding.
+pub(crate) mod v1 {
+    use alloc::vec::Vec;
+
+    use serde::{Deserialize, Serialize};
+
+    /// PCZT fields that are specific to producing the transaction's Sapling
+    /// bundle.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub(crate) struct Bundle {
+        spends: Vec<super::Spend>,
+        outputs: Vec<super::Output>,
+        value_sum: i128,
+        anchor: [u8; 32],
+        bsk: Option<crate::common::SecretKeyBytes>,
+    }
+
+    impl TryFrom<super::Bundle> for Bundle {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            let anchor = match bundle.anchor {
+                Some(anchor) => anchor,
+                None if bundle.spends.is_empty() => super::DEFAULT_ANCHOR,
+                None => return Err(crate::EncodingError::RequiresV2),
+            };
+
+            Ok(Self {
+                spends: bundle.spends,
+                outputs: bundle.outputs,
+                value_sum: bundle.value_sum,
+                anchor,
+                bsk: bundle.bsk,
+            })
+        }
+    }
+
+    impl From<Bundle> for super::Bundle {
+        fn from(bundle: Bundle) -> Self {
+            Self {
+                spends: bundle.spends,
+                outputs: bundle.outputs,
+                value_sum: bundle.value_sum,
+                anchor: Some(bundle.anchor),
+                bsk: bundle.bsk,
+            }
+        }
+    }
+}
+
+/// Types and operations for the v2 Sapling PCZT encoding.
+pub(crate) mod v2 {
+    /// Encodes a logical Sapling bundle for the v2 PCZT format, owning the
+    /// decision of whether the bundle can be omitted. A bundle that is exactly
+    /// equal to [`super::EMPTY_BUNDLE`] serializes to `None` and is dropped from
+    /// the encoding. An otherwise-empty bundle carrying
+    /// [`super::DEFAULT_ANCHOR`] is treated as empty for this purpose.
+    pub(crate) fn encode(bundle: super::Bundle) -> Option<super::Bundle> {
+        (!is_default_empty(&bundle)).then_some(bundle)
+    }
+
+    fn is_default_empty(bundle: &super::Bundle) -> bool {
+        let mut bundle = bundle.clone();
+        if bundle.anchor == Some(super::DEFAULT_ANCHOR) {
+            bundle.anchor = None;
+        }
+
+        bundle == super::EMPTY_BUNDLE
+    }
+}
+
 #[cfg(feature = "sapling")]
 impl Bundle {
-    pub(crate) fn into_parsed(self) -> Result<sapling::pczt::Bundle, sapling::pczt::ParseError> {
+    /// Parses this bundle into the form used by the `sapling` crate.
+    ///
+    /// If the bundle's `anchor` is absent and `anchor_requirement` is
+    /// [`AnchorRequirement::Required`], returns [`ParseError::MissingAnchor`] unless the
+    /// bundle has no spends or outputs (in which case there is nothing to prove or
+    /// extract).
+    ///
+    /// [`AnchorRequirement::Required`]: crate::common::AnchorRequirement::Required
+    pub(crate) fn into_parsed(
+        self,
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        let wire_anchor = self.anchor;
+        let anchor = anchor_requirement
+            .resolve(
+                wire_anchor,
+                self.spends.is_empty() && self.outputs.is_empty(),
+            )
+            .ok_or(ParseError::MissingAnchor)?;
+
         let spends = self
             .spends
             .into_iter()
@@ -474,7 +579,7 @@ impl Bundle {
                             )
                         })
                         .transpose()?,
-                    spend.dummy_ask,
+                    spend.dummy_ask.as_ref().map(|ask| *ask.expose_secret()),
                     spend.proprietary,
                 )
             })
@@ -511,7 +616,18 @@ impl Bundle {
             })
             .collect::<Result<_, _>>()?;
 
-        sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, self.anchor, self.bsk)
+        let bundle = sapling::pczt::Bundle::parse(
+            spends,
+            outputs,
+            self.value_sum,
+            anchor,
+            self.bsk.as_ref().map(|bsk| *bsk.expose_secret()),
+        )?;
+
+        Ok(Parsed {
+            bundle,
+            wire_anchor,
+        })
     }
 
     pub(crate) fn serialize_from(bundle: sapling::pczt::Bundle) -> Self {
@@ -539,7 +655,7 @@ impl Bundle {
                     proof_generation_key: spend
                         .proof_generation_key()
                         .as_ref()
-                        .map(|key| (key.ak.to_bytes(), key.nsk.to_bytes())),
+                        .map(|key| (key.ak().to_bytes(), key.nsk().to_bytes())),
                     witness: spend.witness().as_ref().map(|witness| {
                         (
                             u32::try_from(u64::from(witness.position()))
@@ -561,7 +677,7 @@ impl Bundle {
                     dummy_ask: spend
                         .dummy_ask()
                         .as_ref()
-                        .map(|dummy_ask| dummy_ask.to_bytes()),
+                        .map(|dummy_ask| SecretKeyBytes::new(dummy_ask.to_bytes())),
                     proprietary: spend.proprietary().clone(),
                 }
             })
@@ -595,8 +711,171 @@ impl Bundle {
             spends,
             outputs,
             value_sum: bundle.value_sum().to_raw(),
-            anchor: bundle.anchor().to_bytes(),
-            bsk: bundle.bsk().map(|bsk| bsk.into()),
+            anchor: Some(bundle.anchor().to_bytes()),
+            bsk: bundle
+                .bsk()
+                .as_ref()
+                .map(|bsk| SecretKeyBytes::new(bsk.to_bytes())),
         }
+    }
+}
+
+/// Errors that can occur while parsing a Sapling bundle into the form used by
+/// the `sapling` crate.
+#[cfg(feature = "sapling")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ParseError {
+    /// The operation requires the bundle's `anchor` to be set, but it was absent.
+    ///
+    /// For a v6 transaction, an Updater can resolve this by setting the anchor; see
+    /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchorsandpre-authorization).
+    MissingAnchor,
+    /// The bundle's remaining fields were structurally invalid.
+    Bundle(sapling::pczt::ParseError),
+}
+
+#[cfg(feature = "sapling")]
+impl From<sapling::pczt::ParseError> for ParseError {
+    fn from(e: sapling::pczt::ParseError) -> Self {
+        ParseError::Bundle(e)
+    }
+}
+
+/// Errors that can occur while checking that a Sapling bundle's spend witnesses are
+/// consistent with its anchor.
+#[cfg(all(feature = "sapling", feature = "prover"))]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AnchorConsistencyError {
+    /// A non-zero-valued spend has a `witness` but is missing other note data required
+    /// to compute its Merkle path root.
+    IncompleteSpendData,
+    /// A non-zero-valued spend's `witness` does not root to the given anchor.
+    WitnessDoesNotRootToAnchor,
+}
+
+/// Checks that every non-zero-valued spend in `bundle` whose `witness` is present has a
+/// Merkle path that roots to `anchor` (\[ZIP 374\] "Anchors and pre-authorization").
+///
+/// Zero-valued spends are skipped, as their Merkle paths are not checked by the Sapling
+/// circuit.
+///
+/// [ZIP 374]: https://zips.z.cash/zip-0374#anchorsandpre-authorization
+#[cfg(all(feature = "sapling", feature = "prover"))]
+pub(crate) fn verify_witnesses_root_to_anchor(
+    bundle: &sapling::pczt::Bundle,
+    anchor: sapling::Anchor,
+) -> Result<(), AnchorConsistencyError> {
+    for spend in bundle.spends() {
+        let Some(witness) = spend.witness() else {
+            continue;
+        };
+        let Some(value) = spend.value() else {
+            continue;
+        };
+        if value.inner() == 0 {
+            continue;
+        }
+
+        let recipient = spend
+            .recipient()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+        let rseed = (*spend.rseed()).ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+
+        let note = sapling::Note::from_parts(recipient, *value, rseed);
+        let leaf = sapling::Node::from_cmu(&note.cmu());
+        let computed_anchor: sapling::Anchor = witness.root(leaf).into();
+
+        if computed_anchor != anchor {
+            return Err(AnchorConsistencyError::WitnessDoesNotRootToAnchor);
+        }
+    }
+
+    Ok(())
+}
+
+/// The result of parsing a Sapling bundle via [`Bundle::into_parsed`].
+///
+/// Carries the bundle's original wire `anchor` alongside the parsed form, so that
+/// [`Parsed::reserialize`] can restore it after an operation that does not itself
+/// change the anchor, even though parsing may have substituted a placeholder for it
+/// (see [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchorsandpre-authorization)).
+#[cfg(feature = "sapling")]
+pub(crate) struct Parsed {
+    pub(crate) bundle: sapling::pczt::Bundle,
+    pub(crate) wire_anchor: Option<[u8; 32]>,
+}
+
+#[cfg(feature = "sapling")]
+impl Parsed {
+    /// Serializes the parsed bundle back into its wire representation, using
+    /// [`Self::wire_anchor`] as the result's `anchor` in place of any placeholder
+    /// substituted while parsing.
+    ///
+    /// Must not be used after an operation that legitimately changes the anchor;
+    /// such operations should set `wire_anchor` to the new value first.
+    pub(crate) fn reserialize(self) -> Bundle {
+        Bundle {
+            anchor: self.wire_anchor,
+            ..Bundle::serialize_from(self.bundle)
+        }
+    }
+}
+
+#[cfg(all(test, feature = "sapling"))]
+mod tests {
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+    use super::{Bundle, ParseError};
+    use crate::common::AnchorRequirement;
+
+    fn output_only_bundle() -> Bundle {
+        let recipient = sapling::zip32::ExtendedSpendingKey::master(&[0; 32])
+            .expect("the derivation path yields a valid key")
+            .to_diversifiable_full_viewing_key()
+            .default_address()
+            .1;
+        let mut builder = sapling::builder::Builder::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+            sapling::builder::BundleType::DEFAULT,
+            sapling::Anchor::empty_tree(),
+        );
+        builder
+            .add_output(
+                None,
+                recipient,
+                sapling::value::NoteValue::from_raw(1),
+                [0; 512],
+            )
+            .unwrap();
+        let (bundle, _) = builder
+            .build_for_pczt(ChaCha20Rng::from_seed([0; 32]))
+            .unwrap();
+        let mut bundle = Bundle::serialize_from(bundle);
+        bundle.anchor = None;
+        bundle
+    }
+
+    #[test]
+    fn output_only_bundle_requires_anchor_when_required() {
+        assert!(matches!(
+            output_only_bundle().into_parsed(AnchorRequirement::Required),
+            Err(ParseError::MissingAnchor)
+        ));
+    }
+
+    #[test]
+    fn output_only_bundle_preserves_absent_anchor_when_not_required() {
+        let bundle = output_only_bundle();
+        let output_count = bundle.outputs.len();
+
+        let parsed = bundle.into_parsed(AnchorRequirement::NotRequired).unwrap();
+        assert!(parsed.bundle.spends().is_empty());
+        assert_eq!(parsed.bundle.outputs().len(), output_count);
+
+        let reserialized = parsed.reserialize();
+        assert!(reserialized.anchor.is_none());
+        assert_eq!(reserialized.outputs.len(), output_count);
     }
 }

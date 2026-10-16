@@ -12,13 +12,13 @@
 //!
 //! References
 //! ==========
-//! - [Section 7.6.1: Equihash.] Zcash Protocol Specification, version 2020.1.10 or later.
+//! - [Equihash.] Zcash Protocol Specification, version 2020.1.10 or later.
 //! - Alex Biryukov and Dmitry Khovratovich.
 //!   [*Equihash: Asymmetric Proof-of-Work Based on the Generalized Birthday Problem.*][BK16]
 //!   NDSS ’16.
 //!
-//! [Section 7.6.1: Equihash.]: https://zips.z.cash/protocol/protocol.pdf#equihash
-//! [BK16]: https://www.internetsociety.org/sites/default/files/blogs-media/equihash-asymmetric-proof-of-work-based-generalized-birthday-problem.pdf
+//! [Equihash.]: https://zips.z.cash/protocol/protocol.pdf#equihash
+//! [BK16]: https://www.ndss-symposium.org/wp-content/uploads/2017/09/equihash-asymmetric-proof-of-work-based-generalized-birthday-problem.pdf
 
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -39,7 +39,7 @@ mod verify;
 #[cfg(test)]
 mod test_vectors;
 
-pub use verify::{is_valid_solution, Error};
+pub use verify::{Error, is_valid_solution};
 
 #[cfg(feature = "solver")]
 mod blake2b;

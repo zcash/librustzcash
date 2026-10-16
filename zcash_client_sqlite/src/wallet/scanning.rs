@@ -1,9 +1,11 @@
 use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, OptionalExtension, named_params, types::Value};
-use std::cmp::{max, min};
-use std::collections::BTreeSet;
-use std::ops::Range;
-use std::rc::Rc;
+use std::{
+    cmp::{max, min},
+    collections::BTreeSet,
+    ops::Range,
+    rc::Rc,
+};
 use tracing::{debug, trace};
 
 use zcash_client_backend::data_api::{
@@ -11,28 +13,26 @@ use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange, spanning_tree::SpanningTree},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
 };
 
-use crate::TableConstants;
 use crate::{
-    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+    PRUNING_DEPTH, TableConstants, VERIFY_LOOKAHEAD,
     error::SqliteClientError,
     wallet::{block_height_extrema, init::WalletMigrationError},
 };
 
-use super::common::table_constants;
-use super::wallet_birthday;
+use super::{block_max_scanned, common::table_constants, wallet_birthday};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
+use ScanPriority::*;
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
-    use ScanPriority::*;
     match priority {
         Ignored => 0,
         Scanned => 10,
@@ -45,7 +45,6 @@ pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
 }
 
 pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
-    use ScanPriority::*;
     match code {
         0 => Some(Ignored),
         10 => Some(Scanned),
@@ -56,6 +55,20 @@ pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
         60 => Some(Verify),
         _ => None,
     }
+}
+
+/// Decodes a `scan_queue` row selected as `(block_range_start, block_range_end, priority)`.
+fn scan_range_from_row<E: WalletError>(row: &rusqlite::Row<'_>) -> Result<ScanRange, E> {
+    let start = row.get::<_, u32>(0).map_err(E::db_error)?;
+    let end = row.get::<_, u32>(1).map_err(E::db_error)?;
+    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
+    let priority = parse_priority_code(code)
+        .ok_or_else(|| E::corrupt(format!("scan priority not recognized: {code}")))?;
+
+    Ok(ScanRange::from_parts(
+        BlockHeight::from(start)..BlockHeight::from(end),
+        priority,
+    ))
 }
 
 pub(crate) fn suggest_scan_ranges(
@@ -69,24 +82,12 @@ pub(crate) fn suggest_scan_ranges(
          ORDER BY priority DESC, block_range_end DESC",
     )?;
 
-    let mut rows =
-        stmt_scan_ranges.query(named_params![":min_priority": priority_code(&min_priority)])?;
-
-    let mut result = vec![];
-    while let Some(row) = rows.next()? {
-        let range = Range {
-            start: row.get::<_, u32>(0).map(BlockHeight::from)?,
-            end: row.get::<_, u32>(1).map(BlockHeight::from)?,
-        };
-        let code = row.get::<_, i64>(2)?;
-        let priority = parse_priority_code(code).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!("scan priority not recognized: {code}"))
-        })?;
-
-        result.push(ScanRange::from_parts(range, priority));
-    }
-
-    Ok(result)
+    stmt_scan_ranges
+        .query_and_then(
+            named_params![":min_priority": priority_code(&min_priority)],
+            scan_range_from_row::<SqliteClientError>,
+        )?
+        .collect()
 }
 
 pub(crate) fn insert_queue_entries<'a>(
@@ -173,18 +174,7 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
         let mut to_create: Option<SpanningTree> = None;
         let mut to_delete_ends: Vec<Value> = vec![];
         while let Some(row) = rows.next().map_err(E::db_error)? {
-            let entry = ScanRange::from_parts(
-                Range {
-                    start: BlockHeight::from(row.get::<_, u32>(0).map_err(E::db_error)?),
-                    end: BlockHeight::from(row.get::<_, u32>(1).map_err(E::db_error)?),
-                },
-                {
-                    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
-                    parse_priority_code(code).ok_or_else(|| {
-                        E::corrupt(format!("scan priority not recognized: {code}"))
-                    })?
-                },
-            );
+            let entry = scan_range_from_row::<E>(row)?;
             to_delete_ends.push(Value::from(u32::from(entry.block_range().end)));
             to_create = if let Some(cur) = to_create {
                 Some(cur.insert(entry, force_rescans))
@@ -221,15 +211,151 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
     Ok(())
 }
 
+/// Queues `range` for re-scanning at [`ScanPriority::Historic`], overriding any record that
+/// part of it has already been scanned.
+///
+/// The merge is performed with forced rescans enabled, so a [`ScanPriority::Scanned`] entry
+/// does not dominate the inserted range; entries whose priority exceeds
+/// [`ScanPriority::Historic`] still do, and are preserved. Nothing outside the `scan_queue`
+/// table is touched.
+///
+/// An empty range is a no-op.
+pub(crate) fn queue_rescan(
+    conn: &rusqlite::Transaction<'_>,
+    range: Range<BlockHeight>,
+) -> Result<(), SqliteClientError> {
+    if range.is_empty() {
+        return Ok(());
+    }
+
+    replace_queue_entries::<SqliteClientError>(
+        conn,
+        &range,
+        Some(ScanRange::from_parts(range.clone(), Historic)).into_iter(),
+        true,
+    )
+}
+
+/// Drops the scan work queued below `height`, leaving the queue's coverage contiguous.
+///
+/// This is the inverse of [`replace_queue_entries`], and cannot be expressed in terms of
+/// it: the spanning tree's dominance rule exists to stop a merge from *lowering* the
+/// priority of a queued range, which is precisely what pruning must do.
+///
+/// With `Some(priority)`, entries at or above that priority are retained whole (even where
+/// they straddle `height`), as are the `Scanned`/`Ignored` bookkeeping entries — those
+/// record which regions the store has already covered or deliberately skips. With `None`,
+/// nothing below `height` is retained, irrespective of priority.
+///
+/// Pruned coverage is only ever *relabelled*, never removed, wherever a retained entry
+/// still sits below it: such regions are rewritten as [`ScanPriority::Ignored`] and
+/// coalesced with their neighbours. Deleting them instead would leave a hole that
+/// [`replace_queue_entries`] refills as [`ScanPriority::Historic`] the next time a
+/// spanning-tree merge covers it, resurrecting the very work being pruned. Only coverage
+/// beneath the lowest retained entry is deleted outright, since raising the queue's floor
+/// cannot open an interior gap.
+///
+/// Returns the number of queue entries that were removed or altered.
+pub(crate) fn prune_scan_queue_below(
+    conn: &rusqlite::Transaction<'_>,
+    height: BlockHeight,
+    retain_with_priority: Option<ScanPriority>,
+) -> Result<u64, SqliteClientError> {
+    let is_retained = |priority: ScanPriority| {
+        retain_with_priority
+            .is_some_and(|retain| priority <= ScanPriority::Scanned || priority >= retain)
+    };
+
+    // Every entry this operation can touch starts below `height`; the queue's non-overlap
+    // invariant leaves the remainder unaffected. Reading them up front keeps the no-op
+    // case read-only, so callers probing at every wallet open never contend for the write
+    // lock.
+    let existing = {
+        let mut stmt = conn.prepare_cached(
+            "SELECT block_range_start, block_range_end, priority FROM scan_queue
+             WHERE block_range_start < :height
+             ORDER BY block_range_start",
+        )?;
+
+        stmt.query_and_then(
+            named_params![":height": u32::from(height)],
+            scan_range_from_row::<SqliteClientError>,
+        )?
+        .collect::<Result<Vec<_>, _>>()?
+    };
+
+    // The lowest retained entry is the floor of the region that must remain covered.
+    let fill_from = existing
+        .iter()
+        .find(|entry| is_retained(entry.priority()))
+        .map(|entry| entry.block_range().start);
+
+    let replacement = existing
+        .iter()
+        .flat_map(|entry| {
+            let range = entry.block_range();
+            if is_retained(entry.priority()) {
+                vec![entry.clone()]
+            } else {
+                // Only the part below `height` is pruned; any remainder keeps its priority.
+                let pruned = ScanRange::from_parts(
+                    range.start..min(range.end, height),
+                    ScanPriority::Ignored,
+                );
+                let kept = (range.end > height)
+                    .then(|| ScanRange::from_parts(height..range.end, entry.priority()));
+
+                match fill_from {
+                    Some(floor) if pruned.block_range().end > floor => {
+                        Some(pruned).into_iter().chain(kept).collect()
+                    }
+                    _ => kept.into_iter().collect(),
+                }
+            }
+        })
+        .fold(Vec::<ScanRange>::new(), |mut acc, entry| {
+            match acc.last() {
+                Some(prev)
+                    if prev.priority() == entry.priority()
+                        && prev.block_range().end == entry.block_range().start =>
+                {
+                    let merged = ScanRange::from_parts(
+                        prev.block_range().start..entry.block_range().end,
+                        prev.priority(),
+                    );
+                    acc.pop();
+                    acc.push(merged);
+                }
+                _ => acc.push(entry),
+            }
+            acc
+        });
+
+    if replacement == existing {
+        return Ok(0);
+    }
+
+    conn.execute(
+        "DELETE FROM scan_queue WHERE block_range_start < :height",
+        named_params![":height": u32::from(height)],
+    )?;
+    insert_queue_entries(conn, replacement.iter())?;
+
+    Ok(existing
+        .iter()
+        .filter(|entry| !replacement.contains(entry))
+        .count() as u64)
+}
+
 fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    protocol: ShieldedProtocol,
+    pool: ShieldedPool,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
-    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(pool)?;
 
     // we'll either have both min and max bounds, or we'll have neither
     let subtree_index_bounds = required_subtree_indices
@@ -287,7 +413,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
     range: Range<BlockHeight>,
-    wallet_note_positions: &[(ShieldedProtocol, Position)],
+    wallet_note_positions: &[(ShieldedPool, Position)],
 ) -> Result<(), SqliteClientError> {
     // Read the wallet birthday (if known).
     // TODO: use per-pool birthdays?
@@ -302,17 +428,32 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         let mut required_sapling_subtrees = BTreeSet::new();
         #[cfg(feature = "orchard")]
         let mut required_orchard_subtrees = BTreeSet::new();
+        // Ironwood note commitments are Orchard-shaped and use the Orchard shard height, but are
+        // tracked in a separate commitment tree.
+        #[cfg(feature = "orchard")]
+        let mut required_ironwood_subtrees = BTreeSet::new();
         for (protocol, position) in wallet_note_positions {
             match protocol {
-                ShieldedProtocol::Sapling => {
+                ShieldedPool::Sapling => {
                     required_sapling_subtrees.insert(
                         Address::above_position(SAPLING_SHARD_HEIGHT.into(), *position).index(),
                     );
                 }
-                ShieldedProtocol::Orchard => {
+                ShieldedPool::Orchard => {
                     #[cfg(feature = "orchard")]
                     required_orchard_subtrees.insert(
                         Address::above_position(ORCHARD_SHARD_HEIGHT.into(), *position).index(),
+                    );
+
+                    #[cfg(not(feature = "orchard"))]
+                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                        *protocol,
+                    )));
+                }
+                ShieldedPool::Ironwood => {
+                    #[cfg(feature = "orchard")]
+                    required_ironwood_subtrees.insert(
+                        Address::above_position(IRONWOOD_SHARD_HEIGHT.into(), *position).index(),
                     );
 
                     #[cfg(not(feature = "orchard"))]
@@ -327,7 +468,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             &range,
             required_sapling_subtrees,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
         )?;
@@ -337,8 +478,20 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             extended_range.as_ref().unwrap_or(&range),
             required_orchard_subtrees,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
+            wallet_birthday,
+        )?
+        .or(extended_range);
+
+        // Ironwood's commitment tree activates at NU6.3.
+        #[cfg(feature = "orchard")]
+        let extended_range = extend_range(
+            conn,
+            extended_range.as_ref().unwrap_or(&range),
+            required_ironwood_subtrees,
+            ShieldedPool::Ironwood,
+            params.activation_height(NetworkUpgrade::Nu6_3),
             wallet_birthday,
         )?
         .or(extended_range);
@@ -370,12 +523,84 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
+    // Check for any newly stabilized notes, and mark them as stabilized.
+    mark_stabilized_notes(
+        conn,
+        params,
+        &[
+            ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood,
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// Marks received notes as `witness_stabilized` once their containing shard's block extent is fully
+/// Scanned and the shard's end height has at least `PRUNING_DEPTH` confirmations.
+///
+/// This means that a note within the chain-tip shard can not be marked as `witness_stabilized`,
+/// because the tip shard is by definition not complete or confirmed to the `PRUNING_DEPTH`.
+///
+/// Only the pools listed in `pools` are processed. Callers must restrict this to pools whose
+/// received-note tables exist in the schema at the point of the call; in particular the
+/// `witness_stabilized_notes` migration runs before the Ironwood received-note table is created,
+/// so it must not request the Ironwood pool.
+pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    pools: &[ShieldedPool],
+) -> Result<(), SqliteClientError> {
+    fn mark_pool(
+        conn: &rusqlite::Transaction<'_>,
+        pool: ShieldedPool,
+        pruning_floor: u32,
+    ) -> Result<(), SqliteClientError> {
+        let TableConstants {
+            table_prefix,
+            shard_height,
+            ..
+        } = table_constants::<SqliteClientError>(pool)?;
+        let sql = format!(
+            "UPDATE {table_prefix}_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM {table_prefix}_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :pruning_floor
+                     AND (commitment_tree_position >> :shard_height) = shard.shard_index
+                     AND shard.shard_index NOT IN (
+                         SELECT shard_index FROM v_{table_prefix}_shard_unscanned_ranges
+                     )
+               )",
+        );
+        conn.execute(
+            &sql,
+            named_params![":pruning_floor": pruning_floor, ":shard_height": shard_height],
+        )?;
+        Ok(())
+    }
+
+    if let Some(max_scanned_height) = block_max_scanned(conn, params)?.map(|m| m.block_height()) {
+        let pruning_floor: u32 = u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+
+        // Mark stabilized notes in each requested pool.
+        for pool in pools {
+            mark_pool(conn, *pool, pruning_floor)?;
+        }
+    }
+
     Ok(())
 }
 
 fn tip_shard_end_height(
     conn: &rusqlite::Transaction<'_>,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     conn.query_row(
@@ -423,20 +648,21 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the shards tables. The minimum of the two
-    // gives the start of a height range that covers the last incomplete shard of both the
-    // Sapling and Orchard pools.
-    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Sapling)?;
+    // Read the maximum height from each of the shards tables. The minimum across the pools gives
+    // the start of a height range that covers the last incomplete shard of every pool, so that
+    // none is left behind. The Ironwood pool is included: post-NU6.3 it is sparse, so its last
+    // shard can end well below the Sapling and Orchard tips.
+    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
-    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Orchard)?;
+    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedPool::Orchard)?;
+    #[cfg(feature = "orchard")]
+    let ironwood_shard_tip = tip_shard_end_height(conn, ShieldedPool::Ironwood)?;
 
     #[cfg(feature = "orchard")]
-    let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
-        (None, None) => None,
-        (None, Some(o)) => Some(o),
-        (Some(s), None) => Some(s),
-        (Some(s), Some(o)) => Some(std::cmp::min(s, o)),
-    };
+    let min_shard_tip = [sapling_shard_tip, orchard_shard_tip, ironwood_shard_tip]
+        .into_iter()
+        .flatten()
+        .min();
     #[cfg(not(feature = "orchard"))]
     let min_shard_tip = sapling_shard_tip;
 
@@ -567,7 +793,7 @@ pub(crate) mod tests {
 
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
-        AccountBirthday, Ratio, WalletRead, WalletWrite,
+        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, spanning_tree::testing::scan_range},
         testing::{
@@ -590,14 +816,57 @@ pub(crate) mod tests {
             BlockCache,
             db::{TestDb, TestDbFactory},
         },
-        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        wallet::scanning::{
+            insert_queue_entries, priority_code, replace_queue_entries, suggest_scan_ranges,
+        },
     };
 
+    /// `extend_range` for the Ironwood pool must query the `ironwood_tree_shards` table (rather
+    /// than the Orchard tree), extending the scan range to cover the subtrees containing the
+    /// discovered notes.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn extend_range_uses_ironwood_tree_shards() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ironwood_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER
+            );
+            INSERT INTO ironwood_tree_shards (shard_index, subtree_end_height)
+            VALUES (0, 100), (1, 200);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let range = BlockHeight::from_u32(50)..BlockHeight::from_u32(60);
+        let required = BTreeSet::from([1u64]);
+
+        let extended = super::extend_range(
+            &tx,
+            &range,
+            required,
+            ShieldedPool::Ironwood,
+            Some(BlockHeight::from_u32(10)),
+            Some(BlockHeight::from_u32(5)),
+        )
+        .unwrap();
+
+        // Subtree 1 spans from the end of subtree 0 (height 100) to its own end (height 200), so
+        // the scan range is extended to cover [50, 201).
+        assert_eq!(
+            extended,
+            Some(BlockHeight::from_u32(50)..BlockHeight::from_u32(201))
+        );
+    }
+
+    use ScanPriority::*;
     #[cfg(feature = "orchard")]
     use {
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
-        std::convert::Infallible,
+        rusqlite::Connection,
+        std::{collections::BTreeSet, convert::Infallible},
         zcash_client_backend::{
             data_api::{
                 WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
@@ -606,7 +875,7 @@ pub(crate) mod tests {
             fees::{DustOutputPolicy, StandardFeeRule, standard},
             wallet::OvkPolicy,
         },
-        zcash_protocol::memo::Memo,
+        zcash_protocol::{ShieldedPool, memo::Memo},
     };
 
     #[test]
@@ -621,8 +890,6 @@ pub(crate) mod tests {
     }
 
     fn scan_complete<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
-
         // We'll start inserting leaf notes 5 notes after the end of the third subtree, with a gap
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
@@ -669,6 +936,12 @@ pub(crate) mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -676,6 +949,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -700,6 +975,7 @@ pub(crate) mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
 
@@ -826,6 +1102,12 @@ pub(crate) mod tests {
                         NonZeroU8::new(16).unwrap(),
                     );
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height,
@@ -833,6 +1115,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: if insert_prior_roots {
                         prior_sapling_roots
@@ -875,8 +1159,6 @@ pub(crate) mod tests {
     }
 
     fn create_account_creates_ignored_range<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
-
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (st, _, birthday, sap_active) =
             test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), true);
@@ -892,8 +1174,6 @@ pub(crate) mod tests {
 
     #[test]
     fn update_chain_tip_before_create_account() {
-        use ScanPriority::*;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -948,8 +1228,6 @@ pub(crate) mod tests {
     }
 
     fn update_chain_tip_with_no_subtree_roots<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
-
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
             test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), false);
@@ -993,8 +1271,6 @@ pub(crate) mod tests {
     }
 
     fn update_chain_tip_when_never_scanned<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
-
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
             test_with_nu5_birthday_offset::<T>(76, 1000, BlockHash([0; 32]), true);
@@ -1037,7 +1313,6 @@ pub(crate) mod tests {
     }
 
     fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
         // Set up the following situation:
         //
         //                                                prior_tip           new_tip
@@ -1084,6 +1359,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1091,6 +1372,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1139,6 +1422,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);
@@ -1229,8 +1513,6 @@ pub(crate) mod tests {
     }
 
     fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {
-        use ScanPriority::*;
-
         // Set up the following situation:
         //
         //                            prior_tip           new_tip
@@ -1277,6 +1559,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1284,6 +1572,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1343,6 +1633,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);
@@ -1465,8 +1756,6 @@ pub(crate) mod tests {
 
     #[test]
     fn replace_queue_entries_merges_previous_range() {
-        use ScanPriority::*;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
@@ -1510,8 +1799,6 @@ pub(crate) mod tests {
 
     #[test]
     fn replace_queue_entries_merges_subsequent_range() {
-        use ScanPriority::*;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
@@ -1551,6 +1838,122 @@ pub(crate) mod tests {
 
         let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// `queue_rescan` overrides the `Scanned` and `Ignored` bookkeeping entries covering its
+    /// range, and leaves entries of higher priority than `Historic` untouched.
+    #[test]
+    fn queue_rescan_overrides_scanned_and_ignored_ranges() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let ranges = [
+            scan_range(200..250, ChainTip),
+            scan_range(100..200, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        st.wallet_mut()
+            .queue_rescan(BlockHeight::from(50)..BlockHeight::from(220))
+            .unwrap();
+
+        let expected = vec![
+            // `ChainTip` dominates `Historic`, so the requested range is clipped here.
+            scan_range(200..250, ChainTip),
+            // Both the `Scanned` and the `Ignored` portions of the requested range are now
+            // queued for scanning, and coalesce into a single entry.
+            scan_range(50..200, Historic),
+            scan_range(0..50, Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    /// An empty range leaves the scan queue exactly as it was.
+    #[test]
+    fn queue_rescan_with_empty_range_is_a_noop() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let ranges = vec![
+            scan_range(150..200, ChainTip),
+            scan_range(100..150, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        st.wallet_mut()
+            .queue_rescan(BlockHeight::from(120)..BlockHeight::from(120))
+            .unwrap();
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert_eq!(actual, ranges);
+    }
+
+    /// `queue_rescan` re-queues blocks that have already been scanned without removing any of
+    /// the wallet state that scanning them produced.
+    #[test]
+    fn queue_rescan_preserves_scanned_wallet_state() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([3; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(50000);
+
+        let (start_height, _, _) =
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        for _ in 1..10 {
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        }
+        st.scan_cached_blocks(start_height, 10);
+
+        let rescan_range = start_height..(start_height + 10);
+        let balance_before = st.get_total_balance(account_id);
+        let max_scanned_before = st
+            .wallet()
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height());
+        assert_eq!(max_scanned_before, Some(start_height + 9));
+
+        st.wallet_mut().queue_rescan(rescan_range.clone()).unwrap();
+
+        // The scanned blocks are queued for scanning again.
+        let queued = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        assert!(
+            queued.iter().any(|r| r.priority() == Historic
+                && r.block_range().start <= rescan_range.start
+                && r.block_range().end >= rescan_range.end),
+            "no Historic range covering {rescan_range:?} in {queued:?}"
+        );
+
+        // Nothing that scanning them produced has been removed.
+        assert_eq!(st.get_total_balance(account_id), balance_before);
+        assert_eq!(
+            st.wallet()
+                .block_max_scanned()
+                .unwrap()
+                .map(|m| m.block_height()),
+            max_scanned_before
+        );
     }
 
     /// This sets up the case wherein:
@@ -1607,12 +2010,17 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // The Sapling and Ironwood trees are unused in this test.
+                let sapling_initial_tree = Frontier::empty();
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
                         birthday_prior_block_hash,
-                        Frontier::empty(), // the Sapling tree is unused in this test
+                        sapling_initial_tree,
                         orchard_initial_tree,
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: vec![],
                     prior_orchard_roots,
@@ -1719,8 +2127,6 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_complete() {
-        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
-
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
         let birthday = account.birthday();
@@ -1813,8 +2219,6 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_incomplete() {
-        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
-
         let mut st = prepare_orchard_block_spanning_test(false);
         let account = st.test_account().cloned().unwrap();
         let birthday = account.birthday();
@@ -1902,5 +2306,336 @@ pub(crate) mod tests {
         );
 
         assert_matches!(proposal, Ok(_));
+    }
+
+    /// `put_ironwood_subtree_roots` records Ironwood subtree roots (and their end heights) in the
+    /// wallet's Ironwood shard table, exactly as the Sapling and Orchard equivalents do for their
+    /// pools. Without it, a wallet restoring from a subtree-root source cannot populate its
+    /// Ironwood tree at all.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots_records_the_shard_end_height() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let shard_end = st.sapling_activation_height() + 500;
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    shard_end,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        let stored: Option<u32> = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT MAX(subtree_end_height) FROM ironwood_tree_shards",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            Some(u32::from(shard_end)),
+            "put_ironwood_subtree_roots must record the subtree end height in ironwood_tree_shards",
+        );
+    }
+
+    /// `update_chain_tip` must fold the Ironwood shard tip into the ChainTip-priority scan range,
+    /// alongside the Sapling and Orchard shard tips. Post-NU6.3 the Ironwood pool is sparse, so
+    /// its last shard can end well below the others; if it is omitted from the minimum, the
+    /// ChainTip range starts at the higher Sapling/Orchard tip and the incomplete Ironwood shard
+    /// is not scheduled for scanning at ChainTip priority.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn update_chain_tip_covers_the_ironwood_shard_tip() {
+        let (mut st, _, birthday, _sap_active) =
+            test_with_nu5_birthday_offset::<OrchardPoolTester>(76, 1000, BlockHash([0; 32]), true);
+        let b = birthday.height();
+
+        // Sapling and Orchard complete a shard high above the birthday; the Ironwood shard ends
+        // at a lower height (the sparse-pool reality).
+        let high = b + 1000;
+        let low = b + 400;
+        st.put_subtree_roots(
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                ::sapling::Node::empty_leaf(),
+            )],
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                MerkleHashOrchard::empty_leaf(),
+            )],
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                1,
+                &[CommitmentTreeRoot::from_parts(
+                    low,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        st.wallet_mut().update_chain_tip(high + 20).unwrap();
+
+        // The lowest-starting ChainTip range must reach down to the Ironwood shard tip, not stop
+        // at the higher Sapling/Orchard tip.
+        let ranges = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        let chain_tip_start = ranges
+            .iter()
+            .filter(|r| r.priority() == ChainTip)
+            .map(|r| r.block_range().start)
+            .min()
+            .expect("there must be a ChainTip scan range");
+        assert!(
+            chain_tip_start <= low,
+            "the ChainTip range must cover the Ironwood shard tip {low:?}, but started at \
+             {chain_tip_start:?}",
+        );
+    }
+
+    fn queue_contents(st: &TestState<(), TestDb, LocalNetwork>) -> Vec<(u32, u32, i64)> {
+        let mut stmt = st
+            .wallet()
+            .conn()
+            .prepare(
+                "SELECT block_range_start, block_range_end, priority FROM scan_queue
+                 ORDER BY block_range_start",
+            )
+            .unwrap();
+
+        stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                r.get::<_, u32>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    /// Asserts that the scan queue's coverage is contiguous. `replace_queue_entries` fills
+    /// any gap between adjacent entries with a `Historic` range, so a hole punched in the
+    /// queue silently re-queues that region for scanning at the next spanning-tree merge.
+    fn assert_queue_contiguous(st: &TestState<(), TestDb, LocalNetwork>) {
+        let entries = queue_contents(st);
+        for pair in entries.windows(2) {
+            assert_eq!(
+                pair[0].1, pair[1].0,
+                "gap in scan queue between {:?} and {:?}",
+                pair[0], pair[1]
+            );
+        }
+    }
+
+    #[test]
+    fn prune_scan_queue_below_retains_at_and_above_priority() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..450_000, ScanPriority::Ignored), // bookkeeping: kept
+                scan_range(450_000..460_000, ScanPriority::FoundNote), // retained priority: kept
+                scan_range(460_000..500_000, ScanPriority::Scanned), // bookkeeping: kept
+                scan_range(500_000..700_000, ScanPriority::Historic), // straddler: split
+                scan_range(700_000..710_000, ScanPriority::ChainTip), // above height: untouched
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        let changed = st
+            .wallet_mut()
+            .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+            .unwrap();
+        assert_eq!(
+            changed, 1,
+            "only the straddling `Historic` entry is altered"
+        );
+
+        // The `Historic` entry's coverage below the floor is demoted rather than deleted:
+        // the `FoundNote` witness range still sits below it, so deleting would leave a gap.
+        assert_eq!(
+            queue_contents(&st),
+            vec![
+                (419_200, 450_000, priority_code(&ScanPriority::Ignored)),
+                (450_000, 460_000, priority_code(&ScanPriority::FoundNote)),
+                (460_000, 500_000, priority_code(&ScanPriority::Scanned)),
+                (500_000, 663_150, priority_code(&ScanPriority::Ignored)),
+                (663_150, 700_000, priority_code(&ScanPriority::Historic)),
+                (700_000, 710_000, priority_code(&ScanPriority::ChainTip)),
+            ]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// The motivating case: after the account that justified the deep `Historic` range is
+    /// deleted, pruning to the remaining wallet birthday leaves exactly the state that
+    /// account creation would have produced had the deleted account never existed — a
+    /// single `Ignored` range below the birthday.
+    #[test]
+    fn prune_scan_queue_below_coalesces_with_the_ignored_floor() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..500_000, ScanPriority::Ignored),
+                scan_range(500_000..700_000, ScanPriority::Historic),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![
+                (419_200, 663_150, priority_code(&ScanPriority::Ignored)),
+                (663_150, 700_000, priority_code(&ScanPriority::Historic)),
+            ]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// Where nothing below the pruned region is retained, the queue's floor simply rises;
+    /// raising the floor cannot open an interior gap, so no `Ignored` filler is recorded.
+    #[test]
+    fn prune_scan_queue_below_raises_the_floor_when_nothing_is_retained() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(500_000..600_000, ScanPriority::Historic),
+                scan_range(600_000..700_000, ScanPriority::Historic),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![(663_150, 700_000, priority_code(&ScanPriority::Historic))]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// `retain_with_priority: None` retains nothing below the height, irrespective of
+    /// priority — even a `Verify` entry is pruned, and the bookkeeping entries that would
+    /// otherwise anchor the queue's floor go with it.
+    #[test]
+    fn prune_scan_queue_below_none_retains_nothing() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..450_000, ScanPriority::Ignored), // deleted despite bookkeeping
+                scan_range(450_000..460_000, ScanPriority::Verify),  // deleted despite priority
+                scan_range(460_000..600_000, ScanPriority::Historic), // deleted
+                scan_range(600_000..700_000, ScanPriority::FoundNote), // straddler: trimmed
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut().prune_scan_queue_below(floor, None).unwrap(),
+            4
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![(663_150, 700_000, priority_code(&ScanPriority::FoundNote))]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// Pruning is a no-op when nothing below the height is prunable, and leaves the queue
+    /// untouched rather than rewriting it.
+    #[test]
+    fn prune_scan_queue_below_is_a_no_op_when_all_entries_are_retained() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let entries = [
+            scan_range(419_200..450_000, ScanPriority::Ignored),
+            scan_range(450_000..460_000, ScanPriority::Scanned),
+            scan_range(460_000..700_000, ScanPriority::FoundNote),
+        ];
+        insert_queue_entries(st.wallet().conn(), entries.iter()).unwrap();
+        let before = queue_contents(&st);
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(
+                    BlockHeight::from_u32(663_150),
+                    Some(ScanPriority::OpenAdjacent)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(queue_contents(&st), before);
+    }
+
+    /// `block_range_end` is exclusive: an entry ending exactly at `height` covers only
+    /// heights strictly below it, so it is deleted whole rather than trimmed to an empty
+    /// range (which the schema's `start < end` constraint would reject).
+    #[test]
+    fn prune_scan_queue_below_treats_end_at_height_as_fully_below() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [scan_range(600_000..663_150, ScanPriority::Historic)].iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            1
+        );
+        let remaining: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM scan_queue", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

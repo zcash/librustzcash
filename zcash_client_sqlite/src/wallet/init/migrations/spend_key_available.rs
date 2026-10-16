@@ -8,9 +8,10 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::full_account_ids;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x07610aac_b0e3_4ba8_aaa6_cda606f0fd7b);
+/// The migration that records ephemeral addresses for each account.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x07610aac_b0e3_4ba8_aaa6_cda606f0fd7b);
 
-const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
 
 #[allow(dead_code)]
 pub(super) struct Migration;

@@ -1,9 +1,16 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt::{self, Debug};
-use std::hash::Hash;
+// The `ScanError` accessors below match on its variants bare.
+use ScanError::*;
+
+use core::{
+    convert::TryFrom,
+    fmt::{self, Debug},
+};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{SaplingIvk, note_encryption::SaplingDomain};
@@ -13,7 +20,7 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -25,10 +32,17 @@ use crate::{
     wallet::WalletOutput,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::wallet::WalletTransparentSpend;
+
 #[cfg(feature = "orchard")]
 use orchard::note_encryption::OrchardDomain;
 
+#[cfg(feature = "transparent-inputs")]
+use transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope};
+
 pub(crate) mod compact;
+pub mod full;
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a [`CompactSaplingOutput`] or [`CompactOrchardAction`].
@@ -132,6 +146,18 @@ pub struct ScanningKey<Ivk, Nk, AccountId> {
     key_scope: Option<Scope>,
 }
 
+impl<Ivk, Nk, AccountId> ScanningKey<Ivk, Nk, AccountId> {
+    /// Constructs a new `ScanningKey` from its constituent parts.
+    pub fn new(ivk: Ivk, nk: Option<Nk>, account_id: AccountId, key_scope: Option<Scope>) -> Self {
+        Self {
+            ivk,
+            nk,
+            account_id,
+            key_scope,
+        }
+    }
+}
+
 impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     for ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>
 {
@@ -197,6 +223,51 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
     }
 }
 
+/// The note-encryption domain used to trial-decrypt Ironwood outputs.
+///
+/// Ironwood ([ZIP 2005], NU6.3) is a distinct shielded pool. Its notes are Orchard-shaped and use
+/// the Orchard commitment and nullifier types, and are decrypted with the same Orchard viewing
+/// keys, but they carry version 3 note plaintexts and so require the Ironwood note-encryption
+/// domain, which is distinct from [`OrchardDomain`] (that domain accepts only version 2
+/// plaintexts). This is why Ironwood is a separate pool rather than a variant of Orchard.
+///
+/// [ZIP 2005]: https://zips.z.cash/zip-2005
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodDomain = orchard::note_encryption::IronwoodDomain;
+
+/// The nullifier type for Ironwood notes. This is the Orchard nullifier type, which does not
+/// depend on the note plaintext version. See [`IronwoodDomain`].
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodNullifier = orchard::note::Nullifier;
+
+/// An Orchard viewing key trial-decrypts Ironwood outputs under the Ironwood note-encryption
+/// domain. The key material is the same as for Orchard; only the domain (and thus the accepted
+/// note plaintext version) differs.
+#[cfg(feature = "orchard")]
+impl<AccountId> ScanningKeyOps<IronwoodDomain, AccountId, orchard::note::Nullifier>
+    for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
+{
+    fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
+        orchard::keys::PreparedIncomingViewingKey::new(&self.ivk)
+    }
+
+    fn nf(
+        &self,
+        note: &orchard::note::Note,
+        _position: Position,
+    ) -> Option<orchard::note::Nullifier> {
+        self.nk.as_ref().map(|key| note.nullifier(key))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
+    }
+}
+
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
     sapling: HashMap<
@@ -207,6 +278,11 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     orchard: HashMap<
         IvkTag,
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
+    >,
+    #[cfg(feature = "orchard")]
+    ironwood: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
     >,
 }
 
@@ -225,11 +301,17 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
                     + Sync,
             >,
         >,
+        #[cfg(feature = "orchard")] ironwood: HashMap<
+            IvkTag,
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+        >,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -239,6 +321,8 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
             sapling: HashMap::new(),
             #[cfg(feature = "orchard")]
             orchard: HashMap::new(),
+            #[cfg(feature = "orchard")]
+            ironwood: HashMap::new(),
         }
     }
 
@@ -261,6 +345,21 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
     > {
         &self.orchard
+    }
+
+    /// Returns the Ironwood keys to be used for incoming note detection.
+    ///
+    /// Ironwood outputs are trial-decrypted with the account's Orchard viewing keys (see
+    /// [`orchard::note_encryption::IronwoodDomain`]), but are tracked as a separate pool from
+    /// Orchard.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(
+        &self,
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+    > {
+        &self.ironwood
     }
 }
 
@@ -286,6 +385,11 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                     + Send
                     + Sync,
             >,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut ironwood: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -316,6 +420,20 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                         }),
                     );
                 }
+
+                // Ironwood outputs are decrypted with the same Orchard viewing keys, but are
+                // tracked as a separate pool.
+                for scope in [Scope::External, Scope::Internal] {
+                    ironwood.insert(
+                        (account_id, scope),
+                        Box::new(ScanningKey {
+                            ivk: fvk.to_ivk(scope),
+                            nk: Some(fvk.clone()),
+                            account_id,
+                            key_scope: Some(scope),
+                        }),
+                    );
+                }
             }
         }
 
@@ -323,47 +441,64 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 }
 
-/// The set of nullifiers being tracked by a wallet.
+/// The nullifiers of the wallet's unspent shielded notes, whose appearance in a scanned block
+/// reveals a spend of wallet funds.
+///
+/// Nullifiers are held in flat vectors because `find_spent` compares them in constant time, so
+/// that a local side-channel observer does not learn which of a block's nullifiers are the
+/// wallet's. That mitigation is partial: the comparison runs once per tracked nullifier, so its
+/// duration still discloses how many notes the wallet holds.
 pub struct Nullifiers<AccountId> {
     sapling: Vec<(AccountId, sapling::Nullifier)>,
     #[cfg(feature = "orchard")]
     orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<(AccountId, IronwoodNullifier)>,
 }
 
 impl<AccountId> Nullifiers<AccountId> {
-    /// Constructs a new empty set of nullifiers
+    /// Constructs a new empty set of nullifiers.
     pub fn empty() -> Self {
         Self {
             sapling: vec![],
             #[cfg(feature = "orchard")]
             orchard: vec![],
+            #[cfg(feature = "orchard")]
+            ironwood: vec![],
         }
     }
 
-    /// Fetches the nullifiers for the unspent notes being tracked by the given wallet.
-    pub(crate) fn unspent<DbT: WalletRead<AccountId = AccountId>>(
+    /// Fetches the nullifiers of the unspent notes being tracked by the given wallet.
+    pub fn unspent<DbT: WalletRead<AccountId = AccountId>>(
         db_data: &DbT,
     ) -> Result<Self, DbT::Error> {
         Ok(Self::new(
             db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
             #[cfg(feature = "orchard")]
             db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
+            #[cfg(feature = "orchard")]
+            db_data.get_ironwood_nullifiers(NullifierQuery::Unspent)?,
         ))
     }
 
-    /// Construct a nullifier set from its constituent parts.
+    /// Constructs a nullifier set from its constituent parts.
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
         #[cfg(feature = "orchard")] orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+        #[cfg(feature = "orchard")] ironwood: Vec<(AccountId, IronwoodNullifier)>,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -376,6 +511,12 @@ impl<AccountId> Nullifiers<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[(AccountId, orchard::note::Nullifier)] {
         self.orchard.as_ref()
+    }
+
+    /// Returns the Ironwood nullifiers for notes that the wallet is tracking.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[(AccountId, IronwoodNullifier)] {
+        self.ironwood.as_ref()
     }
 
     /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
@@ -407,6 +548,19 @@ impl<AccountId> Nullifiers<AccountId> {
     ) {
         self.orchard.extend(nfs);
     }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn retain_ironwood(&mut self, f: impl Fn(&(AccountId, IronwoodNullifier)) -> bool) {
+        self.ironwood.retain(f);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn extend_ironwood(
+        &mut self,
+        nfs: impl IntoIterator<Item = (AccountId, IronwoodNullifier)>,
+    ) {
+        self.ironwood.extend(nfs);
+    }
 }
 
 impl<AccountId: Copy> Nullifiers<AccountId> {
@@ -417,10 +571,10 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
     /// same set).
     ///
     /// - Notes spent by the wallet in this block will have their nullifiers removed from
-    ///   the set, so we don't bother .
+    ///   the set, so that they are not matched again.
     /// - Notes received by the wallet in this block will have their nullifiers added to
     ///   the set, enabling spend detection in subsequent blocks.
-    pub(crate) fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
+    pub fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
         let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
             .transactions()
             .iter()
@@ -448,18 +602,134 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
                     .iter()
                     .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
+
+            let ironwood_spent_nf: Vec<&IronwoodNullifier> = scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.ironwood_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            self.retain_ironwood(|(_, nf)| !ironwood_spent_nf.contains(&nf));
+            self.extend_ironwood(scanned_block.transactions().iter().flat_map(|tx| {
+                tx.ironwood_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
+        }
+    }
+}
+
+/// The set of identifiers whose appearance in a scanned block reveals a spend of wallet funds:
+/// the [`Nullifiers`] of the wallet's unspent shielded notes, together with the outpoints of its
+/// unspent transparent outputs.
+///
+/// Transparent outpoints are held in a hash map, and matching them is not constant-time. This is
+/// not because the data is public — an outpoint is public, but the wallet's association with it
+/// is exactly what a wallet rotating addresses and shielding promptly needs to keep private.
+/// It is because the transparent path cannot deliver the property at this point alone:
+/// recognizing a transparent output requires resolving its address against the wallet's address
+/// set, and that lookup, whether a hash-map probe or a storage backend's indexed query, already
+/// takes time that depends on whether the address is the wallet's. Constant-time matching here
+/// would leave that larger channel open while costing a linear scan of what may be a large UTXO
+/// set. Closing it properly requires addressing both paths together.
+// TODO: Recognize transparent outputs and spends in constant time, across both the address
+// resolution and spend matching paths.
+// https://github.com/zcash/librustzcash/issues/2994
+pub struct SpendIdentifiers<AccountId> {
+    shielded: Nullifiers<AccountId>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent: HashMap<OutPoint, AccountId>,
+}
+
+impl<AccountId> SpendIdentifiers<AccountId> {
+    /// Constructs a new empty set of spend identifiers.
+    pub fn empty() -> Self {
+        Self {
+            shielded: Nullifiers::empty(),
+            #[cfg(feature = "transparent-inputs")]
+            transparent: HashMap::new(),
+        }
+    }
+
+    /// Fetches the spend identifiers of the unspent outputs being tracked by the given wallet.
+    pub fn unspent<DbT: WalletRead<AccountId = AccountId>>(
+        db_data: &DbT,
+    ) -> Result<Self, DbT::Error> {
+        Ok(Self::new(
+            Nullifiers::unspent(db_data)?,
+            #[cfg(feature = "transparent-inputs")]
+            db_data.get_unspent_transparent_outpoints()?,
+        ))
+    }
+
+    /// Constructs a spend identifier set from its constituent parts.
+    pub(crate) fn new(
+        shielded: Nullifiers<AccountId>,
+        #[cfg(feature = "transparent-inputs")] transparent: HashMap<OutPoint, AccountId>,
+    ) -> Self {
+        Self {
+            shielded,
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+        }
+    }
+
+    /// Returns the nullifiers of the shielded notes that the wallet is tracking.
+    pub fn shielded(&self) -> &Nullifiers<AccountId> {
+        &self.shielded
+    }
+
+    /// Returns the outpoints of the unspent transparent outputs that the wallet is tracking,
+    /// each mapped to the account that received it.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(&self) -> &HashMap<OutPoint, AccountId> {
+        &self.transparent
+    }
+}
+
+impl<AccountId: Copy> SpendIdentifiers<AccountId> {
+    /// Updates this set of spend identifiers based on the results of scanning a block.
+    ///
+    /// The shielded nullifiers are updated as by [`Nullifiers::update_with`]. Likewise, the
+    /// outpoints of transparent outputs the wallet spent in this block are removed, and those
+    /// of the transparent outputs it received are added, so that their spends are detected in
+    /// subsequent blocks.
+    pub fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
+        self.shielded.update_with(scanned_block);
+
+        #[cfg(feature = "transparent-inputs")]
+        {
+            for spend in scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.transparent_spends())
+            {
+                self.transparent.remove(spend.outpoint());
+            }
+
+            self.transparent.extend(
+                scanned_block
+                    .transactions()
+                    .iter()
+                    .flat_map(|tx| tx.transparent_outputs())
+                    .filter_map(|out| {
+                        out.recipient_account()
+                            .map(|account_id| (out.outpoint().clone(), *account_id))
+                    }),
+            );
         }
     }
 }
 
 /// Errors that may occur in chain scanning
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum ScanError {
     /// The encoding of a compact Sapling output or compact Orchard action was invalid.
     EncodingInvalid {
         at_height: BlockHeight,
         txid: TxId,
-        pool_type: ShieldedProtocol,
+        pool_type: ShieldedPool,
         index: usize,
     },
 
@@ -477,7 +747,7 @@ pub enum ScanError {
     /// The note commitment tree size for the given protocol at the proposed new block is not equal
     /// to the size at the previous block plus the count of this block's outputs.
     TreeSizeMismatch {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
         given: u32,
         computed: u32,
@@ -487,7 +757,7 @@ pub enum ScanError {
     /// [`CompactBlock`] being scanned, making it impossible to construct the nullifier for a
     /// detected note.
     TreeSizeUnknown {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 
@@ -495,15 +765,33 @@ pub enum ScanError {
     /// that is invalidated by the data in the block itself. This may be caused by the presence
     /// of default values in the chain metadata.
     TreeSizeInvalid {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
+    },
+
+    /// The size of the note commitment tree for the given protocol would exceed the
+    /// `u32` range as a result of applying the outputs in the block being scanned.
+    TreeSizeOverflow {
+        protocol: ShieldedPool,
+        at_height: BlockHeight,
+    },
+
+    /// The prevout reference of a compact transparent input could not be decoded.
+    ///
+    /// Scanning fails rather than skipping such an input: without its prevout the wallet cannot
+    /// determine whether the input spends one of its own outputs, and treating it as unrelated
+    /// would silently overstate the wallet's balance.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentPrevoutInvalid {
+        at_height: BlockHeight,
+        txid: TxId,
+        index: usize,
     },
 }
 
 impl ScanError {
     /// Returns whether this error is the result of a failed continuity check
     pub fn is_continuity_error(&self) -> bool {
-        use ScanError::*;
         match self {
             EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
@@ -511,12 +799,14 @@ impl ScanError {
             TreeSizeMismatch { .. } => true,
             TreeSizeUnknown { .. } => false,
             TreeSizeInvalid { .. } => false,
+            TreeSizeOverflow { .. } => false,
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid { .. } => false,
         }
     }
 
     /// Returns the block height at which the scan error occurred
     pub fn at_height(&self) -> BlockHeight {
-        use ScanError::*;
         match self {
             EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
@@ -524,13 +814,15 @@ impl ScanError {
             TreeSizeMismatch { at_height, .. } => *at_height,
             TreeSizeUnknown { at_height, .. } => *at_height,
             TreeSizeInvalid { at_height, .. } => *at_height,
+            TreeSizeOverflow { at_height, .. } => *at_height,
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid { at_height, .. } => *at_height,
         }
     }
 }
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ScanError::*;
         match &self {
             EncodingInvalid {
                 txid,
@@ -583,6 +875,67 @@ impl fmt::Display for ScanError {
                     "Received invalid (potentially default) {protocol:?} note commitment tree size metadata at height {at_height}"
                 )
             }
+            TreeSizeOverflow {
+                protocol,
+                at_height,
+            } => {
+                write!(
+                    f,
+                    "The {protocol:?} note commitment tree size at height {at_height} would exceed the `u32` range."
+                )
+            }
+            #[cfg(feature = "transparent-inputs")]
+            TransparentPrevoutInvalid {
+                txid,
+                index,
+                at_height,
+            } => {
+                write!(
+                    f,
+                    "The prevout of transparent input {index} of transaction {txid} at height {at_height} was improperly encoded."
+                )
+            }
+        }
+    }
+}
+
+impl core::error::Error for ScanError {}
+
+/// Errors that can occur while scanning a block, including those arising from the wallet
+/// lookups that transparent output detection requires.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ScanBlockError<E> {
+    /// A structural or continuity error in the block being scanned.
+    Scan(ScanError),
+    /// An error occurred while looking up the wallet account associated with a
+    /// transparent address.
+    AddressLookup(E),
+}
+
+impl<E> From<ScanError> for ScanBlockError<E> {
+    fn from(e: ScanError) -> Self {
+        ScanBlockError::Scan(e)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for ScanBlockError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScanBlockError::Scan(e) => write!(f, "Error scanning block: {e}"),
+            ScanBlockError::AddressLookup(e) => write!(
+                f,
+                "Error looking up the wallet account for a transparent address: {e}"
+            ),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for ScanBlockError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ScanBlockError::Scan(e) => Some(e),
+            ScanBlockError::AddressLookup(e) => Some(e),
         }
     }
 }
@@ -594,30 +947,41 @@ impl fmt::Display for ScanError {
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P, AccountId, IvkTag>(
+pub fn scan_block<P, AccountId, IvkTag, E>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
-    nullifiers: &Nullifiers<AccountId>,
+    spend_ids: &SpendIdentifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<AccountId>, ScanError>
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<ScannedBlock<AccountId>, ScanBlockError<E>>
 where
     P: consensus::Parameters + Send + 'static,
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    compact::scan_block_with_runners::<_, _, _, (), ()>(
+    compact::scan_block_with_runners::<_, _, _, (), (), (), _>(
         params,
         block,
         scanning_keys,
-        nullifiers,
+        spend_ids,
         prior_block_metadata,
         None,
+        #[cfg(feature = "transparent-inputs")]
+        find_account_for_address,
     )
 }
 
 /// Tracks the scanner's position within the note commitment trees, in order to calculate
 /// received note positions.
+///
+/// Construction for compact blocks is handled in the [`compact`] submodule, and for full
+/// blocks in the [`full`] submodule; each provides its own `PositionTracker` constructor.
 struct PositionTracker {
     sapling_tree_position: u32,
     sapling_final_tree_size: u32,
@@ -625,6 +989,10 @@ struct PositionTracker {
     orchard_tree_position: u32,
     #[cfg(feature = "orchard")]
     orchard_final_tree_size: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_tree_position: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_final_tree_size: u32,
 }
 
 impl PositionTracker {
@@ -640,26 +1008,36 @@ impl PositionTracker {
             self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
         ))
     }
+
+    #[cfg(feature = "orchard")]
+    fn ironwood_note_position(&self, output_idx: usize) -> Position {
+        Position::from(u64::from(
+            self.ironwood_tree_position + u32::try_from(output_idx).unwrap(),
+        ))
+    }
 }
 
 /// Check for spent notes. The comparison against known-unspent nullifiers is done
 /// in constant time.
-fn find_spent<
-    AccountId: ConditionallySelectable + Default,
-    Spend,
-    Nf: ConstantTimeEq + Copy,
-    WS,
->(
-    spends: &[Spend],
+fn find_spent<'a, I, AccountId, Spend, Nf, WS>(
+    spends: I,
     nullifiers: &[(AccountId, Nf)],
     extract_nf: impl Fn(&Spend) -> Nf,
     construct_wallet_spend: impl Fn(usize, Nf, AccountId) -> WS,
-) -> (Vec<WS>, Vec<Nf>) {
+) -> (Vec<WS>, Vec<Nf>)
+where
+    I: IntoIterator<Item = &'a Spend>,
+    I::IntoIter: ExactSizeIterator,
+    Spend: 'a,
+    AccountId: ConditionallySelectable + Default,
+    Nf: ConstantTimeEq + Copy,
+{
+    let spends = spends.into_iter();
     // TODO: this is O(|nullifiers| * |notes|); does using constant-time operations here really
     // make sense?
     let mut found_spent = vec![];
     let mut unlinked_nullifiers = Vec::with_capacity(spends.len());
-    for (index, spend) in spends.iter().enumerate() {
+    for (index, spend) in spends.enumerate() {
         let spend_nf = extract_nf(spend);
 
         // Find whether any tracked nullifier that matches this spend, and produce a
@@ -685,6 +1063,39 @@ fn find_spent<
     (found_spent, unlinked_nullifiers)
 }
 
+/// Partitions a transaction's transparent inputs into those that spend an output the wallet is
+/// tracking and those that do not, returning the wallet's spends alongside the prevouts of the
+/// remaining inputs.
+///
+/// The unmatched prevouts are not known to be unrelated to the wallet: an input spending an output
+/// created in a block range the wallet has not yet scanned cannot be recognized here, because the
+/// wallet does not yet know the output exists. They are returned so that the caller can record
+/// them against the spending transaction and resolve the spend if that output is discovered later.
+///
+/// Unlike [`find_spent`], the comparison is not constant-time; see [`SpendIdentifiers`] for why
+/// the transparent path does not attempt that property.
+#[cfg(feature = "transparent-inputs")]
+fn find_transparent_spends<AccountId: Copy>(
+    prevouts: impl IntoIterator<Item = OutPoint>,
+    tracked: &HashMap<OutPoint, AccountId>,
+) -> (Vec<WalletTransparentSpend<AccountId>>, Vec<OutPoint>) {
+    let mut found_spent = vec![];
+    let mut unlinked_prevouts = vec![];
+
+    for (index, prevout) in prevouts.into_iter().enumerate() {
+        match tracked.get(&prevout) {
+            Some(account_id) => found_spent.push(WalletTransparentSpend::from_parts(
+                index,
+                prevout,
+                *account_id,
+            )),
+            None => unlinked_prevouts.push(prevout),
+        }
+    }
+
+    (found_spent, unlinked_prevouts)
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn find_received<
@@ -694,9 +1105,9 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, CIPHERTEXT_SIZE>,
+    Output: ShieldedOutput<D>,
     NoteCommitment,
-    const CIPHERTEXT_SIZE: usize,
+    Note,
 >(
     block_height: BlockHeight,
     last_commitments_in_block: bool,
@@ -711,8 +1122,9 @@ fn find_received<
         &[(D, Output)],
     ) -> Vec<Option<((D::Note, D::Recipient, M), usize)>>,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
+    enrich_note: impl Fn(D::Note) -> Note,
 ) -> (
-    Vec<WalletOutput<D::Note, Nf, AccountId>>,
+    Vec<WalletOutput<Note, Nf, AccountId>>,
     Vec<(NoteCommitment, Retention<BlockHeight>)>,
 ) {
     // Check for incoming notes while incrementing tree and witnesses
@@ -792,7 +1204,7 @@ fn find_received<
             shielded_outputs.push(WalletOutput::from_parts(
                 output_idx,
                 output.ephemeral_key(),
-                note,
+                enrich_note(note),
                 is_change,
                 note_commitment_tree_position,
                 nf,
@@ -813,16 +1225,16 @@ pub mod testing {
         GroupEncoding,
         ff::{Field, PrimeField},
     };
-    use rand_core::{OsRng, RngCore};
+    use rand::{Rng, rand_core::UnwrapErr, rngs::SysRng};
     use sapling::{
         Nullifier,
         constants::SPENDING_KEY_GENERATOR,
-        note_encryption::{SaplingDomain, sapling_note_encryption},
+        note_encryption::{COMPACT_NOTE_SIZE, SaplingDomain, sapling_note_encryption},
         util::generate_random_rseed,
         value::NoteValue,
         zip32::DiversifiableFullViewingKey,
     };
-    use zcash_note_encryption::{COMPACT_NOTE_SIZE, Domain};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash, transaction::components::sapling::zip212_enforcement,
     };
@@ -836,7 +1248,7 @@ pub mod testing {
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     };
 
-    fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
+    fn random_compact_tx(mut rng: impl Rng) -> CompactTx {
         let fake_nf = {
             let mut nf = vec![0; 32];
             rng.fill_bytes(&mut nf);
@@ -887,7 +1299,7 @@ pub mod testing {
         let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption(
@@ -923,7 +1335,7 @@ pub mod testing {
         let cout = CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..COMPACT_NOTE_SIZE].to_vec(),
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
@@ -948,6 +1360,8 @@ pub mod testing {
                         + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
                     orchard_commitment_tree_size: initial_orchard_tree_size
                         + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+                    // The test framework does not generate Ironwood notes.
+                    ironwood_commitment_tree_size: 0,
                 }
             });
 
@@ -957,8 +1371,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::thread::spawn;
+    use std::{sync::Arc, thread::spawn};
 
     use super::ScanningKeys;
 

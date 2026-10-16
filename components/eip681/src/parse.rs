@@ -82,7 +82,7 @@ impl Digits {
             total = total
                 .checked_mul(10)
                 .context(OverflowSnafu)?
-                .checked_add(*digit as u64)
+                .checked_add(u64::from(*digit))
                 .context(OverflowSnafu)?;
         }
         Ok(total)
@@ -464,6 +464,46 @@ impl Number {
             .parse(i)
     }
 
+    /// Returns the plain decimal integer representation of `value`.
+    pub(crate) fn from_uint256(value: U256) -> Self {
+        const RADIX: u64 = 10;
+        let radix = U256::from(RADIX);
+
+        let mut places = vec![];
+        let mut rest = value;
+        loop {
+            let (quotient, digit) = rest.div_mod(radix);
+            // `digit` is less than `RADIX`, so it fits in a `u8`.
+            places.push(digit.low_u32() as u8);
+            if quotient.is_zero() {
+                break;
+            }
+            rest = quotient;
+        }
+        places.reverse();
+
+        Number {
+            signum: None,
+            integer: Digits { places },
+            decimal: None,
+            exponent: None,
+        }
+    }
+
+    /// Returns `true` if this [`Number`] has at least one integer digit or a
+    /// decimal part.
+    ///
+    /// [`Number::parse`] is intentionally permissive and will accept inputs
+    /// such as `""`, `"-"`, `"e"`, or `"+E"` that contain no mantissa digits
+    /// at all. Such inputs are only meaningful via [`Number`]'s standalone API
+    /// (where they round-trip as the number zero); when resolving the
+    /// `value = number / ethereum_address / STRING` production in
+    /// [`Value::parse`], a digit-less candidate does not represent the
+    /// `number` alternative and should fall through to `STRING`.
+    pub(crate) fn has_mantissa_digits(&self) -> bool {
+        !self.integer.places.is_empty() || self.decimal.is_some()
+    }
+
     /// Returns the value of the integer portion of the number.
     ///
     /// ## Errors
@@ -504,7 +544,7 @@ impl Number {
             .context(IntegerSnafu)?;
         let multiplier = 10i128.checked_pow(exp).context(LargeExponentSnafu {
             expected: u128::MAX.ilog10() as usize,
-            seen: exp as u64,
+            seen: u64::from(exp),
         })?;
         // The exponent must be >= the number of decimal places to yield an integer result.
         let decimal_exp = exp
@@ -521,7 +561,7 @@ impl Number {
         //     (decimal_numerator * 10^(exp - decimal_places))
         // )
         // ```
-        let multiplied_integer = (integer as i128)
+        let multiplied_integer = i128::from(integer)
             .checked_mul(multiplier)
             .with_context(|| OverflowSnafu)?;
         let decimal_multiplier = match decimal_exp {
@@ -529,7 +569,7 @@ impl Number {
             Err(_) if decimal_numerator == 0 => 0,
             Err(e) => return Err(e),
         };
-        let multiplied_decimal = (decimal_numerator as i128)
+        let multiplied_decimal = i128::from(decimal_numerator)
             .checked_mul(decimal_multiplier)
             .with_context(|| OverflowSnafu)?;
         let value = multiplied_integer
@@ -721,21 +761,16 @@ impl AddressOrEnsName {
     /// Returns the ERC-55 validated string representation of the address, or the ENS name, if possible.
     pub fn to_erc55_validated_string(&self) -> Result<String, ValidationError> {
         match self {
-            AddressOrEnsName::Address(hex_digits) => {
-                if let Err(ValidationError::Erc55Validation { reason }) =
-                    hex_digits.validate_erc55()
-                {
-                    match reason {
+            AddressOrEnsName::Address(hex_digits) => match hex_digits.validate_erc55() {
+                Ok(()) => Ok(format!("0x{hex_digits}")),
+                // An all-lowercase or all-uppercase address carries no checksum to verify.
+                Err(ValidationError::Erc55Validation {
+                    reason:
                         Erc55ValidationFailureReason::AllLowercase
-                        | Erc55ValidationFailureReason::AllUppercase => {
-                            Ok(format!("0x{hex_digits}"))
-                        }
-                        e => Erc55ValidationSnafu { reason: e }.fail(),
-                    }
-                } else {
-                    Ok(format!("0x{hex_digits}"))
-                }
-            }
+                        | Erc55ValidationFailureReason::AllUppercase,
+                }) => Ok(format!("0x{hex_digits}")),
+                Err(e) => Err(e),
+            },
             AddressOrEnsName::Name(ens_name) => Ok(ens_name.to_string()),
         }
     }
@@ -810,6 +845,12 @@ impl Value {
         // Here there are some interesting corner cases:
         //
         // 1. In `number`'s spec, absolutely everything is optional, so it _never_ fails.
+        //   However, a [`Number`] that contains no mantissa digits (i.e. no integer
+        //   digits and no decimal part, such as `""`, `"-"`, `"e"`, or `"+E"`) does not
+        //   represent the `number` alternative of the `value` production, so we reject
+        //   such candidates here and let them fall through to `STRING`. This keeps
+        //   [`Number::parse`] permissive for its own callers while making [`Value::parse`]
+        //   grammar-correct.
         // 2. `ethereum_address` may be prefixed with `0` (in the hex-address case), so both number
         //   and address could be parsed. Because of 1, `number` always wins if it comes first, but
         //   even if the minimum was 1 digit `number` would still win by parsing "0", so
@@ -822,7 +863,15 @@ impl Value {
         // In practice this should be fine because values either end with `&` (in the case of
         // more parameters after it) or with the end of the input.
 
-        let mut results = [number.parse(i), ethereum_address.parse(i), string.parse(i)];
+        let number_result = match number.parse(i) {
+            Ok((_rest, Value::Number(n))) if !n.has_mantissa_digits() => {
+                Err(nom::Err::Error(ParseError::NumberMissingDigits {
+                    input: i,
+                }))
+            }
+            other => other,
+        };
+        let mut results = [number_result, ethereum_address.parse(i), string.parse(i)];
         results.sort_by_key(|a| {
             // Sort by the amount of input left over, smallest first
             a.as_ref().ok().map(|(i, _)| i.len()).unwrap_or(usize::MAX)
@@ -862,7 +911,7 @@ impl Value {
 // have the start of one on the branch `feat/eip-681-tx-req-parser-solidity-types`
 #[derive(Clone, Debug, PartialEq)]
 pub struct EthereumAbiTypeName {
-    name: String,
+    pub(crate) name: String,
 }
 
 impl core::fmt::Display for EthereumAbiTypeName {
@@ -993,7 +1042,7 @@ impl Parameter {
 
 /// A collection of [`Parameter`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct Parameters(Vec<Parameter>);
+pub struct Parameters(pub(crate) Vec<Parameter>);
 
 impl core::fmt::Display for Parameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1145,8 +1194,8 @@ impl Parameters {
 /// prefix is what you expect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaPrefix {
-    prefix: String,
-    has_pay: bool,
+    pub(crate) prefix: String,
+    pub(crate) has_pay: bool,
 }
 
 impl core::fmt::Display for SchemaPrefix {
@@ -1266,6 +1315,8 @@ mod test {
     use prop::strategy::Union;
     use proptest::prelude::*;
 
+    use crate::testing::arb_u256;
+
     #[test]
     fn digits_sanity() {
         assert_eq!(
@@ -1277,6 +1328,34 @@ mod test {
             .unwrap()
         );
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
+    }
+
+    #[test]
+    fn number_from_uint256_edges() {
+        for v in [
+            U256::zero(),
+            U256::one(),
+            U256::from(9u64),
+            U256::from(10u64),
+            U256::MAX,
+        ] {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.to_string(), v.to_string());
+            assert_eq!(n.as_uint256(), Ok(v));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn number_from_uint256_roundtrip(v in arb_u256()) {
+            let n = Number::from_uint256(v);
+            assert_eq!(n.as_uint256(), Ok(v));
+
+            let s = n.to_string();
+            let (rest, parsed) = Number::parse(&s).unwrap();
+            assert!(rest.is_empty(), "unparsed input: {rest:?}");
+            assert_eq!(parsed, n);
+        }
     }
 
     #[test]
@@ -1846,6 +1925,44 @@ mod test {
         let input = expected.to_string();
         let (_output, seen) = Value::parse(&input).unwrap();
         pretty_assertions::assert_eq!(expected, seen);
+    }
+
+    /// [`Number::parse`] is deliberately permissive and will happily consume a
+    /// lone `"e"` or `"E"` (as a `Number` with no integer digits, no decimal
+    /// part, and an exponent marker with no digits). Those alphabetic inputs
+    /// are valid [`UrlEncodedUnicodeString`] content and must resolve to
+    /// [`Value::String`] under the `value = number / ethereum_address / STRING`
+    /// production, not to [`Value::Number`].
+    #[test]
+    fn parse_value_lone_exponent_marker_is_string() {
+        for input in ["e", "E"] {
+            let (rest, seen) = Value::parse(input).unwrap();
+            assert_eq!(
+                "", rest,
+                "`input` {input:?} was not fully consumed. Parsed '{seen:?}'"
+            );
+            assert_eq!(
+                Value::String(UrlEncodedUnicodeString(input.to_string())),
+                seen,
+                "expected lone exponent marker {input:?} to parse as Value::String"
+            );
+        }
+    }
+
+    /// Sanity: inputs that *do* have mantissa digits still resolve to [`Value::Number`].
+    #[test]
+    fn parse_value_number_with_mantissa_digits() {
+        for input in ["0", "1", "1e18", "666.0", "2.014e18"] {
+            let (rest, seen) = Value::parse(input).unwrap();
+            assert_eq!(
+                "", rest,
+                "`input` {input:?} was not fully consumed. Parsed '{seen:?}'"
+            );
+            assert!(
+                matches!(seen, Value::Number(_)),
+                "expected {input:?} to parse as Value::Number, got {seen:?}"
+            );
+        }
     }
 
     proptest! {

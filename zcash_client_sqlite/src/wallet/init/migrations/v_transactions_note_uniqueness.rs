@@ -10,9 +10,11 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::v_transactions_shielding_balance;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
+/// This migration fixes a bug in `v_transactions` where distinct but otherwise identical notes were
+/// being incorrectly deduplicated.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
 
-const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
 
 pub(super) struct Migration;
 
@@ -165,7 +167,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
     use zip32::AccountId;
 
     use crate::{
@@ -198,7 +200,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk0.encode(&db_data.params)],
+                params![ufvk0.encode(&db_data.params).unwrap()],
             )
             .unwrap();
 

@@ -1,10 +1,17 @@
+//! An in-memory [`WalletDb`]-backed data store and [`DataStoreFactory`] for the
+//! `zcash_client_backend` testing framework.
+
 use ambassador::Delegate;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rusqlite::Connection;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::time::Duration;
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    time::SystemTime,
+};
 use uuid::Uuid;
 
 use tempfile::NamedTempFile;
@@ -16,13 +23,15 @@ use shardtree::{ShardTree, error::ShardTreeError};
 use zcash_client_backend::{
     data_api::{
         TargetValue,
+        anchor_retention::AnchorRetentionInterval,
         chain::{ChainState, CommitmentTreeRoot},
-        scanning::ScanRange,
+        error::{LockError, RewindError},
+        scanning::{ScanPriority, ScanRange},
         testing::{DataStoreFactory, Reset, TestState},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
     },
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -33,7 +42,8 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    ShieldedPool, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    value::Zatoshis,
 };
 use zip32::DiversifierIndex;
 
@@ -45,8 +55,12 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::TransparentAddressMetadata,
-    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
-    core::ops::Range,
+    ::transparent::{
+        address::TransparentAddress,
+        bundle::OutPoint,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
+    zcash_client_backend::fees::StandardFeeRule,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -61,22 +75,25 @@ pub(crate) fn test_rng() -> ChaChaRng {
     ChaChaRng::from_seed([0u8; 32])
 }
 
+/// A [`WalletDb`] wrapped as a testing-framework data store: it delegates the wallet traits to the
+/// inner database and owns the temporary file backing it.
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
 #[delegate(WalletRead, target = "wallet_db")]
 #[delegate(WalletTest, target = "wallet_db")]
+#[delegate(OutputLockStore, target = "wallet_db")]
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
-pub(crate) struct TestDb {
+pub struct TestDb {
     wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
-    data_file: NamedTempFile,
+    data_file: Option<NamedTempFile>,
 }
 
 impl TestDb {
     fn from_parts(
         wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
-        data_file: NamedTempFile,
+        data_file: Option<NamedTempFile>,
     ) -> Self {
         Self {
             wallet_db,
@@ -84,26 +101,37 @@ impl TestDb {
         }
     }
 
-    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
+    /// The wrapped wallet database.
+    pub fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &self.wallet_db
     }
 
-    pub(crate) fn db_mut(
-        &mut self,
-    ) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
+    /// The wrapped wallet database, mutably.
+    pub fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &mut self.wallet_db
     }
 
-    pub(crate) fn conn(&self) -> &Connection {
+    /// The wallet database's own SQLite connection, over which a sibling store (a
+    /// `pool_migration` store, say) is opened.
+    pub fn conn(&self) -> &Connection {
         &self.wallet_db.conn
     }
 
-    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+    /// The wallet database's own SQLite connection, mutably. See [`Self::conn`].
+    pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.wallet_db.conn
     }
 
-    pub(crate) fn take_data_file(self) -> NamedTempFile {
+    pub(crate) fn take_data_file(self) -> Option<NamedTempFile> {
         self.data_file
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn data_file_path(&self) -> &std::path::Path {
+        self.data_file
+            .as_ref()
+            .expect("this test requires a file-backed TestDbFactory")
+            .path()
     }
 
     /// Dump the schema and contents of the given database table, in
@@ -119,7 +147,7 @@ impl TestDb {
     pub(crate) fn dump_table(&self, name: &'static str) {
         assert!(name.chars().all(|c| c.is_ascii_alphabetic() || c == '_'));
         unsafe {
-            run_sqlite3(self.data_file.path(), &format!(r#".dump "{name}""#));
+            run_sqlite3(self.data_file_path(), &format!(r#".dump "{name}""#));
         }
     }
 
@@ -133,7 +161,7 @@ impl TestDb {
     #[allow(dead_code)]
     #[cfg(feature = "unstable")]
     pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
-        unsafe { run_sqlite3(self.data_file.path(), command) }
+        unsafe { run_sqlite3(self.data_file_path(), command) }
     }
 }
 
@@ -169,9 +197,25 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
     eprintln!("------");
 }
 
+/// A [`DataStoreFactory`] that builds fresh in-memory [`TestDb`] wallets, optionally migrated only
+/// to a given set of migrations rather than all of them.
+///
+/// Tests that exercise reopening or multiple independent connections can opt into file-backed
+/// storage with [`Self::file_backed`].
 #[derive(Default)]
-pub(crate) struct TestDbFactory {
+pub struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
+    file_backed: bool,
+}
+
+impl TestDbFactory {
+    /// Constructs a factory for tests that require a database file.
+    pub fn file_backed() -> Self {
+        Self {
+            target_migrations: None,
+            file_backed: true,
+        }
+    }
 }
 
 impl DataStoreFactory for TestDbFactory {
@@ -184,11 +228,25 @@ impl DataStoreFactory for TestDbFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
+        anchor_retention_interval: Option<AnchorRetentionInterval>,
         #[cfg(feature = "transparent-inputs")] gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error> {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+        let (mut db_data, data_file) = if self.file_backed {
+            let data_file = NamedTempFile::new().unwrap();
+            let db_data =
+                WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+            (db_data, Some(data_file))
+        } else {
+            let conn = Connection::open_in_memory().unwrap();
+            rusqlite::vtab::array::load_module(&conn).unwrap();
+            (
+                WalletDb::from_connection(conn, network, test_clock(), test_rng()),
+                None,
+            )
+        };
+        if let Some(interval) = anchor_retention_interval {
+            db_data = db_data.with_anchor_retention_interval(interval);
+        }
         #[cfg(feature = "transparent-inputs")]
         if let Some(gap_limits) = gap_limits {
             db_data = db_data.with_gap_limits(gap_limits);
@@ -209,10 +267,11 @@ impl DataStoreFactory for TestDbFactory {
 }
 
 impl Reset for TestDb {
-    type Handle = NamedTempFile;
+    type Handle = Option<NamedTempFile>;
 
-    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
+    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> Self::Handle {
         let network = *st.network();
+        let anchor_retention_interval = st.wallet().db().anchor_retention_interval;
         #[cfg(feature = "transparent-inputs")]
         let gap_limits = st.wallet().db().gap_limits;
         let old_db = std::mem::replace(
@@ -220,6 +279,7 @@ impl Reset for TestDb {
             TestDbFactory::default()
                 .new_data_store(
                     network,
+                    Some(anchor_retention_interval),
                     #[cfg(feature = "transparent-inputs")]
                     Some(gap_limits),
                 )

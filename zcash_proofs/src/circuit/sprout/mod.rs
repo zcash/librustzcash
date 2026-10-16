@@ -5,7 +5,7 @@
 //! using [`libsnark`] for [BCTV14].
 //!
 //! [Sprout statement]: https://zips.z.cash/protocol/protocol.pdf#joinsplitstatement
-//! [`groth16`]: bellman::groth16
+//! [`groth16`]: groth16
 //! [oldimpl]: https://github.com/zcash/zcash/tree/v2.0.7/src/zcash/circuit
 //! [`libsnark`]: https://github.com/scipr-lab/libsnark
 //! [BCTV14]: https://eprint.iacr.org/2013/879

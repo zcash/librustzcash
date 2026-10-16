@@ -12,9 +12,12 @@ use zcash_protocol::consensus;
 use super::transparent_gap_limit_handling;
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x702cf97b_8395_4edc_b584_5c9f87f0ef35);
+/// Ensures that an external transparent address exists in the `addresses` table for each non-
+/// hardened child index starting at index 0 and ending at the index corresponding to default
+/// address for the account.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x702cf97b_8395_4edc_b584_5c9f87f0ef35);
 
-const DEPENDENCIES: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) _params: P,

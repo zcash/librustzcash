@@ -14,9 +14,10 @@ use zcash_protocol::{
 use super::{add_utxo_account, sent_notes_to_internal};
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
+/// Migration that adds transaction summary views & add fee information to transactions.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     add_utxo_account::MIGRATION_ID,
     sent_notes_to_internal::MIGRATION_ID,
 ];
@@ -269,7 +270,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
     use zip32::AccountId;
 
     use crate::{
@@ -280,16 +281,21 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        ::transparent::{
-            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
-            keys::IncomingViewingKey,
+        crate::{
+            UA_TRANSPARENT,
+            wallet::init::migrations::{ufvk_support, utxos_table},
         },
-        zcash_keys::encoding::AddressCodec,
+        ::transparent::{
+            address::Script,
+            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::{IncomingViewingKey, NonHardenedChildIndex},
+        },
+        zcash_client_backend::keys::UnifiedAddressRequest,
+        zcash_keys::{encoding::AddressCodec, keys::ReceiverRequirement::*},
         zcash_primitives::transaction::{TransactionData, TxVersion},
         zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            value::ZatBalance,
+            value::{ZatBalance, Zatoshis},
         },
     };
 
@@ -310,7 +316,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk.encode(&network)],
+                params![ufvk.encode(&network).unwrap()],
             )
             .unwrap();
 
@@ -393,13 +399,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
-        use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_keys::keys::ReceiverRequirement::*;
-        use zcash_protocol::value::Zatoshis;
-
-        use crate::UA_TRANSPARENT;
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
@@ -418,7 +417,6 @@ mod tests {
             BranchId::Canopy,
             0,
             BlockHeight::from(3),
-            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(
@@ -447,7 +445,7 @@ mod tests {
             ))
             .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
-            .transparent()
+            .p2pkh()
             .and_then(|k| {
                 k.derive_external_ivk()
                     .ok()
@@ -457,7 +455,11 @@ mod tests {
 
         db_data.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address) VALUES (0, ?, ?, ?)",
-            params![ufvk.encode(&network), ua.encode(&network), &taddr]
+            params![
+                ufvk.encode(&network).unwrap(),
+                ua.encode(&network),
+                &taddr
+            ]
         ).unwrap();
         db_data
             .conn

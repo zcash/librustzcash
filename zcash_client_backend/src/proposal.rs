@@ -6,21 +6,44 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_primitives::transaction::TxId;
-use zcash_protocol::{PoolType, ShieldedProtocol, consensus::BlockHeight, value::Zatoshis};
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::components::orchard::{
+    ACTION_SIZE as ORCHARD_ACTION_SIZE, BUNDLE_OVERHEAD as ORCHARD_BUNDLE_OVERHEAD,
+    SPEND_AUTH_SIG_SIZE as ORCHARD_AUTH_SIG_SIZE,
+};
+use zcash_primitives::transaction::{
+    TxId, TxVersion,
+    components::sapling::{
+        BUNDLE_OVERHEAD as SAPLING_BUNDLE_OVERHEAD, OUTPUT_DESCRIPTION_SIZE, SPEND_DESCRIPTION_SIZE,
+    },
+    fees::transparent as transparent_fees,
+    fees::zip317::{
+        MAX_TRANSPARENT_INPUT_SIZE, P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE,
+        TRANSPARENT_BUNDLE_OVERHEAD, TX_HEADER_SIZE,
+    },
+};
+use zcash_protocol::{
+    PoolType, ShieldedPool,
+    consensus::{BlockHeight, BranchId},
+    constants::MAX_BLOCK_BYTES,
+    value::Zatoshis,
+};
 use zip321::{TransactionRequest, Zip321Error};
-
-use crate::{
-    data_api::wallet::TargetHeight,
-    fees::TransactionBalance,
-    wallet::{Note, ReceivedNote, WalletTransparentOutput},
+#[cfg(feature = "orchard")]
+use {
+    orchard::Proof, zcash_primitives::transaction::builder::BundlePadding,
+    zcash_protocol::zip318::PoolMigrationConstants,
 };
 
-#[cfg(feature = "unstable")]
-use zcash_protocol::consensus::BranchId;
+use crate::{
+    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
+    fees::TransactionBalance,
+    wallet::{Note, OutputRef, ReceivedNote, WalletTransparentOutput},
+};
 
 /// Errors that can occur in construction of a [`Step`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ProposalError {
     /// The total output value of the transaction request is not a valid Zcash amount.
     RequestTotalInvalid,
@@ -41,12 +64,25 @@ pub enum ProposalError {
     ShieldingInvalid,
     /// No anchor information could be obtained for the specified block height.
     AnchorNotFound(BlockHeight),
+    /// A proposal step produces a shielded bundle — it spends shielded notes, pays to a shielded
+    /// pool, or returns shielded change — but does not specify an anchor height against which its
+    /// shielded-tree lookups are performed. Only a purely transparent step may omit its anchor.
+    MissingShieldedAnchor,
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
     StepDoubleSpend(StepOutput),
     /// An attempted double-spend of an output belonging to the wallet was detected.
-    ChainDoubleSpend(PoolType, TxId, u32),
+    ChainDoubleSpend(OutputRef),
+    /// An input selected by the proposal could not be locked, because a concurrent
+    /// proposal or PCZT already holds a lock on it.
+    ///
+    /// This is a transient condition, not a defect in the proposal itself: the wrapped
+    /// output was spendable when it was selected, but another in-flight proposal locked
+    /// it first. Callers should treat this as "the account is busy" and retry proposal
+    /// creation; the retry will select around the locked output (or fail with an
+    /// insufficient-funds error if no other outputs are available).
+    InputsLocked(OutputRef),
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
@@ -70,10 +106,73 @@ pub enum ProposalError {
     /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
+    /// A shielding proposal was constructed with a destination address that has no shielded
+    /// receiver. Shielding requires the destination to be able to receive shielded value.
+    #[cfg(feature = "transparent-inputs")]
+    ShieldingRequiresShieldedRecipient,
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
-    #[cfg(feature = "unstable")]
     IncompatibleTxVersion(BranchId),
+    /// After NU6.3 activation, a payment to an Orchard receiver must be delivered through the
+    /// Ironwood pool, which requires a version 6 transaction. The explicitly-requested transaction
+    /// version has no Ironwood bundle, so it cannot carry the payment. (The Orchard turnstile is a
+    /// consensus rule after NU6.3: no payment may add value to the Orchard pool, so such a payment
+    /// cannot be delivered as a plain Orchard output either.)
+    OrchardReceiverRequiresIronwood(TxVersion),
+    /// After Ironwood activation, a proposal step would create value in the Orchard pool.
+    /// The turnstile only permits value to leave the pool: a step may return change to it
+    /// only when strictly less value returns than the step's Orchard inputs remove.
+    /// (Payments may never be directed to the Orchard pool after Ironwood activation;
+    /// payment classification maintains that invariant, and step construction enforces it
+    /// via [`ProposalError::OrchardPoolPayment`].)
+    #[cfg(feature = "orchard")]
+    OrchardPoolValueCreation {
+        /// The total value of the Orchard notes spent by the step.
+        input_total: Zatoshis,
+        /// The total value of the Orchard-pool change outputs created by the step.
+        output_total: Zatoshis,
+    },
+    /// After Ironwood activation, the payment at the wrapped index of the step's
+    /// transaction request was directed to the Orchard pool. The turnstile only permits
+    /// value to leave the pool, so no payment may be directed to it; payment
+    /// classification routes Orchard-receiver payments to the Ironwood pool instead.
+    #[cfg(feature = "orchard")]
+    OrchardPoolPayment(usize),
+    /// The transaction the step describes would exceed the maximum size a Zcash block may
+    /// carry, and so cannot be included in any block. The serialized size of the step's
+    /// transaction was estimated from its inputs, outputs, and change, using conservative
+    /// per-element byte costs; the estimate exceeds [`MAX_BLOCK_BYTES`].
+    ///
+    /// `MAX_BLOCK_BYTES` is the *block* size limit, not a per-transaction limit: a
+    /// transaction that fits just under it still cannot be mined, because the block must
+    /// also carry its header and coinbase transaction. Passing the gate is therefore
+    /// necessary but not sufficient for mineability near the boundary; the builder is the
+    /// final authority.
+    ///
+    /// Recovery for a caller that receives this error: reduce the number of inputs by
+    /// lowering the payment amount or by consolidating small notes via send-to-self
+    /// transactions before retrying. Each consolidation round must be mined and its note
+    /// commitments anchored before the resulting notes are spendable, so recovery spans
+    /// multiple confirmations. For `propose_send_max` this error is a dead end — there is
+    /// no smaller amount to back off to — and requires a multi-transaction strategy.
+    ///
+    /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
+    TransactionTooLarge {
+        /// The conservative upper-bound estimate of the step's serialized byte size.
+        estimated_size: usize,
+        /// The maximum serialized byte size a Zcash block may carry (`MAX_BLOCK_BYTES`).
+        limit: usize,
+        /// The number of Sapling inputs the step spends, including prior-step inputs.
+        /// Carried so a wallet can explain the situation in terms of notes rather than
+        /// bytes; the different shielded pools have very different per-input costs.
+        sapling_input_count: usize,
+        /// The number of Orchard inputs the step spends, including prior-step inputs.
+        #[cfg(feature = "orchard")]
+        orchard_input_count: usize,
+        /// The number of Ironwood inputs the step spends, including prior-step inputs.
+        #[cfg(feature = "orchard")]
+        ironwood_input_count: usize,
+    },
 }
 
 impl Display for ProposalError {
@@ -103,6 +202,10 @@ impl Display for ProposalError {
             ProposalError::AnchorNotFound(h) => {
                 write!(f, "Unable to compute anchor for block height {h:?}")
             }
+            ProposalError::MissingShieldedAnchor => write!(
+                f,
+                "A proposal step that produces a shielded bundle must specify an anchor height."
+            ),
             ProposalError::ReferenceError(r) => {
                 write!(f, "No prior step output found for reference {r:?}")
             }
@@ -110,9 +213,19 @@ impl Display for ProposalError {
                 f,
                 "The proposal uses the output of step {r:?} in more than one place."
             ),
-            ProposalError::ChainDoubleSpend(pool, txid, index) => write!(
+            ProposalError::ChainDoubleSpend(output_ref) => write!(
                 f,
-                "The proposal attempts to spend the same output twice: {pool}, {txid}, {index}"
+                "The proposal attempts to spend the same output twice: {}, {}, {}",
+                output_ref.pool(),
+                output_ref.txid(),
+                output_ref.output_index()
+            ),
+            ProposalError::InputsLocked(output_ref) => write!(
+                f,
+                "A selected input is locked by a concurrent proposal (retry later): {}, {}, {}",
+                output_ref.pool(),
+                output_ref.txid(),
+                output_ref.output_index()
             ),
             ProposalError::PaymentPoolsMismatch => write!(
                 f,
@@ -151,11 +264,61 @@ impl Display for ProposalError {
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
             ),
-            #[cfg(feature = "unstable")]
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::ShieldingRequiresShieldedRecipient => write!(
+                f,
+                "A shielding proposal's destination must have a shielded receiver."
+            ),
+            #[cfg(feature = "orchard")]
+            ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            } => write!(
+                f,
+                "After Ironwood activation, a step that spends {} zatoshis from the Orchard pool may not return {} zatoshis to it.",
+                u64::from(*input_total),
+                u64::from(*output_total),
+            ),
+            #[cfg(feature = "orchard")]
+            ProposalError::OrchardPoolPayment(index) => write!(
+                f,
+                "After Ironwood activation, no payment may be directed to the Orchard pool (payment index {index})."
+            ),
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
                 f,
                 "The requested transaction version is incompatible with consensus branch {branch_id:?}"
             ),
+            ProposalError::OrchardReceiverRequiresIronwood(version) => write!(
+                f,
+                "After NU6.3 activation, a payment to an Orchard receiver requires a version 6 (Ironwood) transaction, but version {version:?} was requested."
+            ),
+            ProposalError::TransactionTooLarge {
+                estimated_size,
+                limit,
+                sapling_input_count,
+                #[cfg(feature = "orchard")]
+                orchard_input_count,
+                #[cfg(feature = "orchard")]
+                ironwood_input_count,
+            } => {
+                #[cfg(feature = "orchard")]
+                let _ = (orchard_input_count, ironwood_input_count);
+                write!(
+                    f,
+                    "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum block size ({limit} bytes). It spends {sapling_input_count} Sapling inputs"
+                )?;
+                #[cfg(feature = "orchard")]
+                {
+                    write!(
+                        f,
+                        ", {orchard_input_count} Orchard inputs, {ironwood_input_count} Ironwood inputs"
+                    )?;
+                }
+                write!(
+                    f,
+                    "; reduce the payment amount or consolidate small notes before retrying."
+                )
+            }
         }
     }
 }
@@ -165,26 +328,13 @@ impl std::error::Error for ProposalError {}
 /// The Sapling inputs to a proposed transaction.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ShieldedInputs<NoteRef> {
-    anchor_height: BlockHeight,
     notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
 }
 
 impl<NoteRef> ShieldedInputs<NoteRef> {
     /// Constructs a [`ShieldedInputs`] from its constituent parts.
-    pub fn from_parts(
-        anchor_height: BlockHeight,
-        notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
-    ) -> Self {
-        Self {
-            anchor_height,
-            notes,
-        }
-    }
-
-    /// Returns the anchor height for Sapling inputs that should be used when constructing the
-    /// proposed transaction.
-    pub fn anchor_height(&self) -> BlockHeight {
-        self.anchor_height
+    pub fn from_parts(notes: NonEmpty<ReceivedNote<NoteRef, Note>>) -> Self {
+        Self { notes }
     }
 
     /// Returns the list of Sapling notes to be used as inputs to the proposed transaction.
@@ -202,7 +352,15 @@ impl<NoteRef> ShieldedInputs<NoteRef> {
 pub struct Proposal<FeeRuleT, NoteRef> {
     fee_rule: FeeRuleT,
     min_target_height: TargetHeight,
+    /// The confirmations policy under which the proposal was constructed. It is used to resolve
+    /// the anchor for a step that carries no explicit anchor height (a purely transparent step;
+    /// see [`Step::anchor_height`]).
+    confirmations_policy: ConfirmationsPolicy,
     steps: NonEmpty<Step<NoteRef>>,
+    /// The transaction version explicitly requested when the proposal was constructed, if any.
+    /// When `None`, the transaction is built at the version implied by the target height (version 6
+    /// from NU6.3 onward).
+    proposed_version: Option<TxVersion>,
 }
 
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
@@ -219,9 +377,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn multi_step(
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
-        let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
+        let mut consumed_chain_inputs: BTreeSet<OutputRef> = BTreeSet::new();
         let mut consumed_prior_inputs: BTreeSet<StepOutput> = BTreeSet::new();
 
         for (i, step) in steps.iter().enumerate() {
@@ -251,28 +410,24 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             }
 
             for t_out in step.transparent_inputs() {
-                let key = (
-                    PoolType::TRANSPARENT,
+                let output_ref = OutputRef::new(
                     TxId::from_bytes(*t_out.outpoint().hash()),
+                    PoolType::TRANSPARENT,
                     t_out.outpoint().n(),
                 );
-                if !consumed_chain_inputs.insert(key) {
-                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                if !consumed_chain_inputs.insert(output_ref) {
+                    return Err(ProposalError::ChainDoubleSpend(output_ref));
                 }
             }
 
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
-                let key = (
-                    match &s_out.note() {
-                        Note::Sapling(_) => PoolType::SAPLING,
-                        #[cfg(feature = "orchard")]
-                        Note::Orchard(_) => PoolType::ORCHARD,
-                    },
+                let output_ref = OutputRef::new(
                     *s_out.txid(),
+                    PoolType::Shielded(s_out.note().pool()),
                     s_out.output_index().into(),
                 );
-                if !consumed_chain_inputs.insert(key) {
-                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                if !consumed_chain_inputs.insert(output_ref) {
+                    return Err(ProposalError::ChainDoubleSpend(output_ref));
                 }
             }
         }
@@ -280,6 +435,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         Ok(Self {
             fee_rule,
             min_target_height,
+            confirmations_policy,
+            proposed_version: None,
             steps,
         })
     }
@@ -295,34 +452,44 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `payment_pools`: A map from payment index to pool type.
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
+    /// * `anchor_height`: See [`Step::from_parts`].
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `fee_rule`: The fee rule observed by the proposed transaction.
     /// * `min_target_height`: The minimum block height at which the transaction may be created.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
+    /// * `ironwood_active`: See [`Step::from_parts`].
     #[allow(clippy::too_many_arguments)]
     pub fn single_step(
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+        anchor_height: BlockHeight,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         is_shielding: bool,
+        #[cfg(feature = "orchard")] ironwood_active: bool,
     ) -> Result<Self, ProposalError> {
         Ok(Self {
             fee_rule,
             min_target_height,
+            confirmations_policy,
+            proposed_version: None,
             steps: NonEmpty::singleton(Step::from_parts(
                 &[],
                 transaction_request,
                 payment_pools,
                 transparent_inputs,
                 shielded_inputs,
+                Some(anchor_height),
                 vec![],
                 balance,
                 is_shielding,
+                #[cfg(feature = "orchard")]
+                ironwood_active,
             )?),
         })
     }
@@ -340,10 +507,141 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         self.min_target_height
     }
 
+    /// Returns the confirmations policy under which the proposal was constructed. It is used to
+    /// resolve the anchor for a step that carries no explicit anchor height (a purely transparent
+    /// step; see [`Step::anchor_height`]).
+    pub fn confirmations_policy(&self) -> ConfirmationsPolicy {
+        self.confirmations_policy
+    }
+
+    /// Returns the transaction version explicitly requested when the proposal was constructed, if
+    /// any. When `None`, the transaction is built at the version implied by the target height
+    /// (version 6 from NU6.3 onward).
+    pub fn proposed_version(&self) -> Option<TxVersion> {
+        self.proposed_version
+    }
+
+    /// Returns this proposal with its requested transaction version set to the given value.
+    ///
+    /// This records the version passed to proposal construction so that it is carried through to
+    /// transaction building; it does not re-validate the proposal against the version.
+    pub fn with_proposed_version(mut self, proposed_version: Option<TxVersion>) -> Self {
+        self.proposed_version = proposed_version;
+        self
+    }
+
     /// Returns the steps of the proposal. Each step corresponds to an independent transaction to
     /// be generated as a result of this proposal.
     pub fn steps(&self) -> &NonEmpty<Step<NoteRef>> {
         &self.steps
+    }
+
+    /// Returns the total number of inputs across all steps of this proposal that belong to the
+    /// given pool.
+    ///
+    /// For a shielded pool this is the number of spent notes of that pool (Ironwood notes are
+    /// counted for [`PoolType::IRONWOOD`], not [`PoolType::ORCHARD`]); for
+    /// [`PoolType::Transparent`] it is the number of transparent inputs. See
+    /// [`Step::input_count_in_pool`].
+    pub fn input_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.steps
+            .iter()
+            .map(|step| step.input_count_in_pool(pool_type))
+            .sum()
+    }
+
+    /// Returns a conservative upper-bound estimate of the total serialized byte size
+    /// of all transactions this proposal describes, by summing the per-step estimates
+    /// (see [`Step::estimated_serialized_size`]). Each step is estimated independently,
+    /// so the total is the sum of the per-step serialized sizes, not the size of a
+    /// single transaction.
+    ///
+    /// The estimate is conservative (it never under-counts). See
+    /// [`Step::estimated_serialized_size`] for the per-element costs and the
+    /// mineability caveat.
+    pub fn estimated_serialized_size(&self) -> usize {
+        let steps = self.steps();
+        steps
+            .iter()
+            .map(|step| {
+                step.estimated_serialized_size(&|s_ref| {
+                    Self::resolve_prior_output_pool(steps, s_ref)
+                })
+            })
+            .sum()
+    }
+
+    /// Checks whether every step's estimated serialized size fits within the maximum
+    /// a Zcash block may carry, returning [`ProposalError::TransactionTooLarge`] for
+    /// the first step that does not.
+    ///
+    /// This is called by the public `propose_transfer` / `propose_shielding` wrappers
+    /// and the `create_proposed_transactions` / `create_pczt_from_proposal` build
+    /// entry points, so it protects all input selectors (including third-party ones)
+    /// and all build paths. It is not called during proposal deserialization, so
+    /// previously-persisted proposals remain recoverable.
+    pub fn check_transaction_size(&self) -> Result<(), ProposalError> {
+        let steps = self.steps();
+        for step in steps.iter() {
+            let estimated_size = step
+                .estimated_serialized_size(&|s_ref| Self::resolve_prior_output_pool(steps, s_ref));
+            if estimated_size > MAX_BLOCK_BYTES {
+                // Count per-pool shielded inputs (both the step's own and prior-step)
+                // so the counts match what the estimate charged.
+                let sapling_input_count = step.input_count_in_pool(PoolType::SAPLING)
+                    + step
+                        .prior_step_inputs()
+                        .iter()
+                        .filter(|s_ref| {
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::SAPLING
+                        })
+                        .count();
+                #[cfg(feature = "orchard")]
+                let orchard_input_count = step.input_count_in_pool(PoolType::ORCHARD)
+                    + step
+                        .prior_step_inputs()
+                        .iter()
+                        .filter(|s_ref| {
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::ORCHARD
+                        })
+                        .count();
+                #[cfg(feature = "orchard")]
+                let ironwood_input_count = step.input_count_in_pool(PoolType::IRONWOOD)
+                    + step
+                        .prior_step_inputs()
+                        .iter()
+                        .filter(|s_ref| {
+                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::IRONWOOD
+                        })
+                        .count();
+                return Err(ProposalError::TransactionTooLarge {
+                    estimated_size,
+                    limit: MAX_BLOCK_BYTES,
+                    sapling_input_count,
+                    #[cfg(feature = "orchard")]
+                    orchard_input_count,
+                    #[cfg(feature = "orchard")]
+                    ironwood_input_count,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolves the pool of a prior-step output referenced by `s_ref`, by looking up
+    /// the referenced step in the proposal's step list. Shared by
+    /// [`estimated_serialized_size`](Self::estimated_serialized_size) and
+    /// [`check_transaction_size`](Self::check_transaction_size) to avoid duplicating the
+    /// `StepOutput`-to-`PoolType` resolution logic.
+    fn resolve_prior_output_pool(steps: &NonEmpty<Step<NoteRef>>, s_ref: &StepOutput) -> PoolType {
+        let prior = &steps[s_ref.step_index()];
+        match s_ref.output_index() {
+            StepOutputIndex::Payment(i) => *prior
+                .payment_pools()
+                .get(&i)
+                .expect("payment pool exists for referenced payment"),
+            StepOutputIndex::Change(i) => prior.balance().proposed_change()[i].output_pool(),
+        }
     }
 }
 
@@ -352,6 +650,7 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
         f.debug_struct("Proposal")
             .field("fee_rule", &self.fee_rule)
             .field("min_target_height", &self.min_target_height)
+            .field("proposed_version", &self.proposed_version)
             .field("steps", &self.steps)
             .finish()
     }
@@ -397,11 +696,40 @@ impl StepOutput {
 pub struct Step<NoteRef> {
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
-    transparent_inputs: Vec<WalletTransparentOutput>,
+    transparent_inputs: Vec<WalletTransparentOutput<()>>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+    /// The anchor height that binds every shielded-tree lookup performed while building this
+    /// step's transaction — both shielded-input witnesses and shielded-output anchors.
+    ///
+    /// This is `Some` for any step that produces a shielded bundle — one that spends shielded
+    /// notes, pays to a shielded pool, or returns shielded change. The anchor is selected from the
+    /// wallet's checkpoints at proposal construction time and applied to every shielded-tree
+    /// lookup, so a transaction with only routed shielded outputs (for example an Orchard-receiver
+    /// payment routed into the Ironwood bundle post-NU6.3) remains indistinguishable from one that
+    /// spends real shielded notes. Only a purely transparent step may carry `None`.
+    anchor_height: Option<BlockHeight>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
     is_shielding: bool,
+}
+
+/// Returns whether a step produces any shielded bundle — it spends shielded notes, pays to a
+/// shielded pool, or returns change to a shielded pool. Such a step performs shielded-tree lookups
+/// (including the dummy spends that pad an output-only bundle so it is indistinguishable from one
+/// that spends real notes), so it must bind a concrete anchor against which those lookups are made.
+pub(crate) fn produces_shielded_bundle(
+    has_shielded_inputs: bool,
+    payment_pools: &BTreeMap<usize, PoolType>,
+    balance: &TransactionBalance,
+) -> bool {
+    has_shielded_inputs
+        || payment_pools
+            .values()
+            .any(|pool| matches!(pool, PoolType::Shielded(_)))
+        || balance
+            .proposed_change()
+            .iter()
+            .any(|change| matches!(change.output_pool(), PoolType::Shielded(_)))
 }
 
 impl<NoteRef> Step<NoteRef> {
@@ -420,19 +748,31 @@ impl<NoteRef> Step<NoteRef> {
     ///   addresses).
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
+    /// * `anchor_height`: The anchor height that binds every shielded-tree lookup performed
+    ///   while building this step's transaction — both shielded-input witnesses and
+    ///   shielded-output anchors. A step that produces a shielded bundle (spends shielded notes,
+    ///   pays to a shielded pool, or returns shielded change) must provide `Some`; only a purely
+    ///   transparent step may pass `None`.
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
+    /// * `ironwood_active`: Whether the Ironwood pool is active at the target height for
+    ///   which this step is proposed. When active, the step is checked against the
+    ///   Orchard turnstile: no payment may be directed to the Orchard pool, and change
+    ///   may be returned to it only when strictly less value returns than the step's
+    ///   Orchard inputs remove.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         prior_steps: &[Step<NoteRef>],
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+        anchor_height: Option<BlockHeight>,
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
         is_shielding: bool,
+        #[cfg(feature = "orchard")] ironwood_active: bool,
     ) -> Result<Self, ProposalError> {
         // Verify that the set of payment pools matches exactly a set of valid payment recipients
         if transaction_request.payments().len() != payment_pools.len() {
@@ -440,7 +780,15 @@ impl<NoteRef> Step<NoteRef> {
         }
         for (idx, pool) in &payment_pools {
             if let Some(payment) = transaction_request.payments().get(idx) {
-                if !payment.recipient_address().can_receive_as(*pool) {
+                // Ironwood notes are Orchard-shaped and delivered to the recipient's Orchard
+                // receiver, so an Ironwood-pool payment is valid whenever the recipient can
+                // receive Orchard.
+                let deliverable = payment.recipient_address().can_receive_as(*pool)
+                    || (*pool == PoolType::IRONWOOD
+                        && payment
+                            .recipient_address()
+                            .can_receive_as(PoolType::ORCHARD));
+                if !deliverable {
                     return Err(ProposalError::PaymentPoolsMismatch);
                 }
                 if payment.amount().is_none() {
@@ -509,12 +857,69 @@ impl<NoteRef> Step<NoteRef> {
             return Err(ProposalError::ShieldingInvalid);
         }
 
+        // After Ironwood activation, the Orchard turnstile only permits value to leave
+        // the pool: payments may not be directed to the Orchard pool, and change may be
+        // returned to it only when strictly less value returns than the step's Orchard
+        // inputs remove.
+        #[cfg(feature = "orchard")]
+        if ironwood_active {
+            // With Ironwood active, payment classification routes every Orchard-receiver
+            // payment to the Ironwood pool before a step is constructed, so a payment
+            // directed to the Orchard pool here can only arise through direct misuse of
+            // this public constructor; reject it rather than construct a step whose
+            // transaction could never be mined. The only Orchard-pool outputs a step may
+            // create are change, which is validated below. The untrusted decode path
+            // rejects such a payment pool before calling `from_parts` (see
+            // `try_into_standard_proposal`).
+            if let Some((index, _)) = payment_pools
+                .iter()
+                .find(|(_, pool)| **pool == PoolType::ORCHARD)
+            {
+                return Err(ProposalError::OrchardPoolPayment(*index));
+            }
+
+            let orchard_input_total = shielded_inputs
+                .iter()
+                .flat_map(|s_in| s_in.notes().iter())
+                .filter(|n| n.note().pool() == ShieldedPool::Orchard)
+                .map(|n| n.note().value())
+                .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
+                .ok_or(ProposalError::Overflow)?;
+
+            let orchard_change_total = balance
+                .proposed_change()
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::ORCHARD)
+                .map(|c| c.value())
+                .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
+                .ok_or(ProposalError::Overflow)?;
+
+            if orchard_change_total.is_positive() && orchard_change_total >= orchard_input_total {
+                return Err(ProposalError::OrchardPoolValueCreation {
+                    input_total: orchard_input_total,
+                    output_total: orchard_change_total,
+                });
+            }
+        }
+
+        // A step that produces any shielded bundle must bind a concrete anchor: every shielded-tree
+        // lookup it performs — including the dummy spends that pad an output-only bundle so it is
+        // indistinguishable from one that spends real notes — is made against that anchor. Only a
+        // purely transparent step may omit it. The untrusted decode path rejects this same
+        // combination at the parse boundary (see `try_into_standard_proposal`).
+        if anchor_height.is_none()
+            && produces_shielded_bundle(shielded_inputs.is_some(), &payment_pools, &balance)
+        {
+            return Err(ProposalError::MissingShieldedAnchor);
+        }
+
         if input_total == output_total {
             Ok(Self {
                 transaction_request,
                 payment_pools,
                 transparent_inputs,
                 shielded_inputs,
+                anchor_height,
                 prior_step_inputs,
                 balance,
                 is_shielding,
@@ -537,12 +942,18 @@ impl<NoteRef> Step<NoteRef> {
         &self.payment_pools
     }
     /// Returns the transparent inputs that have been selected to fund the transaction.
-    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
+    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput<()>] {
         &self.transparent_inputs
     }
     /// Returns the shielded inputs that have been selected to fund the transaction.
     pub fn shielded_inputs(&self) -> Option<&ShieldedInputs<NoteRef>> {
         self.shielded_inputs.as_ref()
+    }
+    /// Returns the anchor height that binds every shielded-tree lookup performed while building
+    /// this step's transaction, or `None` for a purely transparent step that performs no such
+    /// lookup.
+    pub fn anchor_height(&self) -> Option<BlockHeight> {
+        self.anchor_height
     }
     /// Returns the inputs that should be obtained from the outputs of the transaction
     /// created to satisfy a previous step of the proposal.
@@ -562,35 +973,490 @@ impl<NoteRef> Step<NoteRef> {
 
     /// Returns whether or not this proposal requires interaction with the specified pool.
     pub fn involves(&self, pool_type: PoolType) -> bool {
-        let input_in_this_pool = || match pool_type {
-            PoolType::Transparent => self.is_shielding || !self.transparent_inputs.is_empty(),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                self.shielded_inputs.iter().any(|s_in| {
-                    s_in.notes()
-                        .iter()
-                        .any(|note| matches!(note.note(), Note::Sapling(_)))
-                })
-            }
-            #[cfg(feature = "orchard")]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                self.shielded_inputs.iter().any(|s_in| {
-                    s_in.notes()
-                        .iter()
-                        .any(|note| matches!(note.note(), Note::Orchard(_)))
-                })
-            }
-            #[cfg(not(feature = "orchard"))]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => false,
-        };
-        let output_in_this_pool = || self.payment_pools().values().any(|pool| *pool == pool_type);
-        let change_in_this_pool = || {
-            self.balance
-                .proposed_change()
+        self.input_in_pool(pool_type)
+            || self.output_in_pool(pool_type)
+            || self.change_in_pool(pool_type)
+    }
+
+    /// Returns whether or not this step spends any inputs from the given pool.
+    ///
+    /// For a shielded pool this is true when a note of that protocol is spent; for
+    /// [`PoolType::Transparent`] it is true when the step is a shielding step or has any
+    /// transparent inputs.
+    pub fn input_in_pool(&self, pool_type: PoolType) -> bool {
+        match pool_type {
+            PoolType::Transparent => self.is_shielding() || !self.transparent_inputs().is_empty(),
+            PoolType::SAPLING => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Sapling))
+            }),
+            PoolType::ORCHARD => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Orchard))
+            }),
+            PoolType::IRONWOOD => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Ironwood))
+            }),
+        }
+    }
+
+    /// Returns whether or not this step directs any payment output to the given pool.
+    ///
+    /// This does not consider change outputs; use [`Step::change_in_pool`] for those.
+    pub fn output_in_pool(&self, pool_type: PoolType) -> bool {
+        self.payment_pools().values().any(|pool| *pool == pool_type)
+    }
+
+    /// Returns whether or not this step directs any change output to the given pool.
+    pub fn change_in_pool(&self, pool_type: PoolType) -> bool {
+        self.balance()
+            .proposed_change()
+            .iter()
+            .any(|c| c.output_pool() == pool_type)
+    }
+
+    /// Returns the number of inputs to this step that belong to the given pool.
+    ///
+    /// For a shielded pool this is the number of spent notes of that protocol; for
+    /// [`PoolType::Transparent`] it is the number of transparent inputs.
+    pub fn input_count_in_pool(&self, pool_type: PoolType) -> usize {
+        match pool_type {
+            PoolType::Transparent => self.transparent_inputs().len(),
+            PoolType::SAPLING => self
+                .shielded_inputs()
                 .iter()
-                .any(|c| c.output_pool() == pool_type)
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().pool() == ShieldedPool::Sapling)
+                .count(),
+            PoolType::ORCHARD => self
+                .shielded_inputs()
+                .iter()
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().pool() == ShieldedPool::Orchard)
+                .count(),
+            PoolType::IRONWOOD => self
+                .shielded_inputs()
+                .iter()
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().pool() == ShieldedPool::Ironwood)
+                .count(),
+        }
+    }
+
+    /// Returns the number of payment outputs of this step that are directed to the given pool.
+    ///
+    /// This does not include change outputs; use [`Step::change_count_in_pool`] for those.
+    pub fn output_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.payment_pools()
+            .values()
+            .filter(|pool| **pool == pool_type)
+            .count()
+    }
+
+    /// Returns the number of change outputs of this step that are directed to the given pool.
+    pub fn change_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.balance()
+            .proposed_change()
+            .iter()
+            .filter(|c| c.output_pool() == pool_type)
+            .count()
+    }
+
+    /// The value of this step's sole Ironwood PAYMENT output, or `None` when the step has any
+    /// number of Ironwood payment outputs other than exactly one, or when that output's value is
+    /// not determined (a ZIP 321 payment may carry no amount).
+    ///
+    /// Change is deliberately not considered. The fee model must reach the same verdict as
+    /// [`Step::is_canonical_crossing`] from the same data, and at the point it decides an Ironwood
+    /// change value is precisely the unknown it is solving for. That costs nothing: a step with
+    /// Ironwood change alongside an Ironwood payment has two real Ironwood outputs, so its bundle
+    /// already meets the default action floor and the padding makes no difference.
+    #[cfg(feature = "orchard")]
+    fn sole_ironwood_payment_value(&self) -> Option<Zatoshis> {
+        let mut payments = self
+            .payment_pools()
+            .iter()
+            .filter(|(_, pool)| **pool == PoolType::IRONWOOD)
+            .map(|(index, _)| {
+                self.transaction_request()
+                    .payments()
+                    .get(index)
+                    .and_then(|payment| payment.amount())
+            });
+
+        match (payments.next(), payments.next()) {
+            (Some(value), None) => value,
+            _ => None,
+        }
+    }
+
+    /// Returns whether this step is a *canonical crossing*: a step whose whole shape is
+    /// indistinguishable from a [ZIP 318] migration transfer, and which is therefore built with a
+    /// single unpadded Ironwood action so that it joins that anonymity set. See
+    /// [`Step::ironwood_bundle_padding`].
+    ///
+    /// A migration transfer spends one Orchard note, pads its Orchard bundle to the default
+    /// two-action floor (the spend plus its change, or a dummy when the note's value exactly
+    /// covers the crossing and its fee), outputs one canonical denomination into the Ironwood
+    /// pool, and is proved against a boundary of the anchor bucket grid. Every one of those is
+    /// required here:
+    ///
+    /// - exactly one Orchard input and at most one Orchard change output, so that the Orchard
+    ///   bundle is exactly two actions;
+    /// - no change in any other pool;
+    /// - no Ironwood spends, a step funded from Ironwood crossing nothing;
+    /// - no Ironwood change, leaving a single Ironwood output;
+    /// - that output's value is a canonical denomination under `params`;
+    /// - the step's anchor lies on `params`' anchor bucket grid;
+    /// - the fee equals `canonical_fee`, which the caller obtains from
+    ///   [`fees::canonical_crossing_fee`] for the consensus parameters and target height the
+    ///   transaction will actually be built against.
+    ///
+    /// [`fees::canonical_crossing_fee`]: crate::fees::canonical_crossing_fee
+    ///
+    /// Dropping the Ironwood padding without the rest would not buy anonymity but destroy it: an
+    /// unpadded Ironwood bundle beside an Orchard bundle of the wrong size, or against a
+    /// chain-tip anchor, is a shape nothing else on the network emits — a fingerprint rather than
+    /// a disguise.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    #[cfg(feature = "orchard")]
+    pub fn is_canonical_crossing<P: PoolMigrationConstants>(
+        &self,
+        params: &P,
+        canonical_fee: Zatoshis,
+    ) -> bool {
+        self.input_count_in_pool(PoolType::ORCHARD) == 1
+            && self.input_count_in_pool(PoolType::IRONWOOD) == 0
+            && self.change_count_in_pool(PoolType::IRONWOOD) == 0
+            // At most ONE Orchard change output. The Orchard bundle must be exactly two actions,
+            // and from NU6.3 a spend and an output no longer share one, so its count is
+            // `spends + outputs`: a second change output makes three. A multi-output change
+            // strategy produces exactly that from a single large note.
+            && self.change_count_in_pool(PoolType::ORCHARD) <= 1
+            // Change anywhere else adds a bundle no migration transfer carries.
+            && self.change_count_in_pool(PoolType::SAPLING) == 0
+            && self.change_count_in_pool(PoolType::TRANSPARENT) == 0
+            && self
+                .sole_ironwood_payment_value()
+                .is_some_and(|value| params.is_canonical_denomination(value))
+            && self
+                .anchor_height()
+                .is_some_and(|anchor| params.anchor_bucket_interval().is_boundary(anchor))
+            // ZIP 318 forbids a non-standard fee, which would partition the anonymity set as
+            // surely as a non-standard shape. A `ChangeStrategy` may be built on any fee rule,
+            // including a fixed non-standard one, so a structurally perfect crossing can still
+            // carry a distinguishing fee.
+            //
+            // This condition is deliberately absent from `ironwood_bundle_padding`: the fee model
+            // decides that padding WHILE computing the fee, so it cannot test the result against a
+            // target. Keeping the fee here makes this predicate a gate on whether to keep a
+            // proposal at all, rather than an input the builder must reproduce.
+            && self.balance().fee_required() == canonical_fee
+    }
+
+    /// The transactional bundle padding the transaction builder must use for this step's Ironwood
+    /// bundle: the padding the [`ChangeStrategy`] recorded when it computed the fee.
+    ///
+    /// This is READ, not re-derived. The builder must produce exactly the action count the fee was
+    /// charged against, and a second derivation could disagree with the first — which is precisely
+    /// what happens for a condition only one of them can evaluate, such as whether the resulting
+    /// fee is itself canonical.
+    ///
+    /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_bundle_padding(&self) -> BundlePadding {
+        let Some(dummy_outputs) = self.balance().dummy_outputs() else {
+            return BundlePadding::DEFAULT;
         };
 
-        input_in_this_pool() || output_in_this_pool() || change_in_this_pool()
+        let real_outputs = self.output_count_in_pool(PoolType::IRONWOOD)
+            + self.change_count_in_pool(PoolType::IRONWOOD);
+        let target_actions = real_outputs + dummy_outputs.ironwood();
+
+        // `pad_to_minimum` is only an 8-bit floor. If the requested transaction is larger than
+        // that, its real spends and outputs already force the required action count, so no floor
+        // is needed.
+        u8::try_from(target_actions).map_or(BundlePadding::UNPADDED, |minimum| BundlePadding {
+            bundle_required: target_actions > 0
+                && self.input_count_in_pool(PoolType::IRONWOOD) == 0
+                && real_outputs == 0,
+            pad_to_minimum: Some(minimum.max(1)),
+        })
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_style_action_count(
+        &self,
+        pool_type: PoolType,
+        padding: BundlePadding,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        crate::fees::orchard::transactional_action_count(
+            padding.bundle_type(),
+            bundle_version,
+            self.input_count_in_pool(pool_type),
+            self.output_count_in_pool(pool_type) + self.change_count_in_pool(pool_type),
+        )
+    }
+
+    /// Returns the number of actions the transaction builder will produce for this step's
+    /// Orchard-pool bundle, given the bundle padding and version it will be configured with.
+    ///
+    /// The count depends upon the bundle version: prior to NU6.3, an action may carry both a
+    /// spend and an output, so a bundle requires `max(spends, outputs)` actions; from NU6.3
+    /// onwards the Orchard pool disables cross-address transfers, and each requested spend and
+    /// output is instead paired with a fabricated zero-valued counterpart, so a bundle requires
+    /// `spends + outputs` actions. The padding determines the floor applied on top of that count.
+    ///
+    /// The caller must pass the same padding and version the transaction builder will be
+    /// configured with, otherwise the count will not match the bundle that is built.
+    /// [`bundle_version_for_branch`] returns the version applicable to a given consensus branch
+    /// and pool. The Orchard bundle is always padded to the default floor; only the Ironwood
+    /// bundle's padding varies, and [`Step::ironwood_bundle_padding`] derives it.
+    ///
+    /// A step describes a wallet spend, which is never a coinbase transaction, so this takes a
+    /// [`BundlePadding`] rather than a full bundle type: coinbase construction is a property of the
+    /// whole transaction and is not representable here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this step's Orchard spend and output counts are incompatible with
+    /// the given padding and version.
+    ///
+    /// [`bundle_version_for_branch`]: zcash_primitives::transaction::components::orchard::bundle_version_for_branch
+    #[cfg(feature = "orchard")]
+    pub fn orchard_action_count(
+        &self,
+        padding: BundlePadding,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        self.orchard_style_action_count(PoolType::ORCHARD, padding, bundle_version)
+    }
+
+    /// Returns the number of actions the transaction builder will produce for this step's
+    /// Ironwood-pool bundle, given the bundle padding and version it will be configured with.
+    ///
+    /// See [`Step::orchard_action_count`] for how the count is determined; the Ironwood pool
+    /// permits cross-address transfers, so an Ironwood bundle requires
+    /// `max(spends, outputs)` actions before padding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this step's Ironwood spend and output counts are incompatible with
+    /// the given padding and version.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_action_count(
+        &self,
+        padding: BundlePadding,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        self.orchard_style_action_count(PoolType::IRONWOOD, padding, bundle_version)
+    }
+
+    /// Returns a conservative upper-bound estimate of the serialized byte size of the
+    /// transaction this step describes.
+    ///
+    /// `prior_steps` is the slice of all steps in the proposal (the same slice
+    /// [`Step::from_parts`] receives), used to resolve the pool of each prior-step
+    /// output this step spends. The caller — typically [`Proposal::check_transaction_size`]
+    /// — passes the full proposal's step list so `step_index()` always resolves.
+    ///
+    /// The estimate sums the per-element byte costs of every input, output, and change
+    /// output the step carries — including prior-step inputs and dummy outputs — plus
+    /// the per-bundle overhead that each present bundle contributes (header fields,
+    /// binding signatures, and the Orchard/Ironwood bundle proof). Each per-element cost
+    /// is an upper bound:
+    /// - Transparent inputs use their actual known serialized size (so P2SH inputs,
+    ///   which can be larger than the P2PKH standard, are not under-counted), with the
+    ///   consensus-maximum input size for inputs whose script size is unknown.
+    /// - Sapling uses the v4 serialized form, which carries proofs and signatures
+    ///   inline — a conservative upper bound, since v5 moves these to bundle-level
+    ///   fields.
+    /// - Orchard and Ironwood use [`ACTION_SIZE`] for each action description, plus
+    ///   the per-action spend authorization signature and the per-action proof share,
+    ///   computed via [`orchard::Proof::expected_proof_size`].
+    ///
+    /// The per-bundle overhead is added only when a bundle is present, so a
+    /// purely-transparent transaction is not charged for Sapling or Orchard proof
+    /// data it does not carry. Action counts account for both the default padding floor
+    /// (`spends + outputs + 2`) and any dummy outputs the change strategy recorded via
+    /// [`TransactionBalance::dummy_outputs`], taking the larger so a nonzero dummy count
+    /// is never under-counted.
+    ///
+    /// The estimate is conservative (it never under-counts), so comparing it against
+    /// [`MAX_BLOCK_BYTES`] is a safe size bound: a step whose estimate fits within a
+    /// block will fit when built, and a step whose estimate exceeds a block may or may
+    /// not fit, but rejecting the latter at proposal time prevents input selection from
+    /// constructing a transaction that can never be mined. Passing the gate is necessary
+    /// but not sufficient for mineability: `MAX_BLOCK_BYTES` is the *block* size limit,
+    /// and a transaction that fits just under it still cannot be mined because the block
+    /// must also carry its header and coinbase transaction. The builder is the final
+    /// authority.
+    ///
+    /// [`ACTION_SIZE`]: zcash_primitives::transaction::components::orchard::ACTION_SIZE
+    /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
+    pub(crate) fn estimated_serialized_size(
+        &self,
+        resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> usize {
+        // The maximum padding the default Orchard/Ironwood bundle type applies.
+        #[cfg(feature = "orchard")]
+        const ORCHARD_PADDING_ACTIONS: usize = 2;
+
+        // Single-pass tally of shielded inputs by pool, counting both the step's own
+        // shielded inputs and prior-step inputs that spend shielded outputs.
+        let mut sapling_spends = 0usize;
+        let mut orchard_spends = 0usize;
+        let mut ironwood_spends = 0usize;
+
+        if let Some(shielded) = self.shielded_inputs() {
+            for note in shielded.notes().iter() {
+                match note.note().pool() {
+                    ShieldedPool::Sapling => sapling_spends += 1,
+                    ShieldedPool::Orchard => orchard_spends += 1,
+                    ShieldedPool::Ironwood => ironwood_spends += 1,
+                }
+            }
+        }
+
+        // Prior-step inputs: each references an output of a preceding step. The closure
+        // resolves the pool of the referenced output. For transparent Payment-sourced
+        // prior inputs, use the consensus maximum input size (the recipient could be
+        // P2SH with a large scriptSig); for Change-sourced transparent prior inputs,
+        // use the P2PKH standard (ephemeral change outputs are wallet-internal P2PKH).
+        let mut prior_transparent_input_bytes = 0usize;
+        for s_ref in self.prior_step_inputs() {
+            let pool = resolve_prior_pool(s_ref);
+            match pool {
+                PoolType::Transparent => {
+                    let size = match s_ref.output_index() {
+                        StepOutputIndex::Payment(_) => MAX_TRANSPARENT_INPUT_SIZE,
+                        StepOutputIndex::Change(_) => P2PKH_STANDARD_INPUT_SIZE,
+                    };
+                    prior_transparent_input_bytes += size;
+                }
+                PoolType::SAPLING => sapling_spends += 1,
+                PoolType::ORCHARD => orchard_spends += 1,
+                PoolType::IRONWOOD => ironwood_spends += 1,
+            }
+        }
+
+        // Transparent inputs: use each input's actual serialized size where known, so
+        // that P2SH inputs are not under-counted. For inputs whose script size is
+        // unknown, use the consensus-maximum input size.
+        let transparent_input_bytes = self
+            .transparent_inputs()
+            .iter()
+            .map(
+                |input| match transparent_fees::InputView::serialized_size(input) {
+                    transparent_fees::InputSize::Known(size) => size,
+                    transparent_fees::InputSize::Unknown(_) => MAX_TRANSPARENT_INPUT_SIZE,
+                },
+            )
+            .sum::<usize>();
+
+        // Transparent outputs.
+        let transparent_payment_outputs =
+            self.output_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
+        let transparent_change_outputs =
+            self.change_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
+        let transparent_present = !self.transparent_inputs().is_empty()
+            || prior_transparent_input_bytes > 0
+            || transparent_payment_outputs > 0
+            || transparent_change_outputs > 0;
+
+        // Dummy outputs recorded by the change strategy. These pad the shielded bundles
+        // beyond the default `spends + outputs + 2` floor; the estimate must charge for
+        // them so a nonzero dummy count is never under-counted.
+        let dummy = self.balance().dummy_outputs();
+
+        // Sapling spends and outputs. The default bundle type pads to at least two
+        // outputs when there are any spends or outputs; adding 2 to each count covers
+        // the padding floor. If the change strategy recorded dummy Sapling outputs,
+        // charge for those too.
+        let sapling_outputs = self.output_count_in_pool(PoolType::SAPLING)
+            + self.change_count_in_pool(PoolType::SAPLING);
+        let sapling_dummy = dummy.map_or(0, |d| d.sapling());
+        let sapling_bundle_present = sapling_spends > 0 || sapling_outputs > 0 || sapling_dummy > 0;
+        let sapling_spend_bytes = if sapling_bundle_present {
+            (sapling_spends + 2) * SPEND_DESCRIPTION_SIZE
+        } else {
+            0
+        };
+        let sapling_output_bytes = if sapling_bundle_present {
+            (sapling_outputs + 2 + sapling_dummy) * OUTPUT_DESCRIPTION_SIZE
+        } else {
+            0
+        };
+
+        // Orchard and Ironwood bundles. Each action costs `ACTION_SIZE` plus the
+        // per-action spend authorization signature; the bundle proof is
+        // `Proof::expected_proof_size(num_actions)` (a fixed base plus a per-action
+        // share), computed via the orchard crate's own `pub const fn`.
+        #[cfg(feature = "orchard")]
+        let orchard_bundle_bytes = orchard_style_bundle_bytes(
+            orchard_spends,
+            self.output_count_in_pool(PoolType::ORCHARD)
+                + self.change_count_in_pool(PoolType::ORCHARD),
+            dummy.map_or(0, |d| d.orchard()),
+            ORCHARD_PADDING_ACTIONS,
+        );
+        #[cfg(not(feature = "orchard"))]
+        let orchard_bundle_bytes: usize = 0;
+        #[cfg(not(feature = "orchard"))]
+        let _ = (orchard_spends, ironwood_spends);
+
+        #[cfg(feature = "orchard")]
+        let ironwood_bundle_bytes = orchard_style_bundle_bytes(
+            ironwood_spends,
+            self.output_count_in_pool(PoolType::IRONWOOD)
+                + self.change_count_in_pool(PoolType::IRONWOOD),
+            dummy.map_or(0, |d| d.ironwood()),
+            ORCHARD_PADDING_ACTIONS,
+        );
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_bundle_bytes: usize = 0;
+
+        TX_HEADER_SIZE
+            + (transparent_present as usize) * TRANSPARENT_BUNDLE_OVERHEAD
+            + transparent_input_bytes
+            + prior_transparent_input_bytes
+            + transparent_payment_outputs
+            + transparent_change_outputs
+            + (sapling_bundle_present as usize) * SAPLING_BUNDLE_OVERHEAD
+            + sapling_spend_bytes
+            + sapling_output_bytes
+            + orchard_bundle_bytes
+            + ironwood_bundle_bytes
+    }
+}
+
+/// Computes the estimated byte size of an Orchard-family bundle (Orchard or Ironwood)
+/// for the given pool, given the number of shielded spends, real outputs, and dummy
+/// outputs the step directs to that pool. The action count is
+/// `max(spends + outputs + padding, outputs + dummy)`, so a nonzero dummy count is
+/// never under-counted.
+#[cfg(feature = "orchard")]
+fn orchard_style_bundle_bytes(
+    spends: usize,
+    outputs: usize,
+    dummy_outputs: usize,
+    padding_actions: usize,
+) -> usize {
+    let default_count = spends + outputs + padding_actions;
+    let dummy_count = outputs + dummy_outputs;
+    let num_actions = default_count.max(dummy_count);
+    if num_actions > 0 {
+        ORCHARD_BUNDLE_OVERHEAD
+            + Proof::expected_proof_size(num_actions)
+            + num_actions * (ORCHARD_ACTION_SIZE + ORCHARD_AUTH_SIG_SIZE)
+    } else {
+        0
     }
 }
 
@@ -604,12 +1470,1102 @@ impl<NoteRef> Debug for Step<NoteRef> {
                 &self.shielded_inputs().map(|i| i.notes.len()),
             )
             .field("prior_step_inputs", &self.prior_step_inputs)
-            .field(
-                "anchor_height",
-                &self.shielded_inputs().map(|i| i.anchor_height),
-            )
+            .field("anchor_height", &self.anchor_height)
             .field("balance", &self.balance)
             .field("is_shielding", &self.is_shielding)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use zcash_keys::address::{Address, UnifiedAddress};
+
+    use incrementalmerkletree::Position;
+    use nonempty::NonEmpty;
+    use zcash_address::ZcashAddress;
+    use zcash_primitives::transaction::{
+        TxId,
+        builder::BundlePadding,
+        components::orchard::{ACTION_SIZE, bundle_version_for_branch},
+    };
+
+    use crate::{
+        data_api::{
+            anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            wallet::{ConfirmationsPolicy, TargetHeight},
+        },
+        fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
+        wallet::Note,
+    };
+    use zcash_protocol::{
+        PoolType, ShieldedPool,
+        consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        constants::MAX_BLOCK_BYTES,
+        value::{COIN, Zatoshis},
+        zip318::PoolMigrationConstants,
+    };
+    use zip321::{Payment, TransactionRequest};
+
+    use orchard::{
+        ValuePool,
+        bundle::BundleVersion,
+        keys::{FullViewingKey, SpendingKey},
+        note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
+    use proptest::prelude::*;
+
+    use super::{Proposal, ProposalError, ShieldedInputs, Step};
+
+    // Builds an Orchard note of the given version and value. The recipient, rho, and rseed are
+    // fixed; only the version and value vary, which is all `Note::pool`/`Note::protocol` depend on.
+    fn orchard_note(value: u64, version: NoteVersion) -> Option<OrchardNote> {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32]))?;
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let rho = Option::from(Rho::from_bytes(&[0; 32]))?;
+        let rseed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho))?;
+        Option::from(OrchardNote::from_parts(
+            recipient,
+            NoteValue::from_raw(value),
+            rho,
+            rseed,
+            version,
+        ))
+    }
+
+    // Wraps a list of notes as the shielded inputs of a step.
+    fn shielded_inputs_for(notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
+        let received = notes
+            .into_iter()
+            .enumerate()
+            .map(|(i, note)| {
+                crate::wallet::ReceivedNote::from_parts(
+                    i as u32,
+                    TxId::from_bytes([0; 32]),
+                    i as u16,
+                    note,
+                    zip32::Scope::External,
+                    Position::from(i as u64),
+                    Some(BlockHeight::from_u32(100)),
+                    None,
+                )
+            })
+            .collect::<Vec<_>>();
+        NonEmpty::from_vec(received).map(ShieldedInputs::from_parts)
+    }
+
+    // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
+    fn step_with_notes(notes: Vec<Note>) -> Step<u32> {
+        step_with_notes_and_change(notes, vec![])
+    }
+
+    // Wraps a list of notes into a single `Step` spending those shielded notes and returning the
+    // given change outputs. The step is constructed directly rather than via `Step::from_parts`,
+    // so the change values need not be covered by the input values.
+    fn step_with_notes_and_change(notes: Vec<Note>, change: Vec<ChangeValue>) -> Step<u32> {
+        let shielded_inputs = shielded_inputs_for(notes);
+        Step {
+            transaction_request: TransactionRequest::empty(),
+            payment_pools: BTreeMap::new(),
+            transparent_inputs: vec![],
+            shielded_inputs,
+            anchor_height: Some(BlockHeight::from_u32(100)),
+            prior_step_inputs: vec![],
+            balance: TransactionBalance::new(change, Zatoshis::ZERO).unwrap(),
+            is_shielding: false,
+        }
+    }
+
+    // Constructs a validated step spending the given notes, with no payments.
+    fn validated_step(
+        notes: Vec<Note>,
+        balance: TransactionBalance,
+        ironwood_active: bool,
+    ) -> Result<Step<u32>, ProposalError> {
+        Step::from_parts(
+            &[],
+            TransactionRequest::empty(),
+            BTreeMap::new(),
+            vec![],
+            shielded_inputs_for(notes),
+            Some(BlockHeight::from_u32(100)),
+            vec![],
+            balance,
+            false,
+            ironwood_active,
+        )
+    }
+
+    /// The canonical crossing fee under the mainnet parameters these tests use.
+    fn canonical_fee() -> Zatoshis {
+        crate::fees::canonical_crossing_fee(
+            &zcash_protocol::consensus::MAIN_NETWORK,
+            BlockHeight::from_u32(2_000_000),
+        )
+        .expect("the canonical shape is a valid input to the ZIP 317 rule")
+    }
+
+    /// The ZIP 318 parameters a wallet retaining the specified grid would report. Tests take their
+    /// parameters from a wallet-shaped value, as production code does; there is deliberately no
+    /// implementation of `PoolMigrationConstants` for a network type.
+    fn zip318() -> PoolMigrationParams {
+        PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318)
+    }
+
+    fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
+        ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
+    }
+
+    // A step paying `value` into the Ironwood pool: one payment, routed to Ironwood, funded by
+    // Orchard notes, with the given change. This is the shape of an ordinary post-NU6.3 payment
+    // to an Orchard receiver, which is delivered through the Ironwood bundle.
+    fn ironwood_payment_step(value: u64, change: Vec<ChangeValue>) -> Step<u32> {
+        let recipient: ZcashAddress =
+            "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl"
+                .parse()
+                .expect("a valid unified address");
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            recipient,
+            Zatoshis::const_from_u64(value),
+        )])
+        .expect("a valid transaction request");
+
+        Step {
+            transaction_request: request,
+            payment_pools: BTreeMap::from([(0usize, PoolType::IRONWOOD)]),
+            transparent_inputs: vec![],
+            shielded_inputs: shielded_inputs_for(orchard_and_ironwood_notes(
+                (1, value + 100_000),
+                (0, 0),
+            )),
+            // A boundary of the ZIP 318 grid: a canonical crossing must be anchored to one.
+            anchor_height: Some(BlockHeight::from_u32(144)),
+            prior_step_inputs: vec![],
+            balance: TransactionBalance::new(change, canonical_fee())
+                .unwrap()
+                .with_dummy_outputs(DummyOutputCounts::new(0, 0, 0)),
+            is_shielding: false,
+        }
+    }
+
+    /// A crossing whose value is a canonical ZIP 318 denomination is built with a single unpadded
+    /// Ironwood action, matching the shape of a migration transfer.
+    #[test]
+    fn canonical_crossing_is_unpadded() {
+        for value in [COIN, COIN / 2, COIN / 100, 20 * COIN, 10_000 * COIN] {
+            let step = ironwood_payment_step(value, vec![]);
+            assert!(
+                step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "{value} zatoshi should be a canonical crossing"
+            );
+            assert_eq!(step.ironwood_bundle_padding(), BundlePadding::UNPADDED);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    BundleVersion::ironwood_v3()
+                ),
+                Ok(1)
+            );
+        }
+    }
+
+    /// One zatoshi off a canonical denomination, or outside the ZIP's bounds, is not a canonical
+    /// crossing: it stays padded, since it would join no migration anonymity set.
+    #[test]
+    fn near_canonical_crossing_stays_padded() {
+        for value in [COIN + 1, COIN - 1, 3 * COIN, 100_000, 20_000 * COIN] {
+            let step = ironwood_payment_step(value, vec![]);
+            assert!(
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "{value} zatoshi should not be a canonical crossing"
+            );
+            assert_eq!(
+                step.ironwood_action_count(BundlePadding::DEFAULT, BundleVersion::ironwood_v3()),
+                Ok(2)
+            );
+        }
+    }
+
+    /// Ironwood change alongside a canonical payment is NOT a canonical crossing. The fee model
+    /// cannot see a change value at the point it decides padding — that value is what it is
+    /// solving for — so including change here would let the two disagree and break the builder's
+    /// exact-balance check. It costs nothing: two real outputs already meet the default floor.
+    #[test]
+    fn ironwood_change_is_not_a_canonical_crossing() {
+        let step = ironwood_payment_step(COIN, vec![shielded_change(ShieldedPool::Ironwood, 5000)]);
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// A payment funded from Ironwood notes crosses nothing, so it is never a canonical crossing
+    /// however canonical its value. Its bundle has two real actions regardless.
+    #[test]
+    fn ironwood_funded_payment_is_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        step.shielded_inputs =
+            shielded_inputs_for(orchard_and_ironwood_notes((0, 0), (1, 2 * COIN)));
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// An anchor off the bucket grid is not a canonical crossing, however canonical the value and
+    /// however migration-shaped the bundles. Unpadding here would produce an "unpadded Ironwood
+    /// against a fresh anchor" shape that no migration transfer emits, which is a fingerprint
+    /// rather than a disguise.
+    #[test]
+    fn unbucketed_anchor_is_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        for height in [143u32, 145, 1, 2_000_000] {
+            step.anchor_height = Some(BlockHeight::from_u32(height));
+            assert!(
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "anchor {height} is not a grid boundary"
+            );
+        }
+        // The neighbouring boundaries are.
+        for height in [144u32, 288, 1_999_872] {
+            step.anchor_height = Some(BlockHeight::from_u32(height));
+            assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+        }
+    }
+
+    /// A migration transfer spends exactly one Orchard note. A payment drawing on more leaves an
+    /// Orchard bundle of the wrong size, so unpadding its Ironwood bundle would not resemble a
+    /// migration transfer.
+    #[test]
+    fn multiple_orchard_inputs_are_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+
+        step.shielded_inputs = shielded_inputs_for(orchard_and_ironwood_notes((3, COIN), (0, 0)));
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// Overridden ZIP 318 parameters narrow which crossings are canonical, and the padding follows.
+    #[test]
+    fn canonical_crossing_respects_overridden_parameters() {
+        #[derive(Clone)]
+        struct SmallCap;
+        impl PoolMigrationConstants for SmallCap {
+            fn denomination_cap(&self) -> Zatoshis {
+                Zatoshis::const_from_u64(COIN)
+            }
+        }
+
+        let step = ironwood_payment_step(2 * COIN, vec![]);
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+        assert!(!step.is_canonical_crossing(&SmallCap, canonical_fee()));
+    }
+
+    /// A step that produces any shielded bundle must bind a concrete anchor. Passing `None` (the
+    /// decoded state of the wire-format zero sentinel) for such a step is rejected, whether the
+    /// shielded bundle comes from spent notes or from shielded outputs. Only a purely transparent
+    /// step may carry `None`.
+    #[test]
+    fn shielded_step_requires_anchor() {
+        // A step that spends shielded notes with no anchor is rejected.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                shielded_inputs_for(orchard_and_ironwood_notes((1, 10_000), (0, 0))),
+                None,
+                vec![],
+                TransactionBalance::new(vec![], Zatoshis::const_from_u64(10_000)).unwrap(),
+                false,
+                false,
+            ),
+            Err(ProposalError::MissingShieldedAnchor)
+        );
+
+        // A step with a shielded output but no shielded inputs must also bind an anchor: the dummy
+        // spends padding the output bundle commit to it.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 10_000)],
+                    Zatoshis::ZERO,
+                )
+                .unwrap(),
+                false,
+                false,
+            ),
+            Err(ProposalError::MissingShieldedAnchor)
+        );
+
+        // A purely transparent step may carry no anchor.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
+                false,
+                false,
+            ),
+            Ok(step) if step.anchor_height().is_none()
+        );
+    }
+
+    /// Proposal construction conserves value: the total output value of a step (payments +
+    /// change + fee) may never exceed its total input value. A step whose outputs exceed its
+    /// inputs is rejected with [`ProposalError::BalanceError`] rather than being constructed.
+    /// This is the value-conservation floor that pool-selection policy builds on: no selection
+    /// of inputs can ever be assembled into a proposal that spends more than it takes in.
+    #[test]
+    fn proposal_construction_conserves_value() {
+        // Inputs: one 10_000 Orchard note. Outputs: 8_000 change + 4_000 fee = 12_000, which
+        // exceeds the 10_000 of input value. (ironwood_active = false so the balance check,
+        // not the turnstile, is what rejects this.)
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 8_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Err(ProposalError::BalanceError {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::const_from_u64(10_000)
+                && output_total == Zatoshis::const_from_u64(12_000)
+        );
+
+        // The matching balanced step (6_000 change + 4_000 fee == 10_000 input) is accepted,
+        // confirming the rejection above is due to the value imbalance and not some unrelated
+        // constraint.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 6_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Ok(_)
+        );
+    }
+
+    /// A proposal whose estimated serialized size exceeds the maximum a Zcash block may
+    /// carry is rejected by `Proposal::check_transaction_size`, rather than being allowed
+    /// to reach the builder.
+    ///
+    /// `Step::from_parts` accepts the step (it does not enforce the size gate), and
+    /// `Proposal::check_transaction_size` rejects it — confirming the gate is in the
+    /// proposal-level check, not the constructor, so the decode path is not broken.
+    #[test]
+    fn proposal_exceeding_the_block_size_limit_is_rejected() {
+        let proof_per_action =
+            orchard::Proof::expected_proof_size(2) - orchard::Proof::expected_proof_size(1);
+        let full_action_cost = ACTION_SIZE + 64 + proof_per_action;
+        let oversize_spend_count = MAX_BLOCK_BYTES / full_action_cost + 1;
+
+        let one_zato = Zatoshis::const_from_u64(1);
+        let input_total = (one_zato * oversize_spend_count).unwrap();
+        let change = ChangeValue::shielded(ShieldedPool::Orchard, input_total, None);
+        let balance = TransactionBalance::new(vec![change], Zatoshis::ZERO).unwrap();
+
+        // `from_parts` accepts the step (no size gate).
+        let step = validated_step(
+            orchard_and_ironwood_notes((oversize_spend_count, 1), (0, 0)),
+            balance,
+            false,
+        )
+        .expect("from_parts accepts oversized steps");
+
+        let proposal = Proposal::multi_step(
+            (),
+            TargetHeight::from(100),
+            ConfirmationsPolicy::default(),
+            NonEmpty::singleton(step),
+        )
+        .expect("multi_step accepts a valid step");
+
+        // `check_transaction_size` rejects it.
+        assert_matches!(
+            proposal.check_transaction_size(),
+            Err(ProposalError::TransactionTooLarge {
+                estimated_size,
+                limit,
+                sapling_input_count,
+                #[cfg(feature = "orchard")]
+                orchard_input_count,
+                #[cfg(feature = "orchard")]
+                ironwood_input_count,
+            }) if limit == MAX_BLOCK_BYTES
+                && estimated_size > MAX_BLOCK_BYTES
+                && sapling_input_count == 0
+                && orchard_input_count == oversize_spend_count
+                && ironwood_input_count == 0
+        );
+    }
+
+    /// A proposal whose estimated size fits within the block limit is accepted by
+    /// `check_transaction_size`.
+    #[test]
+    fn proposal_fitting_within_the_block_size_limit_is_accepted() {
+        let proof_per_action =
+            orchard::Proof::expected_proof_size(2) - orchard::Proof::expected_proof_size(1);
+        let full_action_cost = ACTION_SIZE + 64 + proof_per_action;
+        let fitting_spend_count = MAX_BLOCK_BYTES / full_action_cost - 8;
+
+        let one_zato = Zatoshis::const_from_u64(1);
+        let input_total = (one_zato * fitting_spend_count).unwrap();
+        let change = ChangeValue::shielded(ShieldedPool::Orchard, input_total, None);
+        let balance = TransactionBalance::new(vec![change], Zatoshis::ZERO).unwrap();
+
+        let step = validated_step(
+            orchard_and_ironwood_notes((fitting_spend_count, 1), (0, 0)),
+            balance,
+            false,
+        )
+        .expect("from_parts accepts steps that fit");
+
+        let proposal = Proposal::multi_step(
+            (),
+            TargetHeight::from(100),
+            ConfirmationsPolicy::default(),
+            NonEmpty::singleton(step),
+        )
+        .expect("multi_step accepts a valid step");
+
+        assert_matches!(proposal.check_transaction_size(), Ok(()));
+    }
+
+    #[test]
+    fn orchard_turnstile_permits_only_strict_pool_balance_decrease() {
+        // Post-activation, change may return to Orchard when strictly less value returns
+        // than the step's Orchard inputs remove: 6_000 change < 10_000 input.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 6_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Ok(_)
+        );
+
+        // Post-activation, Orchard change equal to the Orchard input total would leave the
+        // pool balance unchanged, which the turnstile forbids.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((1, 10_000), (1, 20_000)),
+                TransactionBalance::new(
+                    vec![
+                        shielded_change(ShieldedPool::Orchard, 10_000),
+                        shielded_change(ShieldedPool::Ironwood, 16_000),
+                    ],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Err(ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::const_from_u64(10_000)
+                && output_total == Zatoshis::const_from_u64(10_000)
+        );
+
+        // Post-activation, a step that spends no Orchard notes may not create Orchard
+        // change at all.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((0, 0), (1, 20_000)),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 16_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Err(ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::ZERO
+                && output_total == Zatoshis::const_from_u64(16_000)
+        );
+
+        // Before activation, value may freely enter the Orchard pool: the same step is
+        // valid.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((0, 0), (1, 20_000)),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 16_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Ok(_)
+        );
+    }
+
+    // Constructs a step that spends a 10_000-zatoshi Orchard note to pay 6_000 zatoshis to
+    // an Orchard receiver, with the payment assigned to the given pool.
+    fn orchard_payment_step(
+        pool: PoolType,
+        ironwood_active: bool,
+    ) -> Result<Step<u32>, ProposalError> {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let ua = UnifiedAddress::from_receivers(Some(recipient), None, None, None, None).unwrap();
+        let to = Address::Unified(Box::new(ua)).to_zcash_address(&Network::TestNetwork);
+
+        let request = TransactionRequest::new(vec![
+            zip321::Payment::new(
+                to,
+                Some(Zatoshis::const_from_u64(6_000)),
+                None,
+                None,
+                None,
+                vec![],
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+
+        Step::from_parts(
+            &[],
+            request,
+            BTreeMap::from([(0usize, pool)]),
+            vec![],
+            shielded_inputs_for(orchard_and_ironwood_notes((1, 10_000), (0, 0))),
+            Some(BlockHeight::from_u32(100)),
+            vec![],
+            TransactionBalance::new(vec![], Zatoshis::const_from_u64(4_000)).unwrap(),
+            false,
+            ironwood_active,
+        )
+    }
+
+    #[test]
+    fn orchard_turnstile_permits_routed_and_pre_activation_payments() {
+        // A payment routed through the Ironwood bundle (the post-activation representation
+        // of an Orchard-receiver payment) is valid.
+        assert_matches!(orchard_payment_step(PoolType::IRONWOOD, true), Ok(_));
+
+        // Before activation, an Orchard-pool payment is valid.
+        assert_matches!(orchard_payment_step(PoolType::ORCHARD, false), Ok(_));
+    }
+
+    // Post-activation, payment classification never assigns a payment to the Orchard pool,
+    // so a step constructed with one can only arise through direct misuse of the public
+    // constructor, which rejects it.
+    #[test]
+    fn orchard_pool_payment_with_ironwood_active_is_an_error() {
+        assert_matches!(
+            orchard_payment_step(PoolType::ORCHARD, true),
+            Err(ProposalError::OrchardPoolPayment(0))
+        );
+    }
+
+    // Builds `orchard.0` version-2 (Orchard) notes of value `orchard.1`, followed by `ironwood.0`
+    // version-3 (Ironwood) notes of value `ironwood.1`.
+    //
+    // Every note of a given pool is identical, so each is derived once and cloned: deriving a full
+    // viewing key per note makes the large-transaction cases below cost seconds rather than
+    // milliseconds. Only the count and the pool of each note matter to an action count.
+    fn orchard_and_ironwood_notes(
+        (n, orchard_value): (usize, u64),
+        (m, ironwood_value): (usize, u64),
+    ) -> Vec<Note> {
+        let mut notes = Vec::with_capacity(n + m);
+        if n > 0 {
+            let note = Note::Orchard {
+                note: orchard_note(orchard_value, NoteVersion::V2).unwrap(),
+                pool: ValuePool::Orchard,
+            };
+            notes.extend(std::iter::repeat_n(note, n));
+        }
+        if m > 0 {
+            let note = Note::Orchard {
+                note: orchard_note(ironwood_value, NoteVersion::V3).unwrap(),
+                pool: ValuePool::Ironwood,
+            };
+            notes.extend(std::iter::repeat_n(note, m));
+        }
+        notes
+    }
+
+    // Note and change values, spanning a zero-valued note through a large one. An action count is a
+    // function of how many notes and outputs a step has in each pool, never of what they are worth,
+    // so every value here must give the same answer. The upper bound keeps the total value of even
+    // the largest generated step well inside `MAX_MONEY`, so that `TransactionBalance` construction
+    // cannot fail for a reason these tests are not about.
+    fn arb_note_value() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            1 => Just(0u64),
+            8 => 1u64..1_000_000_000,
+        ]
+    }
+
+    // An upper bound on the actions a single bundle can contain on-chain: a transaction may not
+    // exceed a block, and each action costs at least its action description. The true ceiling is
+    // lower, since `ACTION_SIZE` excludes each action's spend authorization signature and the
+    // bundle's proof, but an over-estimate is what these tests want: it exercises counts at least
+    // as large as anything buildable.
+    const MAX_ACTIONS_PER_BUNDLE: usize = MAX_BLOCK_BYTES / ACTION_SIZE;
+
+    // Spend and output counts spanning what a wallet can actually produce: ordinary payments, large
+    // note-consolidation transactions, and bundles at the block ceiling. Each side is capped at
+    // half the ceiling, because from NU6.3 an Orchard spend and an output no longer share an
+    // action, so `spends + outputs` must itself fit. Small counts are weighted heavily: that is
+    // where the padding floor binds, and where real transactions live.
+    fn arb_note_count() -> impl Strategy<Value = usize> {
+        prop_oneof![
+            6 => 0usize..8,
+            2 => 8usize..100,
+            1 => 100usize..=MAX_ACTIONS_PER_BUNDLE / 2,
+        ]
+    }
+
+    // The network upgrades at which the Orchard pool exists but still permits cross-address
+    // transfers, so that a requested spend and a requested output may share an action.
+    fn arb_pre_nu6_3_upgrade() -> impl Strategy<Value = NetworkUpgrade> {
+        prop::sample::select(vec![
+            NetworkUpgrade::Nu5,
+            NetworkUpgrade::Nu6,
+            NetworkUpgrade::Nu6_1,
+            NetworkUpgrade::Nu6_2,
+        ])
+    }
+
+    // The network upgrades from which the Orchard pool disables cross-address transfers.
+    fn arb_nu6_3_or_later_upgrade() -> impl Strategy<Value = NetworkUpgrade> {
+        prop::sample::select(vec![NetworkUpgrade::Nu6_3, NetworkUpgrade::Nu7])
+    }
+
+    // Resolves the bundle version applicable to a pool at an upgrade's testnet activation height,
+    // the way the fee and builder paths do: height -> consensus branch -> `BundleVersion`.
+    fn bundle_version_at(upgrade: NetworkUpgrade, pool: ValuePool) -> BundleVersion {
+        let height = Network::TestNetwork.activation_height(upgrade).unwrap();
+        bundle_version_for_branch(BranchId::for_height(&Network::TestNetwork, height), pool)
+            .unwrap()
+    }
+
+    // A step that requires no actions in a pool produces no bundle in that pool, so it is charged
+    // nothing, no matter how much padding the bundle type would otherwise apply. The exception is
+    // a bundle type that requires a bundle: the builder then produces one consisting entirely of
+    // dummy actions, padded to the type's minimum.
+    #[test]
+    fn uninvolved_pool_is_charged_nothing_unless_a_bundle_is_required() {
+        let step = step_with_notes(vec![]);
+        for bundle_type in [BundlePadding::DEFAULT, BundlePadding::UNPADDED] {
+            assert_eq!(
+                step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
+                Ok(0)
+            );
+            assert_eq!(
+                step.ironwood_action_count(bundle_type, BundleVersion::ironwood_v3()),
+                Ok(0)
+            );
+        }
+
+        // `bundle_required` guarantees a bundle exists, padded to the type's minimum: two
+        // all-dummy actions by default, or one when the type opts out of the default padding.
+        let required = BundlePadding {
+            bundle_required: true,
+            pad_to_minimum: None,
+        };
+        assert_eq!(
+            step.orchard_action_count(required, BundleVersion::orchard_v3()),
+            Ok(2)
+        );
+        let required_unpadded = BundlePadding {
+            bundle_required: true,
+            pad_to_minimum: Some(1),
+        };
+        assert_eq!(
+            step.orchard_action_count(required_unpadded, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+
+        // A zero floor cannot suppress a required bundle: a bundle must contain at least one
+        // action to exist at all, so the required-but-unpadded-to-zero case still yields one.
+        let required_zero_floor = BundlePadding {
+            bundle_required: true,
+            pad_to_minimum: Some(0),
+        };
+        assert_eq!(
+            step.orchard_action_count(required_zero_floor, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+
+        // Without `bundle_required`, a zero floor leaves an uninvolved pool with no bundle.
+        let zero_floor = BundlePadding {
+            bundle_required: false,
+            pad_to_minimum: Some(0),
+        };
+        assert_eq!(
+            step.orchard_action_count(zero_floor, BundleVersion::orchard_v3()),
+            Ok(0)
+        );
+    }
+
+    // `spends_cannot_be_charged_to_a_coinbase_bundle` used to live here, asserting that a step
+    // which spends notes is rejected when charged to a coinbase bundle of that pool. The action
+    // counters now take a `BundlePadding`, which has no coinbase variant, so that case is
+    // unrepresentable rather than merely rejected: a step describes a wallet spend, and a wallet
+    // spend is never a coinbase transaction.
+
+    // What NU6.3 costs a large transaction depends on its shape, and a wallet estimating fees at
+    // scale has to get the difference right.
+    #[test]
+    fn nu6_3_action_growth_at_scale_depends_on_step_shape() {
+        let balanced = |n| {
+            step_with_notes_and_change(
+                orchard_and_ironwood_notes((n, 10_000), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), n).collect(),
+            )
+        };
+
+        // A consolidation -- sweeping many notes into a single change output -- pays for that
+        // output's fabricated spend and nothing else: one extra action, however large it is.
+        let consolidation = step_with_notes_and_change(
+            orchard_and_ironwood_notes((MAX_ACTIONS_PER_BUNDLE, 10_000), (0, 0)),
+            vec![shielded_change(ShieldedPool::Orchard, 10_000)],
+        );
+        // 2439 actions: the change output rides along in a spend's action, exactly filling a block.
+        assert_eq!(
+            consolidation
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(MAX_ACTIONS_PER_BUNDLE)
+        );
+        // 2440 from NU6.3: one action over the ceiling, so the same sweep no longer fits.
+        assert_eq!(
+            consolidation
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(MAX_ACTIONS_PER_BUNDLE + 1)
+        );
+
+        // A balanced step -- as many outputs as spends -- doubles instead, so the largest one that
+        // fits in a block halves at NU6.3: 2439 spends paired with 2439 outputs before, 1219 of
+        // each after. This is why `arb_note_count` caps each side at half the ceiling.
+        let half = MAX_ACTIONS_PER_BUNDLE / 2;
+        assert_eq!(
+            balanced(MAX_ACTIONS_PER_BUNDLE)
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(MAX_ACTIONS_PER_BUNDLE)
+        );
+        // 2438: the largest balanced step that still fits.
+        assert_eq!(
+            balanced(half)
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(2 * half)
+        );
+        // 2440: one note more on each side and it does not.
+        assert_eq!(
+            balanced(half + 1)
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(2 * half + 2)
+        );
+    }
+
+    // A `Step` does not necessarily come from this wallet's own input selection: a proposal crosses
+    // a trust boundary as a serialized message (see `proposal.proto` and
+    // `Proposal::try_into_standard_proposal`), so a step's output and change counts are
+    // attacker-influenced. A step claiming far more outputs than could ever fit on-chain must still
+    // be counted exactly, so that the fee rule is handed an unaffordable action count and rejects
+    // it, rather than a small wrapped-around one it would accept.
+    //
+    // The counts themselves cannot overflow `usize`: each is the length of an in-memory collection,
+    // so reaching `usize::MAX` would require more notes than could be addressed.
+    #[test]
+    fn counts_beyond_the_block_limit_are_counted_exactly() {
+        let spends = 4 * MAX_ACTIONS_PER_BUNDLE;
+        let change = 4 * MAX_ACTIONS_PER_BUNDLE;
+        let step = step_with_notes_and_change(
+            orchard_and_ironwood_notes((spends, 10_000), (0, 0)),
+            std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change).collect(),
+        );
+
+        // Roughly eight times what a block can hold, reported exactly.
+        assert!(spends + change > 8 * MAX_ACTIONS_PER_BUNDLE - 1);
+        assert_eq!(
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(spends + change)
+        );
+
+        // Pre-NU6.3 the same step pairs, so it is charged half as much -- still far past the
+        // ceiling, and still counted exactly.
+        assert_eq!(
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(spends.max(change))
+        );
+
+        // Padding a step this size cannot reduce it, and the ZIP 317 floor is irrelevant here.
+        assert_eq!(
+            step.orchard_action_count(BundlePadding::DEFAULT, BundleVersion::orchard_v3()),
+            Ok(spends + change)
+        );
+    }
+
+    // A payment output counts towards the action count of the pool it is directed to, exactly as
+    // a change output does. `orchard_payment_step` spends one Orchard note to make one payment.
+    #[test]
+    fn action_count_includes_payment_outputs() {
+        // Pre-activation, the payment is an Orchard-pool output: one spend and one output share
+        // an action, because the pre-NU6.3 Orchard bundle version permits cross-address transfers.
+        let step = orchard_payment_step(PoolType::ORCHARD, false).unwrap();
+        assert_eq!(
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(1)
+        );
+        assert_eq!(
+            step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
+            Ok(0)
+        );
+
+        // Post-activation, the payment is routed to the Ironwood pool: the Orchard note spend is
+        // charged to the Orchard bundle and the payment output to the Ironwood bundle, so neither
+        // pool can pair them into one action.
+        let step = orchard_payment_step(PoolType::IRONWOOD, true).unwrap();
+        assert_eq!(
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+        assert_eq!(
+            step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
+            Ok(1)
+        );
+    }
+
+    proptest! {
+        // The number of actions a step's Orchard-pool bundle requires depends upon the bundle
+        // version: the pre-NU6.3 versions permit cross-address transfers, so a spend and an
+        // output may share an action (`max(spends, outputs)`), while from NU6.3 onwards the
+        // Orchard pool disables them, so each spend and output is paired with a fabricated
+        // counterpart and occupies its own action (`spends + outputs`). The Ironwood pool
+        // permits cross-address transfers at every version, so it always pairs.
+        #[test]
+        fn action_count_pairs_spends_and_outputs_only_when_cross_address_is_permitted(
+            orchard_spends in arb_note_count(),
+            ironwood_spends in arb_note_count(),
+            orchard_change in arb_note_count(),
+            ironwood_change in arb_note_count(),
+            orchard_value in arb_note_value(),
+            ironwood_value in arb_note_value(),
+            change_value in arb_note_value(),
+        ) {
+            let change = std::iter::repeat_n(ShieldedPool::Orchard, orchard_change)
+                .chain(std::iter::repeat_n(ShieldedPool::Ironwood, ironwood_change))
+                .map(|pool| shielded_change(pool, change_value))
+                .collect();
+            let step = step_with_notes_and_change(
+                orchard_and_ironwood_notes((orchard_spends, orchard_value), (ironwood_spends, ironwood_value)),
+                change,
+            );
+
+            // `UNPADDED` pads only to the one-action consensus minimum, so for a non-empty
+            // bundle its action count is exactly the number of requested actions.
+            for version in [BundleVersion::orchard_insecure_v1(), BundleVersion::orchard_v2()] {
+                prop_assert_eq!(
+                    step.orchard_action_count(BundlePadding::UNPADDED, version),
+                    Ok(orchard_spends.max(orchard_change))
+                );
+            }
+            prop_assert_eq!(
+                step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
+                Ok(orchard_spends + orchard_change)
+            );
+            prop_assert_eq!(
+                step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
+                Ok(ironwood_spends.max(ironwood_change))
+            );
+
+            // The bundle type governs padding on top of that count: `DEFAULT` pads a non-empty
+            // bundle up to the ZIP 317 two-action floor, and produces no bundle at all when the
+            // step requires no actions in that pool.
+            let pad = |requested: usize| if requested == 0 { 0 } else { requested.max(2) };
+            prop_assert_eq!(
+                step.orchard_action_count(BundlePadding::DEFAULT, BundleVersion::orchard_v3()),
+                Ok(pad(orchard_spends + orchard_change))
+            );
+            prop_assert_eq!(
+                step.ironwood_action_count(BundlePadding::DEFAULT, BundleVersion::ironwood_v3()),
+                Ok(pad(ironwood_spends.max(ironwood_change)))
+            );
+        }
+
+        // The action count a caller obtains for a real target height, resolving the bundle
+        // version the way the fee and builder paths do: height -> consensus branch ->
+        // `BundleVersion`. This is the scenario the legacy hardcoded `max(spends, outputs)`
+        // formula got wrong: at a post-NU6.3 height it understated the Orchard action count
+        // whenever a step had both spends and outputs, and so understated the ZIP 317 fee.
+        #[test]
+        fn orchard_action_count_grows_at_nu6_3_activation_height(
+            spends in arb_note_count(),
+            change in arb_note_count(),
+            note_value in arb_note_value(),
+            change_value in arb_note_value(),
+            pre_nu6_3 in arb_pre_nu6_3_upgrade(),
+            nu6_3_or_later in arb_nu6_3_or_later_upgrade(),
+        ) {
+            let orchard_step = step_with_notes_and_change(
+                orchard_and_ironwood_notes((spends, note_value), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, change_value), change)
+                    .collect(),
+            );
+
+            // Pre-NU6.3, each change output shares an action with a spend: max(spends, change).
+            prop_assert_eq!(
+                orchard_step.orchard_action_count(
+                    BundlePadding::UNPADDED,
+                    bundle_version_at(pre_nu6_3, ValuePool::Orchard),
+                ),
+                Ok(spends.max(change))
+            );
+
+            // From NU6.3, the Orchard pool disables cross-address transfers: a change output's
+            // corresponding dummy input must be signed with the spending key for the internal
+            // IVK the change is sent to, so it cannot share an action with a spend of a note
+            // belonging to a different address. Hence spends + change actions.
+            prop_assert_eq!(
+                orchard_step.orchard_action_count(
+                    BundlePadding::UNPADDED,
+                    bundle_version_at(nu6_3_or_later, ValuePool::Orchard),
+                ),
+                Ok(spends + change)
+            );
+
+            // The Ironwood pool retains cross-address transfers, so an equivalent Ironwood step
+            // still pairs at a post-NU6.3 height.
+            let ironwood_step = step_with_notes_and_change(
+                orchard_and_ironwood_notes((0, 0), (spends, note_value)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Ironwood, change_value), change)
+                    .collect(),
+            );
+            prop_assert_eq!(
+                ironwood_step.ironwood_action_count(
+                    BundlePadding::UNPADDED,
+                    bundle_version_at(nu6_3_or_later, ValuePool::Ironwood),
+                ),
+                Ok(spends.max(change))
+            );
+        }
+
+        // A non-empty bundle is charged the greater of the actions it requests and the bundle
+        // type's padding floor: padding never reduces the count, and the floor is never
+        // undershot. A bundle that requests nothing is not produced at all, so it is charged
+        // nothing however high the floor. `DEFAULT` (floor 2) and `UNPADDED` (floor 1) are the
+        // floors the wallet itself uses; the whole `u8` range is covered here, including the
+        // degenerate zero floor, since the bundle type is the caller's to choose.
+        #[test]
+        fn action_count_is_never_below_the_bundle_types_padding_floor(
+            spends in arb_note_count(),
+            change in arb_note_count(),
+            note_value in arb_note_value(),
+            change_value in arb_note_value(),
+            pad_to_minimum in 0u8..=u8::MAX,
+        ) {
+            let step = step_with_notes_and_change(
+                orchard_and_ironwood_notes((spends, note_value), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, change_value), change)
+                    .collect(),
+            );
+            let bundle_type = BundlePadding {
+                bundle_required: false,
+                pad_to_minimum: Some(pad_to_minimum),
+            };
+
+            // Post-NU6.3, so the requested count is `spends + change`.
+            let requested = spends + change;
+            let expected = if requested == 0 {
+                0
+            } else {
+                requested.max(usize::from(pad_to_minimum))
+            };
+            prop_assert_eq!(
+                step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
+                Ok(expected)
+            );
+        }
+
+        // `Note::pool` reports the `ValuePool` recorded alongside an Orchard note.
+        #[test]
+        fn note_pool_reports_stored_value_pool(
+            value in 1u64..1_000_000_000u64,
+            is_ironwood in any::<bool>(),
+        ) {
+            let (version, pool, expected) = if is_ironwood {
+                (NoteVersion::V3, ValuePool::Ironwood, ShieldedPool::Ironwood)
+            } else {
+                (NoteVersion::V2, ValuePool::Orchard, ShieldedPool::Orchard)
+            };
+            let Some(note) = orchard_note(value, version) else {
+                // A handful of (value, rho, rseed) combinations do not form a valid note; skip them.
+                return Err(TestCaseError::reject("invalid orchard note"));
+            };
+            let note = Note::Orchard { note, pool };
+            prop_assert_eq!(note.pool(), expected);
+        }
+
+        // `Step::input_count_in_pool` returns the number of selected notes in each pool, splitting
+        // Orchard (version 2) from Ironwood (version 3); Sapling is zero here. `input_in_pool`
+        // agrees with `input_count_in_pool > 0`, and `Proposal::input_count_in_pool` sums the
+        // per-step counts.
+        #[test]
+        fn step_and_proposal_input_counts_match_constructed_notes(
+            n_orchard in 0usize..5,
+            n_ironwood in 0usize..5,
+            m_orchard in 0usize..5,
+            m_ironwood in 0usize..5,
+        ) {
+            let step1 = step_with_notes(orchard_and_ironwood_notes((n_orchard, 10_000), (n_ironwood, 20_000)));
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::SAPLING), 0);
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::ORCHARD), n_orchard);
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::IRONWOOD), n_ironwood);
+
+            for pool in [ShieldedPool::Sapling, ShieldedPool::Orchard, ShieldedPool::Ironwood] {
+                let pool_type = PoolType::Shielded(pool);
+                prop_assert_eq!(
+                    step1.input_in_pool(pool_type),
+                    step1.input_count_in_pool(pool_type) > 0
+                );
+            }
+
+            let step2 = step_with_notes(orchard_and_ironwood_notes((m_orchard, 10_000), (m_ironwood, 20_000)));
+            let proposal = Proposal::<(), u32> {
+                fee_rule: (),
+                min_target_height: TargetHeight::from(100u32),
+                confirmations_policy: ConfirmationsPolicy::default(),
+                proposed_version: None,
+                steps: NonEmpty::from_vec(vec![step1, step2]).unwrap(),
+            };
+            prop_assert_eq!(proposal.input_count_in_pool(PoolType::SAPLING), 0);
+            prop_assert_eq!(
+                proposal.input_count_in_pool(PoolType::ORCHARD),
+                n_orchard + m_orchard
+            );
+            prop_assert_eq!(
+                proposal.input_count_in_pool(PoolType::IRONWOOD),
+                n_ironwood + m_ironwood
+            );
+        }
     }
 }

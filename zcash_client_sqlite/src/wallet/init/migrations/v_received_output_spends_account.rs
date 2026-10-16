@@ -8,9 +8,11 @@ use uuid::Uuid;
 
 use crate::wallet::init::{WalletMigrationError, migrations::fix_v_transactions_expired_unmined};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x50fd092d_97b9_44cf_ade9_86b526e4cd50);
+/// This migration revises the `v_received_output_spends` view to add the account ID to the returned
+/// fields.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x50fd092d_97b9_44cf_ade9_86b526e4cd50);
 
-const DEPENDENCIES: &[Uuid] = &[fix_v_transactions_expired_unmined::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_v_transactions_expired_unmined::MIGRATION_ID];
 
 pub(super) struct Migration;
 

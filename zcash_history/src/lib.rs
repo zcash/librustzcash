@@ -1,20 +1,26 @@
-//! Chain history library for Zcash
-//!
-//! To be used in zebra and via FFI bindings in zcashd
+//! To be used in Zebra. Originally also consumed by zcashd via FFI bindings,
+//! which reached End-of-Support in July 2026.
 
+#![no_std]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
+
+#[macro_use]
+extern crate alloc;
 
 mod entry;
 mod node_data;
 mod tree;
 mod version;
 
+#[cfg(test)]
+mod test_vectors;
+
 pub use entry::{Entry, MAX_ENTRY_SIZE};
-pub use node_data::{MAX_NODE_DATA_SIZE, NodeData};
+pub use node_data::{MAX_NODE_DATA_SIZE, NodeData, V2 as NodeDataV2, V3 as NodeDataV3};
 pub use tree::Tree;
-pub use version::{V1, V2, Version};
+pub use version::{V1, V2, V3, Version};
 
 /// Crate-level error type
 #[derive(Debug)]
@@ -25,8 +31,8 @@ pub enum Error {
     ExpectedNode(Option<EntryLink>),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::ExpectedInMemory(l) => write!(f, "Node/leaf expected to be in memory: {l}"),
             Self::ExpectedNode(None) => write!(f, "Node expected"),
@@ -36,7 +42,6 @@ impl std::fmt::Display for Error {
 }
 
 /// Reference to the tree node.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
@@ -45,8 +50,8 @@ pub enum EntryLink {
     Generated(u32),
 }
 
-impl std::fmt::Display for EntryLink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for EntryLink {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::Stored(v) => write!(f, "stored({v})"),
             Self::Generated(v) => write!(f, "generated({v})"),
@@ -55,7 +60,6 @@ impl std::fmt::Display for EntryLink {
 }
 
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
-#[repr(C)]
 #[derive(Debug)]
 pub enum EntryKind {
     /// Leaf entry.

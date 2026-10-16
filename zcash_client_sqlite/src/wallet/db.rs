@@ -179,14 +179,17 @@ pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
 /// - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
 ///   `cached_transparent_receiver_address` value, for imported transparent P2PKH addresses that
-///   were not obtained via derivation from an HD seed associated with the account. In cases that
-///   `cached_transparent_receiver_address` is non-null, either this column, or
-///   `imported_transparent_receiver_script` (for imported P2SH addresses), or
-///   `transparent_child_index` must also be non-null. This is only set for imported addresses
-///   (key_scope = -1).
+///   were not obtained via derivation from an HD seed associated with the account. This is only
+///   set for imported addresses (key_scope = -1).
 /// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
 ///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
 ///   address derived from this script. This is only set for imported addresses (key_scope = -1).
+///
+/// At most one of `imported_transparent_receiver_pubkey` and
+/// `imported_transparent_receiver_script` may be set. An imported row (key_scope = -1) with
+/// neither set is a standalone transparent address imported without key material: the wallet
+/// watches for outputs received by `cached_transparent_receiver_address`, but cannot spend
+/// them unless the corresponding pubkey or redeem script is subsequently imported.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -210,6 +213,7 @@ CREATE TABLE "addresses" (
     CONSTRAINT ck_addr_transparent_index_consistency CHECK (
         (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
         AND (
+            -- no transparent receiver: all transparent columns are absent
             (
                 cached_transparent_receiver_address IS NULL
                 AND transparent_child_index IS NULL
@@ -218,12 +222,18 @@ CREATE TABLE "addresses" (
             )
             OR (
                 cached_transparent_receiver_address IS NOT NULL
+                -- a transparent receiver has a child index iff it was derived
+                AND ((transparent_child_index IS NULL) == (key_scope = -1))
+                -- at most one kind of imported key material
+                AND NOT (
+                    imported_transparent_receiver_pubkey IS NOT NULL
+                    AND imported_transparent_receiver_script IS NOT NULL
+                )
+                -- imported key material appears only on imported (key_scope = -1) rows
                 AND (
-                    (transparent_child_index IS NULL) == (
-                        key_scope = -1 AND (
-                            (imported_transparent_receiver_pubkey IS NULL) !=
-                              (imported_transparent_receiver_script IS NULL)
-                        )
+                    key_scope = -1 OR (
+                        imported_transparent_receiver_pubkey IS NULL
+                        AND imported_transparent_receiver_script IS NULL
                     )
                 )
             )
@@ -236,6 +246,10 @@ CREATE TABLE "addresses" (
 pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
 CREATE INDEX idx_addresses_accounts ON addresses (
     account_id ASC
+)"#;
+pub(super) const INDEX_ADDRESSES_CACHED_TRANSPARENT_RECEIVER_ADDRESS: &str = r#"
+CREATE UNIQUE INDEX idx_addresses_cached_transparent_receiver_address ON addresses (
+    cached_transparent_receiver_address ASC
 )"#;
 pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
 CREATE INDEX idx_addresses_indices ON addresses (
@@ -264,7 +278,9 @@ CREATE TABLE blocks (
     sapling_commitment_tree_size INTEGER,
     orchard_commitment_tree_size INTEGER,
     sapling_output_count INTEGER,
-    orchard_action_count INTEGER)";
+    orchard_action_count INTEGER,
+    ironwood_commitment_tree_size INTEGER,
+    ironwood_action_count INTEGER)";
 
 /// Stores the wallet's transactions.
 ///
@@ -308,6 +324,14 @@ CREATE TABLE blocks (
 /// - `trust_status`: A flag indicating whether the transaction should be considered "trusted".
 ///   When set to `1`, outputs of this transaction will be considered spendable with `trusted`
 ///   confirmations instead of `untrusted` confirmations.
+/// - `zip318_kind`: how the transaction classifies against ZIP 318, encoded by
+///   [`Zip318Classification::to_code`]. The default, `0`, means NOT CLASSIFIED, and is what a row
+///   holds until the wallet has decrypted the transaction; it is deliberately distinct from the
+///   code for "nonconforming", which is a decision that the transaction is not a ZIP 318 one. A
+///   client must render the default as no label, never as "not a migration". Rows written before
+///   this column existed keep the default and need the transaction rescanned.
+///
+/// [`Zip318Classification::to_code`]: zcash_protocol::zip318::Zip318Classification::to_code
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -323,6 +347,7 @@ CREATE TABLE "transactions" (
     min_observed_height INTEGER NOT NULL,
     confirmed_unmined_at_height INTEGER,
     trust_status INTEGER,
+    zip318_kind INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block
@@ -375,6 +400,9 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    lock_expiry_height INTEGER,
+    lock_owner BLOB,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -388,6 +416,10 @@ CREATE INDEX idx_sapling_received_notes_address ON sapling_received_notes (
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_sapling_received_notes_tx ON sapling_received_notes (
     transaction_id ASC
+)"#;
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
+CREATE INDEX idx_sapling_received_notes_witness_stabilized ON sapling_received_notes (
+    witness_stabilized
 )"#;
 
 /// A junction table between received Sapling notes and the transactions that spend them.
@@ -439,6 +471,10 @@ CREATE INDEX idx_sapling_received_note_spends_transaction_id ON sapling_received
 /// - `address_id`: a foreign key to the address that this note was sent to; null in the
 ///   case that the note was sent to an internally-scoped address (we never store addresses
 ///   containing internal Orchard receivers in the `addresses` table).
+/// - `note_version`: the version of the note plaintext from which this note was obtained,
+///   matching the note plaintext lead byte. The Orchard note encryption domain accepts only
+///   version 2 note plaintexts, so this is always 2; the version is recorded rather than
+///   assumed because it determines how the note commitment trapdoor is derived from `rseed`.
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTES: &str = r#"
 CREATE TABLE "orchard_received_notes" (
     id INTEGER PRIMARY KEY,
@@ -458,6 +494,10 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    note_version INTEGER NOT NULL DEFAULT 2,
+    lock_expiry_height INTEGER,
+    lock_owner BLOB,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -471,6 +511,10 @@ CREATE INDEX idx_orchard_received_notes_address ON orchard_received_notes (
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_orchard_received_notes_tx ON orchard_received_notes (
     transaction_id ASC
+)"#;
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
+CREATE INDEX idx_orchard_received_notes_witness_stabilized ON orchard_received_notes (
+    witness_stabilized
 )"#;
 
 /// A junction table between received Orchard notes and the transactions that spend them.
@@ -493,6 +537,264 @@ pub(super) const INDEX_ORCHARD_RNS_TX: &str = r#"
 CREATE INDEX idx_orchard_received_note_spends_transaction_id ON orchard_received_note_spends (
     transaction_id ASC
 )"#;
+
+/// Stores the Ironwood notes received by the wallet.
+///
+/// Ironwood notes ([ZIP 2005], NU6.3) are Orchard-protocol notes obtained from version 3 note
+/// plaintexts, carried by the Ironwood bundle of a transaction and committed to the Ironwood
+/// note commitment tree. They are stored separately from `orchard_received_notes` because the
+/// two pools have distinct note commitment trees, and because an Orchard action and an Ironwood
+/// action in the same transaction may share an action index.
+///
+/// The columns have the same semantics as those of the `orchard_received_notes` table; see
+/// [`TABLE_ORCHARD_RECEIVED_NOTES`] for details. Note spentness is tracked in
+/// [`TABLE_IRONWOOD_RECEIVED_NOTE_SPENDS`].
+///
+/// [ZIP 2005]: https://zips.z.cash/zip-2005
+pub(super) const TABLE_IRONWOOD_RECEIVED_NOTES: &str = "
+CREATE TABLE ironwood_received_notes (
+    id INTEGER PRIMARY KEY,
+    transaction_id INTEGER NOT NULL
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    action_index INTEGER NOT NULL,
+    account_id INTEGER NOT NULL
+        REFERENCES accounts(id) ON DELETE CASCADE,
+    diversifier BLOB NOT NULL,
+    value INTEGER NOT NULL,
+    rho BLOB NOT NULL,
+    rseed BLOB NOT NULL,
+    nf BLOB UNIQUE,
+    is_change INTEGER NOT NULL,
+    memo BLOB,
+    commitment_tree_position INTEGER,
+    recipient_key_scope INTEGER,
+    address_id INTEGER
+        REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    note_version INTEGER NOT NULL,
+    lock_expiry_height INTEGER,
+    lock_owner BLOB,
+    UNIQUE (transaction_id, action_index)
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT: &str = "
+CREATE INDEX idx_ironwood_received_notes_account ON ironwood_received_notes (
+    account_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ADDRESS: &str = "
+CREATE INDEX idx_ironwood_received_notes_address ON ironwood_received_notes (
+    address_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_TX: &str = "
+CREATE INDEX idx_ironwood_received_notes_tx ON ironwood_received_notes (
+    transaction_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = "
+CREATE INDEX idx_ironwood_received_notes_witness_stabilized ON ironwood_received_notes (
+    witness_stabilized
+)";
+
+/// A junction table between received Ironwood notes and the transactions that spend them.
+///
+/// This plays the same role for Ironwood notes as [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`] does
+/// for Sapling notes; see its documentation for details.
+pub(super) const TABLE_IRONWOOD_RECEIVED_NOTE_SPENDS: &str = "
+CREATE TABLE ironwood_received_note_spends (
+    ironwood_received_note_id INTEGER NOT NULL
+        REFERENCES ironwood_received_notes(id) ON DELETE CASCADE,
+    transaction_id INTEGER NOT NULL
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    UNIQUE (ironwood_received_note_id, transaction_id)
+)";
+pub(super) const INDEX_IRONWOOD_RNS_NOTE: &str = "
+CREATE INDEX idx_ironwood_received_note_spends_note_id ON ironwood_received_note_spends (
+    ironwood_received_note_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RNS_TX: &str = "
+CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_received_note_spends (
+    transaction_id ASC
+)";
+
+// The in-progress Orchard -> Ironwood pool migration (ZIP 318). The table DDL and store live in the
+// `crate::pool_migration` module; these golden copies track the normalized schema those tables
+// install into `wallet.db`. Every structured value is stored in typed columns and child tables; the
+// only `BLOB` is the pre-signed transaction (`pczt`), which is already-versioned, unstructured bytes.
+
+/// One row per migration an account has run: its status, identity, and the scalar fields of its
+/// denomination plan. The crossing values are the ordered list in
+/// `orchard_ironwood_migration_crossing_values`.
+///
+/// - `id`: the key the child tables join on; stable for the record's life (the parent row is
+///   updated in place) and never exposed outside the store. External identity is `uuid`.
+/// - `account_id`: the owning `accounts` row (`ON DELETE CASCADE`). Unique among NON-TERMINAL
+///   rows (`INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`): at most one migration is in progress
+///   per account, while terminal records accumulate as retained history.
+/// - `status`: the migration's lifecycle status, by wire name.
+/// - `note_split_*`: the denomination plan's scalar fields, in zatoshis.
+/// - `anchor_bucket_interval`: the anchor-retention grid, in blocks, the migration was committed
+///   against. Its transfers anchor to boundaries of this grid and are provable only while the
+///   wallet retains those checkpoints.
+/// - `replan_threshold`: the integer percent of planned transfer value above which
+///   unsatisfiable value triggers an immediate replan; stamped at commit.
+/// - `uuid`: the migration's stable identity, distinct per record and preserved across every
+///   rewrite; the only identifier exposed outside the store.
+/// - `committed_height`: the chain height known to the wallet when the record was first
+///   persisted; `NULL` when there was none, or for rows that predate the column.
+///
+/// The `DEFAULT`s on `anchor_bucket_interval` (144, [`AnchorBucketInterval::ZIP_318`]),
+/// `replan_threshold` (20, [`ReplanThreshold::DEFAULT`]), and `uuid` (empty blob, backfilled by
+/// the `orchard_ironwood_migration_history` migration) exist only so this DDL matches the stored
+/// schema text left by the `ADD COLUMN` migrations that introduced those columns; the store
+/// binds all three explicitly.
+///
+/// [`AnchorBucketInterval::ZIP_318`]: zcash_protocol::zip318::AnchorBucketInterval::ZIP_318
+/// [`ReplanThreshold::DEFAULT`]: zcash_pool_migration::satisfiability::ReplanThreshold::DEFAULT
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
+CREATE TABLE orchard_ironwood_migrations (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    note_split_fee_buffer INTEGER NOT NULL,
+    note_split_change INTEGER,
+    note_split_prep_fees INTEGER NOT NULL,
+    note_split_total_input INTEGER NOT NULL,
+    note_split_total_migratable INTEGER NOT NULL,
+    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144,
+    replan_threshold INTEGER NOT NULL DEFAULT 20,
+    uuid BLOB NOT NULL DEFAULT X'',
+    committed_height INTEGER
+)";
+/// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
+/// have no table of their own: each is its crossing value plus the denomination fee buffer.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_CROSSING_VALUES: &str = "
+CREATE TABLE orchard_ironwood_migration_crossing_values (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, ordinal)
+)";
+/// The inputs of each preparation transaction (`source` is `wallet` or `prior`), keyed by the
+/// transaction's `(layer, tx_index)` grid coordinate. The layers/transactions grid has no tables
+/// of its own: every transaction a real plan produces has at least one input and one output (and
+/// no layer is empty), so the grid is implied by the input and output rows.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_INPUTS: &str = "
+CREATE TABLE orchard_ironwood_migration_prep_inputs (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    layer INTEGER NOT NULL,
+    tx_index INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    wallet_index INTEGER,
+    prior_layer INTEGER,
+    prior_transaction INTEGER,
+    prior_output INTEGER,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, layer, tx_index, ordinal)
+)";
+/// The outputs of each preparation transaction (`role` is `funding`, `intermediate`, or `change`),
+/// keyed like the inputs.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_OUTPUTS: &str = "
+CREATE TABLE orchard_ironwood_migration_prep_outputs (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    layer INTEGER NOT NULL,
+    tx_index INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, layer, tx_index, ordinal)
+)";
+/// The preparation plan's direct-funding wallet notes (used as a funding note with no preparation).
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_DIRECT_FUNDING: &str = "
+CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    wallet_index INTEGER NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, ordinal)
+)";
+/// One row per migration transaction. `transfer_id` is the transaction's ordinal WITHIN its
+/// migration (a `MigrationTransferId`), not a transaction ID — it is created as `tx_id` by the
+/// released `orchard_ironwood_migration_tables` DDL and renamed here by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration, which is why this text is the
+/// renamed one rather than the created one. `kind` is `preparation` or `transfer`; `pczt` is
+/// the pre-signed transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle
+/// discriminant, with the hex consensus transaction ID in `txid` (`NULL` until broadcast) and
+/// `mined_height`. `lock_owner` records the `LockOwner` under which this
+/// transaction's notes are locked, if any. `unsatisfiable_at` is the height of the chain state a
+/// spent-input observation rests on, when the transaction has been determined unsatisfiable, and
+/// `unsatisfiable_kind` the wire name of WHICH observation that was (`inputs_spent`,
+/// `inputs_invalidated`, `anchor_invalidated`, or `inherited` for a mark that arrived through the
+/// dependency closure); the two are `NULL` together or non-`NULL` together, and a row where they
+/// disagree is rejected as corrupt. `broadcast_failure_at` is the chain tip an application
+/// observed from a node that REJECTED a broadcast of this transaction, standing until the engine
+/// adjudicates that rejection against the wallet's own view, and independent of the
+/// unsatisfiability columns in both directions. Dependencies are edges in
+/// `orchard_ironwood_migration_transaction_deps`, and the real-spend nullifiers cached from the
+/// stored PCZT are rows of `orchard_ironwood_migration_spend_nullifiers`.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
+CREATE TABLE orchard_ironwood_migration_transactions (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    transfer_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    kind_layer INTEGER,
+    kind_index INTEGER,
+    kind_crossing INTEGER,
+    pczt BLOB NOT NULL,
+    scheduled_height INTEGER NOT NULL,
+    expiry_height INTEGER NOT NULL,
+    anchor_boundary INTEGER,
+    state TEXT NOT NULL,
+    txid BLOB,
+    mined_height INTEGER,
+    lock_owner BLOB,
+    unsatisfiable_at INTEGER,
+    unsatisfiable_kind TEXT,
+    broadcast_failure_at INTEGER,
+    PRIMARY KEY (migration_id, transfer_id)
+)";
+/// The dependency edges between migration transactions: `transfer_id` depends on
+/// `depends_on_transfer_id`, in `ordinal` order. Both columns are ordinals within the migration
+/// named by `migration_id`, and both were created as `tx_id` / `depends_on_tx_id` by the released
+/// `orchard_ironwood_migration_tables` DDL and renamed by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS: &str = "
+CREATE TABLE orchard_ironwood_migration_transaction_deps (
+    migration_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    depends_on_transfer_id INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, transfer_id, ordinal),
+    FOREIGN KEY (migration_id, transfer_id)
+        REFERENCES orchard_ironwood_migration_transactions(migration_id, transfer_id) ON DELETE CASCADE
+)";
+/// The nullifiers of each migration transaction's REAL spends, cached from its stored PCZT so the
+/// pool-migration state machine never has to parse one: `transfer_id` names the transaction within
+/// the migration, `ordinal` the nullifier's position in that transaction's list, and `nullifier`
+/// the 32-byte value (the width is a `CHECK`, since no other length can have been written here). A
+/// transaction with no rows here has an empty cache, which only a `mined` transaction may have:
+/// the `orchard_ironwood_migration_unsatisfiability` schema migration, which populates this table
+/// for transactions committed before it existed, exempts exactly those rows.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_SPEND_NULLIFIERS: &str = "
+CREATE TABLE orchard_ironwood_migration_spend_nullifiers (
+    migration_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
+    PRIMARY KEY (migration_id, transfer_id, ordinal),
+    FOREIGN KEY (migration_id, transfer_id)
+        REFERENCES orchard_ironwood_migration_transactions(migration_id, transfer_id) ON DELETE CASCADE
+)";
+pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE: &str = "
+CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration_transactions (
+    state, scheduled_height
+)";
+/// Enforces at most one PENDING migration per account: uniqueness is scoped to the non-terminal
+/// rows, so terminal migrations accumulate as retained history. The predicate's status list is
+/// generated from `MigrationStatus::terminal` wherever this index is created; this golden copy is
+/// held to it by `canonical_pool_migration_ddl_matches_the_migration_path`.
+pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT: &str = "
+CREATE UNIQUE INDEX idx_orchard_ironwood_migrations_account ON orchard_ironwood_migrations (
+    account_id
+) WHERE status NOT IN ('complete', 'failed', 'superseded', 'cancelled')";
 
 /// Stores the transparent outputs received by the wallet.
 ///
@@ -538,6 +840,8 @@ CREATE TABLE "transparent_received_outputs" (
     max_observed_unspent_height INTEGER,
     address_id INTEGER NOT NULL
         REFERENCES addresses(id) ON DELETE CASCADE,
+    lock_expiry_height INTEGER,
+    lock_owner BLOB,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT: &str = r#"
@@ -551,6 +855,10 @@ CREATE INDEX idx_transparent_received_outputs_address ON transparent_received_ou
 pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_TX: &str = r#"
 CREATE INDEX idx_transparent_received_outputs_tx ON transparent_received_outputs (
     transaction_id
+)"#;
+pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_VALUE_ZAT: &str = r#"
+CREATE INDEX idx_transparent_received_outputs_value_zat ON transparent_received_outputs (
+    value_zat DESC
 )"#;
 
 /// A junction table between received transparent outputs and the transactions that spend them.
@@ -672,10 +980,11 @@ CREATE INDEX idx_sent_notes_transaction_id ON sent_notes (
 ///   to blockchain scanning.
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE "tx_retrieval_queue" (
-    txid BLOB NOT NULL UNIQUE,
+    txid BLOB NOT NULL,
     query_type INTEGER NOT NULL,
     dependent_transaction_id INTEGER
-        REFERENCES transactions(id_tx) ON DELETE CASCADE
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    CONSTRAINT tx_retrieval_intent UNIQUE (txid, query_type)
 )"#;
 pub(super) const INDEX_TX_RETIREVAL_QUEUE_DEPENDENT_TX: &str = r#"
 CREATE INDEX idx_tx_retrieval_queue_dependent_tx ON tx_retrieval_queue (
@@ -767,6 +1076,15 @@ CREATE TABLE sapling_tree_checkpoint_marks_removed (
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
 )";
 
+/// Stores the identifiers of Sapling [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE sapling_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
 /// Stores the shards of a [`ShardTree`] for the Orchard commitment tree.
 ///
 /// This is identical to [`TABLE_SAPLING_TREE_SHARDS`]; see its documentation for details.
@@ -819,6 +1137,84 @@ CREATE TABLE orchard_tree_checkpoint_marks_removed (
     FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
     ON DELETE CASCADE,
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+)";
+
+/// Stores the identifiers of Orchard [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// This is identical to [`TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS`]; see its documentation for
+/// details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE orchard_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
+/// Stores the shards of an Ironwood [`ShardTree`].
+///
+/// Ironwood note commitments are Orchard-shaped, so this is identical to
+/// [`TABLE_ORCHARD_TREE_SHARDS`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_SHARDS: &str = "
+CREATE TABLE ironwood_tree_shards (
+    shard_index INTEGER PRIMARY KEY,
+    subtree_end_height INTEGER,
+    root_hash BLOB,
+    shard_data BLOB,
+    contains_marked INTEGER,
+    CONSTRAINT root_unique UNIQUE (root_hash)
+)";
+
+/// Stores the "cap" of the Ironwood [`ShardTree`].
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CAP`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_CAP: &str = "
+CREATE TABLE ironwood_tree_cap (
+    -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+    -- upsert functionality; the table will only ever contain one row
+    cap_id INTEGER PRIMARY KEY,
+    cap_data BLOB NOT NULL
+)";
+
+/// Stores the checkpointed positions in the Ironwood [`ShardTree`].
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CHECKPOINTS`]; see its documentation for
+/// details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_CHECKPOINTS: &str = "
+CREATE TABLE ironwood_tree_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY,
+    position INTEGER
+)";
+
+/// Stores metadata about the positions of Ironwood notes that have been spent but for
+/// which witness information has not yet been removed from the note commitment tree.
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CHECKPOINT_MARKS_REMOVED`]; see its
+/// documentation for details.
+pub(super) const TABLE_IRONWOOD_TREE_CHECKPOINT_MARKS_REMOVED: &str = "
+CREATE TABLE ironwood_tree_checkpoint_marks_removed (
+    checkpoint_id INTEGER NOT NULL,
+    mark_removed_position INTEGER NOT NULL,
+    FOREIGN KEY (checkpoint_id) REFERENCES ironwood_tree_checkpoints(checkpoint_id)
+    ON DELETE CASCADE,
+    CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+)";
+
+/// Stores the set of Ironwood [`ShardTree`] checkpoints that are explicitly retained as anchors.
+///
+/// Ironwood note commitments are Orchard-shaped, so this is identical to
+/// [`TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE ironwood_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
 )";
 
 //
@@ -887,6 +1283,38 @@ CREATE TABLE nullifier_map (
 pub(super) const INDEX_NF_MAP_LOCATOR_IDX: &str =
     r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#;
 
+/// A map from spent transparent outpoints to the transaction that spent them.
+///
+/// This is the transparent counterpart of [`TABLE_NULLIFIER_MAP`], and exists for the same
+/// reason: an outpoint observed being spent while scanning a range `Y..Z` may spend an output
+/// the wallet has not yet discovered, and the spend must be recoverable once it is.
+///
+/// It is distinct from [`TABLE_TRANSPARENT_SPEND_MAP`], which records the same relation for a
+/// spending transaction the wallet stores. Block scanning observes spending transactions with
+/// no wallet involvement, for which no [`TABLE_TRANSACTIONS`] row exists or should be created,
+/// so the spending transaction is identified by its locator in [`TABLE_TX_LOCATOR_MAP`].
+///
+/// The `prevout_uniq` constraint holds because an outpoint can be spent at most once on a given
+/// chain; a competing spend belongs to a fork, and the entry for it is removed with the locator
+/// when the reorg is processed.
+pub(super) const TABLE_TRANSPARENT_SPEND_LOCATOR_MAP: &str = r#"
+CREATE TABLE transparent_spend_locator_map (
+    prevout_txid BLOB NOT NULL,
+    prevout_output_index INTEGER NOT NULL,
+    block_height INTEGER NOT NULL,
+    tx_index INTEGER NOT NULL,
+    CONSTRAINT tx_locator
+        FOREIGN KEY (block_height, tx_index)
+        REFERENCES tx_locator_map(block_height, tx_index)
+        ON DELETE CASCADE
+        ON UPDATE RESTRICT,
+    CONSTRAINT prevout_uniq UNIQUE (prevout_txid, prevout_output_index)
+)"#;
+pub(super) const INDEX_TRANSPARENT_SPEND_LOCATOR_IDX: &str = r#"CREATE INDEX transparent_spend_locator_idx ON transparent_spend_locator_map (
+    block_height,
+    tx_index
+)"#;
+
 //
 // Internal tables
 //
@@ -939,6 +1367,22 @@ UNION
        (orchard_received_notes.transaction_id, 3, orchard_received_notes.action_index)
 UNION
     SELECT
+        ironwood_received_notes.id AS id_within_pool_table,
+        ironwood_received_notes.transaction_id,
+        4 AS pool,
+        ironwood_received_notes.action_index AS output_index,
+        account_id,
+        ironwood_received_notes.value,
+        is_change,
+        ironwood_received_notes.memo,
+        sent_notes.id AS sent_note_id,
+        ironwood_received_notes.address_id
+    FROM ironwood_received_notes
+    LEFT JOIN sent_notes
+    ON (sent_notes.transaction_id, sent_notes.output_pool, sent_notes.output_index) =
+       (ironwood_received_notes.transaction_id, 4, ironwood_received_notes.action_index)
+UNION
+    SELECT
         u.id AS id_within_pool_table,
         u.transaction_id,
         0 AS pool,
@@ -973,6 +1417,14 @@ FROM orchard_received_note_spends s
 JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
 UNION
 SELECT
+    4 AS pool,
+    s.ironwood_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM ironwood_received_note_spends s
+JOIN ironwood_received_notes rn ON rn.id = s.ironwood_received_note_id
+UNION
+SELECT
     0 AS pool,
     s.transparent_received_output_id AS received_output_id,
     s.transaction_id,
@@ -980,6 +1432,81 @@ SELECT
 FROM transparent_received_output_spends s
 JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id";
 
+/// One row per SCHEDULED pool-migration transaction: a transaction of a non-terminal migration
+/// that has not yet been broadcast (equivalently: has no row in `transactions`). Columns carry
+/// the transaction's identity (`account_uuid`, `migration_uuid`, `txid`), kind and lifecycle
+/// `state` wire names, `scheduled_height` and `expiry_height`, its values in zatoshis
+/// (`value_spent`, `value_received`, `fee`, and `pool_crossing_value` for a transfer), note
+/// counts, and its ZIP 318 classification code. Generated from the pool-migration store's
+/// tables; see `pool_migration::store::create_migration_tx_view_sql`.
+pub(super) fn view_migration_transactions() -> String {
+    crate::pool_migration::orchard_ironwood::migration_tx_view_sql()
+}
+
+/// `v_transactions` plus the scheduled pool-migration transactions of
+/// `view_migration_transactions`, projected into the same column shape (no mined height, block
+/// time, or raw bytes; `account_balance_delta` is minus the transaction's fee, every real output
+/// being internal to the account). `v_transactions` itself is unchanged; a consumer opts into
+/// the merged feed by reading this view instead.
+///
+/// Every column reference names its source table, CTE, or subquery alias. SQLite resolves a
+/// bare name against the input columns before the output aliases, so a bare name can bind a
+/// joined table's column of the same name instead of the projection it appears to repeat.
+pub(super) const VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS: &str = "
+CREATE VIEW v_transactions_with_pending_migrations AS
+SELECT v_transactions.account_uuid           AS account_uuid,
+       v_transactions.mined_height           AS mined_height,
+       v_transactions.txid                   AS txid,
+       v_transactions.tx_index               AS tx_index,
+       v_transactions.expiry_height          AS expiry_height,
+       v_transactions.raw                    AS raw,
+       v_transactions.account_balance_delta  AS account_balance_delta,
+       v_transactions.total_spent            AS total_spent,
+       v_transactions.total_received         AS total_received,
+       v_transactions.fee_paid               AS fee_paid,
+       v_transactions.has_change             AS has_change,
+       v_transactions.sent_note_count        AS sent_note_count,
+       v_transactions.received_note_count    AS received_note_count,
+       v_transactions.memo_count             AS memo_count,
+       v_transactions.block_time             AS block_time,
+       v_transactions.expired_unmined        AS expired_unmined,
+       v_transactions.spent_note_count       AS spent_note_count,
+       v_transactions.is_shielding           AS is_shielding,
+       v_transactions.pool_crossing_value    AS pool_crossing_value,
+       v_transactions.trust_status           AS trust_status,
+       v_transactions.zip318_kind            AS zip318_kind
+FROM v_transactions
+UNION ALL
+SELECT vmt.account_uuid          AS account_uuid,
+       NULL                      AS mined_height,
+       vmt.txid                  AS txid,
+       NULL                      AS tx_index,
+       vmt.expiry_height         AS expiry_height,
+       NULL                      AS raw,
+       -vmt.fee                  AS account_balance_delta,
+       vmt.value_spent           AS total_spent,
+       vmt.value_received        AS total_received,
+       vmt.fee                   AS fee_paid,
+       vmt.has_change            AS has_change,
+       0                         AS sent_note_count,
+       vmt.received_note_count   AS received_note_count,
+       0                         AS memo_count,
+       NULL                      AS block_time,
+       (vmt.expiry_height BETWEEN 1 AND (SELECT MAX(blocks.height) FROM blocks))
+                                 AS expired_unmined,
+       vmt.spent_note_count      AS spent_note_count,
+       0                         AS is_shielding,
+       vmt.pool_crossing_value   AS pool_crossing_value,
+       NULL                      AS trust_status,
+       vmt.zip318_kind           AS zip318_kind
+FROM v_migration_transactions vmt";
+
+/// The history of transactions that affect the balance of each account in the wallet. The parent
+/// module's documentation describes the columns.
+///
+/// Every column reference names its source table, CTE, or subquery alias. SQLite resolves a
+/// bare name against the input columns before the output aliases, so a bare name can bind a
+/// joined table's column of the same name instead of the projection it appears to repeat.
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS
 WITH
@@ -988,7 +1515,7 @@ notes AS (
     SELECT ro.account_id              AS account_id,
            ro.transaction_id          AS transaction_id,
            ro.pool                    AS pool,
-           id_within_pool_table,
+           ro.id_within_pool_table    AS id_within_pool_table,
            ro.value                   AS value,
            ro.value                   AS received_value,
            0                          AS spent_value,
@@ -1018,7 +1545,7 @@ notes AS (
     SELECT ro.account_id              AS account_id,
            ros.transaction_id         AS transaction_id,
            ro.pool                    AS pool,
-           id_within_pool_table,
+           ro.id_within_pool_table    AS id_within_pool_table,
            -ro.value                  AS value,
            0                          AS received_value,
            ro.value                   AS spent_value,
@@ -1037,6 +1564,19 @@ notes AS (
          ON ros.pool = ro.pool
          AND ros.received_output_id = ro.id_within_pool_table
 ),
+-- What each account spent and received in each pool, per transaction. A pool the account
+-- received value in but spent nothing from is a pool that value crossed into from
+-- elsewhere, which is what `pool_crossings` below is built on.
+notes_by_pool AS (
+    SELECT notes.account_id                                     AS account_id,
+           notes.transaction_id                                 AS transaction_id,
+           notes.pool                                           AS pool,
+           SUM(notes.spent_note_count)                          AS spent_note_count,
+           SUM(notes.received_count + notes.change_note_count)  AS received_note_count,
+           SUM(notes.received_value)                            AS received_value
+    FROM notes
+    GROUP BY notes.account_id, notes.transaction_id, notes.pool
+),
 -- Obtain a count of the notes that the wallet created in each transaction,
 -- not counting change notes.
 sent_note_counts AS (
@@ -1053,7 +1593,39 @@ sent_note_counts AS (
     FROM sent_notes
     LEFT JOIN v_received_outputs ro ON sent_notes.id = ro.sent_note_id
     WHERE COALESCE(ro.is_change, 0) = 0
-    GROUP BY account_id, sent_notes.transaction_id
+    -- Group by the SENDING account. A bare `account_id` here binds `ro.account_id`, the
+    -- receiving account, because SQLite resolves a GROUP BY name against the input columns
+    -- before the output aliases.
+    GROUP BY sent_notes.from_account_id, sent_notes.transaction_id
+),
+-- Identifies the transactions that are wallet-internal transfers moving an account's own
+-- funds between shielded pools, and reports the value that crossed. `crossing_value` is
+-- non-NULL exactly for such a transaction, so it carries both the classification and the
+-- amount; see the `pool_crossing_value` column below.
+pool_crossings AS (
+    SELECT notes_by_pool.account_id     AS account_id,
+           notes_by_pool.transaction_id AS transaction_id,
+           CASE WHEN (
+                -- Every note spent and every output received by the wallet is shielded.
+                SUM(CASE WHEN notes_by_pool.pool = 0 THEN notes_by_pool.spent_note_count + notes_by_pool.received_note_count ELSE 0 END) = 0
+                -- The transaction spends at least one of the account's notes.
+                AND SUM(notes_by_pool.spent_note_count) > 0
+                -- At least one output was received in a pool the account spent nothing
+                -- from, so value crossed between pools.
+                AND SUM(CASE WHEN notes_by_pool.spent_note_count = 0 THEN notes_by_pool.received_note_count ELSE 0 END) > 0
+                -- We do not know about any external outputs of the transaction.
+                AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+           )
+           -- The total value received in the pools the account did not spend from. The
+           -- condition above guarantees at least one such output, so when this branch is
+           -- taken the sum is never NULL.
+           THEN SUM(CASE WHEN notes_by_pool.spent_note_count = 0 THEN notes_by_pool.received_value ELSE 0 END)
+           END AS crossing_value
+    FROM notes_by_pool
+    LEFT JOIN sent_note_counts
+         ON sent_note_counts.account_id = notes_by_pool.account_id
+         AND sent_note_counts.transaction_id = notes_by_pool.transaction_id
+    GROUP BY notes_by_pool.account_id, notes_by_pool.transaction_id
 ),
 blocks_max_height AS (
     SELECT MAX(blocks.height) AS max_height FROM blocks
@@ -1089,7 +1661,12 @@ SELECT accounts.uuid                AS account_uuid,
             -- We do not know about any external outputs of the transaction.
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        ) AS is_shielding,
-       transactions.trust_status
+       -- The value that crossed pools, when this transaction is a wallet-internal transfer
+       -- between shielded pools; NULL when it is not such a transfer. A transaction is one
+       -- exactly when this column is non-NULL.
+       pool_crossings.crossing_value AS pool_crossing_value,
+       transactions.trust_status,
+       transactions.zip318_kind
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
 JOIN transactions ON transactions.id_tx = notes.transaction_id
@@ -1098,7 +1675,11 @@ LEFT JOIN blocks ON blocks.height = transactions.mined_height
 LEFT JOIN sent_note_counts
      ON sent_note_counts.account_id = notes.account_id
      AND sent_note_counts.transaction_id = notes.transaction_id
-GROUP BY notes.account_id, notes.transaction_id";
+LEFT JOIN pool_crossings
+     ON pool_crossings.account_id = notes.account_id
+     AND pool_crossings.transaction_id = notes.transaction_id
+GROUP BY notes.account_id, notes.transaction_id
+";
 
 /// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
 /// external recipients.
@@ -1121,9 +1702,10 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   - 0: Transparent
 ///   - 2: Sapling
 ///   - 3: Orchard
+///   - 4: Ironwood
 /// - `output_index`: The index of the output within the transaction bundle associated with
 ///   the `output_pool` value; that is, within `vout` for transparent, the vector of
-///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+///   Sapling `OutputDescription` values, or the vector of Orchard or Ironwood actions.
 /// - `tx_mined_height`: An optional value identifying the block height at which the transaction that
 ///   produced this output was mined, or NULL if the transaction is unmined.
 /// - `tx_trust_status`: A flag indicating whether the transaction that produced this output
@@ -1135,11 +1717,15 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   output of this view, one for each such account.
 /// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
 ///   outgoing transaction outputs this will be `NULL`.
-/// - `address`: The address to which the output was sent; for received outputs, this is the
-///   address at which the output was received, or `NULL` for wallet-internal outputs.
+/// - `address`: The address to which the output was sent. For outputs created by the wallet,
+///   this is the recipient address recorded when the transaction was created. For other
+///   received outputs it is the address at which the output was received — for transparent
+///   outputs, the transparent receiver itself rather than a unified address containing it —
+///   or `NULL` for wallet-internal outputs.
 /// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
 ///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
-///   address. This will be `NULL` for outgoing transaction outputs.
+///   address. This will be `NULL` for outputs that were not received at one of the wallet's
+///   diversified addresses (in particular, for outputs sent to external recipients).
 /// - `value`: The value of the output, in zatoshis.
 /// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
 ///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
@@ -1165,7 +1751,13 @@ WITH unioned AS (
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
            to_account.uuid              AS to_account_uuid,
-           a.address                    AS to_address,
+           -- for a transparent output, the address at which it was received is
+           -- the transparent receiver itself, not a unified address containing it
+           CASE ro.pool
+                WHEN 0 THEN a.cached_transparent_receiver_address
+                ELSE a.address
+           END                          AS to_address,
+           0                            AS is_sent_row,
            a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
@@ -1181,7 +1773,7 @@ WITH unioned AS (
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
     LEFT JOIN accounts to_account ON to_account.id = ro.account_id
     UNION ALL
-    -- select all outputs sent from the wallet to external recipients
+    -- select all outputs sent by the wallet
     SELECT t.id_tx                      AS transaction_id,
            t.txid                       AS txid,
            t.mined_height               AS mined_height,
@@ -1191,6 +1783,7 @@ WITH unioned AS (
            from_account.uuid            AS from_account_uuid,
            NULL                         AS to_account_uuid,
            sent_notes.to_address        AS to_address,
+           1                            AS is_sent_row,
            NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
@@ -1213,7 +1806,14 @@ SELECT
     output_index,
     MAX(from_account_uuid)      AS from_account_uuid,
     MAX(to_account_uuid)        AS to_account_uuid,
-    MAX(to_address)             AS to_address,
+    -- the recipient address recorded when the wallet created the output is
+    -- authoritative; the receiving address is reported only for outputs the
+    -- wallet did not create
+    COALESCE(
+        MAX(CASE WHEN is_sent_row THEN to_address END),
+        MAX(CASE WHEN NOT is_sent_row THEN to_address END)
+    )                           AS to_address,
+    MAX(diversifier_index_be)   AS diversifier_index_be,
     MAX(value)                  AS value,
     MAX(is_change)              AS is_change,
     MAX(memo)                   AS memo,
@@ -1381,6 +1981,87 @@ GROUP BY
     subtree_end_height,
     contains_marked";
 
+/// Combines the Ironwood tree shards and scan ranges.
+///
+/// Ironwood is Orchard-shaped, so this mirrors [`view_orchard_shard_scan_ranges`], but keyed
+/// on NU6.3 (Ironwood) activation. In regtest mode when NU6.3 has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard; in that scenario there
+/// should never be any Ironwood shards, so the view should be empty and this state should be
+/// unobservable.
+pub(super) fn view_ironwood_shard_scan_ranges<P: Parameters>(params: &P) -> String {
+    format!(
+        "CREATE VIEW v_ironwood_shard_scan_ranges AS
+        SELECT
+            shard.shard_index,
+            shard.shard_index << 16 AS start_position,
+            (shard.shard_index + 1) << 16 AS end_position_exclusive,
+            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+            shard.subtree_end_height,
+            shard.contains_marked,
+            scan_queue.block_range_start,
+            scan_queue.block_range_end,
+            scan_queue.priority
+        FROM ironwood_tree_shards shard
+        LEFT OUTER JOIN ironwood_tree_shards prev_shard
+            ON shard.shard_index = prev_shard.shard_index + 1
+        -- Join with scan ranges that overlap with the subtree's involved blocks.
+        INNER JOIN scan_queue ON (
+            subtree_start_height < scan_queue.block_range_end AND
+            (
+                scan_queue.block_range_start <= shard.subtree_end_height OR
+                shard.subtree_end_height IS NULL
+            )
+        )",
+        // NU6.3 might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
+    )
+}
+
+pub(super) fn view_ironwood_shard_unscanned_ranges() -> String {
+    format!(
+        "CREATE VIEW v_ironwood_shard_unscanned_ranges AS
+        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+        SELECT
+            shard_index,
+            start_position,
+            end_position_exclusive,
+            subtree_start_height,
+            subtree_end_height,
+            contains_marked,
+            block_range_start,
+            block_range_end,
+            priority
+        FROM v_ironwood_shard_scan_ranges
+        INNER JOIN wallet_birthday
+        WHERE priority > {}
+        AND block_range_end > wallet_birthday.height",
+        priority_code(&ScanPriority::Scanned),
+    )
+}
+
+pub(super) const VIEW_IRONWOOD_SHARDS_SCAN_STATE: &str = "
+CREATE VIEW v_ironwood_shards_scan_state AS
+SELECT
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked,
+    MAX(priority) AS max_priority
+FROM v_ironwood_shard_scan_ranges
+GROUP BY
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked";
+
 pub(super) const VIEW_ADDRESS_USES: &str = "
 CREATE VIEW v_address_uses AS
     SELECT orn.address_id, orn.account_id, orn.transaction_id, t.mined_height,
@@ -1388,6 +2069,12 @@ CREATE VIEW v_address_uses AS
     FROM orchard_received_notes orn
     JOIN addresses a ON a.id = orn.address_id
     JOIN transactions t ON t.id_tx = orn.transaction_id
+UNION
+    SELECT irn.address_id, irn.account_id, irn.transaction_id, t.mined_height,
+           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+    FROM ironwood_received_notes irn
+    JOIN addresses a ON a.id = irn.address_id
+    JOIN transactions t ON t.id_tx = irn.transaction_id
 UNION
     SELECT srn.address_id, srn.account_id, srn.transaction_id, t.mined_height,
            a.key_scope, a.diversifier_index_be, a.transparent_child_index

@@ -36,35 +36,23 @@ pub const V5_TX_VERSION: u32 = 5;
 /// The version group ID for Zcash v5 transactions.
 pub const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
-/// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
-#[cfg(zcash_unstable = "nu7")]
+/// Transaction version 6, specified in [ZIP 229](https://zips.z.cash/zip-0229).
 pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
-#[cfg(zcash_unstable = "nu7")]
-pub const V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+pub const V6_VERSION_GROUP_ID: u32 = 0xD884B698;
 
-/// Transaction version 7, the extensible transaction format specified in
-/// [ZIP 248](https://zips.z.cash/zip-0248).
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+/// Transaction version 7, introduced by the NuTachyon network upgrade.
+#[cfg(zcash_unstable = "nutachyon")]
 pub const V7_TX_VERSION: u32 = 7;
-/// The version group ID for Zcash v7 transactions.
-///
-/// ZIP 248 has not yet assigned a version group ID; this placeholder will be
-/// replaced once it does.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub const V7_VERSION_GROUP_ID: u32 = 0xFFFFFFFE;
+/// The placeholder version group ID for Zcash v7 transactions ("tach" in ASCII).
+#[cfg(zcash_unstable = "nutachyon")]
+pub const V7_VERSION_GROUP_ID: u32 = 0x74616368;
 
-/// This version is used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus transaction versions are added, all call sites
-/// using this constant should be inspected, and uses should be
-/// removed as appropriate in favor of the new transaction version.
-#[cfg(zcash_unstable = "zfuture")]
-pub const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
-/// This version group ID is used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus version group IDs are added, all call sites
-/// using this constant should be inspected, and uses should be
-/// removed as appropriate in favor of the new version group ID.
-#[cfg(zcash_unstable = "zfuture")]
-pub const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+/// The maximum size in bytes of a Zcash block, and therefore the maximum size of any single
+/// transaction within one.
+///
+/// It is specified as `MAX_BLOCK_SIZE` in
+/// [§ 7.6 Block Header Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#blockheader).
+///
+/// This constant is called `MAX_BLOCK_SIZE` in the zcashd source.
+pub const MAX_BLOCK_BYTES: usize = 2_000_000;

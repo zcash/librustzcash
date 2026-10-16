@@ -8,6 +8,9 @@ pub struct ChainMetadata {
     /// the size of the Orchard note commitment tree as of the end of this block
     #[prost(uint32, tag = "2")]
     pub orchard_commitment_tree_size: u32,
+    /// the size of the Ironwood note commitment tree as of the end of this block
+    #[prost(uint32, tag = "3")]
+    pub ironwood_commitment_tree_size: u32,
 }
 /// A compact representation of a Zcash block.
 ///
@@ -23,9 +26,6 @@ pub struct ChainMetadata {
 /// newly-added service methods, not via existing APIs.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactBlock {
-    /// the version of this wire format, for storage
-    #[prost(uint32, tag = "1")]
-    pub proto_version: u32,
     /// the height of this block
     #[prost(uint64, tag = "2")]
     pub height: u64,
@@ -70,7 +70,8 @@ pub struct CompactTx {
     /// stateless server and a transaction with transparent inputs, this will be
     /// unset because the calculation requires reference to prior transactions.
     /// If there are no transparent inputs, the fee will be calculable as:
-    ///     valueBalanceSapling + valueBalanceOrchard + sum(vPubNew) - sum(vPubOld) - sum(tOut)
+    ///     valueBalanceSapling + valueBalanceOrchard + valueBalanceIronwood
+    ///     + sum(vPubNew) - sum(vPubOld) - sum(tOut)
     #[prost(uint32, tag = "3")]
     pub fee: u32,
     #[prost(message, repeated, tag = "4")]
@@ -79,6 +80,8 @@ pub struct CompactTx {
     pub outputs: ::prost::alloc::vec::Vec<CompactSaplingOutput>,
     #[prost(message, repeated, tag = "6")]
     pub actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
+    #[prost(message, repeated, tag = "9")]
+    pub ironwood_actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
     /// `CompactTxIn` values corresponding to the `vin` entries of the full transaction.
     ///
     /// Note: the single null-outpoint input for coinbase transactions is omitted. Light

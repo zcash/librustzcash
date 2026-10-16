@@ -7,6 +7,7 @@ use crate::scanning::ScanError;
 
 /// Errors related to chain validation and scanning.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error<WalletError, BlockSourceError> {
     /// An error that was produced by wallet operations in the course of scanning the chain.
     Wallet(WalletError),

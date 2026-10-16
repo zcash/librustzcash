@@ -11,9 +11,12 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::account_delete_cascade;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x944f8a1e_bdfa_4d52_90ca_663dee8efc62);
+/// This migration relaxes the addresses table constraint to allow standalone P2SH addresses that
+/// have an imported transparent receiver script but no imported public key and no transparent child
+/// index.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x944f8a1e_bdfa_4d52_90ca_663dee8efc62);
 
-const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration;
 
@@ -136,7 +139,7 @@ mod tests {
     use secrecy::Secret;
     use tempfile::NamedTempFile;
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
 
     use crate::{
         WalletDb,
@@ -171,8 +174,8 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &seed_bytes[..], zip32::AccountId::ZERO)
             .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
-        let ufvk_str = ufvk.encode(&network);
-        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
+        let ufvk_str = ufvk.encode(&network).unwrap();
+        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network).unwrap();
 
         db_data
             .conn

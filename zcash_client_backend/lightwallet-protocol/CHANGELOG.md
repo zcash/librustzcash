@@ -5,7 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
+
+## [v0.5.0] - 2026-06-30
+
+### Added
+- `compact_formats.ChainMetadata` has added field `ironwoodCommitmentTreeSize`.
+- `compact_formats.CompactTx` has added field `ironwoodActions`, which may be
+  used to represent Ironwood action data.
+- `service.PoolType` has added value `IRONWOOD`.
+- `service.ShieldedProtocol` has added value `ironwood`.
+- `service.TreeState` has added field `ironwoodTree`, which represents the
+  Ironwood commitment tree state.
+
+### Changed
+- Documentation has been updated throughout to reflect that the Ironwood pool
+  is included in the shielded pools that service methods return data for by
+  default. See [#29](https://github.com/zcash/lightwallet-protocol/pull/29).
+
+### Removed
+- `compact_formats.CompactBlock.protoVersion` has been removed. The field
+  number `1` and name `protoVersion` are now reserved. See
+  [#25](https://github.com/zcash/lightwallet-protocol/issues/25).
 
 ## [v0.4.1] - 2026-02-20
 

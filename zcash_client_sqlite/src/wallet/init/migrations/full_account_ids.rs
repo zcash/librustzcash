@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
 use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 use zip32::fingerprint::SeedFingerprint;
 
 use super::{
@@ -17,14 +17,14 @@ use crate::wallet::{account_kind_code, init::WalletMigrationError};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) seed: Option<Rc<SecretVec<u8>>>,
     pub(super) params: P,
 }
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     receiving_key_scopes::MIGRATION_ID,
     add_account_birthdays::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
@@ -159,7 +159,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         }
                     })?;
                     let expected_ufvk = usk.to_unified_full_viewing_key();
-                    if ufvk != expected_ufvk.encode(&self.params) {
+                    if !ufvk_parsed.is_equivalent_to(&expected_ufvk) {
                         return Err(if seed_is_relevant {
                             WalletMigrationError::CorruptedData(
                                 "UFVK does not match expected value.".to_string(),
@@ -174,7 +174,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                     let uivk = ufvk_parsed
                         .to_unified_incoming_viewing_key()
-                        .encode(&self.params);
+                        .encode(&self.params)?;
 
                     #[cfg(feature = "orchard")]
                     let orchard_item = ufvk_parsed.orchard().map(|k| k.to_bytes());
@@ -184,7 +184,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let sapling_item = ufvk_parsed.sapling().map(|k| k.to_bytes());
 
                     #[cfg(feature = "transparent-inputs")]
-                    let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
+                    let transparent_item = ufvk_parsed.p2pkh().map(|k| k.serialize());
                     #[cfg(not(feature = "transparent-inputs"))]
                     let transparent_item: Option<Vec<u8>> = None;
 

@@ -1,20 +1,20 @@
 //! Functions common to Sapling and Orchard support in the wallet.
 
 use incrementalmerkletree::Position;
-use rusqlite::{Connection, Row, named_params, types::Value};
+use rusqlite::{Connection, Row, ToSql, named_params, types::Value};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
     data_api::{
         MaxSpendMode, NoteFilter, NullifierQuery, PoolMeta, SAPLING_SHARD_HEIGHT, TargetValue,
         scanning::ScanPriority,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
 };
@@ -23,13 +23,22 @@ use crate::{
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
     error::SqliteClientError,
     wallet::{
-        get_anchor_height, pool_code,
+        get_anchor_height,
+        locking::{
+            locked_tier_expr, output_eligible_condition, overridable_owners_rarray,
+            push_lock_params,
+        },
+        pool_code,
         scanning::{parse_priority_code, priority_code},
     },
 };
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use {
+    crate::IRONWOOD_TABLES_PREFIX, crate::ORCHARD_TABLES_PREFIX,
+    zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 pub(crate) struct TableConstants {
     pub(crate) table_prefix: &'static str,
@@ -52,8 +61,19 @@ const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
     table_prefix: ORCHARD_TABLES_PREFIX,
     output_index_col: "action_index",
     output_count_col: "orchard_action_count",
-    note_reconstruction_cols: "rho, rseed",
+    note_reconstruction_cols: "rho, rseed, note_version",
     shard_height: ORCHARD_SHARD_HEIGHT,
+};
+
+// Ironwood notes are Orchard-shaped, so the Ironwood tables mirror the Orchard tables; they differ
+// only in the table prefix and the block-level action-count column.
+#[cfg(feature = "orchard")]
+const IRONWOOD_TABLE_CONSTANTS: TableConstants = TableConstants {
+    table_prefix: IRONWOOD_TABLES_PREFIX,
+    output_index_col: "action_index",
+    output_count_col: "ironwood_action_count",
+    note_reconstruction_cols: "rho, rseed, note_version",
+    shard_height: IRONWOOD_SHARD_HEIGHT,
 };
 
 #[allow(dead_code)]
@@ -62,14 +82,18 @@ pub(crate) trait ErrUnsupportedPool {
 }
 
 pub(crate) fn table_constants<E: ErrUnsupportedPool>(
-    shielded_protocol: ShieldedProtocol,
+    shielded_protocol: ShieldedPool,
 ) -> Result<TableConstants, E> {
     match shielded_protocol {
-        ShieldedProtocol::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
+        ShieldedPool::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
         #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
+        ShieldedPool::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        ShieldedPool::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => Ok(IRONWOOD_TABLE_CONSTANTS),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Ironwood => Err(E::unsupported_pool_type(PoolType::IRONWOOD)),
     }
 }
 
@@ -154,7 +178,7 @@ fn unscanned_tip_exists(
 /// select a few too many nullifiers, it's not a big deal.
 pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
     conn: &Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     query: NullifierQuery,
     parse_nf: F,
 ) -> Result<Vec<(AccountUuid, N)>, SqliteClientError> {
@@ -200,17 +224,23 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     txid: &TxId,
     index: u32,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -218,6 +248,16 @@ where
         note_reconstruction_cols,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
+
+    let txid_bytes = txid.as_ref();
+    let target_height_arg = u32::from(target_height);
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":txid", &txid_bytes),
+        (":output_index", &index),
+        (":target_height", &target_height_arg),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
     let result = conn.query_row_and_then(
         &format!(
@@ -242,16 +282,14 @@ where
              AND rn.recipient_key_scope IS NOT NULL
              AND rn.nf IS NOT NULL
              AND rn.commitment_tree_position IS NOT NULL
-             AND rn.id NOT IN ({})
+             AND rn.id NOT IN ({}) -- the note is unspent
+             AND ({}) -- the note is eligible under the lock filter
              GROUP BY rn.id",
-            spent_notes_clause(table_prefix)
+            spent_notes_clause(table_prefix),
+            output_eligible_condition(lock_filter, "rn"),
         ),
-        named_params![
-           ":txid": txid.as_ref(),
-           ":output_index": index,
-           ":target_height": u32::from(target_height),
-        ],
-        |row| to_spendable_note(params, row),
+        &sql_params[..],
+        |row| to_spendable_note(params, protocol, row),
     );
 
     // `OptionalExtension` doesn't work here because the error type of `Result` is already
@@ -304,11 +342,16 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let Some(anchor_height) =
         get_anchor_height(conn, target_height, confirmations_policy.trusted())?
@@ -327,21 +370,72 @@ where
             protocol,
             &to_spendable_note,
             NoteRequest::from_max_spend_mode(mode, anchor_height),
+            lock_filter,
         ),
         TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
             params,
             account,
             zats,
+            ValueSelection::Accumulate,
             target_height,
             anchor_height,
             confirmations_policy,
             exclude,
             protocol,
             &to_spendable_note,
+            lock_filter,
         ),
     }
 }
+
+/// Selects the single OLDEST spendable note of the given protocol whose value alone is at least
+/// `value`, or `None` when no single eligible note covers it. Age is the note's commitment tree
+/// position, which is assigned in strict chain order.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_single_spendable_note<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedPool,
+    to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    let Some(anchor_height) =
+        get_anchor_height(conn, target_height, confirmations_policy.trusted())?
+    else {
+        return Ok(None);
+    };
+
+    Ok(select_spendable_notes_matching_value(
+        conn,
+        params,
+        account,
+        value,
+        ValueSelection::SingleCovering,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        exclude,
+        protocol,
+        &to_spendable_note,
+        lock_filter,
+    )?
+    .into_iter()
+    .next())
+}
+
 /// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
@@ -351,7 +445,7 @@ where
 /// - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
 /// - Note spendability is determined using the `target_height`. If the note is mined at a height
 ///   greater than or equal to the target height, it will still be returned by this query.
-/// - The `to_spendable_note` function is expected to return `Ok(None)` in the case that spending
+/// - The `to_received_note` function is expected to return `Ok(None)` in the case that spending
 ///   key details cannot be determined.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
@@ -361,12 +455,17 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_received_note: F,
     note_request: NoteRequest,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -383,6 +482,7 @@ where
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
              scan_state.max_priority,
+             rn.witness_stabilized,
              IFNULL(t.trust_status, 0) AS trust_status,
              MAX(tt.mined_height) AS max_shielding_input_height,
              MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -407,9 +507,11 @@ where
          AND ({})  -- the transaction is unexpired
          AND rn.id NOT IN rarray(:exclude)  -- the note is not excluded
          AND rn.id NOT IN ({})  -- the note is unspent
+         AND ({}) -- the note is eligible under the lock filter
          GROUP BY rn.id",
         tx_unexpired_condition("t"),
-        spent_notes_clause(table_prefix)
+        spent_notes_clause(table_prefix),
+        output_eligible_condition(lock_filter, "rn")
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -424,16 +526,24 @@ where
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
+    let account_uuid = account.0;
+    let target_height_arg = u32::from(target_height);
+    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":account_uuid", &account_uuid),
+        (":target_height", &target_height_arg),
+        (":exclude", &excluded_ptr),
+        (":min_value", &min_value),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+
     let row_results = stmt_select_notes.query_and_then(
-        named_params![
-            ":account_uuid": account.0,
-            ":target_height": &u32::from(target_height),
-            ":exclude": &excluded_ptr,
-            ":min_value": u64::from(zip317::MARGINAL_FEE)
-        ],
+        &sql_params[..],
         |row| -> Result<_, SqliteClientError> {
-            let result_note = to_received_note(params, row)?;
+            let result_note = to_received_note(params, protocol, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
+            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let shard_scan_priority = max_priority_raw
@@ -448,6 +558,7 @@ where
 
             Ok((
                 result_note,
+                witness_stabilized,
                 shard_scan_priority,
                 tx_trust_status,
                 tx_shielding_inputs_trusted,
@@ -457,29 +568,35 @@ where
 
     row_results
         .map(|t| match t? {
-            (Some(note), max_shard_priority, tx_trusted, tx_shielding_inputs_trusted) => {
-                let shard_scanned = max_shard_priority
-                    .iter()
-                    .any(|p| *p <= ScanPriority::Scanned);
+            (
+                Some(note),
+                witness_stabilized,
+                max_shard_priority,
+                tx_trusted,
+                tx_shielding_inputs_trusted,
+            ) => {
+                let shard_witness_available = witness_stabilized
+                    || max_shard_priority.is_some_and(|p| p <= ScanPriority::Scanned);
 
                 let mined_at_anchor = note
                     .mined_height()
                     .zip(note_request.anchor_height())
                     .is_some_and(|(h, ah)| h <= ah);
 
-                let has_confirmations = confirmations_policy.confirmations_until_spendable(
-                    target_height,
-                    PoolType::Shielded(protocol),
-                    Some(note.spending_key_scope()),
-                    note.mined_height(),
-                    tx_trusted,
-                    note.max_shielding_input_height(),
-                    tx_shielding_inputs_trusted,
-                ) == 0;
+                let has_confirmations = witness_stabilized
+                    || confirmations_policy.confirmations_until_spendable(
+                        target_height,
+                        PoolType::Shielded(protocol),
+                        Some(note.spending_key_scope()),
+                        note.mined_height(),
+                        tx_trusted,
+                        note.max_shielding_input_height(),
+                        tx_shielding_inputs_trusted,
+                    ) == 0;
 
                 match (
                     note_request,
-                    shard_scanned && mined_at_anchor && has_confirmations,
+                    shard_witness_available && mined_at_anchor && has_confirmations,
                 ) {
                     (NoteRequest::UnspentOrError { .. }, false) => {
                         Err(SqliteClientError::IneligibleNotes)
@@ -494,9 +611,23 @@ where
         .collect()
 }
 
+/// The shape of a value-targeted note selection: accumulate the oldest notes toward the target,
+/// or draw only the single oldest note that covers it alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ValueSelection {
+    /// Accumulate the oldest eligible notes until the target value is covered.
+    Accumulate,
+    /// Select only the oldest eligible notes whose individual values cover the target alone,
+    /// oldest first.
+    SingleCovering,
+}
+
 /// Selects the set of spendable notes whose sum will be equal or greater that the
 /// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
 /// the ones present in the ``exclude`` slice.
+///
+/// Under [`ValueSelection::SingleCovering`], instead returns the notes whose individual value
+/// covers ``target_value`` alone, oldest first; callers take the head.
 ///
 /// - Implementation details
 ///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
@@ -507,15 +638,21 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
+    selection: ValueSelection,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -523,9 +660,10 @@ where
         note_reconstruction_cols,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
-    if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
-        return Ok(vec![]);
-    }
+
+    // When an anchor exists within an unscanned range, nodes without stabilized witness data will
+    // not be reliably constructable. The selection query will use this to filter out such notes.
+    let tip_unscanned = unscanned_tip_exists(conn, anchor_height, table_prefix)?;
 
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached.
@@ -541,15 +679,77 @@ where
     // 3) Select all notes for which the running sum was less than the required value, as
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
+    //
+    // AGE is the note's commitment tree position: positions are assigned in strict chain
+    // order, so ordering by position is ordering by the age of the note on chain. The row
+    // id is NOT a usable proxy for age — ids are assigned in SCAN order, and priority
+    // scanning visits recent blocks before back-filling history, so a restored wallet's
+    // newest notes carry its lowest ids.
+    //
+    // A `LockFilter::Policy` that prefers one lock tier (`PreferUnlocked`/`PreferLocked`)
+    // accumulates the running sum in tier order (via the leading window `ORDER BY` key) so
+    // that the preferred tier is drawn upon first; age order is retained as the secondary
+    // key so that within each tier the oldest notes are still selected first. Because the
+    // window order need not match the CTE's physical output order, the threshold-crossing
+    // note is chosen as the note with the smallest running sum at or above the target
+    // (`ORDER BY so_far`).
+    let tier = locked_tier_expr(lock_filter, "rn");
+    let window_frame = match &tier {
+        Some((expr, direction)) => format!(
+            "ORDER BY {expr} {direction}, rn.commitment_tree_position ROWS UNBOUNDED PRECEDING"
+        ),
+        None => "ORDER BY rn.commitment_tree_position ROWS UNBOUNDED PRECEDING".to_string(),
+    };
+    // The single-covering tail selects FROM the CTE, where `rn` is out of scope, so the tier
+    // expression is materialized as a CTE column with the direction applied at the ordering
+    // site; a constant stands in when the lock filter admits only one tier and no preference
+    // applies.
+    let (tier_column, tier_direction) = tier
+        .as_ref()
+        .map(|(expr, direction)| (expr.as_str(), *direction))
+        .unwrap_or(("0", "ASC"));
+    let crossing_note_subquery =
+        "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1";
+    let result_columns = format!(
+        "id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope,
+                mined_height, witness_stabilized, trust_status,
+                max_shielding_input_height, min_shielding_input_trust"
+    );
+    // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
+    // takes every note below the running-sum threshold plus the threshold-crossing note;
+    // single-covering takes the individually sufficient notes ordered by lock tier first and
+    // age second — the same key order the accumulation window uses, so a `PreferUnlocked` or
+    // `PreferLocked` caller draws its preferred tier before an older note of the other tier —
+    // and relies on the caller to take the head (the Rust-side confirmations filter below may
+    // drop leading rows, so the limit cannot be applied in SQL).
+    let selection_tail = match selection {
+        ValueSelection::Accumulate => format!(
+            "SELECT {result_columns}
+         FROM eligible WHERE so_far < :target_value
+         UNION
+         SELECT {result_columns}
+         FROM ({crossing_note_subquery})"
+        ),
+        ValueSelection::SingleCovering => format!(
+            "SELECT {result_columns}
+         FROM eligible WHERE value >= :target_value
+         ORDER BY lock_tier {tier_direction}, commitment_tree_position"
+        ),
+    };
+    let eligible_condition = output_eligible_condition(lock_filter, "rn");
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
              SELECT
                  rn.id AS id, t.txid, rn.{output_index_col},
                  rn.diversifier, rn.value,
                  {note_reconstruction_cols}, rn.commitment_tree_position,
-                 SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
+                 {tier_column} AS lock_tier,
+                 SUM(value) OVER ({window_frame}) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
+                 rn.witness_stabilized,
                  IFNULL(t.trust_status, 0) AS trust_status,
                  MAX(tt.mined_height) AS max_shielding_input_height,
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -571,29 +771,25 @@ where
              AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL
-             -- the shard containing the note is fully scanned; this condition will exclude
-             -- notes for which `scan_state.max_priority IS NULL` (which will also arise if
-             -- `rn.commitment_tree_position IS NULL`; hence we don't need that explicit filter)
-             AND scan_state.max_priority <= :scanned_priority
+             -- The note must be mined at or below the anchor for the anchor's tree
+             -- frontier to witness it
              AND t.block <= :anchor_height
+             -- A stabilized note's witness is durable across rewinds, so it bypasses
+             -- the scan-state gating
+             AND (
+                 rn.witness_stabilized = 1
+                 OR (
+                     :tip_unscanned = 0 -- the tip shard has no unscanned ranges
+                     AND scan_state.max_priority <= :scanned_priority -- the note shard is fully scanned or ignored
+                 )
+             )
              AND rn.id NOT IN rarray(:exclude)
-             AND rn.id NOT IN ({})
+             AND rn.id NOT IN ({}) -- the note is not spent
+             AND ({eligible_condition}) -- the note is eligible under the lock filter
              GROUP BY rn.id
          )
-         SELECT id, txid, {output_index_col},
-                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope,
-                mined_height, trust_status,
-                max_shielding_input_height, min_shielding_input_trust
-         FROM eligible WHERE so_far < :target_value
-         UNION
-         SELECT id, txid, {output_index_col},
-                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope,
-                mined_height, trust_status,
-                max_shielding_input_height, min_shielding_input_trust
-         FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
-        spent_notes_clause(table_prefix)
+         {selection_tail}",
+        spent_notes_clause(table_prefix),
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -608,34 +804,45 @@ where
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
-    let notes = stmt_select_notes.query_and_then(
-        named_params![
-            ":account_uuid": account.0,
-            ":anchor_height": &u32::from(anchor_height),
-            ":target_height": &u32::from(target_height),
-            ":target_value": &u64::from(target_value),
-            ":exclude": &excluded_ptr,
-            ":scanned_priority": priority_code(&ScanPriority::Scanned),
-            ":min_value": u64::from(zip317::MARGINAL_FEE)
-        ],
-        |row| {
-            let tx_trust_status = row.get::<_, bool>("trust_status")?;
-            let max_shielding_input_height = row
-                .get::<_, Option<u32>>("max_shielding_input_height")?
-                .map(BlockHeight::from);
-            let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
-            let note = to_spendable_note(params, row)?;
+    let account_uuid = account.0;
+    let anchor_height_arg = u32::from(anchor_height);
+    let target_height_arg = u32::from(target_height);
+    let target_value_arg = u64::from(target_value);
+    let scanned_priority = priority_code(&ScanPriority::Scanned);
+    let tip_unscanned_arg = i64::from(tip_unscanned);
+    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":account_uuid", &account_uuid),
+        (":anchor_height", &anchor_height_arg),
+        (":target_height", &target_height_arg),
+        (":target_value", &target_value_arg),
+        (":exclude", &excluded_ptr),
+        (":scanned_priority", &scanned_priority),
+        (":tip_unscanned", &tip_unscanned_arg),
+        (":min_value", &min_value),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
-            Ok(note.map(|n| {
-                (
-                    n,
-                    tx_trust_status,
-                    max_shielding_input_height,
-                    tx_shielding_inputs_trusted,
-                )
-            }))
-        },
-    )?;
+    let notes = stmt_select_notes.query_and_then(&sql_params[..], |row| {
+        let tx_trust_status = row.get::<_, bool>("trust_status")?;
+        let max_shielding_input_height = row
+            .get::<_, Option<u32>>("max_shielding_input_height")?
+            .map(BlockHeight::from);
+        let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
+        let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+        let note = to_spendable_note(params, protocol, row)?;
+
+        Ok(note.map(|n| {
+            (
+                n,
+                tx_trust_status,
+                max_shielding_input_height,
+                tx_shielding_inputs_trusted,
+                witness_stabilized,
+            )
+        }))
+    })?;
 
     notes
         .filter_map(|result_maybe_note| {
@@ -647,16 +854,21 @@ where
                         tx_trusted,
                         max_shielding_input_height,
                         tx_shielding_inputs_trusted,
+                        witness_stabilized,
                     )| {
-                        let has_confirmations = confirmations_policy.confirmations_until_spendable(
-                            target_height,
-                            PoolType::Shielded(protocol),
-                            Some(note.spending_key_scope()),
-                            note.mined_height(),
-                            tx_trusted,
-                            max_shielding_input_height,
-                            tx_shielding_inputs_trusted,
-                        ) == 0;
+                        // A stabilized note was confirmed well beyond any reasonable
+                        // confirmations policy at stabilization time, so the confirmations
+                        // check is trivially satisfied.
+                        let has_confirmations = witness_stabilized
+                            || confirmations_policy.confirmations_until_spendable(
+                                target_height,
+                                PoolType::Shielded(protocol),
+                                Some(note.spending_key_scope()),
+                                note.mined_height(),
+                                tx_trusted,
+                                max_shielding_input_height,
+                                tx_shielding_inputs_trusted,
+                            ) == 0;
 
                         has_confirmations.then_some(note)
                     },
@@ -700,7 +912,7 @@ impl UnspentNoteMeta {
 
 pub(crate) fn select_unspent_note_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
@@ -762,11 +974,12 @@ pub(crate) fn select_unspent_note_meta(
 
 pub(crate) fn unspent_notes_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     account: AccountUuid,
     filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<PoolMeta>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
@@ -788,7 +1001,22 @@ pub(crate) fn unspent_notes_meta(
         })
     }
 
-    let run_selection = |min_value| {
+    // This is an aggregation, not a value-target selection, so no tier ordering applies; only the
+    // eligibility filter (Part A) is imposed.
+    let eligible_condition = output_eligible_condition(lock_filter, "rn");
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let account_uuid = account.0;
+    let target_height_arg = u32::from(target_height);
+
+    let run_selection = |min_value: Zatoshis| {
+        let min_value = u64::from(min_value);
+        let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+            (":account_uuid", &account_uuid),
+            (":min_value", &min_value),
+            (":exclude", &excluded_ptr),
+            (":target_height", &target_height_arg),
+        ];
+        push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
         conn.query_row_and_then::<_, SqliteClientError, _, _>(
             &format!(
                 "SELECT COUNT(*), SUM(rn.value)
@@ -800,15 +1028,11 @@ pub(crate) fn unspent_notes_meta(
                  AND rn.value > :min_value
                  AND transactions.mined_height IS NOT NULL
                  AND rn.id NOT IN rarray(:exclude)
-                 AND rn.id NOT IN ({})",
-                spent_notes_clause(table_prefix)
+                 AND rn.id NOT IN ({}) -- the note is unspent
+                 AND ({eligible_condition}) -- the note is eligible under the lock filter",
+                spent_notes_clause(table_prefix),
             ),
-            named_params![
-                ":account_uuid": account.0,
-                ":min_value": u64::from(min_value),
-                ":exclude": &excluded_ptr,
-                ":target_height": u32::from(target_height)
-            ],
+            &sql_params[..],
             |row| {
                 Ok((
                     row.get::<_, usize>(0)?,
@@ -945,7 +1169,7 @@ mod tests {
         AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedProtocol, value::Zatoshis};
+    use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
     use crate::testing::{BlockCache, db::TestDbFactory};
 
@@ -968,7 +1192,7 @@ mod tests {
 
         let unspent_note_meta = super::select_unspent_note_meta(
             st.wallet().conn(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             birthday_height,
             h,
         )

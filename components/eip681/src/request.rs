@@ -12,11 +12,67 @@ use snafu::prelude::*;
 
 use crate::error::{
     AbiParameterAddressIsNotAnAddressSnafu, AbiParameterLenSnafu, AbiParameterNameSnafu,
-    AbiParameterUint256Snafu, ChainIdInvalidSnafu, Error, FnNameSnafu, HasAbiParametersSnafu,
-    HasFunctionNameSnafu, MissingFnSnafu, NativeTransferError, ParameterInvalidSnafu,
-    ParameterNotNumberSnafu, RecipientAddressInvalidSnafu, UnexpectedLeftoverInputSnafu,
+    AbiParameterUint256Snafu, AmbiguousEncodingSnafu, ChainIdInvalidSnafu, Error, FnNameSnafu,
+    HasAbiParametersSnafu, HasFunctionNameSnafu, MissingFnSnafu, NativeTransferError,
+    ParameterInvalidSnafu, ParameterNotNumberSnafu, RecipientAddressInvalidSnafu,
+    UnexpectedLeftoverInputSnafu,
 };
-use crate::parse::RawTransactionRequest;
+use crate::parse::{
+    AddressOrEnsName, Digits, EthereumAbiTypeName, Number, Parameter, Parameters,
+    RawTransactionRequest, SchemaPrefix, UrlEncodedUnicodeString, Value,
+};
+
+/// The function name of an ERC-20 transfer.
+const ERC20_TRANSFER_FUNCTION_NAME: &str = "transfer";
+
+/// The ABI type of the first ERC-20 transfer parameter: the recipient.
+const ERC20_RECIPIENT_ABI_TYPE: &str = "address";
+
+/// The ABI type of the second ERC-20 transfer parameter: the amount.
+const ERC20_AMOUNT_ABI_TYPE: &str = "uint256";
+
+/// Parses `input` as exactly one Ethereum address or ENS name.
+fn parse_address(input: &str) -> Result<AddressOrEnsName, Error> {
+    let (rest, address) = AddressOrEnsName::parse(input)?;
+    ensure!(
+        rest.is_empty(),
+        UnexpectedLeftoverInputSnafu { input: rest }
+    );
+    Ok(address)
+}
+
+/// Assembles a raw request from its parts.
+///
+/// Returns an error if the URI encoding of the request does not parse back to the
+/// same request.
+fn raw_request_from_parts(
+    schema_prefix: &str,
+    has_pay: bool,
+    target_address: AddressOrEnsName,
+    chain_id: Option<u64>,
+    function_name: Option<UrlEncodedUnicodeString>,
+    parameters: Vec<Parameter>,
+) -> Result<RawTransactionRequest, Error> {
+    let raw = RawTransactionRequest {
+        schema_prefix: SchemaPrefix {
+            prefix: schema_prefix.to_string(),
+            has_pay,
+        },
+        target_address,
+        chain_id: chain_id.map(Digits::from_u64),
+        function_name,
+        parameters: (!parameters.is_empty()).then_some(Parameters(parameters)),
+    };
+
+    let uri = raw.to_string();
+    let round_trips = matches!(
+        RawTransactionRequest::parse(&uri),
+        Ok((rest, reparsed)) if rest.is_empty() && reparsed == raw
+    );
+    ensure!(round_trips, AmbiguousEncodingSnafu { uri });
+
+    Ok(raw)
+}
 
 /// A parsed EIP-681 transaction request.
 ///
@@ -52,52 +108,6 @@ pub enum TransactionRequest {
 }
 
 impl TransactionRequest {
-    /// Construct a `TransactionRequest` from `NativeRequest` parts, if possible.
-    pub fn from_native_request_parts(
-        schema_prefix: &str,
-        has_pay: bool,
-        chain_id: Option<u64>,
-        recipient: &str,
-        value: Option<U256>,
-        gas_limit: Option<U256>,
-        gas_price: Option<U256>,
-    ) -> Result<Self, Error> {
-        let chain_id = chain_id.map(|id| format!("@{id}")).unwrap_or_default();
-        let value = value.map(|v| format!("value={v}"));
-        let gas_limit = gas_limit.map(|v| format!("gasLimit={v}"));
-        let gas_price = gas_price.map(|v| format!("gasPrice={v}"));
-        let params: String = [value, gas_limit, gas_price]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("&");
-        let pay = if has_pay { "pay-" } else { "" };
-        let query = if params.is_empty() {
-            String::new()
-        } else {
-            format!("?{params}")
-        };
-        let req = format!("{schema_prefix}:{pay}{recipient}{chain_id}{query}");
-        Self::parse(&req)
-    }
-
-    /// Construct a `TransactionRequest` from `Erc20Request` parts, if possible.
-    pub fn from_erc20_request_parts(
-        schema_prefix: &str,
-        has_pay: bool,
-        chain_id: Option<u64>,
-        token_contract_address: &str,
-        recipient_address: &str,
-        value: U256,
-    ) -> Result<Self, Error> {
-        let chain_id = chain_id.map(|id| format!("@{id}")).unwrap_or_default();
-        let pay = if has_pay { "pay-" } else { "" };
-        let req = format!(
-            "{schema_prefix}:{pay}{token_contract_address}{chain_id}/transfer?address={recipient_address}&uint256={value}"
-        );
-        Self::parse(&req)
-    }
-
     /// Parse an EIP-681 URI into a categorized transaction request.
     ///
     /// The request is automatically categorized based on its structure:
@@ -238,6 +248,43 @@ impl TryFrom<&RawTransactionRequest> for NativeRequest {
 }
 
 impl NativeRequest {
+    /// Constructs a native transfer request from its parts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `recipient` is not exactly one valid address or ENS name
+    /// (a hex address must be 40 digits, with a valid ERC-55 checksum if mixed-case),
+    /// or if the parts have no URI encoding that parses back to them (for example, a
+    /// `schema_prefix` containing `:`).
+    pub fn from_parts(
+        schema_prefix: &str,
+        has_pay: bool,
+        chain_id: Option<u64>,
+        recipient: &str,
+        value: Option<U256>,
+        gas_limit: Option<U256>,
+        gas_price: Option<U256>,
+    ) -> Result<Self, Error> {
+        let parameters = [
+            value.map(|v| Parameter::Value(Number::from_uint256(v))),
+            gas_limit.map(|v| Parameter::GasLimit(Number::from_uint256(v))),
+            gas_price.map(|v| Parameter::GasPrice(Number::from_uint256(v))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let raw = raw_request_from_parts(
+            schema_prefix,
+            has_pay,
+            parse_address(recipient)?,
+            chain_id,
+            None,
+            parameters,
+        )?;
+        Ok(NativeRequest::try_from(&raw)?)
+    }
+
     /// Returns the schema prefix of the request.
     pub fn schema_prefix(&self) -> &str {
         self.inner.schema_prefix.prefix()
@@ -354,7 +401,7 @@ impl TryFrom<&RawTransactionRequest> for Erc20Request {
         let fn_name = raw.function_name.as_ref().context(MissingFnSnafu)?;
         let decoded = fn_name.decode()?;
         ensure!(
-            decoded == "transfer",
+            decoded == ERC20_TRANSFER_FUNCTION_NAME,
             FnNameSnafu {
                 seen: decoded.to_string()
             }
@@ -381,7 +428,7 @@ impl TryFrom<&RawTransactionRequest> for Erc20Request {
 
         // We expect a specific parameter count and order
         ensure!(
-            param1 == "address" && param2 == "uint256",
+            param1 == ERC20_RECIPIENT_ABI_TYPE && param2 == ERC20_AMOUNT_ABI_TYPE,
             AbiParameterNameSnafu { param1, param2 }
         );
 
@@ -401,6 +448,50 @@ impl TryFrom<&RawTransactionRequest> for Erc20Request {
 }
 
 impl Erc20Request {
+    /// Constructs an ERC-20 transfer request from its parts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `token_contract_address` or `recipient_address` is not
+    /// exactly one valid address or ENS name (a hex address must be 40 digits, with a
+    /// valid ERC-55 checksum if mixed-case), or if the parts have no URI encoding that
+    /// parses back to them (for example, a `schema_prefix` containing `:`).
+    pub fn from_parts(
+        schema_prefix: &str,
+        has_pay: bool,
+        chain_id: Option<u64>,
+        token_contract_address: &str,
+        recipient_address: &str,
+        value: U256,
+    ) -> Result<Self, Error> {
+        let parameters = vec![
+            Parameter::AbiType(
+                EthereumAbiTypeName {
+                    name: ERC20_RECIPIENT_ABI_TYPE.to_string(),
+                },
+                Value::Address(parse_address(recipient_address)?),
+            ),
+            Parameter::AbiType(
+                EthereumAbiTypeName {
+                    name: ERC20_AMOUNT_ABI_TYPE.to_string(),
+                },
+                Value::Number(Number::from_uint256(value)),
+            ),
+        ];
+
+        let raw = raw_request_from_parts(
+            schema_prefix,
+            has_pay,
+            parse_address(token_contract_address)?,
+            chain_id,
+            Some(UrlEncodedUnicodeString::encode(
+                ERC20_TRANSFER_FUNCTION_NAME,
+            )),
+            parameters,
+        )?;
+        Erc20Request::try_from(&raw)
+    }
+
     /// Returns the schema prefix.
     pub fn schema_prefix(&self) -> &str {
         self.inner.schema_prefix.prefix()
@@ -474,6 +565,110 @@ mod test {
     }
 
     #[test]
+    fn parse_rejects_hex_address_longer_than_40_digits() {
+        // The grammar allows "0x" followed by 40 or more hex digits, but an Ethereum
+        // address is exactly 40 of them.
+        let recipient = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
+        let token = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
+        for extra in 1..=24 {
+            let long_recipient = format!("{recipient}{}", "0".repeat(extra));
+            let long_token = format!("{token}{}", "0".repeat(extra));
+
+            let inputs = [
+                format!("ethereum:{long_recipient}?value=1"),
+                format!("ethereum:{token}/transfer?address={long_recipient}&uint256=1000000"),
+                format!("ethereum:{long_token}/transfer?address={recipient}&uint256=1000000"),
+            ];
+            for input in inputs {
+                assert!(
+                    matches!(
+                        TransactionRequest::parse(&input).unwrap(),
+                        TransactionRequest::Unrecognised(_)
+                    ),
+                    "{input}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_parts_rejects_invalid_addresses() {
+        let recipient = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
+        let token = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+        let long_recipient = format!("{recipient}0");
+        let long_token = format!("{token}0");
+        let bad_checksum = recipient.replace('f', "F");
+        let amount = U256::from(1000000);
+
+        for bad in [long_recipient.as_str(), bad_checksum.as_str()] {
+            assert!(
+                NativeRequest::from_parts("ethereum", false, None, bad, None, None, None).is_err(),
+                "{bad}"
+            );
+            assert!(
+                Erc20Request::from_parts("ethereum", false, None, token, bad, amount).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(
+            Erc20Request::from_parts("ethereum", false, None, &long_token, recipient, amount)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn from_parts_rejects_parts_that_extend_the_uri() {
+        let recipient = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
+        let token = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+        let amount = U256::from(1000000);
+
+        let injected_recipients = [
+            format!("{recipient}?value=1"),
+            format!("{recipient}@1"),
+            format!("{token}/transfer?address={recipient}&uint256=1"),
+            format!("{recipient}&uint256=1"),
+        ];
+        for injected in &injected_recipients {
+            assert!(
+                NativeRequest::from_parts("ethereum", false, None, injected, None, None, None)
+                    .is_err(),
+                "{injected}"
+            );
+            assert!(
+                Erc20Request::from_parts("ethereum", false, None, token, injected, amount).is_err(),
+                "{injected}"
+            );
+            assert!(
+                Erc20Request::from_parts("ethereum", false, None, injected, recipient, amount)
+                    .is_err(),
+                "{injected}"
+            );
+        }
+
+        assert!(
+            NativeRequest::from_parts("ethereum:pay", false, None, recipient, None, None, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn from_parts_rejects_parts_without_an_unambiguous_encoding() {
+        // Without "pay-" in the prefix, the URI for this name reads back as a "pay-"
+        // request for "example.eth".
+        let name = "pay-example.eth";
+        assert!(parse_address(name).is_ok());
+
+        assert!(matches!(
+            NativeRequest::from_parts("ethereum", false, None, name, None, None, None),
+            Err(Error::AmbiguousEncoding { .. })
+        ));
+        let native =
+            NativeRequest::from_parts("ethereum", true, None, name, None, None, None).unwrap();
+        assert_eq!(native.recipient_address(), name);
+    }
+
+    #[test]
     fn parse_erc20_transfer() {
         let input = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/transfer?address=0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359&uint256=1000000";
         let request = TransactionRequest::parse(input).unwrap();
@@ -523,6 +718,8 @@ mod test {
 
     use proptest::prelude::*;
 
+    use crate::testing::arb_u256;
+
     /// Valid ERC-55 addresses for use in proptests.
     const ERC55_ADDRESSES: &[&str] = &[
         "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
@@ -537,11 +734,6 @@ mod test {
 
     fn arb_schema_prefix() -> impl Strategy<Value = &'static str> {
         prop::sample::select(&["ethereum", "chaos_emerald"][..])
-    }
-
-    fn arb_u256() -> impl Strategy<Value = U256> {
-        (any::<u128>(), any::<u128>())
-            .prop_map(|(upper, lower)| (U256::from(upper) << 128) | U256::from(lower))
     }
 
     fn arb_opt_u256() -> impl Strategy<Value = Option<U256>> {
@@ -563,7 +755,7 @@ mod test {
             gas_limit in arb_opt_u256(),
             gas_price in arb_opt_u256(),
         ) {
-            let request = TransactionRequest::from_native_request_parts(
+            let native = NativeRequest::from_parts(
                 schema_prefix,
                 has_pay,
                 chain_id,
@@ -574,7 +766,6 @@ mod test {
             )
             .unwrap();
 
-            let native = request.as_native().expect("Expected NativeRequest");
             assert_eq!(native.schema_prefix(), schema_prefix);
             assert_eq!(native.has_pay(), has_pay);
             assert_eq!(native.chain_id(), chain_id);
@@ -584,7 +775,7 @@ mod test {
             assert_eq!(native.gas_price(), gas_price);
 
             // Display -> reparse roundtrip
-            let output = request.to_string();
+            let output = native.to_string();
             let reparsed = TransactionRequest::parse(&output).unwrap();
             let native_b = reparsed
                 .as_native()
@@ -609,7 +800,7 @@ mod test {
             recipient_address in arb_erc55_address(),
             value in arb_u256(),
         ) {
-            let request = TransactionRequest::from_erc20_request_parts(
+            let erc20 = Erc20Request::from_parts(
                 schema_prefix,
                 has_pay,
                 chain_id,
@@ -619,7 +810,6 @@ mod test {
             )
             .unwrap();
 
-            let erc20 = request.as_erc20().expect("Expected Erc20Request");
             assert_eq!(erc20.schema_prefix(), schema_prefix);
             assert_eq!(erc20.has_pay(), has_pay);
             assert_eq!(erc20.chain_id(), chain_id);
@@ -628,7 +818,7 @@ mod test {
             assert_eq!(erc20.value_atomic(), value);
 
             // Display -> reparse roundtrip
-            let output = request.to_string();
+            let output = erc20.to_string();
             let reparsed = TransactionRequest::parse(&output).unwrap();
             let erc20_b = reparsed.as_erc20().expect("Roundtrip changed request type");
             assert_eq!(erc20.schema_prefix(), erc20_b.schema_prefix());

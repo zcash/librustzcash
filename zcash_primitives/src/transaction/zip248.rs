@@ -11,18 +11,16 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent};
 use orchard::bundle::{self as orchard};
 use sapling::bundle::{self as sapling};
 use zcash_encoding::CompactSize;
+use zcash_protocol::constants::MAX_BLOCK_BYTES;
 use zcash_protocol::value::{ZatBalance, Zatoshis};
 
 use super::components::sprout;
-
-#[cfg(zcash_unstable = "zfuture")]
-use super::components::tze;
 
 use super::Authorization;
 
@@ -42,10 +40,6 @@ pub enum BundleType {
     ///
     /// In-memory only — no wire encoding, not in the ZIP 248 registry.
     Sprout,
-    /// Transparent Zcash Extensions (speculative, `zcash_unstable = "zfuture"` only).
-    ///
-    /// In-memory only — not yet assigned a bundle type in ZIP 248.
-    Tze,
     /// Transparent inputs and outputs (bundleType 0).
     Transparent,
     /// Coinbase issuance and metadata (bundleType 1). No authorizing data.
@@ -68,8 +62,7 @@ pub enum BundleType {
 impl BundleType {
     /// Try to decode a wire value. Returns `None` for unrecognized types.
     ///
-    /// [`BundleType::Sprout`] and [`BundleType::Tze`] are never returned —
-    /// they have no wire encoding.
+    /// [`BundleType::Sprout`] is never returned — it has no wire encoding.
     pub fn from_u64(v: u64) -> Option<Self> {
         match v {
             0 => Some(Self::Transparent),
@@ -87,11 +80,10 @@ impl BundleType {
     ///
     /// # Panics
     ///
-    /// Panics if called on [`BundleType::Sprout`] or [`BundleType::Tze`],
-    /// which have no wire encoding.
+    /// Panics if called on [`BundleType::Sprout`], which has no wire encoding.
     pub fn to_u64(self) -> u64 {
         match self {
-            Self::Sprout | Self::Tze => panic!("in-memory-only bundle type has no wire encoding"),
+            Self::Sprout => panic!("in-memory-only bundle type has no wire encoding"),
             Self::Transparent => 0,
             Self::Coinbase => 1,
             Self::Sapling => 2,
@@ -175,8 +167,6 @@ impl BundleId {
 
     /// Sprout bundle (in-memory only, no wire encoding).
     pub const SPROUT: Self = Self::new(BundleType::Sprout, BundleVariant::Default);
-    /// TZE bundle (in-memory only, no wire encoding).
-    pub const TZE: Self = Self::new(BundleType::Tze, BundleVariant::Default);
     /// Transparent bundle (bundleType 0, variant 0).
     pub const TRANSPARENT: Self = Self::new(BundleType::Transparent, BundleVariant::Default);
     /// Coinbase bundle (bundleType 1, variant 0).
@@ -389,8 +379,28 @@ pub enum TypedBundle<A: Authorization> {
     Sapling(sapling::Bundle<A::SaplingAuth, ZatBalance>),
     Orchard(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
     Ironwood(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
-    #[cfg(zcash_unstable = "zfuture")]
-    Tze(tze::Bundle<A::TzeAuth>),
+}
+
+impl Clone for TypedBundle<crate::transaction::Authorized> {
+    fn clone(&self) -> Self {
+        match self {
+            TypedBundle::Transparent(b) => TypedBundle::Transparent(b.clone()),
+            TypedBundle::Coinbase(b) => TypedBundle::Coinbase(b.clone()),
+            TypedBundle::Sprout(b) => TypedBundle::Sprout(b.clone()),
+            TypedBundle::Sapling(b) => TypedBundle::Sapling(b.clone()),
+            TypedBundle::Orchard(b) => TypedBundle::Orchard(b.clone()),
+            TypedBundle::Ironwood(b) => TypedBundle::Ironwood(b.clone()),
+        }
+    }
+}
+
+impl Clone for BundleMap<crate::transaction::Authorized> {
+    fn clone(&self) -> Self {
+        BundleMap {
+            known: self.known.clone(),
+            unknown: self.unknown.clone(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -493,15 +503,6 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
-    /// Returns the tze bundle, if present.
-    #[cfg(zcash_unstable = "zfuture")]
-    pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
-        self.known.get(&BundleId::TZE).and_then(|b| match b {
-            TypedBundle::Tze(bundle) => Some(bundle),
-            _ => None,
-        })
-    }
-
     /// Returns an iterator over unknown (opaque) bundles, keyed by their
     /// raw `(bundleType, bundleVariant)` wire values.
     pub fn unknown_bundles(&self) -> impl Iterator<Item = (&(u64, u64), &UnknownBundle)> {
@@ -546,12 +547,6 @@ impl<A: Authorization> BundleMap<A> {
             .insert(BundleId::IRONWOOD, TypedBundle::Ironwood(Box::new(bundle)));
     }
 
-    /// Inserts the tze bundle.
-    #[cfg(zcash_unstable = "zfuture")]
-    pub fn insert_tze(&mut self, bundle: tze::Bundle<A::TzeAuth>) {
-        self.known.insert(BundleId::TZE, TypedBundle::Tze(bundle));
-    }
-
     /// Insert an opaque bundle whose type is not recognized.
     pub fn insert_unknown(&mut self, raw_type: u64, raw_variant: u64, bundle: UnknownBundle) {
         self.unknown.insert((raw_type, raw_variant), bundle);
@@ -582,18 +577,12 @@ impl<A: Authorization> BundleMap<A> {
         mut f_orchard: impl FnMut(
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>,
-        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
-            Option<tze::Bundle<A::TzeAuth>>,
-        )
-            -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> BundleMap<B> {
         // Delegate to try_map_authorization with infallible closures.
         self.try_map_authorization::<B, core::convert::Infallible>(
             |b| Ok(f_transparent(b)),
             |b| Ok(f_sapling(b)),
             |b| Ok(f_orchard(b)),
-            #[cfg(zcash_unstable = "zfuture")]
-            |b| Ok(f_tze(b)),
         )
         // Safety: Infallible cannot be constructed, so this never panics.
         .unwrap()
@@ -614,12 +603,6 @@ impl<A: Authorization> BundleMap<A> {
             Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         )
             -> Result<Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>, E>,
-        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
-            Option<tze::Bundle<A::TzeAuth>>,
-        ) -> Result<
-            Option<tze::Bundle<B::TzeAuth>>,
-            E,
-        >,
     ) -> Result<BundleMap<B>, E> {
         let mut transparent_bundle = None;
         let mut coinbase_bundle = None;
@@ -627,8 +610,6 @@ impl<A: Authorization> BundleMap<A> {
         let mut sapling_bundle = None;
         let mut orchard_bundle = None;
         let mut ironwood_bundle = None;
-        #[cfg(zcash_unstable = "zfuture")]
-        let mut tze_bundle = None;
         let mut result = BundleMap::new();
 
         for (_id, bundle) in self.known {
@@ -639,8 +620,6 @@ impl<A: Authorization> BundleMap<A> {
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
                 TypedBundle::Orchard(b) => orchard_bundle = Some(*b),
                 TypedBundle::Ironwood(b) => ironwood_bundle = Some(*b),
-                #[cfg(zcash_unstable = "zfuture")]
-                TypedBundle::Tze(b) => tze_bundle = Some(b),
             }
         }
         result.unknown = self.unknown;
@@ -667,10 +646,6 @@ impl<A: Authorization> BundleMap<A> {
         // *Ironwood pool*, so the same authorization mapping applies to it.
         if let Some(b) = f_orchard(ironwood_bundle)? {
             result.insert_ironwood(b);
-        }
-        #[cfg(zcash_unstable = "zfuture")]
-        if let Some(b) = f_tze(tze_bundle)? {
-            result.insert_tze(b);
         }
 
         Ok(result)
@@ -974,10 +949,7 @@ impl ValuePoolDeltaEntry {
                     #[cfg(not(feature = "std"))]
                     "ValuePoolDelta assetClass must be 0 or 1",
                     #[cfg(feature = "std")]
-                    alloc::format!(
-                        "ValuePoolDelta assetClass must be 0 or 1, got {:#x}",
-                        _other,
-                    ),
+                    alloc::format!("ValuePoolDelta assetClass must be 0 or 1, got {_other:#x}"),
                 ));
             }
         };
@@ -1026,6 +998,15 @@ pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64
     let bundle_type = CompactSize::read(&mut reader)?;
     let bundle_variant = CompactSize::read(&mut reader)?;
     let data_len = CompactSize::read(&mut reader)? as usize;
+    // The payload is allocated before it is read, so bound the claimed length
+    // by something a transaction could actually contain: no bundle can exceed
+    // the maximum block size.
+    if data_len > MAX_BLOCK_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "v7 bundle data length exceeds the maximum block size",
+        ));
+    }
     let mut data = vec![0u8; data_len];
     reader.read_exact(&mut data)?;
     Ok(((bundle_type, bundle_variant), data))

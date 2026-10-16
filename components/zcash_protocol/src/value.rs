@@ -4,6 +4,8 @@ use core::iter::Sum;
 use core::num::NonZeroU64;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
+use corez::io;
+
 #[cfg(feature = "std")]
 use std::error;
 
@@ -352,6 +354,25 @@ impl Zatoshis {
         (self.0 as i64).to_le_bytes()
     }
 
+    /// Returns this Zatoshis encoded as an unsigned 64-bit little-endian value.
+    pub fn to_u64_le_bytes(self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
+
+    /// Writes this Zatoshis as an unsigned 64-bit little-endian integer.
+    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.to_u64_le_bytes())
+    }
+
+    /// Reads a Zatoshis from an unsigned 64-bit little-endian integer, mapping an
+    /// out-of-range amount to [`io::ErrorKind::InvalidData`].
+    pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
+        let mut bytes = [0u8; 8];
+        reader.read_exact(&mut bytes)?;
+        Self::from_u64_le_bytes(bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "amount out of range"))
+    }
+
     /// Returns whether or not this `Zatoshis` is the zero value.
     pub fn is_zero(&self) -> bool {
         self == &Zatoshis::ZERO
@@ -524,7 +545,16 @@ impl From<Infallible> for BalanceError {
 pub mod testing {
     use proptest::prelude::prop_compose;
 
-    use super::{ZatBalance, Zatoshis, MAX_BALANCE, MAX_MONEY};
+    use super::{MAX_BALANCE, MAX_MONEY, ZatBalance, Zatoshis};
+
+    /// A raw zatoshi amount as [`Zatoshis`], for terse test fixtures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `amount` exceeds [`super::MAX_MONEY`].
+    pub fn zats(amount: u64) -> Zatoshis {
+        Zatoshis::const_from_u64(amount)
+    }
 
     prop_compose! {
         pub fn arb_zat_balance()(amt in -MAX_BALANCE..MAX_BALANCE) -> ZatBalance {

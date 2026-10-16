@@ -16,27 +16,35 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
           all-features: true
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: nightly
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
 
       - name: Build latest rustdocs
-        run: >
-          cargo doc
-          --no-deps
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
         env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo doc --no-deps --workspace "${feature_flags[@]}"
 
       - name: Move latest rustdocs into book
         run: |
@@ -44,10 +52,10 @@ jobs:
           mv ./target/doc ./book/book/rustdoc/latest
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ./book/book
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

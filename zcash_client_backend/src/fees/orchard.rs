@@ -3,10 +3,26 @@
 
 use std::convert::Infallible;
 
-use orchard::builder::BundleType;
+use orchard::{builder::BundleType, bundle::BundleVersion};
 use zcash_protocol::value::Zatoshis;
 
-/// A trait that provides a minimized view of Orchard bundle configuration
+/// Returns the number of actions the transaction builder will produce for a
+/// transactional (non-coinbase) Orchard-pool bundle of the given bundle type and
+/// version, carrying the given numbers of requested spends and outputs.
+///
+/// The caller must pass the same [`BundleType`](orchard::builder::BundleType) the
+/// transaction builder will be configured with: the builder enforces an exact
+/// balance against the fee computed from these counts.
+pub(crate) fn transactional_action_count(
+    bundle_type: BundleType,
+    bundle_version: BundleVersion,
+    num_spends: usize,
+    num_outputs: usize,
+) -> Result<usize, &'static str> {
+    bundle_type.num_actions(bundle_version.default_flags(), num_spends, num_outputs)
+}
+
+/// A trait that provides a minimized view of Orchard-style bundle configuration
 /// suitable for use in fee and change calculation.
 pub trait BundleView<NoteRef> {
     /// The type of inputs to the bundle.
@@ -14,8 +30,8 @@ pub trait BundleView<NoteRef> {
     /// The type of inputs of the bundle.
     type Out: OutputView;
 
-    /// Returns the type of the bundle
-    fn bundle_type(&self) -> BundleType;
+    /// Returns the bundle version for the bundle.
+    fn bundle_version(&self) -> BundleVersion;
     /// Returns the inputs to the bundle.
     fn inputs(&self) -> &[Self::In];
     /// Returns the outputs of the bundle.
@@ -23,12 +39,12 @@ pub trait BundleView<NoteRef> {
 }
 
 impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
-    for (BundleType, &'a [In], &'a [Out])
+    for (BundleVersion, &'a [In], &'a [Out])
 {
     type In = In;
     type Out = Out;
 
-    fn bundle_type(&self) -> BundleType {
+    fn bundle_version(&self) -> BundleVersion {
         self.0
     }
 
@@ -41,15 +57,18 @@ impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     }
 }
 
-/// A [`BundleView`] for the empty bundle with [`BundleType::DEFAULT`] bundle type.
+/// A [`BundleView`] for the empty legacy Orchard bundle.
 pub struct EmptyBundleView;
 
 impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
     type In = Infallible;
     type Out = Infallible;
 
-    fn bundle_type(&self) -> BundleType {
-        BundleType::DEFAULT
+    fn bundle_version(&self) -> BundleVersion {
+        // An empty bundle contains no spends or outputs, and therefore produces
+        // zero actions under every bundle version's action-count policy, so the
+        // version returned here cannot affect fee calculation.
+        BundleVersion::orchard_v2()
     }
 
     fn inputs(&self) -> &[Self::In] {

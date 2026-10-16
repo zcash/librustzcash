@@ -8,9 +8,11 @@ use uuid::Uuid;
 use super::{fix_v_transactions_expired_unmined, tx_observation_height};
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x4e68277f_6269_467e_9437_f3853cc4a41f);
+/// Adds support for marking transactions as explicitly trusted for the purpose of satisfying the
+/// ZIP 315 confirmations policy
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x4e68277f_6269_467e_9437_f3853cc4a41f);
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     fix_v_transactions_expired_unmined::MIGRATION_ID,
     tx_observation_height::MIGRATION_ID,
 ];

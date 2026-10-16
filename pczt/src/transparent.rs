@@ -19,7 +19,7 @@ use zcash_script::script::Evaluable;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
     pub(crate) inputs: Vec<Input>,
@@ -27,9 +27,16 @@ pub struct Bundle {
     pub(crate) outputs: Vec<Output>,
 }
 
+/// The canonical empty transparent bundle: the form the transparent bundle of a PCZT
+/// takes when it carries no transparent data.
+pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
+    inputs: Vec::new(),
+    outputs: Vec::new(),
+};
+
 /// Information about a transparent input within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Input {
     //
     // Transparent effecting data.
@@ -140,7 +147,7 @@ pub struct Input {
 
 /// Information about a transparent output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Output {
     //
     // Transparent effecting data.
@@ -228,7 +235,7 @@ impl Bundle {
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.
-        for (lhs, rhs) in self.inputs.iter_mut().zip(inputs.into_iter()) {
+        for (lhs, rhs) in self.inputs.iter_mut().zip(inputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Input {
                 prevout_txid,
@@ -279,7 +286,7 @@ impl Bundle {
             }
         }
 
-        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
+        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Output {
                 value,

@@ -43,6 +43,7 @@ impl Exchange for Kraken {
                 "https://api.kraken.com/0/public/Ticker?pair=XZECZUSD"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

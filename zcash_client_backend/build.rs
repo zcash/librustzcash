@@ -1,12 +1,20 @@
+#[cfg(not(windows))]
 use std::env;
+#[cfg(not(windows))]
 use std::fs;
 use std::io;
+#[cfg(not(windows))]
 use std::path::{Path, PathBuf};
 
+// The proto machinery below is only ever exercised on non-Windows targets (see the note in
+// `main`), so gate it on `not(windows)` to avoid dead-code and unused-import warnings on Windows.
+#[cfg(not(windows))]
 const COMPACT_FORMATS_PROTO: &str = "proto/compact_formats.proto";
 
+#[cfg(not(windows))]
 const PROPOSAL_PROTO: &str = "proto/proposal.proto";
 
+#[cfg(not(windows))]
 const SERVICE_PROTO: &str = "proto/service.proto";
 
 fn main() -> io::Result<()> {
@@ -32,6 +40,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn build() -> io::Result<()> {
     let out: PathBuf = env::var_os("OUT_DIR")
         .expect("Cannot find OUT_DIR environment variable")

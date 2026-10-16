@@ -24,9 +24,11 @@ use crate::{
 
 use super::received_notes_nullable_nf;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7029b904_6557_4aa1_9da5_6904b65d2ba5);
+/// This migration reads the wallet's raw transaction data and updates the `sent_notes` table to
+/// ensure that memo entries are consistent with the decrypted transaction's outputs.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7029b904_6557_4aa1_9da5_6904b65d2ba5);
 
-const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -253,7 +255,12 @@ fn get_transaction<P: consensus::Parameters>(
         },
     )
     .optional()?
-    .map(|(t, b, e)| parse_tx(params, &t, b, e))
+    // The `scan_queue` table is not guaranteed to exist at the schema version this
+    // migration runs against, so no chain tip height is available as a consensus branch
+    // ID fallback. The transactions processed by this migration were created by the
+    // wallet and therefore always have a nonzero expiry height, so no fallback is
+    // needed.
+    .map(|(t, b, e)| parse_tx(params, &t, b, e, None))
     .transpose()
 }
 

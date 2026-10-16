@@ -8,7 +8,49 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.7.0] - PENDING
+## [Unreleased]
+
+### Changed
+- MSRV is now 1.89
+
+## [0.10.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.2` and `zcash_protocol 0.11.0-pre.1`.
+
+## [0.10.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
+
+## [0.10.0-pre.0] - 2026-10-02
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.0` and `zcash_protocol 0.11.0-pre.0`.
+
+## [0.9.0] - 2026-08-18
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.5`, `zcash_address 0.13.0`.
+
+### Fixed
+- The `test-dependencies` feature now enables `zcash_address/test-dependencies`
+  and `zcash_protocol/test-dependencies`, which the strategies in
+  `zip321::testing` require. Enabling it without also enabling those features on
+  those crates directly previously failed to compile.
+
+## [0.8.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.7.0] - 2026-04-23
 
 ### Added
 - `zip321::PaymentError` enum for errors in constructing a `Payment`.
@@ -17,6 +59,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated to `zcash_protocol 0.8`, `zcash_address 0.11`.
 - `zip321::Payment::new` now returns `Result<Self, PaymentError>` instead of
   `Option<Self>`, providing a meaningful error when a memo is sent to a
   transparent recipient or a zero-valued output is sent to a transparent address.

@@ -1,7 +1,11 @@
 //! Types for wallet error handling.
 
-use std::error;
-use std::fmt::{self, Debug, Display};
+use std::{
+    collections::HashMap,
+    error,
+    fmt::{self, Debug, Display, Write},
+    hash::Hash,
+};
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ConversionError;
@@ -9,6 +13,7 @@ use zcash_keys::address::UnifiedAddress;
 use zcash_primitives::transaction::builder;
 use zcash_protocol::{
     PoolType,
+    consensus::BlockHeight,
     value::{BalanceError, Zatoshis},
 };
 
@@ -22,6 +27,7 @@ use ::transparent::address::TransparentAddress;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, ChangeErrT, NoteRefT>
 {
     /// An error occurred retrieving data from the underlying data source
@@ -101,14 +107,95 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
+    /// The caller requested a nonzero target expiry height below the proposal's
+    /// minimum target height. Zero remains valid because it disables expiry.
+    ExpiryHeightBelowTargetHeight {
+        expiry_height: BlockHeight,
+        min_target_height: BlockHeight,
+    },
+
+    /// The caller requested an expiry height for a step that is a canonical ZIP 318 crossing.
+    ///
+    /// Such a step takes its expiry from the ZIP 318 rolling window, which every crossing in the
+    /// same period shares; a caller-chosen expiry would single it out and undo the shape the
+    /// unpadded bundle and bucketed anchor were chosen to produce. Those are already fixed by the
+    /// time the transaction is built, so the conflict is reported rather than silently resolved.
+    /// Pass `None` to accept the canonical expiry.
+    ExpiryHeightConflictsWithCanonicalCrossing { requested: BlockHeight },
+
+    /// A ZIP 316 Revision 2 recipient address of the payment at the given index has
+    /// expired, or has expiry metadata that conflicts with the transaction's expiry
+    /// height. A currently-valid address should be obtained for the intended recipient.
+    RecipientAddressExpiry {
+        payment_index: usize,
+        error: AddressExpiryError,
+    },
+
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
 }
 
+/// Errors that may occur when rewinding the wallet to a previous chain state.
+#[non_exhaustive]
+pub enum RewindError<AccountId: Hash + Eq, E> {
+    /// An error occurred retrieving data from the underlying data source.
+    DataSource(E),
+    /// Every account in the wallet has a birthday height greater than the height to which any
+    /// reset birthday would be lowered (the chain state's block height plus one), and the
+    /// `reset_account_birthdays` argument supplied by the caller was empty. So long as at
+    /// least one account already has a birthday at or below the new birthday floor, the
+    /// rewind proceeds without lowering any birthdays even when `reset_account_birthdays` is
+    /// empty. The caller should re-try the rewind, providing a non-empty set of accounts
+    /// whose birthday metadata should be lowered to the new birthday floor.
+    ///
+    /// The reported map contains every account in the wallet along with its existing birthday
+    /// height. The caller may include any subset of these in the next call's
+    /// `reset_account_birthdays`; accounts not included will retain their existing birthday
+    /// metadata. (Rescanning of any blocks above the rewind target is performed against all
+    /// wallet viewing keys regardless of which accounts' birthday metadata is reset.)
+    RewindBeyondBirthdays(HashMap<AccountId, BlockHeight>),
+}
+
+impl<AccountId: Hash + Eq + Debug, E: Debug> Debug for RewindError<AccountId, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewindError::DataSource(e) => f.debug_tuple("DataSource").field(e).finish(),
+            RewindError::RewindBeyondBirthdays(birthdays) => f
+                .debug_tuple("RewindBeyondBirthdays")
+                .field(birthdays)
+                .finish(),
+        }
+    }
+}
+
+impl<AccountId: Hash + Eq + Debug, E: Display> Display for RewindError<AccountId, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewindError::DataSource(e) => write!(f, "Wallet data source error: {e}"),
+            RewindError::RewindBeyondBirthdays(birthdays) => write!(
+                f,
+                "Rewind would precede the birthday height of one or more accounts: {birthdays:?}"
+            ),
+        }
+    }
+}
+
+impl<AccountId: Hash + Eq + Debug, E: error::Error + 'static> error::Error
+    for RewindError<AccountId, E>
+{
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            RewindError::DataSource(e) => Some(e),
+            RewindError::RewindBeyondBirthdays(_) => None,
+        }
+    }
+}
+
 /// Errors that can occur while working with PCZTs.
 #[cfg(feature = "pczt")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcztError {
     /// An error occurred while building a PCZT.
     Build,
@@ -135,6 +222,72 @@ pub enum PcztError {
     Invalid(String),
 }
 
+/// The ways in which a ZIP 316 Revision 2 recipient address's expiry metadata can
+/// prevent a payment from being constructed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AddressExpiryError {
+    /// The address's expiry time is earlier than the current time.
+    TimeExpired {
+        /// The address's expiry time, in seconds since the Unix epoch.
+        expiry_time: u64,
+    },
+    /// The chain has advanced past the address's expiry height.
+    HeightExpired {
+        /// The address's expiry height.
+        address_expiry: BlockHeight,
+        /// The height of the chain tip against which expiry was evaluated.
+        chain_height: BlockHeight,
+    },
+    /// The transaction's expiry height would exceed the address's expiry height.
+    ///
+    /// ZIP 316 forbids sending in this case rather than lowering the transaction's
+    /// expiry height to match, since an expiry height derived from the address's
+    /// metadata would leak information about the destination on chain.
+    ExpiryHeightConflict {
+        address_expiry: BlockHeight,
+        transaction_expiry: BlockHeight,
+    },
+    /// The address defines an expiry height, which requires the transaction to carry a
+    /// nonzero expiry height, but transaction expiry was disabled.
+    TransactionExpiryDisabled { address_expiry: BlockHeight },
+}
+
+impl fmt::Display for AddressExpiryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddressExpiryError::TimeExpired { expiry_time } => write!(
+                f,
+                "the address expired at {expiry_time} (seconds since the Unix epoch)"
+            ),
+            AddressExpiryError::HeightExpired {
+                address_expiry,
+                chain_height,
+            } => write!(
+                f,
+                "the address expired at height {address_expiry}, and the chain has \
+                 reached height {chain_height}"
+            ),
+            AddressExpiryError::ExpiryHeightConflict {
+                address_expiry,
+                transaction_expiry,
+            } => write!(
+                f,
+                "the transaction would expire at height {transaction_expiry}, after the \
+                 address's expiry height {address_expiry}"
+            ),
+            AddressExpiryError::TransactionExpiryDisabled { address_expiry } => write!(
+                f,
+                "the address expires at height {address_expiry}, which requires the \
+                 transaction to carry a nonzero expiry height, but transaction expiry \
+                 was disabled"
+            ),
+        }
+    }
+}
+
+impl error::Error for AddressExpiryError {}
+
 impl<DE, TE, SE, FE, CE, N> fmt::Display for Error<DE, TE, SE, FE, CE, N>
 where
     DE: fmt::Display,
@@ -145,8 +298,6 @@ where
     N: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use fmt::Write;
-
         match self {
             Error::DataSource(e) => {
                 write!(
@@ -249,6 +400,29 @@ where
                     "The specified transparent address was not recognized as belonging to the wallet."
                 )
             }
+            Error::ExpiryHeightConflictsWithCanonicalCrossing { requested } => write!(
+                f,
+                "An expiry height of {requested} was requested for a canonical ZIP 318 crossing, \
+                 which takes the ZIP 318 rolling expiry; pass `None` to accept it."
+            ),
+            Error::RecipientAddressExpiry {
+                payment_index,
+                error,
+            } => write!(
+                f,
+                "The recipient address of the payment at index {payment_index} cannot be \
+                 paid: {error}. Try to obtain a currently-valid address for the intended \
+                 recipient."
+            ),
+            Error::ExpiryHeightBelowTargetHeight {
+                expiry_height,
+                min_target_height,
+            } => write!(
+                f,
+                "The requested expiry height {expiry_height} is below the proposal's \
+                 minimum target height {min_target_height}; the transaction would already be \
+                 expired at the earliest height at which it could be mined."
+            ),
             #[cfg(feature = "pczt")]
             Error::Pczt(e) => write!(f, "PCZT error: {e}"),
         }
@@ -440,3 +614,45 @@ impl<DE, TE, SE, FE, CE, N> From<pczt::roles::tx_extractor::Error>
         Error::Pczt(PcztError::Extraction(e))
     }
 }
+
+/// Errors that may occur when resolving the account controlling an address.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FindAccountForAddressError<E> {
+    /// Error returned by the underlying wallet backend.
+    Backend(E),
+
+    /// A Unified Address whose receivers map to different accounts.
+    UnifiedAddressConflict,
+}
+
+impl<E> From<E> for FindAccountForAddressError<E> {
+    fn from(err: E) -> Self {
+        Self::Backend(err)
+    }
+}
+
+impl<E: Display> Display for FindAccountForAddressError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FindAccountForAddressError::Backend(e) => {
+                write!(f, "Wallet backend error: {e}")
+            }
+            FindAccountForAddressError::UnifiedAddressConflict => write!(
+                f,
+                "Receivers of the provided Unified Address map to different wallet accounts."
+            ),
+        }
+    }
+}
+
+impl<E: error::Error + 'static> error::Error for FindAccountForAddressError<E> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            FindAccountForAddressError::Backend(e) => Some(e),
+            FindAccountForAddressError::UnifiedAddressConflict => None,
+        }
+    }
+}
+
+pub use super::locking::LockError;

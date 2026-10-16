@@ -10,9 +10,11 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::v_tx_outputs_use_legacy_false;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xb8fe5112_4365_473c_8b42_2b07c0f0adaf);
+/// This migration reworks transaction history views to correctly include spent transparent utxo
+/// value.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xb8fe5112_4365_473c_8b42_2b07c0f0adaf);
 
-const DEPENDENCIES: &[Uuid] = &[v_tx_outputs_use_legacy_false::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[v_tx_outputs_use_legacy_false::MIGRATION_ID];
 
 pub(super) struct Migration;
 

@@ -9,16 +9,250 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `bip0039 0.14`.
+- MSRV is now 1.89
+
+## [0.17.0-pre.2] - 2026-10-13
+
 ### Added
+- `zcash_keys::constants` module, containing:
+  - `mainnet`, `testnet`, and `regtest` modules, which define
+    `HRP_SAPLING_EXTENDED_SPENDING_KEY`, `HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY`,
+    and `B58_SECRET_KEY_PREFIX`, with the same names as in
+    `zcash_protocol::constants::{mainnet, testnet, regtest}`.
+  - `hrp_sapling_extended_spending_key`, `hrp_sapling_extended_full_viewing_key`,
+    and `b58_secret_key_prefix`, which take a `NetworkType`.
+- `zcash_keys::address::UnifiedAddress::prune_retaining`
+- `zcash_keys::address::PruneError`
+- `zcash_keys::keys::UnifiedFullViewingKey::from_p2sh`
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.2`, `zcash_protocol 0.11.0-pre.1`, and
+  `zcash_transparent 0.11.0-pre.2`.
+- `zcash_keys::keys::transparent::Key::{decode_base58, encode_base58}` now take
+  a `NetworkType` instead of `&N` where `N: NetworkConstants`. Callers holding
+  consensus parameters pass `params.network_type()`.
+- The following methods now encode every receiver of a `UnifiedAddress`.
+  Previously they omitted the transparent receiver of an address that also had a
+  shielded receiver. To encode an address without its transparent receiver,
+  first remove that receiver with `UnifiedAddress::prune_retaining`.
+  - `zcash_keys::address::UnifiedAddress::{to_zcash_address,
+    to_zcash_address_revision, encode, encode_revision}`
+  - `zcash_keys::address::Address::{to_zcash_address, to_zcash_address_revision,
+    encode, encode_revision}`
+
+### Removed
+- `zcash_keys::address::UnifiedAddress::{to_receiver_preserving_zcash_address,
+  to_receiver_preserving_zcash_address_revision, encode_receiver_preserving,
+  encode_receiver_preserving_revision}` and
+  `zcash_keys::address::Address::{to_receiver_preserving_zcash_address,
+  to_receiver_preserving_zcash_address_revision, encode_receiver_preserving,
+  encode_receiver_preserving_revision}`. Use the corresponding
+  `to_zcash_address`, `to_zcash_address_revision`, `encode`, and
+  `encode_revision` methods instead.
+- `zcash_keys::address::UnifiedAddress::{to_transparent_including_zcash_address,
+  to_transparent_including_zcash_address_revision, encode_transparent_including,
+  encode_transparent_including_revision}`. Use `UnifiedAddress::has_transparent`
+  together with the corresponding `to_zcash_address`, `to_zcash_address_revision`,
+  `encode`, and `encode_revision` methods instead.
+
+## [0.17.0-pre.1] - 2026-10-06
+
+### Added
+- `zcash_keys::address::UnifiedAddress::decode`
+- `zcash_keys::address::UnifiedAddress::{to_zcash_address_revision,
+  encode_revision, to_receiver_preserving_zcash_address_revision,
+  encode_receiver_preserving_revision,
+  to_transparent_including_zcash_address_revision,
+  encode_transparent_including_revision}`
+- `zcash_keys::address::Address::{to_zcash_address_revision, encode_revision,
+  to_receiver_preserving_zcash_address_revision,
+  encode_receiver_preserving_revision}`
+- `zcash_keys::address::Receiver::to_zcash_address_revision`
+- `zcash_keys::encoding::{UnifiedDecodingError, UnifiedEncodingError}`
+- `zcash_keys::keys::UnifiedFullViewingKey::{encode_revision, is_equivalent_to}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::encode_revision`
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.1` and `zcash_transparent 0.11.0-pre.1`.
+- Unified addresses and viewing keys are now encoded at ZIP 316 Revision 0 when
+  Revision 0 can represent them, and at Revision 2 otherwise. Previously they
+  were always encoded at Revision 2. Use the `_revision` variants to encode at a
+  specific revision. This affects:
+  - `zcash_keys::address::UnifiedAddress::{to_zcash_address, encode,
+    to_receiver_preserving_zcash_address, encode_receiver_preserving,
+    to_transparent_including_zcash_address, encode_transparent_including}`
+  - `zcash_keys::address::Address::{to_zcash_address, encode,
+    to_receiver_preserving_zcash_address, encode_receiver_preserving}`
+  - `zcash_keys::address::Receiver::to_zcash_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::encode` and
+    `zcash_keys::keys::UnifiedIncomingViewingKey::encode`, which now return
+    `Result<String, UnifiedEncodingError>`.
+- `zcash_keys::keys::UnifiedFullViewingKey::decode` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::decode` now return
+  `Result<Self, UnifiedDecodingError>` in place of `Result<Self, String>`.
+
+### Removed
+- `impl AddressCodec<P> for zcash_keys::address::UnifiedAddress`. Use
+  `UnifiedAddress::decode` and `UnifiedAddress::encode` instead.
+
+## [0.17.0-pre.0] - 2026-10-01
+
+This release supports the NU7 upgrade on testnet.
+
+### Added
+- `zeroize` feature, enabled by default, which erases the Sapling, Orchard,
+  and ZIP 32 secret key material held by `UnifiedSpendingKey` when it is dropped.
+- `zcash_keys::keys::DerivationError::Sapling`
+- `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
+- `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_time`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_time`
+- `zcash_keys::address::UnifiedAddress::expiry_height`
+- `zcash_keys::address::UnifiedAddress::expiry_time`
+- `zcash_keys::address::UnifiedAddress::to_transparent_including_zcash_address`
+- `zcash_keys::address::UnifiedAddress::encode_transparent_including`
+- `zcash_keys::address::UnifiedAddress::to_receiver_preserving_zcash_address`
+- `zcash_keys::address::UnifiedAddress::encode_receiver_preserving`
+- `zcash_keys::address::Address::to_receiver_preserving_zcash_address`
+- `zcash_keys::address::Address::encode_receiver_preserving`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2pkh`
+- `zcash_keys::keys::UnifiedFullViewingKey::p2sh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2pkh`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`
+- `zcash_keys::keys::ReceiverRequirements::TRANSPARENT_ONLY`
+- `zcash_keys::keys::UnifiedAddressRequest::TRANSPARENT_ONLY`
+- ZIP 316 Revision 2 metadata support in `UnifiedFullViewingKey`,
+  `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
+  - Address expiry height and expiry time metadata fields.
+  - Expiry metadata is propagated from UFVK → UIVK → UA per spec.
+  - Automatic R2 revision selection when metadata items are present.
+
+### Changed
+- `zcash_keys::keys::UnifiedSpendingKey::to_bytes` (behind `unstable`) now
+  returns `secrecy::SecretVec<u8>` in place of `Vec<u8>`; use
+  `ExposeSecret::expose_secret` to read the bytes.
+- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`, `orchard 0.16`,
+  `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`,
+  `zcash_address 0.14.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- `zcash_keys::keys::sapling::spending_key` now returns
+  `Option<ExtendedSpendingKey>`, and returns `None` if derivation produces an
+  invalid Sapling spending key. `UnifiedSpendingKey::from_seed` returns
+  `DerivationError::Sapling` in that case.
+- `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent` now return
+  `Option<&_>`. A unified viewing key carries at most one transparent item, so a
+  key that carries a P2SH viewing key item returns `None` from `p2pkh`, and one
+  that carries a P2PKH viewing key returns `None` from `p2sh`.
+- Without the `transparent-inputs` feature, a P2SH viewing key item is retained as an
+  unknown item instead of being parsed. A `UnifiedIncomingViewingKey` derived from a
+  `UnifiedFullViewingKey` that carries one now records that it does not describe the
+  account completely, so `to_receiver_requirements` no longer reports such a key as
+  describing a shielded-only or transparent-only account.
+- Unified Addresses derived from a `UnifiedFullViewingKey` or
+  `UnifiedIncomingViewingKey` that carries a P2SH viewing key item now contain the
+  corresponding P2SH receiver, and `has_transparent` returns `true` for such a key.
+  A P2SH viewing key item is represented by `zcash_transparent::zip48::P2shFullViewingKey`
+  or `P2shIncomingViewingKey`, which accept only the standard ZIP 48 descriptor template;
+  a key carrying any other template fails to decode.
+- The `orchard` and `sapling` features are now enabled by default. Consumers
+  that require a smaller feature set should disable default features and enable
+  only the features they need.
+- `zcash_keys::address::UnifiedAddress::from_receivers` now accepts optional
+  expiry height and expiry time parameters.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::new` (behind
+  `test-dependencies`) now accepts unknown data, expiry height, expiry time,
+  and unknown metadata parameters.
+- `zcash_keys::address::UnifiedAddress::from_receivers` no longer requires a
+  shielded receiver; at least one receiver (transparent or shielded) suffices.
+- `zcash_keys::address::UnifiedAddress::to_zcash_address` produces `zu`
+  (shielded-only) addresses for R2, stripping any transparent receiver; an
+  address with no shielded receiver falls back to its `tu`
+  (transparent-including) encoding.
+- The `Sapling` and `Unified` variants of `zcash_keys::address::Address` now
+  wrap their payloads in `Box` to reduce the enum's stack footprint.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::to_receiver_requirements`
+  returns `ReceiverRequirements::TRANSPARENT_ONLY` for a key having a transparent
+  item, no shielded item, and no data item that the build cannot interpret,
+  instead of `Err(ReceiverRequirementError::NoShieldedReceiver)`. Address
+  generation from such a key, including via
+  `UnifiedAddressRequest::AllAvailableKeys`, now produces a transparent-only
+  ZIP 316 Revision 2 (`tu`) Unified Address. A key having a data item that the
+  build cannot interpret, such as an item of a pool whose feature is disabled,
+  still returns `Err(ReceiverRequirementError::NoShieldedReceiver)`.
+- `zcash_keys::keys::ReceiverRequirements::intersect` permits a result having no
+  shielded receiver when an operand already had none.
+- `zcash_keys::keys::transparent::gap_limits::generate_address_list` propagates
+  `Err(AddressGenerationError::NoSatisfiableReceiver)` for an external-scope
+  address, instead of returning a bare transparent address for that error.
+- `zcash_keys::keys::AddressGenerationError::ShieldedReceiverRequired` has been
+  renamed to `zcash_keys::keys::AddressGenerationError::NoSatisfiableReceiver`.
+
+### Deprecated
+- `zcash_keys::keys::UnifiedFullViewingKey::transparent` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::transparent`; use `p2pkh`
+  instead.
+
+### Removed
+- `zcash_keys::keys::transparent::Key::{pubkey_with_context,
+  der_encode_with_context}`. Use `Key::pubkey` and `Key::der_encode` instead.
+
+### Fixed
+- `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer
+  panics when the `regex` crate is built without the `unicode-perl` feature,
+  which this crate does not require. This affected consumers whose dependency
+  graphs enabled no `regex` Unicode features.
+
+## [0.16.1] - 2026-07-28
+
+### Added
+- `impl Debug for zcash_keys::keys::transparent::gap_limits::GapAddressesError`
+
+## [0.16.0] - 2026-07-24
+
+### Changed
+- Migrated to `zcash_transparent 0.10.0`.
+
+## [0.15.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`, `zcash_transparent 0.9.0`.
+- Migrated to `orchard 0.15`.
+
+## [0.15.0-pre.0] - 2026-06-30
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`,
+  `zcash_transparent 0.9.0-pre.0`.
+
+## [0.14.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9`, `zcash_address 0.12`, `zcash_transparent 0.8`, `orchard 0.14`
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.13.0] - 2026-04-27
+
+### Added
+- `zcash_keys::keys::OutgoingViewingKey`
+- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_uivk`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::subsumes`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers`
 - `impl {PartialEq, Eq} for zcash_keys::keys::UnifiedIncomingViewingKey`
 - `zcash_keys::keys::ReceiverRequirementError`
 - `zcash_keys::keys::transparent::DerDecodeError` (behind the
   `transparent-key-encoding` feature flag)
-- `zcash_keys::keys::OutgoingViewingKey`
-- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::transparent::gap_limits` module (behind the
   `transparent-inputs` feature flag), containing:
   - `GapLimits` type (moved from `zcash_client_backend::wallet::transparent`).
@@ -29,6 +263,9 @@ workspace.
   - `GapAddressesError`
 
 ### Changed
+- MSRV is now 1.85.1.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`, `zcash_transparent 0.7`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_keys::keys::ReceiverRequirement::intersect`,
   `UnifiedAddressRequest::new`, `ReceiverRequirements::new`,
   `ReceiverRequirements::intersect`, and
@@ -37,8 +274,6 @@ workspace.
 - `zcash_keys::keys::transparent::Key::der_decode` now returns
   `Result<Self, DerDecodeError>` instead of `Result<Self, ()>` (behind the
   `transparent-key-encoding` feature flag).
-- MSRV is now 1.85.1.
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - The `std` feature flag now enables the equivalent flag on the dependencies
   `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.
 

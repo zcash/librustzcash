@@ -127,7 +127,13 @@ impl ZcashdHdDerivation {
         network: &C,
         path: &str,
     ) -> Result<Self, PathParseError> {
-        let re = Regex::new(r"^m/32'/(\d+)'/(\d+)'(?:/(\d+)')?$").expect("checked to be valid");
+        // ASCII digit classes are used deliberately. An HD keypath's digits
+        // are ASCII by definition, and `\d` requires the regex crate's
+        // `unicode-perl` feature, which this crate does not declare. In a
+        // dependency graph that enables that feature nowhere else, a `\d`
+        // pattern fails to compile at runtime.
+        let re =
+            Regex::new(r"^m/32'/([0-9]+)'/([0-9]+)'(?:/([0-9]+)')?$").expect("checked to be valid");
         let parts = re.captures(path).ok_or(PathParseError::PathInvalid)?;
         assert!(parts.len() <= 4);
 

@@ -7,7 +7,9 @@ use uuid::Uuid;
 use crate::wallet::init::WalletMigrationError;
 
 /// Identifier for the migration that performs the initial setup of the wallet database.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbc4f5e57_d600_4b6c_990f_b3538f0bfce1);
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xbc4f5e57_d600_4b6c_990f_b3538f0bfce1);
+
+pub(super) const DEPENDENCIES: &[Uuid] = &[];
 
 pub(super) struct Migration;
 
@@ -17,7 +19,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        HashSet::new()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

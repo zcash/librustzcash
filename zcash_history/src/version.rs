@@ -1,10 +1,10 @@
-use std::fmt;
-use std::io;
+use alloc::vec::Vec;
+use core::fmt;
 
 use blake2b_simd::Params as Blake2Params;
-use byteorder::{ByteOrder, LittleEndian};
+use corez::io;
 
-use crate::{MAX_NODE_DATA_SIZE, NodeData, node_data};
+use crate::{MAX_NODE_DATA_SIZE, NodeData, NodeDataV2, NodeDataV3};
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     let hash_result = Blake2Params::new()
@@ -21,7 +21,7 @@ fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
 fn personalization(branch_id: u32) -> [u8; 16] {
     let mut result = [0u8; 16];
     result[..12].copy_from_slice(b"ZcashHistory");
-    LittleEndian::write_u32(&mut result[12..], branch_id);
+    result[12..16].copy_from_slice(&branch_id.to_le_bytes());
     result
 }
 
@@ -48,7 +48,7 @@ pub trait Version {
 
         let mut hash_buf = [0u8; MAX_NODE_DATA_SIZE * 2];
         let size = {
-            let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
+            let mut cursor = corez::io::Cursor::new(&mut hash_buf[..]);
             Self::write(left, &mut cursor)
                 .expect("Writing to memory buf with enough length cannot fail; qed");
             Self::write(right, &mut cursor)
@@ -84,7 +84,7 @@ pub trait Version {
     fn to_bytes(data: &Self::NodeData) -> Vec<u8> {
         let mut buf = [0u8; MAX_NODE_DATA_SIZE];
         let pos = {
-            let mut cursor = std::io::Cursor::new(&mut buf[..]);
+            let mut cursor = corez::io::Cursor::new(&mut buf[..]);
             Self::write(data, &mut cursor).expect("Cursor cannot fail");
             cursor.position() as usize
         };
@@ -94,7 +94,7 @@ pub trait Version {
 
     /// Convert from byte representation.
     fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> io::Result<Self::NodeData> {
-        let mut cursor = std::io::Cursor::new(buf);
+        let mut cursor = corez::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
     }
 
@@ -149,7 +149,7 @@ impl Version for V1 {
 pub enum V2 {}
 
 impl Version for V2 {
-    type NodeData = node_data::V2;
+    type NodeData = NodeDataV2;
 
     fn consensus_branch_id(data: &Self::NodeData) -> u32 {
         data.v1.consensus_branch_id
@@ -168,11 +168,50 @@ impl Version for V2 {
         left: &Self::NodeData,
         right: &Self::NodeData,
     ) -> Self::NodeData {
-        node_data::V2::combine_inner(subtree_commitment, left, right)
+        NodeDataV2::combine_inner(subtree_commitment, left, right)
     }
 
     fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
-        node_data::V2::read(consensus_branch_id, r)
+        NodeDataV2::read(consensus_branch_id, r)
+    }
+
+    fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
+        data.write(w)
+    }
+}
+
+/// Version 3 of the Zcash chain history tree.
+///
+/// This version is used from the NU6.3 epoch for history nodes that include
+/// Ironwood shielded pool metadata. Earlier epochs continue to use the
+/// corresponding earlier history tree versions.
+pub enum V3 {}
+
+impl Version for V3 {
+    type NodeData = NodeDataV3;
+
+    fn consensus_branch_id(data: &Self::NodeData) -> u32 {
+        data.v2.v1.consensus_branch_id
+    }
+
+    fn start_height(data: &Self::NodeData) -> u64 {
+        data.v2.v1.start_height
+    }
+
+    fn end_height(data: &Self::NodeData) -> u64 {
+        data.v2.v1.end_height
+    }
+
+    fn combine_inner(
+        subtree_commitment: [u8; 32],
+        left: &Self::NodeData,
+        right: &Self::NodeData,
+    ) -> Self::NodeData {
+        NodeDataV3::combine_inner(subtree_commitment, left, right)
+    }
+
+    fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
+        NodeDataV3::read(consensus_branch_id, r)
     }
 
     fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {

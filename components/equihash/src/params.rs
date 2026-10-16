@@ -12,7 +12,7 @@ impl Params {
         // - k >= 3 so the encoded solutions have an exact byte length.
         // - k < n, so the collision bit length is at least 1.
         // - n is a multiple of k + 1, so we have an integer collision bit length.
-        if (n % 8 == 0) && (k >= 3) && (k < n) && (n % (k + 1) == 0) {
+        if n.is_multiple_of(8) && (k >= 3) && (k < n) && n.is_multiple_of(k + 1) {
             Some(Params { n, k })
         } else {
             None
@@ -28,7 +28,7 @@ impl Params {
         (self.n / (self.k + 1)) as usize
     }
     pub(crate) fn collision_byte_length(&self) -> usize {
-        (self.collision_bit_length() + 7) / 8
+        self.collision_bit_length().div_ceil(8)
     }
     #[cfg(test)]
     pub(crate) fn hash_length(&self) -> usize {

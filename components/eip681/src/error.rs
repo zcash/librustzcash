@@ -63,6 +63,14 @@ pub enum ParseError<'a> {
     /// Unexpected leftover input after parsing.
     #[snafu(display("Unexpected leftover input: {input}"))]
     UnexpectedLeftoverInput { input: &'a str },
+
+    /// A [`Number`] candidate had no mantissa digits (no integer digits and no
+    /// decimal part), and so does not represent the `number` alternative of
+    /// the `value` grammar production.
+    ///
+    /// [`Number`]: crate::parse::Number
+    #[snafu(display("Number candidate has no mantissa digits at: {input}"))]
+    NumberMissingDigits { input: &'a str },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -241,6 +249,10 @@ pub enum Error {
     /// The request is not a valid native transfer.
     #[snafu(display("Not a native transfer request: {source}"))]
     NotNativeTransfer { source: NativeTransferError },
+
+    /// The request parts have no EIP-681 encoding that parses back to the same parts.
+    #[snafu(display("The request parts do not have an unambiguous encoding; saw '{uri}'"))]
+    AmbiguousEncoding { uri: String },
 }
 
 impl From<ValidationError> for Error {

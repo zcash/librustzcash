@@ -47,6 +47,7 @@ impl Exchange for Mexc {
                 "https://api.mexc.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),
+                |b| b,
                 RETRY_LIMIT,
                 retry_filter,
             )

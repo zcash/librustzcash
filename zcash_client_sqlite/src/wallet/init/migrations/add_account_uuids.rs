@@ -13,9 +13,10 @@ use crate::wallet::{account_kind_code, init::WalletMigrationError};
 
 use super::support_legacy_sqlite;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xcccc623f_3243_43c7_b884_ceef25149e04);
+/// This migration adds a UUID to each account record, and adds `name` and `key_source` columns.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xcccc623f_3243_43c7_b884_ceef25149e04);
 
-const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
 
 pub(super) struct Migration;
 

@@ -12,10 +12,12 @@ use crate::{BlockDb, error::SqliteClientError};
 #[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb, FsBlockDbError},
-    rusqlite::Connection,
-    std::fs::File,
-    std::io::Read,
-    std::path::{Path, PathBuf},
+    rusqlite::{Connection, OptionalExtension, named_params},
+    std::{
+        fs::File,
+        io::Read,
+        path::{Path, PathBuf},
+    },
 };
 
 pub mod init;
@@ -126,8 +128,6 @@ pub(crate) fn blockmetadb_insert(
     conn: &Connection,
     block_meta: &[BlockMeta],
 ) -> Result<(), rusqlite::Error> {
-    use rusqlite::named_params;
-
     let mut stmt_insert = conn.prepare(
         "INSERT INTO compactblocks_meta (
             height,
@@ -212,8 +212,6 @@ pub(crate) fn blockmetadb_find_block(
     conn: &Connection,
     height: BlockHeight,
 ) -> Result<Option<BlockMeta>, rusqlite::Error> {
-    use rusqlite::OptionalExtension;
-
     conn.query_row(
         "SELECT blockhash, time, sapling_outputs_count, orchard_actions_count
         FROM compactblocks_meta
@@ -399,6 +397,101 @@ mod tests {
     #[cfg(feature = "orchard")]
     fn truncate_to_chain_state_above_scanned_orchard() {
         testing::pool::truncate_to_chain_state_above_scanned::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn truncate_to_chain_state_commitment_tree_error_sapling() {
+        testing::pool::truncate_to_chain_state_commitment_tree_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_to_chain_state_commitment_tree_error_orchard() {
+        testing::pool::truncate_to_chain_state_commitment_tree_error::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn put_blocks_commitment_tree_error_sapling() {
+        testing::pool::put_blocks_commitment_tree_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn put_blocks_commitment_tree_error_orchard() {
+        testing::pool::put_blocks_commitment_tree_error::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_to_chain_state_deep_sapling() {
+        testing::pool::rewind_to_chain_state_deep::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_chain_state_deep_orchard() {
+        testing::pool::rewind_to_chain_state_deep::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_to_chain_state_shallow_sapling() {
+        testing::pool::rewind_to_chain_state_shallow::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_chain_state_shallow_orchard() {
+        testing::pool::rewind_to_chain_state_shallow::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_after_non_contiguous_scan_sapling() {
+        testing::pool::rewind_after_non_contiguous_scan::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_after_non_contiguous_scan_orchard() {
+        testing::pool::rewind_after_non_contiguous_scan::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "expensive-tests")]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
+    fn stabilized_note_spendable_after_deep_rewind_sapling() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
+    fn stabilized_note_spendable_after_deep_rewind_orchard() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "expensive-tests")]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
+    fn newly_discovered_notes_become_stabilized_sapling() {
+        testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
+    fn newly_discovered_notes_become_stabilized_orchard() {
+        testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
     }
 
     #[test]

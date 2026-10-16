@@ -11,9 +11,11 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::received_notes_nullable_nf;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xe2d71ac5_6a44_4c6b_a9a0_6d0a79d355f1);
+/// This migration adds a table for storing mappings from nullifiers to the transaction they are
+/// revealed in.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xe2d71ac5_6a44_4c6b_a9a0_6d0a79d355f1);
 
-const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
 
 pub(super) struct Migration;
 

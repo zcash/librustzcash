@@ -3,6 +3,18 @@
 This repository contains a (work-in-progress) set of Rust crates for working
 with Zcash.
 
+⚠️ IMPORTANT: The only way to check Zcash consensus validity is to use a Zcash
+consensus node. ⚠️
+
+The public API surfaces of these crates include many APIs that are used by the
+zcashd and Zebra node implementations, as well as other critical components in
+the Zcash ecosystem, but none of them expose any way to check consensus validity
+of transactions. In particular, APIs for parsing transactions only check a subset
+of validity constraints. The specific subset they check is not sufficient to
+guarantee any meaningful user-level validity constraints, and is not necessarily
+stable over time, or consistent with other implementations of parsers for Zcash
+transactions.
+
 <!-- START mermaid-dependency-graph -->
 
 ```mermaid
@@ -11,22 +23,24 @@ graph TB
         direction TB
         subgraph main
             zcash_address
+            zcash_history
             zcash_primitives
             zcash_transparent
             zcash_proofs
-            zcash_extensions
             zcash_protocol
             pczt
             zcash_client_backend
-            zcash_client_memory
             zcash_client_sqlite
             zcash_keys
+            zcash_pool_migration
             zip321
         end
 
         subgraph standalone_components
+            eip681
             equihash
             f4jumble
+            payment_uri
             zcash_encoding
         end
     end
@@ -46,25 +60,32 @@ graph TB
     %% they are deliberate edges) but commented out (to simplify the graph).
 
     zcash_client_sqlite --> zcash_client_backend
-    zcash_client_memory --> zcash_client_backend
+
+    zcash_client_sqlite --> zcash_pool_migration
+
+    %% The base `pczt` data model backs the pool-migration schema backfills, in
+    %% every build configuration.
+    zcash_client_sqlite --> pczt
+
+    %% The `zcash_client_backend` dependency is gated on the `wallet` feature.
+    zcash_pool_migration -.-> zcash_client_backend
 
     zcash_client_backend --> pczt
+    zcash_pool_migration --> pczt
 
     %% zcash_client_sqlite --> zcash_keys
-    %% zcash_client_memory --> zcash_keys
     zcash_client_backend --> zcash_keys
+    %% zcash_pool_migration --> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 
-    zcash_extensions --> zcash_primitives
     zcash_proofs --> zcash_primitives
     pczt --> zcash_primitives
     %% zcash_client_backend --> zcash_primitives
     %% zcash_client_sqlite --> zcash_primitives
-    %% zcash_client_memory --> zcash_primitives
+    %% zcash_pool_migration --> zcash_primitives
 
     %% zcash_client_sqlite --> zcash_transparent
-    %% zcash_client_memory --> zcash_transparent
     %% zcash_client_backend --> zcash_transparent
     %% pczt --> zcash_transparent
     zcash_keys --> zcash_transparent
@@ -72,45 +93,42 @@ graph TB
 
     zcash_client_backend --> zip321
 
-    zcash_transparent --> zcash_address
-    %% zcash_keys --> zcash_address
+    zcash_keys --> zcash_address
     %% zcash_client_backend --> zcash_address
     %% zcash_client_sqlite --> zcash_address
-    %% zcash_client_memory --> zcash_address
     zip321 --> zcash_address
 
-    %% zcash_transparent --> zcash_protocol
+    zcash_transparent --> zcash_protocol
     %% zcash_keys --> zcash_protocol
     %% zcash_client_sqlite --> zcash_protocol
-    %% zcash_client_memory --> zcash_protocol
     %% zcash_primitives --> zcash_protocol
     %% zcash_client_backend --> zcash_protocol
     %% pczt --> zcash_protocol
-    %% zcash_extensions --> zcash_protocol
     zcash_address --> zcash_protocol
     %% zip321 --> zcash_protocol
+    %% zcash_pool_migration --> zcash_protocol
 
     %% zcash_client_sqlite --> zcash_encoding
     %% zcash_transparent --> zcash_encoding
-    %% zcash_client_memory --> zcash_encoding
     %% zcash_client_backend --> zcash_encoding
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
     %% zcash_address --> zcash_encoding
+    zcash_history --> zcash_encoding
     zcash_protocol --> zcash_encoding
 
     zcash_primitives --> equihash
     zcash_address --> f4jumble
+    payment_uri --> eip681
 
     %% zcash_client_backend --> orchard
     %% pczt --> orchard
     zcash_keys --> orchard
     zcash_primitives --> orchard
     %% zcash_client_sqlite --> orchard
-    %% zcash_client_memory --> orchard
+    %% zcash_pool_migration --> orchard
 
     %% zcash_client_sqlite --> sapling-crypto
-    %% zcash_client_memory --> sapling-crypto
     %% zcash_client_backend --> sapling-crypto
     zcash_keys --> sapling-crypto
     %% zcash_proofs --> sapling-crypto
@@ -124,7 +142,7 @@ graph TB
     %% zcash_client_backend --> zcash_note_encryption
 
     %% zcash_client_sqlite --> zip32
-    %% zcash_client_memory --> zip32
+    %% zcash_pool_migration --> zip32
     %% zcash_client_backend --> zip32
     %% zcash_keys --> zip32
     orchard --> zip32
@@ -144,16 +162,16 @@ graph TB
     click equihash "https://docs.rs/equihash/" _blank
     click f4jumble "https://docs.rs/f4jumble/" _blank
     click orchard "https://docs.rs/orchard/" _blank
+    click payment_uri "https://docs.rs/payment_uri/" _blank
     click pczt "https://docs.rs/pczt/" _blank
     click sapling-crypto "https://docs.rs/sapling-crypto/" _blank
     click zcash_address "https://docs.rs/zcash_address/" _blank
     click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
     click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
-    click zcash_client_memory "https://docs.rs/zcash_client_memory/" _blank
     click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
-    click zcash_extensions "https://docs.rs/zcash_extensions/" _blank
     click zcash_keys "https://docs.rs/zcash_keys/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
+    click zcash_pool_migration "https://docs.rs/zcash_pool_migration/" _blank
     click zcash_primitives "https://docs.rs/zcash_primitives/" _blank
     click zcash_proofs "https://docs.rs/zcash_proofs/" _blank
     click zcash_protocol "https://docs.rs/zcash_protocol/" _blank
@@ -161,6 +179,7 @@ graph TB
     click zcash_transparent "https://docs.rs/zcash_transparent/" _blank
     click zip321 "https://docs.rs/zip321/" _blank
     click zip32 "https://docs.rs/zip32/" _blank
+    click zcash_history "https://docs.rs/zcash_history/" _blank
 ```
 
 <!-- END mermaid-dependency-graph -->
@@ -208,12 +227,20 @@ graph TB
   - fee calculation
   - transaction proposals & high-level transaction construction APIs
 * `zcash_client_sqlite`: SQLite-based implementation of `zcash_client_backend` storage APIs
+* `zcash_pool_migration`: Backend-agnostic engine for migrating wallet funds between value pools (first used for the NU6.3 Orchard → Ironwood migration)
+  - note-split planning into self-funding denominations
+  - migration PCZT construction, signing & height-based scheduling
+  - state persistence through a wallet backend
 
 #### Utilities & Common Dependencies
 
+* `payment_uri`: Parsing and validation for cross-chain payment request URIs
 * `f4jumble`: Encoding for Unified addresses
 * `zcash_encoding`: Bitcoin-derived transaction encoding utilities for Zcash
 * `equihash`: Proof-of-work protocol implementation
+* `zcash_history`: Zcash blockchain history tree
+  - the ZIP 221 Merkle Mountain Range over per-block metadata
+  - consumed by node implementations (Zebra, zcashd) for FlyClient proofs
 
 
 ## Security Warnings

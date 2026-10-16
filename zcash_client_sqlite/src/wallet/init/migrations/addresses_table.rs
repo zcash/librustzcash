@@ -9,7 +9,7 @@ use zcash_keys::{
     encoding::AddressCodec,
     keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey},
 };
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::{UA_TRANSPARENT, wallet::init::WalletMigrationError};
@@ -21,9 +21,9 @@ use super::ufvk_support;
 
 /// The migration that removed the address columns from the `accounts` table, and created
 /// the `accounts` table.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
 
-const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
@@ -73,7 +73,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
-                .map_err(WalletMigrationError::CorruptedData)?;
+                .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
 
             // Verify that the address column contains the expected value.
             let address: String = row.get(2)?;
@@ -83,7 +83,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ))
             })?;
             let decoded_address = if let Address::Unified(ua) = decoded {
-                ua
+                *ua
             } else {
                 return Err(WalletMigrationError::CorruptedData(
                     "Address in accounts table was not a Unified Address.".to_string(),
@@ -96,7 +96,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 return Err(WalletMigrationError::CorruptedData(format!(
                     "Decoded UA {} does not match the UFVK's default address {} at {:?}.",
                     address,
-                    Address::Unified(expected_address).encode(&self.params),
+                    Address::from(expected_address).encode(&self.params),
                     idx,
                 )));
             }
@@ -129,7 +129,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 #[cfg(feature = "transparent-inputs")]
                 {
                     let expected_address = ufvk
-                        .transparent()
+                        .p2pkh()
                         .and_then(|k| k.derive_external_ivk().ok().map(|k| k.default_address().0));
                     if Some(decoded_transparent_address) != expected_address {
                         return Err(WalletMigrationError::CorruptedData(format!(
@@ -155,7 +155,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                  VALUES (:account, :ufvk)",
                 named_params![
                     ":account": u32::from(account),
-                    ":ufvk": ufvk.encode(&self.params),
+                    ":ufvk": ufvk.encode(&self.params)?,
                 ],
             )?;
 
@@ -187,7 +187,7 @@ fn insert_address<P: consensus::Parameters>(
     account: AccountId,
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
-) -> Result<(), rusqlite::Error> {
+) -> Result<(), WalletMigrationError> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
             account,

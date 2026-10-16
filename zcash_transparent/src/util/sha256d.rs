@@ -1,4 +1,4 @@
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 use sha2::{Digest, Sha256, digest::Output};
 
 /// Abstraction over a reader which SHA-256d-hashes the data being read.

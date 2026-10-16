@@ -87,8 +87,7 @@ impl fmt::Display for Error {
             Error::MissingSigningKey => write!(f, "Missing signing key"),
             Error::NullDataTooLong { actual, limit } => write!(
                 f,
-                "Provided null data is longer than the maximum supported length (actual: {}, limit: {})",
-                actual, limit
+                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
             ),
             Error::InputCountMismatch => write!(
                 f,
@@ -96,8 +95,7 @@ impl fmt::Display for Error {
             ),
             Error::InvalidExternalSignature { sig_index } => write!(
                 f,
-                "A provided external signature at index {} was not valid for any transparent input",
-                sig_index
+                "A provided external signature at index {sig_index} was not valid for any transparent input"
             ),
             Error::DuplicateSignature => write!(
                 f,
@@ -119,8 +117,6 @@ impl core::error::Error for Error {}
 /// stored in this set and used to authorize transactions with transparent inputs.
 pub struct TransparentSigningSet {
     #[cfg(feature = "transparent-inputs")]
-    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
-    #[cfg(feature = "transparent-inputs")]
     keys: Vec<(secp256k1::SecretKey, secp256k1::PublicKey)>,
 }
 
@@ -135,8 +131,6 @@ impl TransparentSigningSet {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "transparent-inputs")]
-            secp: secp256k1::Secp256k1::gen_new(),
-            #[cfg(feature = "transparent-inputs")]
             keys: vec![],
         }
     }
@@ -146,7 +140,7 @@ impl TransparentSigningSet {
     /// Returns the corresponding pubkey.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_key(&mut self, sk: secp256k1::SecretKey) -> secp256k1::PublicKey {
-        let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk);
+        let pubkey = secp256k1::PublicKey::from_secret_key(&sk);
         // Cache the pubkey for ease of matching later.
         self.keys.push((sk, pubkey));
         pubkey
@@ -317,7 +311,7 @@ impl Authorization for Unauthorized {
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k1::VerifyOnly> {
+pub struct TransparentSignatureContext {
     // Data from the original Bundle<Unauthorized>, needed to reconstruct Bundle<Authorized>
     original_vin_unauthorized: Vec<TxIn<Unauthorized>>,
     original_vout: Vec<TxOut>,
@@ -325,7 +319,6 @@ pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k
 
     // External data references
     sighashes: Vec<[u8; 32]>,
-    secp_ctx: &'a secp256k1::Secp256k1<V>,
 
     // Mutable state: accumulated script signatures for inputs
     final_script_sigs: Vec<Option<script::Sig>>,
@@ -645,7 +638,7 @@ impl Bundle<Unauthorized> {
                         });
 
                         let msg = secp256k1::Message::from_digest(sighash);
-                        let sig = signing_set.secp.sign_ecdsa(&msg, sk);
+                        let sig = secp256k1::ecdsa::sign(msg, sk);
 
                         Ok(construct_script_sig(&sig, pubkey))
                     }
@@ -684,7 +677,7 @@ impl Bundle<Unauthorized> {
                                         .iter()
                                         .find(|(_, pk)| pk.serialize() == pubkey_bytes)
                                     {
-                                        let sig = signing_set.secp.sign_ecdsa(&msg, sk);
+                                        let sig = secp256k1::ecdsa::sign(msg, sk);
                                         let mut sig_bytes: Vec<u8> = sig.serialize_der().to_vec();
                                         sig_bytes.push(SIGHASH_ALL);
                                         script_sig.push(
@@ -739,8 +732,7 @@ impl Bundle<Unauthorized> {
     pub fn prepare_transparent_signatures<F>(
         self,
         calculate_sighash: F,
-        secp_ctx: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-    ) -> Result<TransparentSignatureContext<'_, secp256k1::VerifyOnly>, Error>
+    ) -> Result<TransparentSignatureContext, Error>
     where
         F: Fn(SignableInput) -> [u8; 32], // The closure's signature
     {
@@ -768,14 +760,13 @@ impl Bundle<Unauthorized> {
             original_vout: self.vout,
             authorization_inputs: self.authorization.inputs,
             sighashes,
-            secp_ctx,
             final_script_sigs: vec![None; num_inputs],
         })
     }
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
+impl TransparentSignatureContext {
     /// Appends a new batch of external signatures to the transparent inputs.
     ///
     /// This method iterates through the provided signatures, applying each one to the
@@ -822,18 +813,14 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
             let sighash_msg = secp256k1::Message::from_digest(self.sighashes[input_idx]);
 
             // We only support external signatures for P2PKH inputs.
-            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info {
-                if self
-                    .secp_ctx
-                    .verify_ecdsa(&sighash_msg, signature, pubkey)
-                    .is_ok()
-                {
-                    if matched_input_idx.is_some() {
-                        // This signature was already valid for a different input.
-                        return Err(Error::DuplicateSignature);
-                    }
-                    matched_input_idx = Some((input_idx, pubkey));
+            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info
+                && secp256k1::ecdsa::verify(signature, sighash_msg, pubkey).is_ok()
+            {
+                if matched_input_idx.is_some() {
+                    // This signature was already valid for a different input.
+                    return Err(Error::DuplicateSignature);
                 }
+                matched_input_idx = Some((input_idx, pubkey));
             }
         }
 
@@ -888,23 +875,24 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(all(test, feature = "std", feature = "transparent-inputs"))]
 mod tests {
     use std::vec::Vec;
 
     use super::{Error, OutPoint, SignableInput, TransparentBuilder, TxOut};
     use crate::address::TransparentAddress;
-    use secp256k1::{Message, Secp256k1, SecretKey};
-    use zcash_address::ZcashAddress;
+    use secp256k1::{Message, SecretKey};
     use zcash_protocol::value::Zatoshis;
+
+    /// The pubkey hash of the P2PKH address that the tests pay. Its value is arbitrary.
+    const RECIPIENT_PUBKEY_HASH: [u8; 20] = [0x11; 20];
 
     // Helper that takes a key to create distinct inputs.
     fn new_p2pkh_spend_with_key(
         key_bytes: [u8; 32],
     ) -> (SecretKey, secp256k1::PublicKey, TxOut, OutPoint) {
-        let sk = SecretKey::from_slice(&key_bytes).expect("32 bytes is a valid secret key");
-        let secp = Secp256k1::new();
-        let pk = secp256k1::PublicKey::from_secret_key(&secp, &sk);
+        let sk = SecretKey::from_secret_bytes(key_bytes).expect("32 bytes is a valid secret key");
+        let pk = secp256k1::PublicKey::from_secret_key(&sk);
 
         let taddr = TransparentAddress::PublicKeyHash(crate::util::hash160::hash(&pk.serialize()));
 
@@ -918,13 +906,7 @@ mod tests {
 
     #[test]
     fn append_and_finalize_signatures() {
-        let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
-        let generic_addr: ZcashAddress = addr_str
-            .parse()
-            .expect("Test address string should be valid");
-        let taddr: TransparentAddress = generic_addr
-            .convert()
-            .expect("Conversion to TransparentAddress should succeed");
+        let taddr = TransparentAddress::PublicKeyHash(RECIPIENT_PUBKEY_HASH);
 
         // Create two inputs with corresponding secret keys for signing
         let (sk1, pk1, coin1, utxo1) = new_p2pkh_spend_with_key([1; 32]);
@@ -941,9 +923,6 @@ mod tests {
         // Build the unauthorized bundle
         let bundle = builder.build().unwrap();
 
-        // Create the secp256k1 context for verification
-        let secp = Secp256k1::verification_only();
-
         // This closure will be called by `prepare_transparent_signatures` for each input.
         // For this test, we'll just return a fixed, unique hash for each input.
         let calculate_sighash = |input: SignableInput| {
@@ -955,18 +934,17 @@ mod tests {
 
         // Prepare the signing context
         let sig_context = bundle
-            .prepare_transparent_signatures(calculate_sighash, &secp)
+            .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
 
         let sighash1 = sig_context.sighashes[0];
         let sighash2 = sig_context.sighashes[1];
 
         // Sign with the corresponding secret keys
-        let signing_secp = Secp256k1::signing_only();
-        let msg1 = Message::from_digest_slice(&sighash1).unwrap();
-        let msg2 = Message::from_digest_slice(&sighash2).unwrap();
-        let sig1 = signing_secp.sign_ecdsa(&msg1, &sk1);
-        let sig2 = signing_secp.sign_ecdsa(&msg2, &sk2);
+        let msg1 = Message::from_digest(sighash1);
+        let msg2 = Message::from_digest(sighash2);
+        let sig1 = secp256k1::ecdsa::sign(msg1, &sk1);
+        let sig2 = secp256k1::ecdsa::sign(msg2, &sk2);
 
         // Create a batch with the correct signatures
         let signatures_batch = vec![sig1, sig2];
@@ -989,19 +967,18 @@ mod tests {
         let bundle = builder.build().unwrap();
 
         // Prepare the signing context
-        let secp = Secp256k1::verification_only();
         let calculate_sighash = |input: SignableInput| [input.index as u8; 32];
         let sig_context = bundle
-            .prepare_transparent_signatures(calculate_sighash, &secp)
+            .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
 
         // Create a signature from a different key
         let unrelated_sk_bytes = [2; 32];
-        let unrelated_sk = SecretKey::from_slice(&unrelated_sk_bytes).unwrap();
+        let unrelated_sk = SecretKey::from_secret_bytes(unrelated_sk_bytes).unwrap();
 
         let sighash = sig_context.sighashes[0];
-        let msg = Message::from_digest_slice(&sighash).unwrap();
-        let bad_signature = Secp256k1::signing_only().sign_ecdsa(&msg, &unrelated_sk);
+        let msg = Message::from_digest(sighash);
+        let bad_signature = secp256k1::ecdsa::sign(msg, &unrelated_sk);
 
         // Assert that appending this "bad" signature fails with the correct error
         let result = sig_context.append_external_signatures(&[bad_signature]);
@@ -1029,17 +1006,16 @@ mod tests {
         let bundle = builder.build().unwrap();
 
         // Prepare the signing context
-        let secp = Secp256k1::verification_only();
         // Make both sighashes the same for this test.
         let calculate_sighash = |_input: SignableInput| [42; 32];
         let sig_context = bundle
-            .prepare_transparent_signatures(calculate_sighash, &secp)
+            .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
 
         // Create one signature from the first key that will now appear valid for both inputs
         let sighash = sig_context.sighashes[0]; // Both sighashes are identical ([42; 32])
-        let msg = Message::from_digest_slice(&sighash).unwrap();
-        let ambiguous_sig = Secp256k1::signing_only().sign_ecdsa(&msg, &sk);
+        let msg = Message::from_digest(sighash);
+        let ambiguous_sig = secp256k1::ecdsa::sign(msg, &sk);
 
         // Assert that appending this one signature fails with DuplicateSignature
         let result = sig_context.append_external_signatures(&[ambiguous_sig]);
@@ -1058,20 +1034,19 @@ mod tests {
         let bundle = builder.build().unwrap();
 
         // Prepare the signing context
-        let secp = Secp256k1::verification_only();
         let calculate_sighash = |input: SignableInput| {
             let mut sighash = [0u8; 32];
             sighash[0] = input.index as u8; // A simple, unique sighash for each input
             sighash
         };
         let sig_context = bundle
-            .prepare_transparent_signatures(calculate_sighash, &secp)
+            .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
 
         // Create and append a signature for only the first input
         let sighash1 = sig_context.sighashes[0];
-        let msg1 = Message::from_digest_slice(&sighash1).unwrap();
-        let sig1 = Secp256k1::signing_only().sign_ecdsa(&msg1, &sk1);
+        let msg1 = Message::from_digest(sighash1);
+        let sig1 = secp256k1::ecdsa::sign(msg1, &sk1);
 
         // This append operation should succeed, as we are providing one valid signature.
         let result_after_append = sig_context.append_external_signatures(&[sig1]);
@@ -1086,8 +1061,7 @@ mod tests {
         let final_bundle_result = partially_signed_context.finalize_signatures();
         assert!(
             matches!(final_bundle_result, Err(Error::MissingSignatures)),
-            "Should fail with MissingSignatures, but got: {:?}",
-            final_bundle_result
+            "Should fail with MissingSignatures, but got: {final_bundle_result:?}"
         );
     }
 
@@ -1104,11 +1078,10 @@ mod tests {
         use zcash_script::pattern::check_multisig;
         use zcash_script::script::{Component, Evaluable, FromChain};
 
-        let secp = Secp256k1::new();
-        let sk1 = SecretKey::from_slice(&key_bytes_1).unwrap();
-        let sk2 = SecretKey::from_slice(&key_bytes_2).unwrap();
-        let pk1 = secp256k1::PublicKey::from_secret_key(&secp, &sk1);
-        let pk2 = secp256k1::PublicKey::from_secret_key(&secp, &sk2);
+        let sk1 = SecretKey::from_secret_bytes(key_bytes_1).unwrap();
+        let sk2 = SecretKey::from_secret_bytes(key_bytes_2).unwrap();
+        let pk1 = secp256k1::PublicKey::from_secret_key(&sk1);
+        let pk2 = secp256k1::PublicKey::from_secret_key(&sk2);
 
         // Build a 2-of-2 multisig redeem script
         let redeem_script: FromChain =
@@ -1129,9 +1102,7 @@ mod tests {
     fn apply_signatures_p2sh() {
         use super::TransparentSigningSet;
 
-        let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
-        let taddr: TransparentAddress =
-            addr_str.parse::<ZcashAddress>().unwrap().convert().unwrap();
+        let taddr = TransparentAddress::PublicKeyHash(RECIPIENT_PUBKEY_HASH);
 
         let (sks, redeem_script, coin, utxo) = new_p2sh_2of2_spend([1; 32], [2; 32]);
 
@@ -1156,16 +1127,14 @@ mod tests {
         };
 
         let result = bundle.apply_signatures(calculate_sighash, &signing_set);
-        assert!(result.is_ok(), "P2SH apply_signatures failed: {:?}", result);
+        assert!(result.is_ok(), "P2SH apply_signatures failed: {result:?}");
     }
 
     #[test]
     fn apply_signatures_p2sh_missing_key() {
         use super::TransparentSigningSet;
 
-        let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
-        let taddr: TransparentAddress =
-            addr_str.parse::<ZcashAddress>().unwrap().convert().unwrap();
+        let taddr = TransparentAddress::PublicKeyHash(RECIPIENT_PUBKEY_HASH);
 
         let (sks, redeem_script, coin, utxo) = new_p2sh_2of2_spend([1; 32], [2; 32]);
 

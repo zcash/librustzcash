@@ -8,17 +8,304 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.27.0] - PENDING
+## [Unreleased]
+
+### Changed
+- MSRV is now 1.89
+
+## [0.31.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.1` and
+  `zcash_transparent 0.11.0-pre.2`.
+
+## [0.31.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_transparent 0.11.0-pre.1`.
+
+### Fixed
+- `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
+  for an empty slice instead of panicking.
+
+## [0.31.0-pre.0] - 2026-09-30
+
+This release supports the NU7 upgrade on testnet.
 
 ### Added
-- `zcash_primitives::transaction::zip248`, the ZIP 248 extensible transaction
-  format, deployed as transaction version 7 (unstable; requires
-  `zcash_unstable = "nu7"` or `"zfuture"`). It provides `BundleType`,
-  `BundleVariant`, `BundleId`, `BundleMap`, `TypedBundle`, `CoinbaseBundle`,
-  `UnknownBundle` and `ValuePoolDeltas`, and `TransactionData` gains
-  `from_parts_v7`, `digest_v7`, `coinbase_bundle`, `ironwood_bundle`,
-  `value_pool_deltas`, `bundles` and `check_v7_consensus_rules`.
-- `zcash_primitives::transaction::TxVersion::V7`
+- Experimental `TxVersion::V7`, the [ZIP 248] extensible transaction format,
+  behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon.
+- `zcash_primitives::transaction::zip248` (requires
+  `zcash_unstable="nutachyon"` for the V7 wire format and digests)
+- `zcash_primitives::transaction::sighash_v7` (requires
+  `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::TransactionData::{from_parts_v7,
+  from_parts_with_bundles, bundles, value_pool_deltas, coinbase_bundle,
+  fee_amount, txid_digests}`
+- `zcash_primitives::transaction::TransactionData::{digest_v7,
+  check_v7_consensus_rules}` (require `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::V7ConsensusError` (requires
+  `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`
+  (require `zcash_unstable="nutachyon"`)
+- `zcash_primitives::transaction::TxDigests::{coinbase_digest,
+  value_pool_deltas_digest, unknown_effect_digests}` (require
+  `zcash_unstable="nutachyon"`)
+
+### Changed
+- `zcash_primitives::transaction::TransactionData::from_parts` now takes a
+  `zip248::ValuePoolDeltas` in place of the `zip233_amount` argument (which was
+  present only under `zcash_unstable="nu7"` with the `zip-233` feature). Pass
+  `ValuePoolDeltas::empty()` to preserve the previous behavior; set a ZIP 233
+  amount with `ValuePoolDeltas::set_zip233`.
+
+[ZIP 248]: https://zips.z.cash/zip-0248
+
+### Changed
+- Migrated to `bls12_381 0.9`, `ff 0.14`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`,
+  `redjubjub 0.9`, `sapling-crypto 0.9`, `secp256k1 0.33`,
+  `zcash_note_encryption 0.5`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}`
+  (and `mock_build`, behind `test-dependencies`) now require their `rng`
+  argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
+- `BranchId::Nu7` is available without a custom compiler configuration, with
+  consensus branch ID `0x77190AD9`. `TxVersion::suggested_for_branch` returns
+  `TxVersion::V6` for it, and `TxVersion::valid_in_branch` accepts `V5` and `V6`
+  transactions but not `V4` transactions under it (ZIP 2003).
+
+## [0.30.1] - 2026-08-18
+
+### Added
+- `zcash_primitives::transaction::components::sapling::SPEND_DESCRIPTION_SIZE` and
+  `OUTPUT_DESCRIPTION_SIZE`, the sizes in bytes of a Sapling spend description and
+  output description in their v4 (pre-NU5) serialized forms. Each is the full
+  per-element cost on the wire in a version 4 transaction (the v5 form moves
+  proofs and signatures to bundle-level fields), so these are conservative upper
+  bounds: dividing a per-element byte budget by them yields a lower bound on the
+  number of spends or outputs that fit within that budget.
+- `zcash_primitives::transaction::components::sapling::testing::arb_bundle`, now
+  public behind the `test-dependencies` feature, generates a Sapling bundle with
+  arbitrary spends and outputs for cross-crate test strategies.
+- `zcash_primitives::transaction::components::orchard::SPEND_AUTH_SIG_SIZE` and
+  `BUNDLE_OVERHEAD`, the per-action spend authorization signature size and the
+  per-bundle overhead (excluding the proof and per-action data) for an
+  Orchard/Ironwood bundle.
+- `zcash_primitives::transaction::components::sapling::BUNDLE_OVERHEAD`, the
+  per-bundle overhead of a Sapling bundle (value balance, binding signature, and
+  CompactSize prefixes).
+- `zcash_primitives::transaction::fees::zip317::MAX_TRANSPARENT_INPUT_SIZE`,
+  `TRANSPARENT_BUNDLE_OVERHEAD`, and `TX_HEADER_SIZE`, the consensus-maximum
+  transparent input size, the transparent bundle overhead, and the fixed
+  transaction header size used in serialized-size estimation.
+
+## [0.30.0] - 2026-07-23
+
+### Added
+- `zcash_primitives::transaction::components::orchard::ACTION_SIZE`, the size in
+  bytes of an Orchard action description as encoded in a transaction. It excludes
+  the action's spend authorization signature and its share of the bundle's proof,
+  which are encoded separately, so dividing a size budget by it yields an upper
+  bound on the number of actions that fit within that budget.
+- `zcash_primitives::transaction::builder::DeferredPcztBuilder`, a builder for
+  V6 (NU6.3 onward) PCZTs whose Orchard-family anchors — and real-spend
+  witnesses — are deferred to proving time (ZIP 374): spends are added as bare
+  `(fvk, note)` pairs (via `orchard`'s new deferred-anchor builder support),
+  the emitted PCZT carries absent anchor and witness fields, and the real
+  values are installed after signing through the PCZT `Updater` role.
+  Restricted to the Orchard and Ironwood pools (Sapling nullifiers commit to
+  note positions, so Sapling spends cannot be signed before their witnesses
+  are final).
+- `zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported`
+- `zcash_primitives::transaction::builder::cached_orchard_proving_key`, the
+  process-wide, per-circuit-version Orchard proving-key cache, now public so
+  other proving code in the workspace (such as the pool-migration engine) can
+  share it instead of rebuilding the expensive proving key.
+- `zcash_primitives::transaction::builder::BundlePadding`, the transactional
+  bundle padding (`bundle_required` / `pad_to_minimum`) for an Orchard-family
+  pool, with `BundlePadding::{DEFAULT, UNPADDED}` matching the corresponding
+  `orchard::builder::BundleType` constants. Unlike `BundleType` it cannot
+  express a coinbase bundle.
+
+### Changed
+- Migrated to `zcash_transparent 0.10.0`.
+- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
+  separate `orchard_padding` and `ironwood_padding` fields (of the new
+  `BundlePadding` type) in place of `orchard_pool_bundle_type`, selecting the
+  transactional bundle padding independently for each Orchard protocol value
+  pool. `BundlePadding`, unlike `orchard::builder::BundleType`, cannot select a
+  coinbase bundle: whether a transaction is coinbase is a property of the whole
+  transaction, chosen by the `BuildConfig` variant, so it can no longer be set
+  per pool. Set both fields to the same value to pad both pools alike.
+- `zcash_primitives::transaction::builder::Builder::build` no longer
+  reconstructs the Orchard proving key on every call. When the `std` feature is
+  enabled the key is now built lazily and cached process-wide (keyed by circuit
+  version), so building many transactions in a process reuses a single key
+  instead of rebuilding this expensive object each time.
+
+## [0.29.0] - 2026-07-09
+
+### Added
+- `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0`, `zcash_transparent 0.9.0`.
+- Migrated to `orchard 0.15`.
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  the consensus branch ID under which the transaction was constructed instead of
+  an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived
+  from the branch ID via `bundle_version_for_branch`. A transaction whose
+  consensus branch ID predates NU5 is now rejected as invalid data if it
+  contains a non-empty Orchard bundle.
+- `zcash_primitives::transaction::components::orchard::read_v6_bundle` now takes
+  the consensus branch ID and the `orchard::ValuePool` identifying the bundle
+  slot to read, instead of an `orchard::bundle::BundleVersion`; the slot's
+  bundle version is derived via `bundle_version_for_branch`. A non-empty bundle
+  in a slot whose value pool is not supported under the transaction's consensus
+  branch ID (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3)
+  is now rejected as invalid data.
+- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries an
+  `orchard_pool_bundle_type` field selecting the transactional bundle type for the
+  Orchard and Ironwood bundles. Pass `orchard::builder::BundleType::DEFAULT` to keep
+  the previous (padded) behavior.
+
+## [0.29.0-pre.0] - 2026-06-30
+
+### Added
+- `zcash_primitives::block::Block::from_parts` (behind the `test-dependencies`
+  feature flag).
+- `zcash_primitives::transaction`:
+  - `TxVersion::V6`, the NU6.3 transaction format supporting Transparent,
+    Sapling, Orchard, and Ironwood bundles.
+  - `TxVersion::has_ironwood`
+  - `TransactionData::from_parts_v6`, for constructing v6 transactions with
+    separate Orchard and Ironwood bundles.
+  - `TransactionData::ironwood_bundle`, for accessing the Ironwood bundle on a
+    transaction.
+  - `TxDigests::ironwood_digest`, for carrying the Ironwood bundle digest.
+  - `TransactionDigest::{IronwoodDigest, digest_ironwood}`, for digest
+    implementations that commit to Ironwood bundles.
+- `zcash_primitives::transaction::builder::Builder::add_orchard_change_output`,
+  for constructing wallet-controlled Orchard change outputs.
+- `zcash_primitives::transaction::builder` Ironwood support:
+  - `BuildConfig::Standard::ironwood_anchor`, the anchor used to construct the
+    Ironwood bundle.
+  - `Builder::{add_ironwood_spend, add_ironwood_output}`, which build the
+    Ironwood bundle alongside the Orchard bundle and require
+    `orchard::note::NoteVersion::V3` notes.
+  - `BuildResult::ironwood_meta` and `PcztParts::ironwood`/`PcztResult::ironwood_meta`,
+    exposing the Ironwood bundle and its build metadata.
+  - `Error::{IronwoodBuild, IronwoodSpend, IronwoodSpendUnsupportedNoteVersion,
+    IronwoodRecipient, IronwoodBuilderNotAvailable}`.
+- `zcash_primitives::transaction::builder`:
+  - `Builder::with_expiry_height`, for overriding the expiry height of the
+    transaction under construction. For non-coinbase transactions, setting this
+    to `BlockHeight::from(0)` disables transaction expiry.
+  - `Error::CoinbaseExpiryHeightMismatch`, returned when a coinbase builder's
+    expiry height is overridden to a value that does not match its target block
+    height.
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`.
+- `zcash_primitives::transaction::builder`:
+  - NU6.3 standard builders use the NU6.3 Orchard pool restrictions when
+    constructing V6 transactions.
+  - NU6.3 coinbase builders no longer expose Orchard outputs.
+- `TransactionDigest::digest_orchard` now receives `TxVersion`, so digest
+  implementations can distinguish Orchard commitments by transaction format.
+- `TransactionDigest::digest_sapling` now receives `TxVersion`, so digest
+  implementations can distinguish Sapling commitments by transaction format.
+- Updated the `orchard` dependency to the `feat/ironwood` revision `cbb6ed1`,
+  which gives every `Bundle` an explicit `BundleVersion` (distinguishing value
+  pool, protocol version, and bundle version) and lifts `Flags` out of
+  `BundleType`. Cross-address transfers are restricted to the Ironwood pool (an
+  Orchard v6 bundle can no longer set the cross-address flag). The bundle
+  (de)serialization helpers
+  `zcash_primitives::transaction::components::orchard::{read_v5_bundle,
+  read_v6_bundle, read_flags}` now take a `BundleVersion` argument, while
+  `write_v6_bundle` derives the version from the bundle.
+- `zcash_primitives::transaction::fees::FeeRule::fee_required` now takes an
+  additional `ironwood_action_count: usize` argument following
+  `orchard_action_count`. Implementors and callers must thread through the
+  number of Ironwood actions; pass `0` for transactions without an Ironwood
+  bundle. Under ZIP 317 each Ironwood action is charged one marginal fee, the
+  same as an Orchard action.
+- `TransactionData::from_parts_v6` is now also available behind
+  `zcash_unstable = "nu7"`, and includes the ZIP 233 amount argument when the
+  `zip-233` feature is enabled.
+- `TransactionData::{map_bundles, try_map_bundles}`: the `f_orchard` argument
+  is now `FnMut` instead of `FnOnce`, and is applied to the Ironwood bundle in
+  addition to the Orchard bundle. Callers whose `f_orchard` closures capture by
+  move, or that must not apply to the Ironwood bundle, must be updated.
+- `TransactionDigest::combine` now takes an additional `ironwood_digest`
+  argument.
+- The `TransactionDigest::HeaderDigest` associated type of
+  `BlockTxCommitmentDigester` is now `(TxVersion, BranchId)` (was `BranchId`).
+
+### Removed
+- All support for Transparent Zcash Extensions (TZEs), which was only ever
+  available behind the `--cfg zcash_unstable="zfuture"` development flag and has
+  been determined never to land. This removes the `zfuture` configuration and
+  everything it gated, including:
+  - `zcash_primitives::extensions` (the `transparent` extension traits and
+    types).
+  - `zcash_primitives::transaction::components::tze` and
+    `zcash_primitives::transaction::fees::tze`.
+  - `zcash_primitives::transaction::TxVersion::ZFuture`,
+    `TransactionData::{from_parts_zfuture, tze_bundle}`,
+    `TransactionData::write_tze`, `TransactionDigest::{TzeDigest, digest_tze}`,
+    and `TxDigests`/`TransactionDigest` no longer carry TZE digests.
+  - `zcash_primitives::transaction::builder::Builder::{build_zfuture,
+    get_fee_zfuture}`, the `ExtensionTxBuilder` implementation, and
+    `transaction::builder::Error::TzeBuild`.
+  - `zcash_primitives::transaction::fees::FutureFeeRule` and
+    `fees::FeeRule::fee_required_zfuture`.
+- `zcash_primitives::transaction::builder::BuildConfig::orchard_builder_config`
+
+### Fixed
+- V6 transaction IDs and authorizing commitments now use the v6 Sapling,
+  Orchard, and Ironwood digest domains.
+
+## [0.28.0] - 2026-06-02
+
+### Added
+- Support for the NU6.2 consensus branch. The following now handle
+  `zcash_protocol::consensus::BranchId::Nu6_2` (mapped to `TxVersion::V5`):
+  - `zcash_primitives::transaction::TxVersion::suggested_for_branch`
+  - `zcash_primitives::transaction::TxVersion::valid_in_branch`
+
+### Changed
+- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
+  argument.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46).
+
+### Security
+- Deserialization of v5 Orchard bundles now rejects proofs whose length is not
+  the canonical size for the number of actions, preventing a proof padded with
+  arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
+  transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
+  for earlier branches to preserve the ability to parse historical transactions.
+## [0.27.1] - 2026-05-14
+
+### Fixed
+- `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`:
+  the implementation for `TransparentInputInfo` now reports the ZIP 317 standard
+  size (`STANDARD_P2PKH` = 150 bytes) for P2PKH inputs, matching what
+  proposal-time fee computation already uses. Previously it reported the exact
+  serialized size (149 bytes), causing builds of transactions with `>= 150`
+  P2PKH inputs to fail with `Error::ChangeRequired` due to fee disagreement
+  across `ceildiv(t_in_total_size, 150)` boundaries.
+
+## [0.27.0] - 2026-04-23
+
+### Added
 - `zcash_primitives::block`:
   - `Block`
   - `impl Debug for {BlockHeader, BlockHeaderData}`
@@ -29,12 +316,10 @@ workspace.
 - `zcash_primitives::transaction::TxVersion::valid_in_branch`
 
 ### Changed
-- `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
-  is no longer restricted to the PCZT workflow; it can now be used with
-  `Builder::build`.
-
 - MSRV is now 1.85.1.
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `equihash 0.3`,
+  `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_transparent 0.7`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has new `Coinbase` and `TargetIncompatible` variants.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
@@ -42,6 +327,8 @@ workspace.
   - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`
     instead of its constituent parts. Use `Builder::add_transparent_p2pkh_input` if you need the
     previous API.
+  - `Builder::add_transparent_p2sh_input` is no longer restricted to the PCZT
+    workflow; it can now be used with `Builder::build`.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.
@@ -79,6 +366,19 @@ workspace.
     - `SIGHASH_ANYONECANPAY` (use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead).
     - `SighashType` (use `zcash_transparent::sighash::SighashType` instead).
 - `zcash_primitives::zip32` module (use the `zip32` crate instead).
+
+### Added
+- `zcash_primitives::transaction::components::sprout::JsDescription`:
+  - `vpub_old` and `vpub_new` accessors for Sprout value pool changes.
+  - `anchor` accessor for the note commitment tree anchor.
+  - `nullifiers` and `commitments` accessors for input/output note data.
+  - `random_seed` and `macs` accessors for the random seed and MACs.
+  - `groth_proof_bytes` accessor that returns Groth16 proof bytes
+    (returns `None` for PHGR proofs).
+- `zcash_primitives::transaction::Authorized` now implements `Clone`.
+- `zcash_primitives::transaction::TransactionData<Authorized>` now
+  implements `Clone`.
+- `zcash_primitives::transaction::Transaction` now implements `Clone`.
 
 ## [0.26.4] - 2025-12-17
 
@@ -142,8 +442,8 @@ workspace.
   `test-dependencies` feature to provide access to test vectors.
 
 ### Changed
-- This release provides pre-release support for some planned Network Upgrade 7
-  features under the `zcash_unstable=nu7` configuration flag. This
+- This release provides pre-release support for some planned Ironwood / NU6.3
+  features under the `zcash_unstable="nu6.3"` configuration flag. This
   configuration flag guards SemVer-breaking changes that will appear in a
   future `zcash_primitives` release.
 

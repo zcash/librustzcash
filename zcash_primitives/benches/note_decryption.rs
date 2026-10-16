@@ -1,6 +1,5 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use ff::Field;
-use rand_core::OsRng;
+use rand::{Rng, rand_core::UnwrapErr, rngs::SysRng};
 use sapling::{
     self, Diversifier, SaplingIvk,
     note_encryption::{
@@ -21,13 +20,29 @@ use zcash_protocol::{
 #[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
 
+/// The mask that clears the bits of the last little-endian byte at or above bit 251, the
+/// bit length of a Sapling incoming viewing key.
+const IVK_TOP_BYTE_MASK: u8 = 0x07;
+
+/// Samples a uniformly random Sapling incoming viewing key.
+fn random_ivk(rng: &mut impl Rng) -> SaplingIvk {
+    loop {
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        bytes[31] &= IVK_TOP_BYTE_MASK;
+        if let Some(ivk) = SaplingIvk::from_bytes(&bytes).into_option() {
+            return ivk;
+        }
+    }
+}
+
 fn bench_note_decryption(c: &mut Criterion) {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
     let height = TEST_NETWORK.activation_height(Canopy).unwrap();
     let zip212_enforcement = zip212_enforcement(&TEST_NETWORK, height);
 
-    let valid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
-    let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
+    let valid_ivk = random_ivk(&mut rng);
+    let invalid_ivk = random_ivk(&mut rng);
 
     // Construct a Sapling output.
     let output = {

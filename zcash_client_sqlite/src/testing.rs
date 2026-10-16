@@ -1,18 +1,31 @@
+//! Test-support utilities exposed under the `test-dependencies` feature: an in-memory
+//! [`db::TestDbFactory`] / [`db::TestDb`] wallet for the `zcash_client_backend` testing framework, a
+//! [`BlockCache`] compact-block source, and the [`highest_rooted_orchard_checkpoint`] commitment-tree
+//! helper. Consumed by this crate's own tests and, through the feature, by downstream crates' tests.
+
 use prost::Message;
 use rusqlite::params;
-use tempfile::NamedTempFile;
 
 use zcash_client_backend::{
     data_api::testing::{CacheInsertionResult, NoteCommitments, TestCache},
     proto::compact_formats::CompactBlock,
 };
 use zcash_protocol::TxId;
+#[cfg(feature = "orchard")]
+use {
+    shardtree::{error::ShardTreeError, store::ShardStore},
+    zcash_client_backend::data_api::WalletCommitmentTrees,
+    zcash_protocol::consensus::BlockHeight,
+};
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
 use super::BlockDb;
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
+#[cfg(all(test, feature = "unstable"))]
+use std::io::Write;
+#[cfg(all(test, feature = "unstable"))]
 use {
     crate::{
         FsBlockDb, FsBlockDbError,
@@ -22,28 +35,38 @@ use {
     tempfile::TempDir,
 };
 
-pub(crate) mod db;
+pub mod db;
+// The shielded-pool testers are used only by this crate's own in-crate tests, not by external
+// consumers of the exposed harness, so they stay test-only and keep their heavier test-only
+// dependencies (proptest, incrementalmerkletree-testing) out of the `test-dependencies` build.
+#[cfg(test)]
 pub(crate) mod pool;
 
-pub(crate) struct BlockCache {
-    _cache_file: NamedTempFile,
+/// An in-memory compact-block cache backed by a temporary [`BlockDb`], implementing the
+/// `zcash_client_backend` testing framework's [`TestCache`].
+pub struct BlockCache {
     db_cache: BlockDb,
 }
 
 impl BlockCache {
-    pub(crate) fn new() -> Self {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
+    /// Creates an empty cache over a fresh in-memory block database.
+    pub fn new() -> Self {
+        let db_cache = BlockDb::from_connection(rusqlite::Connection::open_in_memory().unwrap());
         init_cache_database(&db_cache).unwrap();
 
-        BlockCache {
-            _cache_file: cache_file,
-            db_cache,
-        }
+        BlockCache { db_cache }
     }
 }
 
-pub(crate) struct BlockCacheInsertionResult {
+impl Default for BlockCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The result of inserting a compact block into a [`BlockCache`]: the block's transaction ids and
+/// the note commitments it added.
+pub struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
     #[allow(dead_code)]
     note_commitments: NoteCommitments,
@@ -99,13 +122,41 @@ impl TestCache for BlockCache {
     }
 }
 
-#[cfg(feature = "unstable")]
+/// The highest checkpoint at or below `from` whose Orchard commitment-tree root is available, or
+/// `None` if there is none at or below `from`. Right after scanning, the tip checkpoint is not yet
+/// rooted, so a spend anchors to the newest settled checkpoint below it (every note mined at or
+/// before that height is still witnessable there).
+#[cfg(feature = "orchard")]
+pub fn highest_rooted_orchard_checkpoint<W>(db: &mut W, from: BlockHeight) -> Option<BlockHeight>
+where
+    W: zcash_client_backend::data_api::WalletCommitmentTrees,
+{
+    db.with_orchard_tree_mut::<_, _, ShardTreeError<<W as WalletCommitmentTrees>::Error>>(|tree| {
+        // Take the highest checkpoint id at or below `from` directly from the checkpoint set,
+        // rather than probing the tree at every height down from `from`.
+        let store = tree.store();
+        let count = store.checkpoint_count().map_err(ShardTreeError::Storage)?;
+        let mut highest: Option<BlockHeight> = None;
+        store
+            .for_each_checkpoint(count, |id, _| {
+                if *id <= from {
+                    highest = Some(highest.map_or(*id, |h| h.max(*id)));
+                }
+                Ok(())
+            })
+            .map_err(ShardTreeError::Storage)?;
+        Ok(highest)
+    })
+    .expect("queries the Orchard tree")
+}
+
+#[cfg(all(test, feature = "unstable"))]
 pub(crate) struct FsBlockCache {
     fsblockdb_root: TempDir,
     db_meta: FsBlockDb,
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl FsBlockCache {
     pub(crate) fn new() -> Self {
         let fsblockdb_root = tempfile::tempdir().unwrap();
@@ -119,21 +170,23 @@ impl FsBlockCache {
     }
 }
 
-#[cfg(feature = "unstable")]
+/// The result of inserting a compact block into an [`FsBlockCache`]: the block's transaction ids and
+/// its on-disk block metadata.
+#[cfg(all(test, feature = "unstable"))]
 #[derive(Debug)]
 pub struct FsBlockCacheInsertionResult {
     txids: Vec<TxId>,
     pub(crate) block_meta: BlockMeta,
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl CacheInsertionResult for FsBlockCacheInsertionResult {
     fn txids(&self) -> &[TxId] {
         &self.txids[..]
     }
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl TestCache for FsBlockCache {
     type BsError = FsBlockDbError;
     type BlockSource = FsBlockDb;
@@ -144,8 +197,6 @@ impl TestCache for FsBlockCache {
     }
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
-        use std::io::Write;
-
         let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
         let block_meta = BlockMeta {
             height: cb.height(),

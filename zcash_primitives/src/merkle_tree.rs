@@ -1,7 +1,7 @@
 //! Parsers and serializers for Zcash Merkle trees.
 
 use alloc::vec::Vec;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use incrementalmerkletree::{
@@ -240,20 +240,24 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 ) -> io::Result<MerklePath<Node, DEPTH>> {
     // Skip the first byte, which should be DEPTH to signify the length of
     // the following vector of Pedersen hashes.
-    if witness[0] != DEPTH {
+    let (&depth, rest) = witness
+        .split_first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "witness is empty"))?;
+    if depth != DEPTH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "depth is not as expected",
         ));
     }
-    witness = &witness[1..];
+    witness = rest;
 
     // Begin to construct the authentication path
-    let iter = witness.chunks_exact(33);
-    witness = iter.remainder();
+    let (chunks, remainder) = witness.as_chunks::<33>();
+    witness = remainder;
 
     // The vector works in reverse
-    let auth_path = iter
+    let auth_path = chunks
+        .iter()
         .rev()
         .map(|bytes| {
             // Length of inner vector should be the length of a Pedersen hash
@@ -300,7 +304,7 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 pub mod testing {
     use crate::encoding::{ReadBytesExt, WriteBytesExt};
     use alloc::string::String;
-    use core2::io::{self, Read, Write};
+    use corez::io::{self, Read, Write};
     use incrementalmerkletree::frontier::testing::TestNode;
     use zcash_encoding::Vector;
 
@@ -433,6 +437,14 @@ mod tests {
         assert_eq!(
             hex::encode(tmp),
             "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e"
+        );
+    }
+
+    #[test]
+    fn merkle_path_from_empty_slice() {
+        assert_matches!(
+            merkle_path_from_slice::<Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(&[]),
+            Err(_)
         );
     }
 

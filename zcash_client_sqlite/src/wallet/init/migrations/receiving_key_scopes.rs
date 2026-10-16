@@ -33,9 +33,10 @@ use crate::{
     },
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
+/// This migration adds decryption key scope to persisted information about received notes.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
 
-const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -277,7 +278,7 @@ mod tests {
     use std::convert::Infallible;
 
     use incrementalmerkletree::Position;
-    use rand_core::OsRng;
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
     use rusqlite::{Connection, OptionalExtension, named_params, params};
     use tempfile::NamedTempFile;
 
@@ -293,7 +294,7 @@ mod tests {
         },
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
-        scanning::{Nullifiers, ScanningKeys, scan_block},
+        scanning::{SpendIdentifiers, ScanningKeys, scan_block},
         wallet::WalletTx,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
@@ -301,7 +302,7 @@ mod tests {
         block::BlockHash,
         transaction::{
             Transaction,
-            builder::{BuildConfig, BuildResult, Builder},
+            builder::{BuildConfig, BuildResult, Builder, BundlePadding},
             fees::fixed,
         },
     };
@@ -347,7 +348,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk, birthday_height) VALUES (0, ?, ?)",
-                params![ufvk0.encode(&db_data.params), u32::from(height)],
+                params![ufvk0.encode(&db_data.params).unwrap(), u32::from(height)],
             )
             .unwrap();
         let sapling_dfvk = ufvk0.sapling().unwrap();
@@ -362,6 +363,9 @@ mod tests {
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let mut transparent_signing_set = TransparentSigningSet::new();
@@ -408,7 +412,7 @@ mod tests {
                 &transparent_signing_set,
                 &[],
                 &[],
-                OsRng,
+                UnwrapErr(SysRng),
                 &prover,
                 &prover,
                 #[allow(deprecated)]
@@ -558,7 +562,7 @@ mod tests {
                 // migration.
                 for output in d_tx.sapling_outputs() {
                     match output.transfer_type() {
-                        TransferType::Outgoing | TransferType::WalletInternal => {
+                        TransferType::Outgoing | TransferType::AccountInternal => {
                             // Don't need to bother with sent outputs for this test.
                             if output.transfer_type() != TransferType::Outgoing {
                                 put_received_note_before_migration(
@@ -578,6 +582,9 @@ mod tests {
                             put_received_note_before_migration(wdb.conn.0, output, tx_ref.0, None)
                                 .unwrap();
                         }
+                        TransferType::WalletInternal => unreachable!(
+                            "TransferType::WalletInternal is only produced for transparent outputs"
+                        ),
                     }
                 }
 
@@ -662,14 +669,18 @@ mod tests {
             &params,
             block,
             &scanning_keys,
-            &Nullifiers::empty(),
+            &SpendIdentifiers::empty(),
             Some(&BlockMetadata::from_parts(
                 height - 1,
                 prev_hash,
                 Some(0),
                 #[cfg(feature = "orchard")]
                 Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
             )),
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, std::convert::Infallible>(None),
         )
         .unwrap();
 

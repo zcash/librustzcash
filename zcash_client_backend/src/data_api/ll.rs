@@ -20,10 +20,11 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId,
+    ShieldedPool, TxId,
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    zip318::Zip318Classification,
 };
 use zip32::Scope;
 
@@ -35,7 +36,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::WalletUtxo,
+    crate::wallet::WalletTransparentOutput,
     transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
 };
@@ -58,6 +59,13 @@ pub trait TxMeta {
     /// Returns an iterator over the nullifiers of Orchard notes spent in this transaction.
     #[cfg(feature = "orchard")]
     fn orchard_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
+
+    /// Returns an iterator over the nullifiers of Ironwood notes spent in this transaction.
+    ///
+    /// Ironwood nullifiers share the Orchard nullifier type, but identify notes in the Ironwood
+    /// pool (the transaction's Ironwood bundle, distinct from its Orchard bundle).
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
 
     /// Returns the fee paid by this transaction, given a function that can retrieve the value of
     /// prior transparent outputs spent in the transaction.
@@ -100,6 +108,13 @@ impl TxMeta for Transaction {
             .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
     }
 
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier> {
+        self.ironwood_bundle()
+            .into_iter()
+            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
+    }
+
     fn fee_paid<E, F>(&self, get_prevout: F) -> Result<Option<Zatoshis>, E>
     where
         E: From<BalanceError>,
@@ -138,6 +153,13 @@ pub trait LowLevelWalletRead {
     /// A wallet-internal transaction identifier.
     type TxRef: Copy + Eq + Hash;
 
+    /// Returns the height to which the wallet has been fully scanned: the greatest height
+    /// for which the wallet has trial-decrypted this and all preceding blocks above the
+    /// wallet's birthday height, or `Ok(None)` if no such height exists.
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error>;
+
     /// Returns the set of account identifiers for accounts that spent notes and/or UTXOs in the
     /// construction of the given transaction.
     fn get_funding_accounts<T: TxMeta>(
@@ -153,6 +175,10 @@ pub trait LowLevelWalletRead {
 
         #[cfg(feature = "orchard")]
         funding_accounts.extend(self.detect_accounts_orchard(tx.orchard_spent_note_nullifiers())?);
+
+        #[cfg(feature = "orchard")]
+        funding_accounts
+            .extend(self.detect_accounts_ironwood(tx.ironwood_spent_note_nullifiers())?);
 
         Ok(funding_accounts)
     }
@@ -228,6 +254,20 @@ pub trait LowLevelWalletRead {
         spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
     ) -> Result<HashSet<Self::AccountId>, Self::Error>;
 
+    /// Detects the set of accounts that received Ironwood outputs that, when spent, reveal(ed) the
+    /// given [`Nullifier`]s. This is used to determine which account(s) funded a given
+    /// transaction.
+    ///
+    /// Ironwood notes share the Orchard nullifier type but are tracked separately, so this is
+    /// distinct from [`LowLevelWalletRead::detect_accounts_orchard`].
+    ///
+    /// [`Nullifier`]: orchard::note::Nullifier
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'a>(
+        &self,
+        spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
+
     /// Get information about a transparent output controlled by the wallet.
     ///
     /// # Parameters
@@ -239,16 +279,15 @@ pub trait LowLevelWalletRead {
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletUtxo>, Self::Error>;
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error>;
 
-    /// Returns the vector of transactions in the wallet that spend the transparent outputs of the
-    /// referenced transaction, but for which the amount of fee paid is unknown. This should
-    /// include conflicted transactions and transactions that have expired without having been
-    /// mined.
+    /// Returns the transactions that spend a transparent output of the referenced transaction,
+    /// for which the fee is unknown and the raw transaction data is available.
     ///
-    /// This is used as part of [`wallet::store_decrypted_tx`] to allow downstream transactions'
-    /// fee amounts to be updated once the value of all their inputs are known.
-    fn get_txs_spending_transparent_outputs_of(
+    /// Conflicted transactions, and transactions that expired without being mined, are included.
+    /// [`wallet::store_decrypted_tx`] uses this to set the fees of these transactions once the
+    /// values of all their inputs are known.
+    fn get_unknown_fee_spenders_of(
         &self,
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error>;
@@ -264,6 +303,15 @@ pub trait LowLevelWalletRead {
     /// backing data store, if known.
     #[cfg(feature = "orchard")]
     fn detect_orchard_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
+
+    /// Finds the reference to the transaction that reveals the given Ironwood nullifier in the
+    /// backing data store, if known. Ironwood nullifiers are Orchard-shaped but are tracked as a
+    /// separate pool.
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error>;
@@ -302,6 +350,8 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error>;
 
     /// Add metadata about a transaction to the wallet data store.
@@ -338,6 +388,28 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         &mut self,
         txid: TxId,
         status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
+
+    /// Records how a transaction classifies against [ZIP 318], so that a wallet can label a
+    /// migration transaction in its history without consulting a migration plan.
+    ///
+    /// A store persists this rather than recomputing it, because the evidence it rests on is only
+    /// all present at once while the transaction is being decrypted. A store that has not been
+    /// given a classification for a transaction MUST report it as
+    /// [`Zip318Classification::Unknown`] rather than as
+    /// [`Nonconforming`](Zip318Classification::Nonconforming): the two mean "we never looked" and
+    /// "we looked and it is not one", and presenting the first as the second asserts a judgement
+    /// the wallet has not made.
+    ///
+    /// This is called at most once per transaction. Every input to the classification is fixed by
+    /// the time a transaction is decrypted, so the value never needs revisiting; in particular it
+    /// does not depend on the mined height, which would otherwise make it change under the store.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    fn put_zip318_classification(
+        &mut self,
+        tx_ref: Self::TxRef,
+        classification: Zip318Classification,
     ) -> Result<(), Self::Error>;
 
     /// Adds information about a received Sapling note to the wallet, or updates any existing
@@ -398,6 +470,18 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Adds information about a received Ironwood note to the wallet, or updates any existing
+    /// record for that output. Ironwood notes are Orchard-shaped but are stored as a separate
+    /// pool.
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error>;
+
     /// Updates the backing store to indicate that the Orchard output having the given nullifier is
     /// spent in the transaction referenced by `spent_in_tx`. This may result in multiple distinct
     /// transactions being recorded as having spent the note; only one of these transactions will
@@ -408,6 +492,16 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// Returns `Ok(true)` if a a new record was added to the data store.
     #[cfg(feature = "orchard")]
     fn mark_orchard_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error>;
+
+    /// Updates the backing store to indicate that the Ironwood output having the given nullifier is
+    /// spent in the transaction referenced by `spent_in_tx`. Behaves like
+    /// [`mark_orchard_note_spent`](Self::mark_orchard_note_spent) but for the Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
         &mut self,
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
@@ -437,17 +531,60 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
     ) -> Result<(), Self::Error>;
 
-    /// Removes tracked nullifiers that are no longer needed for spend detection.
+    /// Causes the given Ironwood output nullifiers to be tracked by the wallet. Behaves like
+    /// [`track_block_orchard_nullifiers`](Self::track_block_orchard_nullifiers) but for the
+    /// Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
+    /// Causes the given transparent spends to be tracked by the wallet.
     ///
-    /// This function prunes nullifiers that were recorded at block heights less than
-    /// `(fully_scanned_height - pruning_depth)`, where `fully_scanned_height` is the height
-    /// of the wallet's fully scanned chain state. These nullifiers are no longer needed because
-    /// any notes they could have spent would have already been discovered during scanning.
+    /// This is the transparent counterpart of the `track_block_*_nullifiers` methods
+    /// ([`track_block_sapling_nullifiers`](Self::track_block_sapling_nullifiers) and its Orchard
+    /// and Ironwood equivalents), and exists for the same reason: a transparent output created
+    /// in a block range the wallet has not yet scanned cannot be recognized as its own at the
+    /// time its spend is observed, so the spending transaction must be recorded against the
+    /// outpoint and resolved if the output is later discovered.
+    ///
+    /// The spending transactions here are in general not transactions the wallet stores, so an
+    /// implementation must be able to record them without a corresponding transaction record; for
+    /// space efficiency it may use the combination of block height and index within the block
+    /// instead of the txid, as for the nullifier maps. Entries are removed by
+    /// [`prune_tracked_spends`](Self::prune_tracked_spends).
+    ///
+    /// # Parameters
+    /// - `block_height`: The height of the block containing the spending transactions.
+    /// - `spends`: A slice of tuples, where each tuple contains:
+    ///   - The index of the transaction within the block.
+    ///   - The transaction ID of the transaction effecting the spends.
+    ///   - The outpoints spent by that transaction's transparent inputs that do not spend any
+    ///     output the wallet already knows of.
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error>;
+
+    /// Removes tracked spends that are no longer needed for spend detection.
+    ///
+    /// This function prunes the entries recorded by
+    /// [`track_block_sapling_nullifiers`](Self::track_block_sapling_nullifiers) and its
+    /// per-pool counterparts, and by
+    /// [`track_block_transparent_spends`](Self::track_block_transparent_spends), that were
+    /// recorded at block heights less than `(fully_scanned_height - pruning_depth)`, where
+    /// `fully_scanned_height` is the height of the wallet's fully scanned chain state. These
+    /// entries are no longer needed because any wallet output they could have spent would
+    /// already have been discovered during scanning.
     ///
     /// # Parameters
     /// - `pruning_depth`: The number of blocks below the fully scanned height at which to
-    ///   prune tracked nullifiers.
-    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error>;
+    ///   prune tracked spends.
+    fn prune_tracked_spends(&mut self, pruning_depth: u32) -> Result<(), Self::Error>;
 
     /// Records information about a transaction output that your wallet created, from the constituent
     /// properties of that output.
@@ -487,7 +624,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     #[cfg(feature = "transparent-inputs")]
     fn put_transparent_output(
         &mut self,
-        output: &crate::wallet::WalletTransparentOutput,
+        output: &crate::wallet::WalletTransparentOutput<Self::AccountId>,
         observation_height: BlockHeight,
         known_unspent: bool,
     ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error>;
@@ -536,6 +673,15 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         dependent_tx_ref: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Adds a [`TransactionDataRequest::GetStatus`] request for a transaction whose mined status
+    /// cannot be learned through ordinary compact-block scanning.
+    ///
+    /// The request intent must remain durable while the transaction is mined, so that it becomes
+    /// active again if a chain rewind un-mines the transaction.
+    ///
+    /// [`TransactionDataRequest::GetStatus`]: super::TransactionDataRequest
+    fn queue_tx_status(&mut self, txid: TxId) -> Result<(), Self::Error>;
+
     /// Adds a [`TransactionDataRequest::TransactionsInvolvingAddress`] request to the transaction
     /// data request queue. When the transparent output of `tx_ref` at output index `output_index`
     /// (which must have been received at `receiving_address`) is detected as having been spent,
@@ -568,8 +714,9 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         d_tx: &super::DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Deletes all [`TransactionDataRequest::Enhancement`] requests for the given transaction ID
-    /// from the transaction data request queue.
+    /// Deletes the [`TransactionDataRequest::Enhancement`] request for the given transaction ID
+    /// from the transaction data request queue, without removing any durable status-observation
+    /// intent for the transaction.
     ///
     /// [`TransactionDataRequest::Enhancement`]: super::TransactionDataRequest
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error>;
@@ -580,7 +727,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
-        wallet_note_positions: &[(ShieldedProtocol, Position)],
+        wallet_note_positions: &[(ShieldedPool, Position)],
     ) -> Result<(), Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
@@ -594,17 +741,20 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
 /// This trait provides a generalization over output representations.
 pub trait ReceivedShieldedOutput {
-    const POOL_TYPE: PoolType;
     type AccountId;
-    type Note: Into<crate::wallet::Note>;
+    type Note;
     type Nullifier;
 
     /// Returns the index of the output within its corresponding bundle.
     fn index(&self) -> usize;
     /// Returns the account ID for the account that received this output.
     fn account_id(&self) -> Self::AccountId;
-    /// Returns the received note.
+    /// Returns the note.
     fn note(&self) -> &Self::Note;
+    /// Returns the received note, as a [`Note`].
+    ///
+    /// [`Note`]: crate::wallet::Note
+    fn to_wallet_note(&self) -> crate::wallet::Note;
     /// Returns any memo associated with the output.
     fn memo(&self) -> Option<&MemoBytes>;
     /// Returns a [`TransferType`] value that is determined based upon what type of key was used to
@@ -634,7 +784,6 @@ impl<T: ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nu
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -645,15 +794,18 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletSaplingOutput::account_id(self)
     }
-    fn note(&self) -> &::sapling::Note {
+    fn note(&self) -> &Self::Note {
         WalletSaplingOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
     }
     fn transfer_type(&self) -> TransferType {
         if self.is_change() {
-            TransferType::WalletInternal
+            TransferType::AccountInternal
         } else {
             TransferType::Incoming
         }
@@ -673,7 +825,6 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -684,8 +835,11 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &::sapling::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        DecryptedOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
@@ -694,7 +848,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
         self.transfer_type()
     }
     fn is_change(&self) -> bool {
-        self.transfer_type() == TransferType::WalletInternal
+        self.transfer_type() == TransferType::AccountInternal
     }
     fn nullifier(&self) -> Option<&::sapling::Nullifier> {
         None
@@ -703,7 +857,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
         None
     }
     fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type() == TransferType::WalletInternal {
+        if self.transfer_type() == TransferType::AccountInternal {
             Some(Scope::Internal)
         } else {
             Some(Scope::External)
@@ -725,7 +879,6 @@ impl<T: ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::no
 
 #[cfg(feature = "orchard")]
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -736,15 +889,22 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletOrchardOutput::account_id(self)
     }
-    fn note(&self) -> &::orchard::note::Note {
-        WalletOrchardOutput::note(self)
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
     }
     fn transfer_type(&self) -> TransferType {
         if self.is_change() {
-            TransferType::WalletInternal
+            TransferType::AccountInternal
         } else {
             TransferType::Incoming
         }
@@ -764,8 +924,9 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
+impl<AccountId: Copy> ReceivedShieldedOutput
+    for DecryptedOutput<(::orchard::Note, ::orchard::ValuePool), AccountId>
+{
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -776,8 +937,15 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &orchard::note::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
@@ -786,7 +954,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
         self.transfer_type()
     }
     fn is_change(&self) -> bool {
-        self.transfer_type() == TransferType::WalletInternal
+        self.transfer_type() == TransferType::AccountInternal
     }
     fn nullifier(&self) -> Option<&::orchard::note::Nullifier> {
         None
@@ -795,7 +963,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
         None
     }
     fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type() == TransferType::WalletInternal {
+        if self.transfer_type() == TransferType::AccountInternal {
             Some(Scope::Internal)
         } else {
             Some(Scope::External)

@@ -11,14 +11,15 @@ use zcash_client_backend::{
     data_api::{
         Account, NullifierQuery, TargetValue,
         ll::ReceivedSaplingOutput,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
+    ShieldedPool, TxId,
     consensus::{self, BlockHeight},
+    value::Zatoshis,
 };
 use zip32::Scope;
 
@@ -30,9 +31,10 @@ use super::{
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
+    pool: ShieldedPool,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get("id")?);
+    let note_id = ReceivedNoteId(pool, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let output_index = row.get("output_index")?;
     let diversifier = {
@@ -93,7 +95,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
         .zip(scope_code)
         .map(|(ufvk_str, scope_code)| {
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-                .map_err(SqliteClientError::CorruptedData)?;
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?;
 
             let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
                 .map_err(|_| {
@@ -138,15 +140,17 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
         params,
         txid,
         index,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         target_height,
         to_received_note,
+        lock_filter,
     )
 }
 
@@ -155,6 +159,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
 /// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
 /// the wallet birthday, none of our notes can be spent because we cannot construct witnesses at
 /// the provided anchor height.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -163,6 +168,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -172,8 +178,34 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         exclude,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         to_received_note,
+        lock_filter,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_single_spendable_sapling_note<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
+    super::common::select_single_spendable_note(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
     )
 }
 
@@ -184,7 +216,7 @@ pub(crate) fn select_unspent_note_meta(
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         wallet_birthday,
         anchor_height,
     )
@@ -200,7 +232,7 @@ pub(crate) fn get_sapling_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    super::common::get_nullifiers(conn, ShieldedProtocol::Sapling, query, |nf_bytes| {
+    super::common::get_nullifiers(conn, ShieldedPool::Sapling, query, |nf_bytes| {
         sapling::Nullifier::from_slice(nf_bytes).map_err(|_| {
             SqliteClientError::CorruptedData("unable to parse Sapling nullifier".to_string())
         })
@@ -434,6 +466,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn create_to_address_respects_recipient_expiry() {
+        testing::pool::create_to_address_respects_recipient_expiry::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn scan_full_block_detects_outputs() {
+        testing::pool::scan_full_block_detects_outputs::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn spend_max_spendable_single_step_proposed_transfer() {
         testing::pool::spend_max_spendable_single_step_proposed_transfer::<SaplingPoolTester>()
     }
@@ -445,6 +487,48 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn send_max_spendable_to_transparent() {
+        testing::pool::send_max_spendable_to_transparent::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn send_max_to_tex_fails_without_transparent_inputs() {
+        testing::pool::send_max_to_tex_fails_without_transparent_inputs::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_max_fee_overflow_is_an_error() {
+        testing::pool::send_max_fee_overflow_is_an_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn send_max_spends_inputs_across_pools() {
+        testing::pool::send_max_spends_inputs_across_pools::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    fn send_max_fails_when_balance_is_consumed_by_fees() {
+        testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_delivers_via_sapling_when_orchard_is_unavailable() {
+        testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_to_orchard_only_ua_fails_without_orchard() {
+        testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
     }
@@ -452,6 +536,12 @@ pub(crate) mod tests {
     #[test]
     fn send_max_proposal_fails_when_unconfirmed_funds_present() {
         testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn insufficient_funds_counts_transparent_inputs() {
+        testing::pool::insufficient_funds_counts_transparent_inputs::<SaplingPoolTester>()
     }
 
     #[test]
@@ -520,11 +610,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn spend_fails_on_locked_notes() {
-        testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>()
-    }
-
-    #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>()
     }
@@ -542,6 +627,11 @@ pub(crate) mod tests {
     #[test]
     fn account_deletion() {
         testing::pool::account_deletion::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn account_deletion_with_internal_transfer() {
+        testing::pool::account_deletion_with_internal_transfer::<SaplingPoolTester>()
     }
 
     #[test]
@@ -574,8 +664,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn anchor_checkpoints_retained_across_deep_scan() {
+        testing::pool::anchor_checkpoints_retained_across_deep_scan::<SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn empty_boundary_blocks_are_checkpointed_and_retained() {
+        testing::pool::empty_boundary_blocks_are_checkpointed_and_retained::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn oldest_note_is_selected_first() {
+        testing::pool::oldest_note_is_selected_first::<SaplingPoolTester>()
     }
 
     #[test]
@@ -616,13 +722,13 @@ pub(crate) mod tests {
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_sapling_only() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>(None)
     }
 
     #[cfg(all(feature = "orchard", feature = "pczt-tests"))]
     #[test]
     fn pczt_single_step_sapling_to_orchard() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>(None)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -653,5 +759,45 @@ pub(crate) mod tests {
     #[test]
     fn coinbase_only_filtering() {
         testing::pool::coinbase_only_filtering::<SaplingPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_succeeds() {
+        testing::pool::propose_shielding_coinbase_succeeds::<SaplingPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_transparent_recipient_rejected() {
+        testing::pool::propose_shielding_coinbase_transparent_recipient_rejected::<SaplingPoolTester>(
+        );
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_memo_succeeds() {
+        testing::pool::propose_shielding_coinbase_with_memo_succeeds::<SaplingPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_limit_truncates_inputs() {
+        testing::pool::propose_shielding_coinbase_with_limit_truncates_inputs::<SaplingPoolTester>(
+        );
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_zero_limit_insufficient_funds() {
+        testing::pool::propose_shielding_coinbase_with_zero_limit_insufficient_funds::<
+            SaplingPoolTester,
+        >();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_and_build_shielding_coinbase_succeeds() {
+        testing::pool::propose_and_build_shielding_coinbase_succeeds::<SaplingPoolTester>();
     }
 }

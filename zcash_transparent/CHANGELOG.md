@@ -8,7 +8,130 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.7.0] - PENDING
+## [Unreleased]
+
+### Changed
+- MSRV is now 1.89
+
+## [0.11.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `zcash_protocol 0.11.0-pre.1`.
+- `zcash_transparent` no longer depends on `zcash_address`.
+
+### Removed
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`. Use
+  `zcash_keys::address::Receiver::Transparent(addr).to_zcash_address(net)`
+  instead.
+- The `zcash_address::TryFromAddress` impl for
+  `zcash_transparent::address::TransparentAddress`, which enabled
+  `ZcashAddress::convert::<TransparentAddress>()`. Use
+  `ZcashAddress::convert_if_network::<zcash_keys::address::Address>(net)` and
+  match `Address::Transparent` instead.
+
+## [0.11.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_address 0.14.0-pre.1`.
+
+### Fixed
+- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
+  is not less than its end now yields no indices. It previously yielded the
+  start index.
+
+## [0.11.0-pre.0] - 2026-09-30
+
+### Added
+- `zcash_transparent::keys::ShieldingOvks`
+- `zcash_transparent::sighash::SighashPolicy`
+- `zcash_transparent::pczt`:
+  - `Input::sign_with_sighash_policy`
+  - `Input::append_signature_with_sighash_policy`
+  - `Input::with_signable_input_with_sighash_policy`
+  - `Bundle::finalize_spends_with_sighash_policy`
+- `zcash_transparent::keys::IncomingViewingKey::derive_pubkey`
+- `zcash_transparent::zip48::P2shKey`
+- `zcash_transparent::zip48::P2shFullViewingKey`
+- `zcash_transparent::zip48::P2shIncomingViewingKey`
+- `zcash_transparent::zip48::P2shViewingKeyError`
+
+### Changed
+- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_address 0.14.0-pre.0`,
+  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and `zip32 0.3`.
+- `zcash_transparent::builder::TransparentSignatureContext` no longer has
+  lifetime or type parameters, and
+  `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`
+  no longer takes a `secp256k1::Secp256k1` context argument.
+- `zcash_transparent::keys::AccountPubKey::ovks_for_shielding` now returns
+  `ShieldingOvks` instead of `(InternalOvk, ExternalOvk)`. Read each key from
+  `ShieldingOvks::internal` or `ShieldingOvks::external` instead of by tuple
+  position.
+- `zcash_transparent::pczt`:
+  - `Input::sign` and `Input::append_signature` no longer take a
+    `secp256k1::Secp256k1` context argument.
+  - `Input::sign` and `Input::append_signature` now check that the input's
+    `redeem_script` is the script its `script_pubkey` commits to before signing,
+    and sign only for `SighashType::ALL`. Use `Input::sign_with_sighash_policy` or
+    `Input::append_signature_with_sighash_policy` to permit other sighash types.
+  - `Input::with_signable_input` now applies those same checks, and returns
+    `Result<T, SignerError>` instead of `T`. Use
+    `Input::with_signable_input_with_sighash_policy` to permit other sighash types.
+  - `Bundle::finalize_spends` now requires every partial signature it uses to end
+    in a sighash-type byte matching its input's `sighash_type`, and finalizes only
+    `SighashType::ALL` signatures. Signatures that are discarded rather than placed
+    into a `script_sig` are not checked, so that a Combiner cannot block
+    finalization by contributing junk. Use
+    `Bundle::finalize_spends_with_sighash_policy` to permit other sighash types.
+  - `SignerError` has added variants:
+    - `DisallowedSighashType`
+    - `InvalidInput`
+  - `SpendFinalizerError` has added variants:
+    - `DisallowedSighashType`
+    - `MismatchedSighashType`
+
+## [0.10.0] - 2026-07-23
+
+### Changed
+- `zcash_transparent::pczt::ParseError` has a new `InvalidPartialSignature`
+  variant. The `ParseError` enum is now marked `#[non_exhaustive]`.
+
+### Fixed
+- `zcash_transparent::pczt` spend finalization no longer panics on a
+  `partial_signatures` entry larger than the maximum script push-value size.
+  Such entries are now rejected at parse time.
+
+## [0.9.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`.
+
+## [0.9.0-pre.0] - 2026-06-30
+
+### Added
+- `transparent::bundle::OutPoint` now implements `std::hash::Hash`.
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`.
+
+### Changed
+- `zcash_transparent::zip48::FullViewingKey::standard` now takes its `threshold`
+  argument as a `NonZeroU8` instead of a `u8`. This makes the
+  threshold-must-be-nonzero invariant explicit in the type and unrepresentable
+  by construction. Previously a zero threshold was accepted, producing a 0-of-N
+  (anyone-can-spend) P2SH multisig redeem script.
+
+## [0.8.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.7.0] - 2026-04-23
 
 ### Added
 - `zcash_transparent::util::hash160` module
@@ -34,6 +157,11 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated to `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+- `zcash_transparent::sighash::SignableInput::from_parts` now validates the
+  referenced transparent input index against `&Bundle<_>` and returns
+  `Result<_, InvalidInputIndex>`.
 - `zcash_transparent::builder::TransparentBuilder::add_p2sh_input` is no longer
   restricted to the PCZT workflow; `Bundle::apply_signatures`,
   `Bundle::prepare_transparent_signatures`, and
@@ -55,6 +183,11 @@ workspace.
   ExternalOvk}` now redacts key material.
 - `Debug` output for `zcash_transparent::zip48::{AccountPrivKey}`
   now redacts the embedded extended key material.
+
+## [0.6.4] - 2026-04-16
+
+### Added
+- `zcash_transparent::sighash::SighashType::from_raw`
 
 ## [0.6.3] - 2025-12-17
 

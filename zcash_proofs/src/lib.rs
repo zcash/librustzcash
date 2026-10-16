@@ -12,8 +12,8 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use bellman::groth16::{PreparedVerifyingKey, VerifyingKey, prepare_verifying_key};
 use bls12_381::Bls12;
+use groth16::{PreparedVerifyingKey, VerifyingKey, prepare_verifying_key};
 use sapling::circuit::{
     OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
 };
@@ -346,7 +346,7 @@ pub fn load_parameters(
 ///
 /// This function will panic if it encounters unparsable data.
 ///
-/// [`groth16::Parameters::write`]: bellman::groth16::Parameters::write
+/// [`groth16::Parameters::write`]: groth16::Parameters::write
 pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,

@@ -8,10 +8,656 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.22.0] - PLANNED
+## [Unreleased]
+
+### Added
+- `zcash_client_backend::data_api::{ChangeReceivers, TransparentChangeKind}`
+  (the latter under the `transparent-inputs` feature)
+- `zcash_client_backend::data_api::AccountMeta::change_receivers`
+- `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+
+### Changed
+- Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
+- MSRV is now 1.89
+- `zcash_client_backend::tor::Client::{create, create_with_timeouts}` now install
+  the `ring` provider as the process-level `rustls` `CryptoProvider` when the
+  application has not installed one.
+- `zcash_client_backend::data_api::InputSource` has a new required method
+  `get_change_receivers`, and `zcash_client_backend::fees::MetaSource` a new
+  required method `change_receivers`, which returns it for an `InputSource`.
+- `zcash_client_backend::data_api::AccountMeta::new` takes an additional
+  `change_receivers: ChangeReceivers` argument.
+- The `AccountMetaT` of `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy`
+  and `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy` is now
+  `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.
+- The change strategies in `zcash_client_backend::fees` size transparent
+  change as an output of the account's `TransparentChangeKind` instead of
+  always as a P2PKH output.
+- The change strategies in `zcash_client_backend::fees` place shielded change
+  in a pool in which the account can receive it. They prefer a pool that the
+  transaction already uses, then the fallback change pool, then any other pool.
+  They fail with `ChangeError::UnsupportedChangePool` when the account cannot
+  receive the change in any shielded pool, or when they propose transparent
+  change and the account has no transparent receiver.
+- The change strategies in `zcash_client_backend::fees` fail with
+  `ChangeError::UnsupportedChangePool` for an ephemeral output (the first
+  transaction of a payment to a ZIP 320 TEX address) unless the account's
+  `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
+  P2PKH address derived from the account's transparent key. An account whose
+  transparent change is a P2SH output cannot pay a TEX address.
+
+## [0.25.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `pczt 0.10.0-pre.2`, `zcash_address 0.14.0-pre.2`,
+  `zcash_keys 0.17.0-pre.2`, `zcash_primitives 0.31.0-pre.2`,
+  `zcash_proofs 0.31.0-pre.2`, `zcash_protocol 0.11.0-pre.1`,
+  `zcash_transparent 0.11.0-pre.2`, and `zip321 0.10.0-pre.2`.
+- `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
+  implementation to also return the transparent receiver that the wallet tracks
+  at the diversifier index of an exposed unified address that omits it, as an
+  `Address::Transparent` entry with that diversifier index.
+- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+  now pays a unified address with every receiver of that address. Previously
+  it omitted the transparent receiver of an address that also had a shielded
+  receiver.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now counts the value of the selected transparent inputs in the `available`
+  field of the `InsufficientFunds` error it returns. Previously that field
+  reported the value of the selected shielded notes alone.
+- `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
+  matches on the transparent receiver of a unified `address` that also has a
+  shielded receiver.
+
+## [0.25.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `pczt 0.10.0-pre.1`, `zcash_address 0.14.0-pre.1`,
+  `zcash_keys 0.17.0-pre.1`, `zcash_primitives 0.31.0-pre.1`,
+  `zcash_proofs 0.31.0-pre.1`, `zcash_transparent 0.11.0-pre.1`, and
+  `zip321 0.10.0-pre.1`.
+- Unified addresses that `zcash_client_backend` constructs (the recipient of
+  `data_api::wallet::propose_standard_transfer_to_address`, and the
+  `wallet::Recipient::External` address recorded for an output to a receiver
+  with no stored address) are encoded at ZIP 316 Revision 0 when Revision 0 can
+  represent them, and at Revision 2 otherwise. Previously they were always
+  encoded at Revision 2.
+
+## [0.25.0-pre.0] - 2026-10-02
+
+### Added
+- `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
+- `zcash_client_backend::util` module, containing `Clock`, `SystemClock`, and
+  (behind `test-dependencies`) `testing::FixedClock`.
+- `zcash_client_backend::data_api::error::AddressExpiryError`
+- `zcash_client_backend::data_api::error::Error::RecipientAddressExpiry`
+- `zcash_client_backend::data_api::testing::TestState::clock`
+- `zcash_client_backend::data_api::testing::TestState::generate_next_block_transparent`
+  (behind `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTransparentSpend`
+- `zcash_client_backend::wallet::WalletTx::transparent_spends`
+- `zcash_client_backend::data_api::ScannedBlock::transparent_spend_map` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::scanning::ScanBlockError`, which
+  `zcash_client_backend::scanning::full::ScanBlockError` now re-exports.
+- `zcash_client_backend::scanning::SpendIdentifiers`
+- `zcash_client_backend::scanning::ScanError::TransparentPrevoutInvalid` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::proto::compact_formats::CompactTxIn::prevout` and
+  `TxOut::to_txout` (behind `transparent-inputs`)
+- `zcash_client_backend::sync::decryptor::Handle::{closed, is_closed}` (behind
+  `sync-decryptor`)
+
+### Changed
+- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`,
+  `pasta_curves 0.6`, `pczt 0.10.0-pre.0`, `rand 0.10`, `rand_core 0.10`,
+  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
+  `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
+  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, `zip32 0.3`, and
+  `zip321 0.10.0-pre.0`.
+- `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
+  additional `rng: &mut impl Rng` first argument.
+- `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
+  standalone transparent spending keys it holds when it is dropped.
+- `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
+  `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
+- `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
+  `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
+  `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
+  transaction-creation timestamps and to enforce recipient address expiry, and an
+  `rng: &mut impl CryptoRng` argument, which supplies the randomness for
+  constructing, proving, and signing transactions in place of the operating
+  system's RNG.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}` now enforce the ZIP 316 Revision 2 address
+  expiration rules for every payment recipient: a payment to an address that is
+  known to have expired, or whose expiry height the transaction's expiry height
+  would exceed, fails with `Error::RecipientAddressExpiry`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
+  atomic: an implementation must apply the whole batch of blocks or none of it,
+  and a caller may assume after an error that nothing was persisted. An
+  implementation that applies blocks one at a time must be updated. An
+  implementation must also record as received each scanned transparent output
+  that pays a wallet account.
+- `zcash_client_backend::tor::http`:
+  - `Client::http_get_json` takes an additional `request: impl Fn(Builder) ->
+    Builder` argument, positioned after `url` as in `Client::http_get`, for
+    setting request headers such as `User-Agent`. `Accept: application/json`
+    is applied only if the closure did not set `Accept`. Pass `|b| b` to
+    preserve the previous behaviour.
+  - `Client::{http_get, http_post}`, and therefore `Client::http_get_json`,
+    now always send the `Host` header derived from the request URL (host and
+    port, without userinfo). A `Host` set by the request-construction closure
+    is discarded.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method,
+  `queue_rescan`, which queues a range of block heights to be scanned again.
+- `zcash_client_backend::scanning`:
+  - `scan_block` and `full::scan_block` take a `&SpendIdentifiers<AccountId>`
+    in place of the `&Nullifiers<AccountId>` argument. `SpendIdentifiers`
+    pairs the wallet's `Nullifiers` with the outpoints of its unspent
+    transparent outputs; construct it with `SpendIdentifiers::unspent` where
+    `Nullifiers::unspent` was used, and maintain it across a batch with
+    `SpendIdentifiers::update_with`.
+  - `scan_block` takes an additional `find_account_for_address` argument behind
+    the `transparent-inputs` feature, matching `full::scan_block`, and returns
+    `ScanBlockError<E>` in place of `ScanError`. Pass a closure that resolves a
+    transparent address to the wallet account controlling it, such as a lookup
+    in the map returned by `WalletRead::get_transparent_receiver_accounts`; map
+    `ScanBlockError::Scan` back to your former handling and handle
+    `ScanBlockError::AddressLookup` as a wallet error. With
+    `transparent-inputs` disabled the argument is absent, and the
+    unconstrained error type must be named at the call site
+    (`scan_block::<_, _, _, Infallible>(..)`).
+  - `scan_block` now detects transparent outputs paying the wallet and spends
+    of the wallet's transparent outputs, and `full::scan_block` now detects
+    transparent spends; a coinbase transaction's null-outpoint input is
+    excluded.
+- `zcash_client_backend::wallet::WalletTx::new` takes a `transparent_spends`
+  argument before `transparent_outputs`.
+- `zcash_client_backend::data_api::WalletRead` has two new required methods
+  behind `transparent-inputs`, `get_unspent_transparent_outpoints` and
+  `get_transparent_receiver_accounts`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`, `track_block_transparent_spends`, and
+  `prune_tracked_nullifiers` is renamed to `prune_tracked_spends`: it now prunes
+  the transparent spend map alongside the nullifier maps.
+- `zcash_client_backend::data_api::ll::wallet::NULLIFIER_MAP_RETENTION_BLOCKS` is
+  renamed to `SPEND_MAP_RETENTION_BLOCKS`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletRead::get_txs_spending_transparent_outputs_of`
+  is renamed to `get_unknown_fee_spenders_of`. An implementation must return
+  only the transactions that spend a transparent output of the referenced
+  transaction, for which the fee is unknown and the raw transaction data is
+  available.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` detects transparent
+  outputs paying the wallet and spends of the wallet's transparent outputs,
+  including spends observed before the block that created the spent output has
+  been scanned. `zcash_client_backend::sync` does not yet request transparent
+  data from the server; a caller that fetches compact blocks itself must set
+  `BlockRange.poolTypes` to receive it.
+
+### Fixed
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` now records the
+  transparent outputs of each scanned transaction that pay a wallet account, and
+  queues each such outpoint for transparent spend detection, instead of
+  discarding them.
+- `zcash_client_backend::decrypt::decrypt_transaction` now attempts outgoing
+  ciphertext recovery with every outgoing viewing key an account's UFVK can
+  produce — Orchard, Sapling and transparent-derived, in both the external and
+  internal scopes — instead of only the same-pool external-scope key, and tries
+  each pool's outputs against every account instead of only those whose UFVK
+  holds that pool's key. Cross-pool sends, shielding transactions, and outputs
+  encrypted under an internal-scope OVK now recover their recipient, value and
+  memo as `zcash_client_backend::TransferType::Outgoing`.
+
+## [0.24.0] - 2026-08-18
+
+### Added
+- `zcash_client_backend`:
+  - `ShieldedPool`, which names Ironwood alongside Sapling and Orchard.
+  - `TransferType::AccountInternal`, an output whose recipient and funder are
+    the same account.
+- `zcash_client_backend::data_api`:
+  - `BirthdayError` now implements `Debug`, `Display` and `std::error::Error`.
+  - `anchor_retention` module, the note commitment tree checkpoint retention
+    policy: `AnchorRetention`, `AnchorRetentionInterval` (a re-export of
+    `zcash_protocol::zip318::AnchorBucketInterval`), and `PoolMigrationParams`.
+  - `locking` module, the single home for the note-locking vocabulary:
+    `LockOwner`, `LockRequest`, `LockError`, `LockedInputPolicy`, `LockFilter`,
+    `OutputLockStore`, and `unlock_proposal_inputs`. Each is re-exported at the
+    path its neighbours occupy (`data_api::OutputLockStore`,
+    `data_api::error::LockError`, `wallet::LockOwner`,
+    `data_api::wallet::{LockRequest, unlock_proposal_inputs}`,
+    `data_api::wallet::input_selection::{LockFilter, LockedInputPolicy}`).
+  - `zip318` module, which classifies a decrypted transaction against ZIP 318
+    (requires the `orchard` feature).
+  - `IRONWOOD_SHARD_HEIGHT`
+  - `NoteCommitmentTree`
+  - `SentTransactionOutput::note_commitment_tree`
+  - `CoinbaseFilter::NonCoinbaseOnly` (behind `transparent-inputs`)
+  - `error::RewindError`
+  - `error::Error::ExpiryHeightConflictsWithCanonicalCrossing`
+  - `Balance::{locked_value, add_locked_value}` and
+    `AccountBalance::locked_value`, reporting value committed to an in-flight
+    proposal or PCZT.
+  - `AccountBalance::{unshielded_regular_balance, unshielded_coinbase_balance,
+    with_unshielded_regular_balance_mut, with_unshielded_coinbase_balance_mut}`,
+    splitting transparent funds into regular and coinbase buckets. An output
+    whose index within its block is unknown is classified as regular.
+  - `AccountBalance::{ironwood_balance, with_ironwood_balance_mut}`
+  - `ReceivedNotes::{is_empty, into_single_covering, ironwood, take_ironwood,
+    ironwood_value}`
+  - `NoteRetention::should_retain_ironwood`
+  - `WalletSummary::next_ironwood_subtree_index`
+  - `WalletRead::{get_wallet_recover_until, anchor_retention_interval,
+    pool_migration_params}`
+  - `WalletRead::get_ironwood_nullifiers`, a required method
+  - `WalletWrite::prune_scan_queue_below`
+  - `WalletWrite::{import_standalone_transparent_address,
+    import_standalone_transparent_pubkeys}` (behind `transparent-key-import`)
+  - `WalletWrite::reserve_next_n_internal_addresses` (behind
+    `transparent-inputs`)
+  - `WalletWrite::notify_output_verified_unspent` and
+    `TransactionDataRequest::GetSpendingTx`, behind the new `spend-index`
+    feature, for chain-data sources that can resolve the spend of an individual
+    transparent output.
+  - `WalletCommitmentTrees::{put_sapling_shards, put_orchard_shards,
+    put_ironwood_shards, get_sapling_subtree_root, get_orchard_subtree_root,
+    get_ironwood_subtree_root, with_ironwood_tree_mut,
+    put_ironwood_subtree_roots, remove_retained_checkpoints_below}`
+  - `InputSource::{select_spendable_transparent_outputs,
+    get_spendable_transparent_outputs_for_addresses,
+    select_single_spendable_note, anchor_computable}`, each with a default
+    implementation.
+  - `chain::ChainState::final_ironwood_tree`
+- `zcash_client_backend::data_api::ll`:
+  - `wallet::{put_blocks_rows, PutBlocksRows, PutBlocksRowsDbT,
+    NULLIFIER_MAP_RETENTION_BLOCKS}`, the row-writing stage of `put_blocks`,
+    for stores that maintain their note commitment trees by other means.
+  - `wallet::{build_subtrees, checkpoint_positions, ensure_checkpoints,
+    cross_pool_ensure_heights, batch_ensure_heights, update_tree}`, the note
+    commitment tree stage of `put_blocks`.
+  - `wallet::PutBlocksError::ShardTreeForBlockRange`, and `impl Debug for
+    PutBlocksError`.
+  - `wallet::{detect_ironwood_spend, put_received_ironwood_note,
+    mark_ironwood_note_spent, track_block_ironwood_nullifiers}`
+- `zcash_client_backend::data_api::wallet`:
+  - `{propose_shielding_coinbase, ProposeShieldingCoinbaseErrT}`
+  - `{redact_pczt_for_signer, redact_pczt_for_batch_signer}` and `SignerView`,
+    which create signer views of a wallet-created PCZT (behind the `pczt`
+    feature).
+  - `ConfirmationsPolicy::{anchor_height, bucketed}`
+  - `input_selection::{SpendPolicy, NoteSelection}`
+  - `input_selection::{TransparentSpendPolicy, TransparentSource,
+    CoinbasePolicy, NonEmptyBTreeSet}` (behind `transparent-inputs`)
+  - `input_selection::GreedyInputSelector::{with_shielding_block_space_percent,
+    with_locked_input_policy}`
+- `zcash_client_backend::fees`:
+  - `{DummyOutputCounts, canonical_crossing_fee}` and
+    `TransactionBalance::{with_dummy_outputs, dummy_outputs}`, recording the
+    dummy-output count of each shielded bundle a fee was computed against.
+  - `TransparentChangePolicy` and the `with_transparent_change_policy` builder
+    methods on `zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`
+    and `fixed::SingleOutputChangeStrategy`, which govern whether the change of
+    a fully-transparent transaction is shielded or returned to an
+    internal-scope transparent address (behind `transparent-inputs`).
+  - `ChangeValue::transparent` (behind `transparent-inputs`)
+  - `ChangeValue::ironwood` (behind `orchard`)
+  - `orchard::BundleView::bundle_version`
+- `zcash_client_backend::proposal`:
+  - `Proposal::{proposed_version, with_proposed_version, confirmations_policy,
+    input_count_in_pool, estimated_serialized_size, check_transaction_size}`.
+    `estimated_serialized_size` is a conservative upper bound on the total
+    serialized byte size of the transactions the proposal describes, and
+    `check_transaction_size` validates every step against `MAX_BLOCK_BYTES`.
+    The latter is called by the `propose_transfer` / `propose_shielding`
+    wrappers and by `create_proposed_transactions` /
+    `create_pczt_from_proposal`, but not during proposal deserialization, so
+    previously-persisted proposals remain recoverable.
+  - `Step::{anchor_height, input_in_pool, output_in_pool, change_in_pool,
+    input_count_in_pool, output_count_in_pool, change_count_in_pool,
+    orchard_action_count, ironwood_action_count, is_canonical_crossing,
+    ironwood_bundle_padding}`
+  - `ProposalError::{InputsLocked, MissingShieldedAnchor, OrchardPoolPayment,
+    OrchardPoolValueCreation, OrchardReceiverRequiresIronwood,
+    ShieldingRequiresShieldedRecipient, TransactionTooLarge}`.
+    `TransactionTooLarge` carries the estimated size, the limit, and the
+    per-pool shielded input counts, so a wallet can explain the situation to a
+    user in terms of notes rather than bytes.
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError::{MissingShieldedAnchor, OrchardPaymentProhibited,
+    ProposedVersionInvalid}`
+  - `proposal::{DummyOutputs, ConfirmationsPolicy}`
+  - `proposal::ValuePool::Ironwood`
+  - `service::TreeState::ironwood_tree`
+- `zcash_client_backend::scanning`:
+  - `full` module, providing full-block scanning: `scan_block`,
+    `decrypt_block`, `BatchResult`, and `ScanBlockError`.
+  - `ScanError::TreeSizeOverflow`, `Nullifiers::{unspent, update_with}`, and
+    `impl std::error::Error for ScanError`.
+  - `ScanningKeys::ironwood`, `Nullifiers::ironwood`, `ScannedBlock::ironwood`,
+    `ScannedBlockCommitments::ironwood`, and `BlockMetadata::ironwood_tree_size`
+- `zcash_client_backend::sync`:
+  - `decryptor` module, a Tokio-based batch decryption engine for full blocks
+    and transactions: `Engine`, `Builder`, `Handle`, `new`, and
+    `TryQueueError`. Requires the new `sync-decryptor` feature.
+- `zcash_client_backend::tor`:
+  - `{Timeouts, Client::create_with_timeouts}` and `http::{TimeoutPhase,
+    HttpError::Timeout}`
+- `zcash_client_backend::wallet`:
+  - `OutputRef` and `impl From<wallet::NoteId> for wallet::OutputRef`
+  - `Note::pool`, which reports the value pool a note belongs to
+  - `Recipient::InternalTransparent` (behind `transparent-inputs`)
+  - `TransparentAddressSource::StandaloneAddress` and
+    `TransparentAddressMetadata::standalone_address` (behind
+    `transparent-key-import`)
+  - `WalletTransparentOutput::{recipient_account, recipient_key_scope,
+    funding_account, transfer_type}`
+  - `WalletTx::{transparent_outputs, ironwood_spends, ironwood_outputs}`
+  - `{WalletIronwoodSpend, WalletIronwoodOutput}` type aliases (behind
+    `orchard`)
+- The `zip-233` feature, forwarding to `zcash_primitives/zip-233`.
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.5`, `zcash_address 0.13.0`,
+  `zcash_transparent 0.10.0`, `zip321 0.9.0`, `zcash_keys 0.16.1`,
+  `zcash_primitives 0.30.1`, `zcash_proofs 0.30.0`, `pczt 0.9.3`,
+  `orchard 0.15`, `shardtree 0.7`, `lightwallet-protocol 0.5.0`.
+- The `orchard` feature is now enabled by default. Consumers that require a
+  smaller feature set should disable default features and enable only the
+  features they need.
+- Every public error enum in this crate is now `#[non_exhaustive]`; a `match`
+  over any of them must include a wildcard arm: `data_api::BirthdayError`,
+  `data_api::chain::Error`, `data_api::error::{Error, RewindError, PcztError,
+  LockError}`, `data_api::ll::wallet::PutBlocksError`,
+  `data_api::wallet::input_selection::{InputSelectorError,
+  GreedyInputSelectorError}`, `fees::ChangeError`, `proposal::ProposalError`,
+  `proto::{CompactFormatError, ProposalDecodingError}`, `scanning::ScanError`,
+  `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
+  `tor::grpc::GrpcError`, and `tor::http::HttpError`.
+- APIs that identified a shielded pool by `zcash_protocol::ShieldedProtocol`
+  now use `zcash_protocol::ShieldedPool`, which additionally names Ironwood.
+  Affected items include `data_api::InputSource::{get_spendable_note,
+  select_spendable_notes, select_unspent_notes}`, `wallet::NoteId::{new,
+  protocol}`, `data_api::AccountMeta::note_count`, `fees::ChangeValue::shielded`,
+  the `fees` change-strategy constructors, and the `scanning::ScanError` pool
+  fields.
+- `zcash_client_backend`:
+  - `TransferType::WalletInternal` now denotes only a cross-account internal
+    transfer. Same-account self-transfers use the new `AccountInternal`
+    variant.
+  - `DecryptedOutput::new` takes an additional `zcash_protocol::ShieldedPool`
+    argument, exposed by a `value_pool` accessor, and its
+    `DecryptedOrchardOutput` associated type carries the Orchard `ValuePool`.
+    `decrypt_transaction` decrypts the Ironwood bundle under the Ironwood
+    note-encryption domain.
+- `zcash_client_backend::data_api`:
+  - Output locks are stored through the new `locking::OutputLockStore` trait
+    rather than `WalletWrite`. `WalletWrite` has it as a supertrait (with
+    `AccountId` and `Error` bound to its own), so implementors must supply
+    `lock_outputs`, `unlock_output`, `clear_locked_outputs`, and
+    `get_locked_outputs` through an `OutputLockStore` impl. Because
+    `WalletWrite` now inherits same-named associated types from two
+    supertraits, generic code must qualify them (e.g. `<DbT as
+    WalletRead>::Error`), and a bound of the form `WalletWrite<Error = E,
+    AccountId = A>` becomes `WalletRead<Error = E, AccountId = A> +
+    WalletWrite`.
+  - `WalletWrite::rewind_to_height` has been replaced by
+    `rewind_to_chain_state`, which takes a `ChainState` for the rewind target
+    and returns `Result<(), RewindError<Self::AccountId, Self::Error>>`. A
+    target below any account's birthday fails with
+    `RewindError::RewindBeyondBirthdays`; retry with the affected account ids
+    in the `reset_account_birthdays` argument to acknowledge lowering them.
+  - `WalletWrite::store_transactions_to_be_sent` must unlock any locked outputs
+    the stored transactions spend, and must be idempotent: storing a
+    transaction the wallet has already recorded replaces that record rather
+    than failing. An implementation that inserts its sent-output records must
+    upsert them instead.
+  - The following `InputSource` methods take an additional `lock_filter:
+    LockFilter<'_>`: `get_spendable_note`, `select_spendable_notes`,
+    `select_unspent_notes`, `get_account_metadata`, and (behind
+    `transparent-inputs`) `get_spendable_transparent_outputs`,
+    `get_spendable_transparent_outputs_for_addresses`, and
+    `select_spendable_transparent_outputs`. `LockFilter::Policy(&policy)`
+    applies an owner-scoped `LockedInputPolicy`, whose `Exclude` default
+    selects no locked outputs; `LockFilter::Unfiltered` ignores lock state.
+  - `InputSource::{get_unspent_transparent_output,
+    get_spendable_transparent_outputs}` return `WalletTransparentOutput` (now
+    carrying an account id) instead of `WalletUtxo`.
+  - `Balance::total` and `AccountBalance::total` now include locked value; a
+    caller that displayed a total from `spendable_value` alone should add
+    `locked_value`.
+  - `AccountBalance::unshielded_balance` returns a `Balance` by value (the sum
+    of the regular and coinbase buckets) instead of a `&Balance`. Value in
+    immature transparent coinbase outputs is reported in the coinbase bucket's
+    `value_pending_spendability` rather than as spendable.
+  - `AccountMeta::new` takes an additional `ironwood` argument, and
+    `total_note_count`, `total_value`, and `note_count(ShieldedPool::Ironwood)`
+    include Ironwood notes. The corresponding Ironwood arguments are likewise
+    added to `chain::ChainState::new`, `WalletSummary::new` (behind `orchard`),
+    `scanning::{BlockMetadata::from_parts, ScanningKeys::new}`, and
+    `wallet::WalletTx::new`, which also takes a `transparent_outputs` argument.
+  - `SentTransaction`'s `account_id` field and accessor are renamed to
+    `funding_account`.
+  - `TransparentOutputFilter` is renamed to `CoinbaseFilter`, and its `All`
+    variant to `AllTransparentOutputs`.
+  - `DecryptedTransaction::new` takes an additional `ironwood_outputs` argument
+    with a matching accessor (behind `orchard`).
+  - `testing::DataStoreFactory::new_data_store` takes an additional
+    `anchor_retention_interval: Option<AnchorRetentionInterval>` argument; pass
+    `None` for the default grid. Transaction-construction helpers exposed by
+    `test-dependencies` use the Sapling mock provers, so a test needing valid
+    proofs must call the production APIs with a real prover.
+- `zcash_client_backend::data_api::ll`:
+  - `LowLevelWalletRead` has an added `block_fully_scanned_height` method.
+  - `LowLevelWalletWrite` has added required methods `queue_tx_status`,
+    recording durable status-observation intent for transactions whose mined
+    status compact-block scanning cannot learn, and
+    `put_zip318_classification` (under the `orchard` feature). A store given no
+    classification for a transaction must report it as unclassified, never as
+    `Nonconforming`.
+  - `wallet::{put_blocks, update_tree}` take `Option<&AnchorRetention>` in
+    place of `anchor_retention_height: Option<BlockHeight>`. Replace
+    `Some(height)` with a reference to `AnchorRetention::new(height, interval)`
+    — use `AnchorRetentionInterval::ZIP_318` for the default grid — or to
+    `AnchorRetention::union(height, grids)`; `None` still disables retention.
+    `put_blocks` checkpoints and retains every retention-grid height in the
+    scanned range, including heights whose blocks carry no note commitment.
+  - `wallet::put_blocks_rows` (and therefore `put_blocks`) inserts only the
+    trailing `NULLIFIER_MAP_RETENTION_BLOCKS` blocks' nullifiers when a batch
+    extends the wallet's contiguous fully-scanned frontier. Out-of-order scan
+    ranges continue to track every block's nullifiers.
+- `zcash_client_backend::data_api::wallet`:
+  - The proposal-creation functions `{propose_transfer,
+    propose_standard_transfer_to_address, propose_send_max_transfer,
+    propose_shielding, propose_shielding_coinbase}` take a `lock_inputs:
+    Option<LockRequest>` argument and require `WalletWrite` rather than
+    `WalletRead`; `Some(request)` locks the proposal's inputs on behalf of the
+    request's owner until `target_height + request.for_blocks()`.
+  - `propose_transfer` and `input_selection::InputSelector::propose_transaction`
+    take an additional `&SpendPolicy` argument naming the shielded pools notes
+    may be drawn from and, behind `transparent-inputs`, whether and how the
+    account's transparent UTXOs may be spent. A pool the policy does not name
+    is never drawn upon, so a restricted policy reports `InsufficientFunds`
+    rather than crossing into it. The default preserves the previous behaviour.
+  - `propose_send_max_transfer` takes an additional `locked_input_policy:
+    &LockedInputPolicy` argument, positioned before `lock_inputs`; pass
+    `&LockedInputPolicy::Exclude`. Its note-selection error type
+    (`ProposeSendMaxErrT`) is now `GreedyInputSelectorError` instead of
+    `BalanceError`, so balance errors arrive wrapped in
+    `GreedyInputSelectorError::Balance`.
+  - `create_proposed_transactions` no longer takes a `proposed_version`
+    argument — the version is carried on the `Proposal`, set by the proposing
+    call — and takes an `expiry_height: Option<BlockHeight>` argument mirroring
+    `create_pczt_from_proposal`.
+  - `create_pczt_from_proposal` takes an `orchard_pool_padding` argument
+    selecting the Orchard bundle's padding (pass
+    `zcash_primitives::transaction::builder::BundlePadding::DEFAULT`; the
+    Ironwood bundle's padding is derived from the proposal), and builds at the
+    transaction version implied by the target height rather than always version
+    5. Available behind the `pczt` feature.
+  - The `proposed_version: Option<TxVersion>` parameter of `propose_transfer`,
+    `propose_standard_transfer_to_address` and
+    `input_selection::InputSelector::propose_transaction`, along with
+    `ProposalError::IncompatibleTxVersion`, is no longer gated behind the
+    `unstable` feature. Pass `None` to select the version from the target
+    height.
+  - A payment across the Orchard turnstile whose value is a canonical ZIP 318
+    denomination is proposed against an anchor on the wallet's ZIP 318 bucket
+    grid, funded from a single Orchard note, given the ZIP 318 rolling expiry
+    height, and built with one unpadded Ironwood action; it pays one fewer ZIP
+    317 marginal-fee action and requires up to two bucket intervals of
+    additional confirmations on its inputs. An ordinary transaction is proposed
+    when the wallet cannot fund it that way or no anchor is computable at the
+    bucketed boundary height. Supplying an explicit `expiry_height` for such a
+    transaction to `create_proposed_transactions` or
+    `create_pczt_from_proposal` is rejected with
+    `Error::ExpiryHeightConflictsWithCanonicalCrossing`.
+  - `input_selection::GreedyInputSelector` may combine shielded inputs from any
+    pool spendable at the target height. It spends from a single pool when one
+    can cover the required amount, preferring the pool matching the payment's
+    outputs, and otherwise accumulates pools in preference order, drawing on
+    the legacy Orchard pool last.
+  - `input_selection::ShieldingSelector` requires implementors to provide
+    `propose_shielding_coinbase` in addition to `propose_shielding`.
+- `zcash_client_backend::fees`:
+  - `ChangeStrategy::compute_balance` takes an `ironwood` bundle view alongside
+    `orchard` (behind the `orchard` feature), and, after `target_height`,
+    `anchor_height: BlockHeight` and `zip318: &PoolMigrationParams`. The same
+    additional arguments apply to `InputSelector::{propose_transaction,
+    propose_shielding}`. Pass the anchor height the transaction will be proved
+    against and `WalletRead::pool_migration_params`.
+  - `ChangeError::DustInputs` has an additional `ironwood` field behind the
+    `orchard` feature; exhaustive matches must bind or ignore it.
+  - `StandardFeeRule` tracks the `ironwood_action_count` argument added to
+    `zcash_primitives::transaction::fees::FeeRule::fee_required`; pass `0` for
+    a transaction with no Ironwood bundle.
+  - Fee and change calculation derive the Orchard bundle version, and hence the
+    action-count policy, from the proposal's target height. A proposal
+    targeting NU6.3 or later counts one action per Orchard spend or output. The
+    change strategies also enforce the Orchard turnstile: change is directed to
+    the Orchard pool only when the transaction spends Orchard notes and
+    strictly less value would return to the pool than those notes remove;
+    otherwise it is directed to the Ironwood pool.
+- `zcash_client_backend::proposal`:
+  - `Step::from_parts` takes its `anchor_height` as `Option<BlockHeight>`, and
+    `ShieldedInputs::from_parts` no longer takes one. Any step that produces a
+    shielded bundle must supply `Some`; only a purely transparent step may pass
+    `None`, deferring its anchor to interpretation time. A `None` anchor on a
+    step producing a shielded bundle is rejected with
+    `ProposalError::MissingShieldedAnchor`, and the equivalent zero-anchor
+    encoding with `proto::ProposalDecodingError::MissingShieldedAnchor`.
+  - `{Proposal::single_step, Step::from_parts}` take transparent inputs as
+    `Vec<WalletTransparentOutput<()>>` and an `ironwood_active` flag (behind
+    the `orchard` feature) that enables validation against the Orchard
+    turnstile; `Proposal::{single_step, multi_step}` also take the
+    `ConfirmationsPolicy` the proposal was constructed under.
+  - `Step::{orchard_action_count, ironwood_action_count}` take a
+    `zcash_primitives::transaction::builder::BundlePadding` and return a
+    `Result`. Replace `BundleType::DEFAULT` with `BundlePadding::DEFAULT`,
+    `BundleType::UNPADDED` with `BundlePadding::UNPADDED`, and a
+    `BundleType::Transactional { .. }` literal with the identically-fielded
+    `BundlePadding { .. }`; `BundleType::Coinbase` is no longer representable.
+  - `ProposalError::ChainDoubleSpend` wraps an `OutputRef` instead of
+    `(PoolType, TxId, u32)`.
+- `zcash_client_backend::proto`:
+  - `proposal::Proposal::try_into_standard_proposal` takes the network
+    parameters as an additional argument, and rejects a proposal directing a
+    payment to the Orchard pool once Ironwood is active with
+    `ProposalDecodingError::OrchardPaymentProhibited`. The serialized format
+    gains `confirmationsPolicy` and `dummyOutputs` fields; a proposal
+    serialized without them decodes with the default confirmations policy and
+    no recorded dummy-output counts, and a step's zero anchor height decodes as
+    a deferred anchor.
+  - The migration to `lightwallet-protocol 0.5.0` adds
+    `service::PoolType::Ironwood`, `service::ShieldedProtocol::Ironwood`,
+    `compact_formats::ChainMetadata::ironwood_commitment_tree_size` and
+    `compact_formats::CompactTx::ironwood_actions`, and removes
+    `compact_formats::CompactBlock::proto_version`.
+- `zcash_client_backend::scanning`:
+  - Ironwood outputs are tracked as a pool distinct from Orchard (behind the
+    `orchard` feature), and transparent `OP_RETURN` outputs are recognized as
+    unspendable data outputs and skipped silently instead of being logged as
+    unsupported script kinds.
+- `zcash_client_backend::wallet`:
+  - `Recipient::InternalAccount` is renamed to `Recipient::InternalShielded`.
+  - `WalletTransparentOutput` has an `AccountId` type parameter, and
+    `from_parts` takes additional `recipient_account`, `recipient_key_scope`,
+    and `funding_account` arguments.
+  - `TransparentAddressSource` has a new `StandaloneAddress` variant (behind
+    `transparent-key-import`); exhaustive matches must add an arm for it. An
+    input whose address has this source cannot be spent:
+    `data_api::wallet::create_proposed_transactions` returns
+    `Error::KeyNotAvailable` for a proposal including one.
+
+### Removed
+- `zcash_client_backend::ShieldedProtocol` re-export; use
+  `zcash_client_backend::ShieldedPool`.
+- `zcash_client_backend::data_api::WalletUtxo`; use `WalletTransparentOutput`.
+- `zcash_client_backend::data_api::AccountBalance::with_unshielded_balance_mut`;
+  use `with_unshielded_regular_balance_mut` or
+  `with_unshielded_coinbase_balance_mut`.
+- `zcash_client_backend::fees::orchard::BundleView::bundle_type`; use
+  `bundle_version`.
+- `zcash_client_backend::proposal::ShieldedInputs::anchor_height`; use
+  `Step::anchor_height`.
+- `zcash_client_backend::wallet::Note::protocol`; use `Note::pool`.
+- `zcash_client_backend::data_api::testing::pool::{rewind_to_height_deep,
+  rewind_to_height_shallow}`; use `rewind_to_chain_state_deep` /
+  `rewind_to_chain_state_shallow`. `testing::pool::spend_fails_on_locked_notes`
+  has moved to `testing::pool::locking`.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  constructs valid proposals paying a transparent (non-TEX) recipient, and
+  delivers a payment to a unified address having both Sapling and Orchard
+  receivers via the Sapling receiver when the `orchard` feature is disabled;
+  both previously failed with `ProposalError::PaymentPoolsMismatch`. A unified
+  address containing no payable receiver is now rejected with
+  `GreedyInputSelectorError::UnsupportedAddress`, and a TEX recipient without
+  the `transparent-inputs` feature with
+  `GreedyInputSelectorError::UnsupportedTexAddress`. It returns
+  `Error::InsufficientFunds` when the entire spendable balance would be
+  consumed by fees, instead of proposing a zero-valued payment, and
+  `GreedyInputSelectorError::Balance` instead of panicking when a custom fee
+  rule's per-transaction fees sum above the maximum monetary amount.
+- `zcash_client_backend::tor`: the HTTP and gRPC transports reject a URL whose
+  scheme is neither `http` nor `https` with `http::HttpError::NonHttpUrl`; such
+  a URL was previously treated as plaintext HTTP. They also bound how long each
+  network operation may take, so a server that accepts a connection and never
+  responds no longer leaves the request pending indefinitely. `Client::create`
+  applies `Timeouts::default`; use `create_with_timeouts` for less aggressive
+  deadlines. A request exceeding a deadline fails with
+  `http::HttpError::Timeout`.
+
+## [0.23.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`,
+  `zcash_transparent 0.8.0`, `zip321 0.8.0`, `zcash_keys 0.14.0`,
+  `zcash_primitives 0.28.0`, `zcash_proofs 0.28.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.22.0] - 2026-04-27
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `error::FindAccountForAddressError`
+  - `WalletRead::find_account_for_address`
+  - `defaults` module, containing reference implementations of selected `WalletRead` /
+    `WalletWrite` trait methods that backend authors without an indexed implementation can
+    delegate to:
+    - `defaults::find_account_for_address`
+    - `defaults::address_receiver_matches_ua`
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module
@@ -33,6 +679,7 @@ workspace.
   - `LightdInfo` has added fields `upgrade_name`, `upgrade_height`, and `lighwallet_protocol_version`
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `zcash_client_backend::fees::MetaSource`
+- `zcash_client_backend::scanning::ScanningKey::new`:
 - `zcash_client_backend::wallet`:
   - `transparent` module, behind the `transparent-inputs` feature flag.
   - `Note::receiver`
@@ -45,7 +692,10 @@ workspace.
   - `impl From<orchard::Note> for Note`
 
 ### Changed
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zip321 0.7`,
+  `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`,
+  `zcash_transparent 0.7`, `zcash_primitives 0.27`, `zcash_proofs 0.27`,
+  `zcash_keys 0.13`, `pczt 0.6`.
 - `zcash_client_backend::data_api`:
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`
@@ -58,6 +708,8 @@ workspace.
   - Changes to the `WalletWrite` trait:
     - Added `WalletWrite::import_standalone_transparent_script` method.
     - Added `WalletWrite::truncate_to_chain_state` method.
+    - Added `WalletWrite::rewind_to_height` method.
+    - Added `WalletWrite::mark_transparent_addresses_exposed` method.
   - Type parameters to `DecryptedTransaction` have been modified. It now
     abstracts over the transaction type, to permit use with partial or compact
     transaction data instead of full transactions.

@@ -6,11 +6,38 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
 ### Changed
-- MSRV is now 1.85.1.
+- MSRV is now 1.89
+
+## [0.6.0] - 2026-07-24
+
+### Added
+- `zcash_history` is now compatible with `no_std`, via a new default-enabled
+  `std` feature. Build with `default-features = false` to target `no_std`
+  platforms; an allocator is required.
+
+### Changed
+- Updated to depend on `zcash_encoding 0.5`.
+
+### Fixed
+- Invalid history node height ranges are now rejected during deserialization,
+  and leaf ranges starting at block height zero no longer underflow.
+
+## [0.5.0] - 2026-07-09
+
+### Changed
+- MSRV is now 1.88
+- `zcash_history::MAX_NODE_DATA_SIZE` is now 317 bytes and the derived
+  `zcash_history::MAX_ENTRY_SIZE` is now 326 bytes, to account for Ironwood
+  history node metadata.
 
 ### Added
 - `zcash_history::Entry::data`
+- `zcash_history::NodeDataV2`, exposing the V2 history tree node metadata type.
+- `zcash_history::NodeDataV3`, representing the history tree node metadata for
+  the Ironwood shielded pool.
+- `zcash_history::V3`, marking the history tree version for Ironwood.
 
 ## [0.4.0] - 2023-03-01
 ### Changed

@@ -8,14 +8,15 @@ use uuid::Uuid;
 use zcash_keys::keys::{
     ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
 };
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus};
 
 use super::orchard_received_notes;
 use crate::{UA_ORCHARD, UA_TRANSPARENT, wallet::init::WalletMigrationError};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
+/// This migration ensures that an Orchard receiver exists in the wallet's default Unified address.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
 
-const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -96,7 +97,7 @@ mod tests {
         address::Address,
         keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
     };
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{consensus::Network};
 
     use crate::{
         UA_ORCHARD, UA_TRANSPARENT, WalletDb,
@@ -141,7 +142,7 @@ mod tests {
                 "INSERT INTO accounts (account, ufvk) VALUES (:account_id, :ufvk)",
                 named_params![
                     ":account_id": account_id,
-                    ":ufvk": ufvk.encode(&db_data.params)
+                    ":ufvk": ufvk.encode(&db_data.params).unwrap()
                 ],
             )
             .unwrap();

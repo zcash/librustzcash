@@ -1,11 +1,9 @@
 //! APIs for creating and verifying Sprout proofs.
 
-use bellman::{
-    gadgets::multipack,
-    groth16::{self, Parameters, PreparedVerifyingKey, Proof, create_random_proof},
-};
+use bellman::gadgets::multipack;
 use bls12_381::Bls12;
-use rand_core::OsRng;
+use groth16::{Parameters, PreparedVerifyingKey, Proof, create_random_proof};
+use rand_core::{CryptoRng, Rng};
 
 use crate::circuit::sprout::*;
 
@@ -15,8 +13,11 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
 pub const WITNESS_PATH_SIZE: usize = 1 + 33 * TREE_DEPTH + 8;
 
 /// Sprout JoinSplit proof generation.
+///
+/// `rng` provides the randomness for the proof.
 #[allow(clippy::too_many_arguments)]
-pub fn create_proof(
+pub fn create_proof<R: Rng + CryptoRng>(
+    mut rng: R,
     phi: [u8; 32],
     rt: [u8; 32],
     h_sig: [u8; 32],
@@ -126,9 +127,6 @@ pub fn create_proof(
         outputs,
         rt: Some(rt),
     };
-
-    // Initialize secure RNG
-    let mut rng = OsRng;
 
     create_random_proof(js, proving_key, &mut rng).expect("proving should not fail")
 }

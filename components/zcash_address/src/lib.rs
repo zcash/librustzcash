@@ -67,7 +67,7 @@
 //!
 //! // Functions that return a pointer to a heap-allocated address of the given kind in
 //! // the target language. These should be augmented to return any relevant errors.
-//! extern {
+//! unsafe extern {
 //!     fn addr_from_sapling(data: *const u8) -> *mut c_void;
 //!     fn addr_from_transparent_p2pkh(data: *const u8) -> *mut c_void;
 //! }
@@ -140,11 +140,12 @@ extern crate std;
 
 use alloc::string::String;
 
+pub mod constants;
 mod convert;
 mod encoding;
 mod kind;
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(feature = "test-dependencies")]
 pub mod test_vectors;
 
 pub use convert::{ConversionError, Converter, ToAddress, TryFromAddress, UnsupportedAddress};
@@ -152,7 +153,7 @@ pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
 
-use zcash_protocol::{consensus::NetworkType, PoolType};
+use zcash_protocol::{PoolType, consensus::NetworkType};
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -183,7 +184,7 @@ impl ZcashAddress {
     /// [`Display` implementation]: core::fmt::Display
     /// [`address.to_string()`]: alloc::string::ToString
     pub fn encode(&self) -> String {
-        format!("{}", self)
+        format!("{self}")
     }
 
     /// Attempts to parse the given string as a Zcash address.
@@ -356,7 +357,7 @@ pub mod testing {
 
     use proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
 
-    use crate::{unified::address::testing::arb_unified_address, AddressKind, ZcashAddress};
+    use crate::{AddressKind, ZcashAddress, unified::address::testing::arb_unified_address};
     use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {

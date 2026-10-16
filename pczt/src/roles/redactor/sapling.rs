@@ -59,6 +59,14 @@ impl SaplingRedactor<'_> {
     pub fn clear_bsk(&mut self) {
         self.0.bsk = None;
     }
+
+    /// Removes the bundle anchor.
+    ///
+    /// Parsed roles require the real anchor for Sapling spends, so a receiver
+    /// must restore it before parsing a bundle that contains spends.
+    pub fn clear_anchor(&mut self) {
+        self.0.anchor = None;
+    }
 }
 
 /// A Redactor for Sapling spends.

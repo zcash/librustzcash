@@ -1,4 +1,4 @@
-use rand_core::OsRng;
+use rand_core::CryptoRng;
 use sapling::{
     BatchValidator, Bundle,
     bundle::Authorized,
@@ -7,6 +7,7 @@ use sapling::{
 use zcash_protocol::value::ZatBalance;
 
 pub(super) fn verify_bundle(
+    rng: impl CryptoRng,
     bundle: &Bundle<Authorized, ZatBalance>,
     spend_vk: &SpendVerifyingKey,
     output_vk: &OutputVerifyingKey,
@@ -18,7 +19,7 @@ pub(super) fn verify_bundle(
         return Err(SaplingError::ConsensusRuleViolation);
     }
 
-    if !validator.validate(spend_vk, output_vk, OsRng) {
+    if !validator.validate(spend_vk, output_vk, rng) {
         return Err(SaplingError::InvalidProofsOrSignatures);
     }
 

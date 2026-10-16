@@ -1,6 +1,6 @@
 //! HASH160 (`RIPEMD-160(SHA-256(data))`) hashing utilities.
 
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256, digest::Output};
 

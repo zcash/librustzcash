@@ -9,9 +9,10 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::v_sapling_shard_unscanned_ranges;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xc5bf7f71_2297_41ff_89e1_75e07c4e8838);
+/// This migration adds views and database changes required to provide accurate wallet summaries.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xc5bf7f71_2297_41ff_89e1_75e07c4e8838);
 
-const DEPENDENCIES: &[Uuid] = &[v_sapling_shard_unscanned_ranges::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[v_sapling_shard_unscanned_ranges::MIGRATION_ID];
 
 pub(super) struct Migration;
 

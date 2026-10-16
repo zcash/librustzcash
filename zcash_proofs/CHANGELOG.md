@@ -11,8 +11,61 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- MSRV is now 1.89
+
+## [0.31.0-pre.2] - 2026-10-13
+
+### Changed
+- Migrated to `zcash_primitives 0.31.0-pre.2`.
+
+## [0.31.0-pre.1] - 2026-10-06
+
+### Changed
+- Migrated to `zcash_primitives 0.31.0-pre.1`.
+
+## [0.31.0-pre.0] - 2026-09-30
+
+### Changed
+- Migrated to `bellman 0.15`, `bls12_381 0.9`, `groth16 0.2`, `group 0.14`,
+  `jubjub 0.11`, `rand_core 0.10`, `sapling-crypto 0.9`, and
+  `zcash_primitives 0.31.0-pre.0`.
+- `zcash_proofs::sprout::create_proof` takes an additional `rng` first argument
+  that implements `rand_core::{Rng, CryptoRng}`, in place of drawing randomness from
+  the operating system.
+- `ZcashParameters::sprout_vk` and `sprout::{create_proof, verify_proof}` now
+  use the Groth16 types of the `groth16` crate in place of `bellman::groth16`.
+
+## [0.30.0] - 2026-07-23
+
+### Changed
+- Migrated to `zcash_primitives 0.30.0`.
+
+## [0.29.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_primitives 0.29.0`.
+
+## [0.29.0-pre.0] - 2026-06-30
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_primitives 0.29.0-pre.0`.
+
+## [0.28.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_primitives 0.28.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.27.0] - 2026-04-27
+
+### Changed
 - MSRV is now 1.85.1.
-- Migrated to `sapling-crypto 0.6`.
+- Migrated to `sapling-crypto 0.7`, `zcash_primitives 0.27`.
 
 ## [0.26.1] - 2025-10-18
 

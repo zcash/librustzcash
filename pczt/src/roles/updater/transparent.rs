@@ -13,6 +13,7 @@ impl super::Updater {
             transparent,
             sapling,
             orchard,
+            ironwood,
         } = self.pczt;
 
         let mut bundle = transparent
@@ -27,6 +28,7 @@ impl super::Updater {
                 transparent: crate::transparent::Bundle::serialize_from(bundle),
                 sapling,
                 orchard,
+                ironwood,
             },
         })
     }

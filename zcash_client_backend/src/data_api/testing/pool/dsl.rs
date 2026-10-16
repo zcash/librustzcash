@@ -1,21 +1,38 @@
 //! A convenient DSL for writing wallet tests.
 
 use std::{
+    convert::Infallible,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
+use assert_matches::assert_matches;
+use nonempty::NonEmpty;
+use zcash_keys::address::Address;
 use zcash_primitives::{block::BlockHash, transaction::fees::zip317};
-use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis};
+use zcash_protocol::{
+    PoolType, TxId, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+};
 
-use crate::data_api::{
-    Account, AccountBalance, WalletRead,
-    chain::ScanSummary,
-    testing::{
-        AddressType, DataStoreFactory, FakeCompactOutput, TestAccount, TestBuilder, TestCache,
-        TestFvk, TestState,
+use zip321::Payment;
+
+use crate::{
+    data_api::{
+        Account, AccountBalance, InputSource, WalletRead, WalletTest,
+        chain::ScanSummary,
+        testing::{
+            AddressType, DataStoreFactory, FakeCompactOutput, TestAccount, TestBuilder, TestCache,
+            TestFvk, TestState, single_output_change_strategy,
+        },
+        wallet::{
+            ConfirmationsPolicy, LockRequest,
+            input_selection::{GreedyInputSelector, SpendPolicy},
+            propose_transfer,
+        },
     },
-    wallet::ConfirmationsPolicy,
+    fees::StandardFeeRule,
+    proposal::Proposal,
+    wallet::{LockOwner, OutputRef, OvkPolicy},
 };
 
 use super::ShieldedPoolTester;
@@ -383,5 +400,223 @@ where
         );
 
         summary
+    }
+
+    /// Proposes a ZIP 317 transfer of `amount` zatoshis from the test account to
+    /// `to`, panicking if proposal construction fails.
+    ///
+    /// This fixes the values that are constant across most transfer scenarios:
+    /// the test account, [`StandardFeeRule::Zip317`], [`ConfirmationsPolicy::MIN`],
+    /// no memos, and the tester's shielded pool as the fallback change pool.
+    pub fn propose_transfer_to(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+    ) -> Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef> {
+        let account_id = self.get_account().id();
+        self.propose_standard_transfer::<Infallible>(
+            account_id,
+            StandardFeeRule::Zip317,
+            ConfirmationsPolicy::MIN,
+            to,
+            amount,
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap()
+    }
+
+    /// Proposes and executes a transfer of `amount` zatoshis to `to` with
+    /// [`OvkPolicy::Sender`], returning the single resulting transaction id.
+    ///
+    /// Shorthand for [`Self::propose_transfer_to`] followed by
+    /// [`TestState::create_proposed_transactions`]. (Named `spend_to` to avoid
+    /// clashing with the lower-level [`TestState::spend`].)
+    pub fn spend_to(&mut self, to: &Address, amount: Zatoshis) -> TxId {
+        let account = self.get_account();
+        let proposal = self.propose_transfer_to(to, amount);
+        self.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap()[0]
+    }
+
+    /// Creates the transactions for `proposal` with [`OvkPolicy::Sender`],
+    /// asserts that exactly `expected` transactions were produced, and returns
+    /// their ids.
+    ///
+    /// This collapses the common
+    /// [`TestState::create_proposed_transactions`]-then-assert-count
+    /// boilerplate. It fixes the values that are constant across nearly every
+    /// execution site: the test account's spending key and
+    /// [`OvkPolicy::Sender`]. On failure it reports the full result (including
+    /// any error), matching the diagnostics of the hand-written form.
+    pub fn create_proposed_expecting(
+        &mut self,
+        proposal: &Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>,
+        expected: usize,
+    ) -> NonEmpty<TxId> {
+        let account = self.get_account();
+        let result = self.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            proposal,
+        );
+        assert_matches!(&result, Ok(txids) if txids.len() == expected);
+        result.unwrap()
+    }
+
+    /// Asserts that proposing a transfer of `amount` zatoshis to `to` fails with
+    /// [`Error::InsufficientFunds`], reporting `available` available and exactly
+    /// `required` required.
+    ///
+    /// [`Error::InsufficientFunds`]: crate::data_api::error::Error::InsufficientFunds
+    pub fn expect_insufficient_funds(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+        available: Zatoshis,
+        required: Zatoshis,
+    ) {
+        self.expect_insufficient_funds_with(
+            to,
+            amount,
+            ConfirmationsPolicy::MIN,
+            available,
+            required,
+        )
+    }
+
+    /// Like [`Self::expect_insufficient_funds`], but with an explicit
+    /// `confirmations_policy` instead of the fixed [`ConfirmationsPolicy::MIN`].
+    pub fn expect_insufficient_funds_with(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+        confirmations_policy: ConfirmationsPolicy,
+        available: Zatoshis,
+        required: Zatoshis,
+    ) {
+        let account_id = self.get_account().id();
+        assert_matches!(
+            self.propose_standard_transfer::<Infallible>(
+                account_id,
+                StandardFeeRule::Zip317,
+                confirmations_policy,
+                to,
+                amount,
+                None,
+                None,
+                T::SHIELDED_PROTOCOL,
+            ),
+            Err(crate::data_api::error::Error::InsufficientFunds { available: a, required: r })
+                if a == available && r == required,
+            "expected InsufficientFunds (available={}, required={}) proposing {}",
+            u64::from(available),
+            u64::from(required),
+            u64::from(amount)
+        );
+    }
+
+    /// Mines a single "decoy" block that pays `value` to a throwaway external
+    /// address derived from `seed` (so the funds do not accrue to the test
+    /// account), returning the new block height. Does not scan.
+    pub fn mine_decoy_block(&mut self, seed: u8, value: Zatoshis) -> BlockHeight {
+        let (h, _, _) = self.generate_next_block(
+            &T::sk_to_fvk(&T::sk(&[seed; 32])),
+            AddressType::DefaultExternal,
+            value,
+        );
+        h
+    }
+
+    /// Mines one decoy block per `seed` (see [`Self::mine_decoy_block`]),
+    /// returning the height of the last block mined, if any. Does not scan.
+    pub fn mine_decoy_blocks(
+        &mut self,
+        seeds: impl IntoIterator<Item = u8>,
+        value: Zatoshis,
+    ) -> Option<BlockHeight> {
+        let mut last = None;
+        for seed in seeds {
+            last = Some(self.mine_decoy_block(seed, value));
+        }
+        last
+    }
+
+    /// Returns an [`OutputRef`] for the wallet's single received note in the
+    /// tester's shielded pool, asserting that exactly one such note exists.
+    pub fn sole_note_ref(&self) -> OutputRef {
+        let notes = self.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    }
+
+    /// Returns an [`OutputRef`] for the single received note whose value equals
+    /// `value`, panicking if no such note exists.
+    ///
+    /// Used by the multi-note scenarios, which fund the account with notes of
+    /// distinct values so that each note can be identified by its value.
+    pub fn note_ref_by_value(&self, value: Zatoshis) -> OutputRef {
+        let notes = self.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+        let note = notes
+            .iter()
+            .find(|n| n.note().value() == value)
+            .expect("a note with the requested value exists");
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    }
+
+    /// Proposes a ZIP 317 transfer of `amount` zatoshis to `to` that locks its
+    /// own selected inputs on behalf of `owner` for `lock_for_blocks` blocks,
+    /// panicking if proposal construction fails.
+    ///
+    /// This is the locking counterpart of [`Self::propose_transfer_to`]: it
+    /// goes through the lower-level [`propose_transfer`] so that a
+    /// [`LockRequest`] can be attached, and fixes the same constants (the test
+    /// account, a [`GreedyInputSelector`], the tester's single-output change
+    /// strategy, [`ConfirmationsPolicy::MIN`], the default [`SpendPolicy`], and
+    /// no requested transaction version).
+    pub fn propose_locking_transfer(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+        owner: LockOwner,
+        lock_for_blocks: u32,
+    ) -> Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef> {
+        let account_id = self.get_account().id();
+        let input_selector = GreedyInputSelector::new();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(self.network()),
+            amount,
+        )])
+        .unwrap();
+        let network = *self.network();
+        propose_transfer::<_, _, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            Some(LockRequest::new(owner, lock_for_blocks)),
+            None,
+        )
+        .unwrap()
     }
 }

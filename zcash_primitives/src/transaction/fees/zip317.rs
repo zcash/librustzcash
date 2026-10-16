@@ -33,6 +33,21 @@ pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
+/// The consensus maximum size of a serialized transparent input: outpoint (36) +
+/// CompactSize prefix for the scriptSig (at most 9) + scriptSig (at most
+/// `MAX_SCRIPT_SIZE = 10_000`) + sequence (4). This is the safe upper bound for a
+/// transparent input whose script size is unknown.
+pub const MAX_TRANSPARENT_INPUT_SIZE: usize = 36 + 9 + 10_000 + 4;
+
+/// The per-bundle overhead of a transparent bundle: two CompactSize vector-length
+/// prefixes (one for `vin`, one for `vout`), at most 9 bytes each.
+pub const TRANSPARENT_BUNDLE_OVERHEAD: usize = 18;
+
+/// The fixed size of a Zcash transaction header: version (4) +
+/// `consensus_branch_id` (4) + `lock_time` (4) + `expiry_height` (4). The constant
+/// leaves room for future header fields.
+pub const TX_HEADER_SIZE: usize = 32;
+
 /// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
@@ -41,8 +56,8 @@ pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
-/// This fee rule supports Orchard, Sapling, and (P2PKH only) transparent inputs.
-/// Returns an error if a coin containing a non-P2PKH script is provided as an input.
+/// This fee rule supports Ironwood, Orchard, Sapling, and (P2PKH only) transparent
+/// inputs. Returns an error if a coin containing a non-P2PKH script is provided as an input.
 ///
 /// This fee rule may slightly overestimate fees in case where the user is attempting
 /// to spend a large number of transparent inputs. This is intentional and is relied
@@ -163,6 +178,7 @@ impl super::FeeRule for FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        ironwood_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         let mut t_in_total_size: usize = 0;
         let mut unknown_p2sh_outpoints = vec![];
@@ -189,9 +205,48 @@ impl super::FeeRule for FeeRule {
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
             ceildiv(t_out_total_size, self.p2pkh_standard_output_size),
         ) + max(sapling_input_count, sapling_output_count)
-            + orchard_action_count;
+            + orchard_action_count
+            + ironwood_action_count;
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::iter;
+
+    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+    use super::{FeeRule, MARGINAL_FEE};
+    use crate::transaction::fees::{FeeRule as _, transparent::InputSize};
+
+    fn fee_for(orchard_action_count: usize, ironwood_action_count: usize) -> Zatoshis {
+        FeeRule::standard()
+            .fee_required(
+                &zcash_protocol::consensus::MAIN_NETWORK,
+                BlockHeight::from_u32(1_000_000),
+                iter::empty::<InputSize>(),
+                iter::empty::<usize>(),
+                0,
+                0,
+                orchard_action_count,
+                ironwood_action_count,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn ironwood_actions_charged_marginal_fee() {
+        // Five Ironwood actions exceed the grace allowance, so each is charged the
+        // marginal fee.
+        assert_eq!(fee_for(0, 5), (MARGINAL_FEE * 5usize).unwrap());
+    }
+
+    #[test]
+    fn ironwood_actions_combine_with_orchard() {
+        // Orchard and Ironwood actions are summed into the logical action count.
+        assert_eq!(fee_for(2, 3), (MARGINAL_FEE * 5usize).unwrap());
     }
 }

@@ -7,6 +7,36 @@ on:
   push:
     branches: main
   merge_group:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    ${{
+      format(
+        'ci-{0}-{1}-{2}',
+        github.workflow,
+        github.event_name,
+        github.event.pull_request.number || github.ref
+      )
+    }}
+  cancel-in-progress: >-
+    ${{
+      github.event_name == 'pull_request'
+      || (
+        github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      )
+    }}
+
+env:
+  # Full debug information substantially increases optimized test linking time and
+  # cache size, particularly on Windows. Line tables retain useful CI backtraces.
+  CARGO_PROFILE_TEST_DEBUG: 1
+  # Proving code uses Rayon internally. Capping both layers prevents each
+  # concurrent libtest case from trying to occupy the whole runner.
+  RAYON_NUM_THREADS: 2
 
 jobs:
   required-test:
@@ -19,66 +49,143 @@ jobs:
       matrix:
         target:
           - Linux
-        state:
-          - transparent
-          - transparent-inputs-only
-          - transparent-key-encoding-only
-          - Sapling-only
-          - Orchard
-          - all-pools
-          - all-features
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7", "NuTachyon"]'
+              || (
+                github.event_name == 'pull_request'
+                && '["all-features"]'
+                || '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features"]'
+              )
+            )
+          }}
 
         include:
           - target: Linux
             os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: transparent-inputs-only
-            extra_flags: transparent-inputs
-          - state: transparent-key-encoding-only
-            extra_flags: transparent-key-encoding
-          - state: Orchard
-            orchard-pool: true
-          - state: all-pools
-            all-pools: true
-          - state: all-features
-            all-features: true
-          - state: NU7
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu7"'
-
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+      RUSTFLAGS: >-
+        ${{
+          matrix.state == 'NU7'
+          && '--cfg zcash_unstable="nu7"'
+          || matrix.state == 'NuTachyon'
+          && '--cfg zcash_unstable="nutachyon"'
+          || ''
+        }}
+      RUSTDOCFLAGS: >-
+        ${{
+          matrix.state == 'NU7'
+          && '--cfg zcash_unstable="nu7"'
+          || matrix.state == 'NuTachyon'
+          && '--cfg zcash_unstable="nutachyon"'
+          || ''
+        }}
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: ${{ matrix.all-pools || false }}
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+          transparent-pool: ${{ matrix.state == 'transparent' }}
+          orchard-pool: ${{ matrix.state == 'Orchard' }}
+          all-pools: ${{ matrix.state == 'all-pools' }}
+          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          extra-features: >-
+            ${{
+              matrix.state == 'transparent-inputs-only'
+              && 'transparent-inputs'
+              || (
+                matrix.state == 'transparent-key-encoding-only'
+                && 'transparent-key-encoding'
+                || ''
+              )
+            }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' }}
+          # Unstable cfg states have distinct RUSTFLAGS-derived cache keys.
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
       - name: Run tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test --workspace "${feature_flags[@]}" -- --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
 
+  feature-check:
+    name: Check ${{ matrix.state }} test targets
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'pull_request'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools"]'
+              || '["covered-by-runtime-matrix"]'
+            )
+          }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: prepare
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: ./.github/actions/prepare
+        with:
+          transparent-pool: ${{ matrix.state == 'transparent' }}
+          orchard-pool: ${{ matrix.state == 'Orchard' }}
+          all-pools: ${{ matrix.state == 'all-pools' }}
+          extra-features: >-
+            ${{
+              matrix.state == 'transparent-inputs-only'
+              && 'transparent-inputs'
+              || (
+                matrix.state == 'transparent-key-encoding-only'
+                && 'transparent-key-encoding'
+                || ''
+              )
+            }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          shared-key: msrv
+          save-if: "false"
+      - name: Check all test targets
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo check --workspace --all-targets "${feature_flags[@]}"
+      - name: Feature configuration runtime coverage
+        if: ${{ github.event_name != 'pull_request' }}
+        run: echo "The full feature matrix runs tests for this event."
+
   test:
     name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
@@ -86,13 +193,14 @@ jobs:
         target:
           - macOS
           - Windows
-        state:
-          - transparent
-          - Sapling-only
-          - Orchard
-          - all-pools
-          - all-features
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["all-features", "NU7", "NuTachyon"]'
+              || '["all-features"]'
+            )
+          }}
 
         include:
           - target: macOS
@@ -100,182 +208,173 @@ jobs:
           - target: Windows
             os: ${{ vars.WINDOWS_LARGE_RUNNER || 'windows-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: Orchard
-            orchard-pool: true
-          - state: all-pools
-            all-pools: true
-          - state: all-features
-            all-features: true
-          - state: NU7
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu7"'
-
         exclude:
           - target: macOS
-            state: all-features
-          - target: macOS
             state: NU7
+          - target: macOS
+            state: NuTachyon
 
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+      RUSTFLAGS: >-
+        ${{
+          matrix.state == 'NU7'
+          && '--cfg zcash_unstable="nu7"'
+          || matrix.state == 'NuTachyon'
+          && '--cfg zcash_unstable="nutachyon"'
+          || ''
+        }}
+      RUSTDOCFLAGS: >-
+        ${{
+          matrix.state == 'NU7'
+          && '--cfg zcash_unstable="nu7"'
+          || matrix.state == 'NuTachyon'
+          && '--cfg zcash_unstable="nutachyon"'
+          || ''
+        }}
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: ${{ matrix.all-pools || false }}
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+          all-features: true
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
       - name: Run tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test --workspace "${feature_flags[@]}" -- --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
 
   test-slow:
-    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
+    name: Expensive Test ${{ matrix.state }} on ${{ matrix.target }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       matrix:
         target:
           - Linux
-        state: # all-pools intentionally omitted
-          - transparent
-          - Sapling-only
-          - Orchard
-          - all-features
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["all-pools", "NU7", "NuTachyon"]'
+              || '["all-pools"]'
+            )
+          }}
 
         include:
           - target: Linux
             os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: Orchard
-            orchard-pool: true
-          - state: all-features
-            all-features: true
           - state: NU7
-            all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
+
+          - state: NuTachyon
+            rustflags: '--cfg zcash_unstable="nutachyon"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: false
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+          all-pools: true
+          extra-features: pczt-tests
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
           save-if: "false"
       - name: Run slow tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
-          --features expensive-tests
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test \
+            --workspace \
+            "${feature_flags[@]}" \
+            --features expensive-tests \
+            -- \
+            --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
 
-  # States that we want to ensure can be built, but that we don't actively run tests for.
-  check-msrv:
-    name: Check ${{ matrix.state }} build on ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        target:
-          - Linux
-          - macOS
-          - Windows
-        state:
-          - ZFuture
-          - ZFuture-allfeatures
-
-        include:
-          - target: Linux
-            os: ubuntu-latest
-          - target: macOS
-            os: macOS-latest
-          - target: Windows
-            os: windows-latest
-
-          - state: ZFuture
-            rustflags: '--cfg zcash_unstable="zfuture"'
-          - state: ZFuture-allfeatures
-            all-features: true
-            rustflags: '--cfg zcash_unstable="zfuture"'
-
+  notify-nightly-failure:
+    name: Notify Slack of nightly test failure
+    needs: test-slow
+    if: ${{ always() && github.event_name == 'schedule' && needs.test-slow.result != 'success' }}
+    runs-on: ubuntu-latest
+    permissions: {}
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      RUSTDOCFLAGS: ${{ matrix.rustflags }}
-
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TEST_RESULT: ${{ needs.test-slow.result }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
-          persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
-        with:
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          shared-key: msrv
-          save-if: "false"
-      - name: Run check
-        run: >
-          cargo check
-          --release
-          --workspace
-          --tests
-          ${{ steps.prepare.outputs.feature-flags }}
-      - name: Verify working directory is clean
-        run: git diff --exit-code
+          errors: true
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: >-
+              librustzcash nightly expensive tests ended with
+              ${{ env.TEST_RESULT }}: ${{ env.RUN_URL }}
 
   build-latest:
     name: Latest build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Override the workspace `rust-toolchain.toml` (which pins the MSRV) so
+      # this job actually exercises the latest stable toolchain.
+      RUSTUP_TOOLCHAIN: stable
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: latest
-      - uses: dtolnay/rust-toolchain@stable
+      # macOS-latest pre-installs a system `rustc` that is not a rustup proxy
+      # and does not understand `+toolchain` syntax. Ensure rustup's proxies in
+      # $CARGO_HOME/bin take precedence so `rustc +stable ...` works.
+      - name: Ensure rustup proxies take precedence
+        shell: bash
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: stable
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
         env:
@@ -283,12 +382,18 @@ jobs:
       - name: Remove lockfile to build with latest dependencies
         run: rm Cargo.lock
       - name: Build crates
-        run: >
-          cargo build
-          --workspace
-          --all-targets
-          ${{ steps.prepare.outputs.feature-flags }}
-          --verbose
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo build --workspace --all-targets "${feature_flags[@]}" --verbose
       - name: Verify working directory is clean (excluding lockfile)
         run: git diff --exit-code ':!Cargo.lock'
 
@@ -304,7 +409,7 @@ jobs:
             build_deps: >
               gcc-multilib
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           path: crates
@@ -350,7 +455,7 @@ jobs:
             build_deps: >
               gcc-arm-none-eabi
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           path: crates
@@ -381,6 +486,9 @@ jobs:
       - name: Add zcash_primitives as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_primitives
+      - name: Add zcash_pool_migration as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_pool_migration
       - name: Add lazy_static with the spin_no_std feature
         working-directory: ./ci-build
         run: cargo add lazy_static --features "spin_no_std"
@@ -397,7 +505,7 @@ jobs:
     name: Bitrot check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Build benchmarks to prevent bitrot
@@ -410,7 +518,7 @@ jobs:
     permissions:
       checks: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # We can't currently use only the common feature set (to exclude checking of
@@ -427,6 +535,25 @@ jobs:
           args: >
             -D warnings
 
+  clippy-nodefault:
+    name: Clippy (no default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        id: toolchain
+        with:
+          toolchain: stable
+          components: clippy
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      - name: Run clippy (no default features)
+        run: cargo clippy --no-default-features -- -D warnings
+
   clippy-beta:
     name: Clippy (beta)
     runs-on: ubuntu-latest
@@ -434,15 +561,16 @@ jobs:
       checks: write
     continue-on-error: true
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # We can't currently use only the common feature set (to exclude checking of
       # unstable in-progress code) because this action doesn't support spaces within CLI
       # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
-      - uses: dtolnay/rust-toolchain@beta
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
         with:
+          toolchain: beta
           components: clippy
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
@@ -461,37 +589,89 @@ jobs:
 
   # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
   # docs.rs and in `.github/workflows/book.yml` as closely as possible.
+  clippy-features-discover:
+    name: Discover workspace crates
+    runs-on: ubuntu-latest
+    outputs:
+      crates: ${{ steps.list.outputs.crates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: List workspace crates
+        id: list
+        run: |
+          cargo metadata --no-deps --format-version 1 \
+            | jq -c '[.packages[].name] | sort' \
+            | sed 's/^/crates=/' >> "$GITHUB_OUTPUT"
+
+  clippy-feature-combos:
+    name: Clippy (${{ matrix.crate }}, each feature)
+    needs: clippy-features-discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.clippy-features-discover.outputs.crates) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        id: toolchain
+        with:
+          toolchain: stable
+          components: clippy
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      # Lints each of the crate's features on its own, catching the configurations that the
+      # `--all-features` and `--no-default-features` endpoints both miss. The script carries the
+      # full rationale and can be run locally against one crate or the whole workspace.
+      - name: Clippy each feature
+        run: scripts/clippy-each-feature.sh "$CRATE"
+        env:
+          CRATE: ${{ matrix.crate }}
+
   doc-links:
     name: Intra-doc links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: nightly
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - run: cargo fetch
       # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
-        run: >
-          cargo doc
-          --no-deps
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
-          --document-private-items
+        shell: bash
         env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo doc --no-deps --workspace "${feature_flags[@]}" --document-private-items
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check formatting
@@ -501,33 +681,63 @@ jobs:
     name: Readme dependency graph
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check consistency
         run: python3 .github/helpers/check-dep-graph.py
 
+  release-tags:
+    name: Bumped crate versions are tagged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check that each bumped crate version is tagged upstream
+        env:
+          BASE_SHA: >-
+            ${{
+              github.event.pull_request.base.sha
+              || github.event.merge_group.base_sha
+            }}
+          HEAD_SHA: >-
+            ${{
+              github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+            }}
+        run: python3 .github/helpers/check-release-tags.py
+
   protobuf:
     name: protobuf consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
-        uses: supplypike/setup-bin@1fafb085795af4a3f183502f3a9dffa8f7b83217 # v5.0.0
+        uses: supplypike/setup-bin@8365380a806a88e7a0f0d07059b175ca2f5418d7 # v5.0.1
         with:
           uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
           name: 'protoc'
           version: '25.1'
           subPath: 'bin'
       - name: Trigger protobuf regeneration
-        run: >
-          cargo check
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo check --workspace "${feature_flags[@]}"
       - name: run cargo-fmt to handle the case that regeneration sometimes produces unformatted output
         run: cargo fmt
       - name: Verify working directory is clean
@@ -537,7 +747,7 @@ jobs:
     name: UUID validity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Extract UUIDs
@@ -571,14 +781,19 @@ jobs:
     name: Required status checks have passed
     needs:
       - required-test
-      - check-msrv
+      - feature-check
       - build-latest
       - build-nodefault
+      - build-nostd
       - bitrot
       - clippy
+      - clippy-nodefault
+      - clippy-features-discover
+      - clippy-feature-combos
       - doc-links
       - fmt
       - protobuf
+      - release-tags
       - uuid
     if: ${{ always() }}
     runs-on: ubuntu-latest

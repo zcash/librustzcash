@@ -1,20 +1,21 @@
-use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::hash::Hash;
+use std::{collections::HashSet, convert::TryFrom, hash::Hash};
 
 use incrementalmerkletree::Retention;
 use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
 use subtle::ConditionallySelectable;
 
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use zcash_note_encryption::batch;
 use zcash_primitives::transaction::components::sapling::zip212_enforcement;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 
-use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
+use super::{
+    PositionTracker, ScanBlockError, ScanError, ScanningKeys, SpendIdentifiers, find_received,
+    find_spent,
+};
 use crate::{
     data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
     proto::compact_formats::{ChainMetadata, CompactBlock, CompactTx},
@@ -22,10 +23,20 @@ use crate::{
     wallet::{WalletSpend, WalletTx},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::find_transparent_spends,
+    crate::wallet::WalletTransparentOutput,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
+};
+
 #[cfg(feature = "orchard")]
-use orchard::{
-    note_encryption::{CompactAction, OrchardDomain},
-    tree::MerkleHashOrchard,
+use {
+    super::IronwoodDomain,
+    orchard::{
+        note_encryption::{CompactAction, OrchardDomain},
+        tree::MerkleHashOrchard,
+    },
 };
 
 #[cfg(not(feature = "orchard"))]
@@ -57,6 +68,21 @@ type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     Tasks,
 >;
 
+// Ironwood outputs are decrypted under the Ironwood note-encryption domain, which is distinct from
+// the Orchard domain (it accepts version 3 note plaintexts), so an Ironwood batch is a distinct
+// type from an Orchard batch and requires its own task type.
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatch<IvkTag> =
+    Batch<IvkTag, IronwoodDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatchRunner<IvkTag, Tasks> = BatchRunner<
+    IvkTag,
+    IronwoodDomain,
+    orchard::note_encryption::CompactAction,
+    CompactDecryptor,
+    Tasks,
+>;
+
 pub(crate) trait SaplingTasks<IvkTag>: Tasks<TaggedSaplingBatch<IvkTag>> {}
 impl<IvkTag, T: Tasks<TaggedSaplingBatch<IvkTag>>> SaplingTasks<IvkTag> for T {}
 
@@ -70,19 +96,37 @@ pub(crate) trait OrchardTasks<IvkTag>: Tasks<TaggedOrchardBatch<IvkTag>> {}
 #[cfg(feature = "orchard")]
 impl<IvkTag, T: Tasks<TaggedOrchardBatch<IvkTag>>> OrchardTasks<IvkTag> for T {}
 
-pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTasks<IvkTag>> {
+#[cfg(not(feature = "orchard"))]
+pub(crate) trait IronwoodTasks<IvkTag> {}
+#[cfg(not(feature = "orchard"))]
+impl<IvkTag, T> IronwoodTasks<IvkTag> for T {}
+
+#[cfg(feature = "orchard")]
+pub(crate) trait IronwoodTasks<IvkTag>: Tasks<TaggedIronwoodBatch<IvkTag>> {}
+#[cfg(feature = "orchard")]
+impl<IvkTag, T: Tasks<TaggedIronwoodBatch<IvkTag>>> IronwoodTasks<IvkTag> for T {}
+
+pub(crate) struct BatchRunners<
+    IvkTag,
+    TS: SaplingTasks<IvkTag>,
+    TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
+> {
     sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
     #[cfg(feature = "orchard")]
     orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
+    #[cfg(feature = "orchard")]
+    ironwood: TaggedIronwoodBatchRunner<IvkTag, TI>,
     #[cfg(not(feature = "orchard"))]
-    orchard: PhantomData<TO>,
+    orchard: PhantomData<(TO, TI)>,
 }
 
-impl<IvkTag, TS, TO> BatchRunners<IvkTag, TS, TO>
+impl<IvkTag, TS, TO, TI> BatchRunners<IvkTag, TS, TO, TI>
 where
     IvkTag: Clone + Send + 'static,
     TS: SaplingTasks<IvkTag>,
     TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
 {
     pub(crate) fn for_keys<AccountId>(
         batch_size_threshold: usize,
@@ -104,6 +148,14 @@ where
                     .iter()
                     .map(|(id, key)| (id.clone(), key.prepare())),
             ),
+            #[cfg(feature = "orchard")]
+            ironwood: BatchRunner::new(
+                batch_size_threshold,
+                scanning_keys
+                    .ironwood()
+                    .iter()
+                    .map(|(id, key)| (id.clone(), key.prepare())),
+            ),
             #[cfg(not(feature = "orchard"))]
             orchard: PhantomData,
         }
@@ -113,6 +165,8 @@ where
         self.sapling.flush();
         #[cfg(feature = "orchard")]
         self.orchard.flush();
+        #[cfg(feature = "orchard")]
+        self.ironwood.flush();
     }
 
     #[tracing::instrument(skip_all, fields(height = block.height))]
@@ -132,7 +186,7 @@ where
                 block_hash,
                 txid,
                 |_| SaplingDomain::new(zip212_enforcement),
-                &tx.outputs
+                tx.outputs
                     .iter()
                     .enumerate()
                     .map(|(i, output)| {
@@ -140,12 +194,12 @@ where
                             ScanError::EncodingInvalid {
                                 at_height: block_height,
                                 txid,
-                                pool_type: ShieldedProtocol::Sapling,
+                                pool_type: ShieldedPool::Sapling,
                                 index: i,
                             }
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, ScanError>>()?,
             );
 
             #[cfg(feature = "orchard")]
@@ -153,18 +207,37 @@ where
                 block_hash,
                 txid,
                 OrchardDomain::for_compact_action,
-                &tx.actions
+                tx.actions
                     .iter()
                     .enumerate()
                     .map(|(i, action)| {
                         CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
                             at_height: block_height,
                             txid,
-                            pool_type: ShieldedProtocol::Orchard,
+                            pool_type: ShieldedPool::Orchard,
                             index: i,
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, ScanError>>()?,
+            );
+
+            #[cfg(feature = "orchard")]
+            self.ironwood.add_outputs(
+                block_hash,
+                txid,
+                IronwoodDomain::for_compact_action,
+                tx.ironwood_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, action)| {
+                        CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
+                            at_height: block_height,
+                            txid,
+                            pool_type: ShieldedPool::Ironwood,
+                            index: i,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ScanError>>()?,
             );
         }
 
@@ -173,20 +246,27 @@ where
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
+pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO, TI, E>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
-    nullifiers: &Nullifiers<AccountId>,
+    spend_ids: &SpendIdentifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
-) -> Result<ScannedBlock<AccountId>, ScanError>
+    mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO, TI>>,
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<ScannedBlock<AccountId>, ScanBlockError<E>>
 where
     P: consensus::Parameters + Send + 'static,
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     TS: SaplingTasks<IvkTag> + Sync,
     TO: OrchardTasks<IvkTag> + Sync,
+    TI: IronwoodTasks<IvkTag> + Sync,
 {
     fn check_hash_continuity(
         block: &CompactBlock,
@@ -217,7 +297,7 @@ where
     }
 
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
-        return Err(scan_error);
+        return Err(scan_error.into());
     }
 
     trace!("Block continuity okay at {:?}", block.height());
@@ -238,19 +318,39 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "orchard")]
+    let mut ironwood_nullifier_map = Vec::with_capacity(block.vtx.len());
+    #[cfg(feature = "orchard")]
+    let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
+
+    #[cfg(feature = "transparent-inputs")]
+    let mut transparent_spend_map = Vec::with_capacity(block.vtx.len());
+
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let tx_index =
             TxIndex::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
 
+        // A compact spend carries its nullifier as raw bytes; validate them up front so that a
+        // malformed (wrong-length) nullifier from an untrusted server yields a handleable
+        // `ScanError` rather than panicking the scanner.
+        let sapling_spend_nfs = tx
+            .spends
+            .iter()
+            .enumerate()
+            .map(|(index, spend)| {
+                spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                    at_height: cur_height,
+                    txid,
+                    pool_type: ShieldedPool::Sapling,
+                    index,
+                })
+            })
+            .collect::<Result<Vec<_>, ScanError>>()?;
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
-            &tx.spends,
-            &nullifiers.sapling,
-            |spend| {
-                spend.nf().expect(
-                    "Could not deserialize nullifier for spend from protobuf representation.",
-                )
-            },
+            &sapling_spend_nfs,
+            spend_ids.shielded().sapling(),
+            |nf| *nf,
             WalletSpend::from_parts,
         );
 
@@ -258,25 +358,90 @@ where
 
         #[cfg(feature = "orchard")]
         let orchard_spends = {
+            let orchard_spend_nfs = tx
+                .actions
+                .iter()
+                .enumerate()
+                .map(|(index, spend)| {
+                    spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                        at_height: cur_height,
+                        txid,
+                        pool_type: ShieldedPool::Orchard,
+                        index,
+                    })
+                })
+                .collect::<Result<Vec<_>, ScanError>>()?;
             let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
-                &tx.actions,
-                &nullifiers.orchard,
-                |spend| {
-                    spend.nf().expect(
-                        "Could not deserialize nullifier for spend from protobuf representation.",
-                    )
-                },
+                &orchard_spend_nfs,
+                spend_ids.shielded().orchard(),
+                |nf| *nf,
                 WalletSpend::from_parts,
             );
             orchard_nullifier_map.push((tx_index, txid, orchard_unlinked_nullifiers));
             orchard_spends
         };
 
+        #[cfg(feature = "orchard")]
+        let ironwood_spends = {
+            let ironwood_spend_nfs = tx
+                .ironwood_actions
+                .iter()
+                .enumerate()
+                .map(|(index, spend)| {
+                    spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                        at_height: cur_height,
+                        txid,
+                        pool_type: ShieldedPool::Ironwood,
+                        index,
+                    })
+                })
+                .collect::<Result<Vec<_>, ScanError>>()?;
+            let (ironwood_spends, ironwood_unlinked_nullifiers) = find_spent(
+                &ironwood_spend_nfs,
+                spend_ids.shielded().ironwood(),
+                |nf| *nf,
+                WalletSpend::from_parts,
+            );
+            ironwood_nullifier_map.push((tx_index, txid, ironwood_unlinked_nullifiers));
+            ironwood_spends
+        };
+
+        // Detect spends of transparent outputs the wallet is tracking. A compact transaction
+        // omits the coinbase transaction's single null-outpoint input, so every `vin` entry
+        // present here refers to a real prior output.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_spends, unlinked_prevouts) = {
+            let prevouts = tx
+                .vin
+                .iter()
+                .enumerate()
+                .map(|(index, txin)| {
+                    txin.prevout()
+                        .map_err(|_| ScanError::TransparentPrevoutInvalid {
+                            at_height: cur_height,
+                            txid,
+                            index,
+                        })
+                })
+                .collect::<Result<Vec<_>, ScanError>>()?;
+
+            find_transparent_spends(prevouts, spend_ids.transparent())
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map.push((tx_index, txid, unlinked_prevouts));
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
+        #[cfg(feature = "transparent-inputs")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(transparent_spends.iter().map(|spend| spend.account_id()));
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
+        #[cfg(feature = "orchard")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(ironwood_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
         let (sapling_outputs, mut sapling_nc) = find_received(
@@ -296,13 +461,13 @@ where
                             ScanError::EncodingInvalid {
                                 at_height: cur_height,
                                 txid,
-                                pool_type: ShieldedProtocol::Sapling,
+                                pool_type: ShieldedPool::Sapling,
                                 index: i,
                             }
                         })?,
                     ))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, ScanError>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.sapling.collect_results(cur_hash, txid)),
@@ -313,6 +478,7 @@ where
                     .collect()
             },
             |output| sapling::Node::from_cmu(&output.cmu),
+            |note| note,
         );
         sapling_note_commitments.append(&mut sapling_nc);
         let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
@@ -333,13 +499,13 @@ where
                         ScanError::EncodingInvalid {
                             at_height: cur_height,
                             txid,
-                            pool_type: ShieldedProtocol::Orchard,
+                            pool_type: ShieldedPool::Orchard,
                             index: i,
                         }
                     })?;
                     Ok((OrchardDomain::for_compact_action(&action), action))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, ScanError>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.orchard.collect_results(cur_hash, txid)),
@@ -350,25 +516,133 @@ where
                     .collect()
             },
             |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+            |note| (note, orchard::ValuePool::Orchard),
         );
         #[cfg(feature = "orchard")]
         orchard_note_commitments.append(&mut orchard_nc);
+
+        #[cfg(feature = "orchard")]
+        let (ironwood_outputs, mut ironwood_nc) = find_received(
+            cur_height,
+            pos_tracker.compact_tx_contains_last_ironwood_actions_in_block(&tx),
+            txid,
+            |output_idx| pos_tracker.ironwood_note_position(output_idx),
+            &scanning_keys.ironwood,
+            &spent_from_accounts,
+            &tx.ironwood_actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    let action = CompactAction::try_from(action).map_err(|_| {
+                        ScanError::EncodingInvalid {
+                            at_height: cur_height,
+                            txid,
+                            pool_type: ShieldedPool::Ironwood,
+                            index: i,
+                        }
+                    })?;
+                    Ok((IronwoodDomain::for_compact_action(&action), action))
+                })
+                .collect::<Result<Vec<_>, ScanError>>()?,
+            batch_runners
+                .as_mut()
+                .map(|runners| |txid| runners.ironwood.collect_results(cur_hash, txid)),
+            |ivks, outputs| {
+                batch::try_compact_note_decryption(ivks, outputs)
+                    .into_iter()
+                    .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                    .collect()
+            },
+            |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+            |note| (note, orchard::ValuePool::Ironwood),
+        );
+        #[cfg(feature = "orchard")]
+        ironwood_note_commitments.append(&mut ironwood_nc);
+
+        // Detect transparent outputs of this transaction that pay a wallet account. An output
+        // whose script does not describe a supported address, or whose value is not a valid
+        // amount, cannot be one the wallet controls, so it is skipped rather than treated as a
+        // scan failure; a malformed prevout above is not, because there the wallet would be
+        // unable to tell whether its own funds were being spent.
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_outputs = {
+            let mut detected = vec![];
+            for (output_index, vout) in tx.vout.iter().enumerate() {
+                let Ok(txout) = vout.to_txout() else {
+                    warn!(
+                        "Ignoring transparent output {output_index} of transaction {txid}: value is not a valid amount of zatoshis"
+                    );
+                    continue;
+                };
+
+                let Some(address) = txout
+                    .script_kind()
+                    .as_ref()
+                    .and_then(TransparentAddress::from_script_kind)
+                else {
+                    continue;
+                };
+
+                if let Some((account_id, key_scope)) =
+                    find_account_for_address(&address).map_err(ScanBlockError::AddressLookup)?
+                {
+                    detected.push(
+                        WalletTransparentOutput::from_parts(
+                            OutPoint::new(
+                                txid.into(),
+                                u32::try_from(output_index)
+                                    .expect("a transaction has fewer than 2^32 outputs"),
+                            ),
+                            txout,
+                            Some(cur_height),
+                            Some(account_id),
+                            key_scope,
+                            None,
+                        )
+                        .expect("recipient address extraction previously checked"),
+                    );
+                }
+            }
+            detected
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_transparent = !(transparent_spends.is_empty() && transparent_outputs.is_empty());
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_transparent = false;
 
         #[cfg(feature = "orchard")]
         let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
-        if has_sapling || has_orchard {
+        #[cfg(feature = "orchard")]
+        let has_ironwood = !(ironwood_spends.is_empty() && ironwood_outputs.is_empty());
+        #[cfg(not(feature = "orchard"))]
+        let has_ironwood = false;
+
+        if has_transparent || has_sapling || has_orchard || has_ironwood {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                #[cfg(feature = "transparent-inputs")]
+                transparent_spends,
+                #[cfg(not(feature = "transparent-inputs"))]
+                vec![],
+                #[cfg(feature = "transparent-inputs")]
+                transparent_outputs,
+                #[cfg(not(feature = "transparent-inputs"))]
+                vec![],
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
                 orchard_spends,
                 #[cfg(feature = "orchard")]
                 orchard_outputs,
+                #[cfg(feature = "orchard")]
+                ironwood_spends,
+                #[cfg(feature = "orchard")]
+                ironwood_outputs,
             ));
         }
 
@@ -393,6 +667,14 @@ where
             orchard_note_commitments,
             orchard_nullifier_map,
         ),
+        #[cfg(feature = "orchard")]
+        ScannedBundles::new(
+            pos_tracker.ironwood_final_tree_size,
+            ironwood_note_commitments,
+            ironwood_nullifier_map,
+        ),
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map,
     ))
 }
 
@@ -412,7 +694,7 @@ impl PositionTracker {
             params: &P,
             block: &CompactBlock,
             prior_block_metadata: Option<&BlockMetadata>,
-            protocol: ShieldedProtocol,
+            protocol: ShieldedPool,
             activation_nu: NetworkUpgrade,
             prior_tree_size: impl Fn(&BlockMetadata) -> Option<u32>,
             tx_output_count: impl Fn(&CompactTx) -> usize,
@@ -486,7 +768,7 @@ impl PositionTracker {
             params,
             block,
             prior_block_metadata,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             NetworkUpgrade::Sapling,
             |m| m.sapling_tree_size(),
             |tx| tx.outputs.len(),
@@ -498,11 +780,23 @@ impl PositionTracker {
             params,
             block,
             prior_block_metadata,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             NetworkUpgrade::Nu5,
             |m| m.orchard_tree_size(),
             |tx| tx.actions.len(),
             |m| m.orchard_commitment_tree_size,
+        )?;
+
+        #[cfg(feature = "orchard")]
+        let (ironwood_prior_tree_size, ironwood_final_tree_size) = tree_sizes_around(
+            params,
+            block,
+            prior_block_metadata,
+            ShieldedPool::Ironwood,
+            NetworkUpgrade::Nu6_3,
+            |m| m.ironwood_tree_size(),
+            |tx| tx.ironwood_actions.len(),
+            |m| m.ironwood_commitment_tree_size,
         )?;
 
         Ok(Self {
@@ -512,6 +806,10 @@ impl PositionTracker {
             orchard_tree_position: orchard_prior_tree_size,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: ironwood_prior_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size,
         })
     }
 
@@ -528,6 +826,14 @@ impl PositionTracker {
             == self.orchard_final_tree_size
     }
 
+    #[cfg(feature = "orchard")]
+    fn compact_tx_contains_last_ironwood_actions_in_block(&self, tx: &CompactTx) -> bool {
+        self.ironwood_tree_position
+            + u32::try_from(tx.ironwood_actions.len())
+                .expect("Ironwood action count cannot exceed a u32")
+            == self.ironwood_final_tree_size
+    }
+
     fn increment_over_compact_tx(&mut self, tx: &CompactTx) {
         self.sapling_tree_position +=
             u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
@@ -535,6 +841,8 @@ impl PositionTracker {
         {
             self.orchard_tree_position +=
                 u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
+            self.ironwood_tree_position += u32::try_from(tx.ironwood_actions.len())
+                .expect("Ironwood action count cannot exceed a u32");
         }
     }
 
@@ -549,26 +857,40 @@ impl PositionTracker {
         assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
         #[cfg(feature = "orchard")]
         assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
+        #[cfg(feature = "orchard")]
+        assert_eq!(self.ironwood_tree_position, self.ironwood_final_tree_size);
 
-        if let Some(chain_meta) = chain_metadata {
-            if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Sapling,
-                    at_height,
-                    given: chain_meta.sapling_commitment_tree_size,
-                    computed: self.sapling_tree_position,
-                });
-            }
+        let Some(chain_meta) = chain_metadata else {
+            return Ok(());
+        };
 
-            #[cfg(feature = "orchard")]
-            if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Orchard,
-                    at_height,
-                    given: chain_meta.orchard_commitment_tree_size,
-                    computed: self.orchard_tree_position,
-                });
-            }
+        if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Sapling,
+                at_height,
+                given: chain_meta.sapling_commitment_tree_size,
+                computed: self.sapling_tree_position,
+            });
+        }
+
+        #[cfg(feature = "orchard")]
+        if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Orchard,
+                at_height,
+                given: chain_meta.orchard_commitment_tree_size,
+                computed: self.orchard_tree_position,
+            });
+        }
+
+        #[cfg(feature = "orchard")]
+        if chain_meta.ironwood_commitment_tree_size != self.ironwood_tree_position {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedPool::Ironwood,
+                at_height,
+                given: chain_meta.ironwood_commitment_tree_size,
+                computed: self.ironwood_tree_position,
+            });
         }
 
         Ok(())
@@ -579,6 +901,32 @@ impl PositionTracker {
 mod tests {
 
     use std::convert::Infallible;
+
+    #[cfg(feature = "transparent-inputs")]
+    use std::collections::HashMap;
+
+    #[cfg(feature = "orchard")]
+    use {
+        super::{ScanBlockError, ScanError},
+        crate::proto::compact_formats::{
+            ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
+        },
+        orchard::{
+            keys::Scope,
+            note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
+            note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+            value::NoteValue,
+        },
+        pasta_curves::{
+            group::ff::{Field, PrimeField},
+            pallas,
+        },
+        proptest::prelude::*,
+        rand::rngs::SysRng,
+        rand_core::{Rng, UnwrapErr},
+        zcash_note_encryption::Domain,
+        zcash_protocol::ShieldedPool,
+    };
 
     use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
@@ -593,7 +941,9 @@ mod tests {
     use super::{BatchRunners, scan_block_with_runners};
     use crate::{
         data_api::BlockMetadata,
-        scanning::{Nullifiers, ScanningKeys, scan_block, testing::fake_compact_block},
+        scanning::{
+            Nullifiers, ScanningKeys, SpendIdentifiers, scan_block, testing::fake_compact_block,
+        },
     };
 
     #[test]
@@ -619,7 +969,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 2);
 
             let mut batch_runners = if scan_multithreaded {
-                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
                 runners
                     .add_block(&Network::TestNetwork, cb.clone())
                     .unwrap();
@@ -630,19 +980,23 @@ mod tests {
                 None
             };
 
-            let scanned_block = scan_block_with_runners(
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
                 &network,
                 cb,
                 &scanning_keys,
-                &Nullifiers::empty(),
+                &SpendIdentifiers::empty(),
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0u8; 32]),
                     Some(0),
                     #[cfg(feature = "orchard")]
                     Some(0),
+                    #[cfg(feature = "orchard")]
+                    Some(0),
                 )),
                 batch_runners.as_mut(),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -682,6 +1036,206 @@ mod tests {
         go(true);
     }
 
+    #[cfg(feature = "orchard")]
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(24))]
+
+        /// An Ironwood output (a version 3 note in `tx.ironwood_actions`) is detected by the
+        /// scanner using the account's Orchard viewing key under the Ironwood note-encryption
+        /// domain, and is reported as an Ironwood output distinct from the Orchard pool. This
+        /// exercises the fix that decrypts Ironwood notes with `IronwoodDomain` rather than
+        /// `OrchardDomain` (which, accepting only version 2 plaintexts, would silently fail to
+        /// detect the note). Fuzzing the value, diversified address index, and key scope covers a
+        /// range of notes the wallet must detect.
+        #[test]
+        fn scan_block_detects_ironwood_note(
+            value in 1u64..=1_000_000_000u64,
+            diversifier_index in 0u32..8,
+            internal in proptest::bool::ANY,
+        ) {
+            let network = Network::TestNetwork;
+            let account = AccountId::ZERO;
+            let usk =
+                UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+            let ufvk = usk.to_unified_full_viewing_key();
+            let orchard_fvk = ufvk.orchard().expect("Orchard key is present").clone();
+            let scanning_keys = ScanningKeys::from_account_ufvks([(account, ufvk)]);
+
+            let scope = if internal { Scope::Internal } else { Scope::External };
+            let mut rng = UnwrapErr(SysRng);
+            let recipient = orchard_fvk.address_at(diversifier_index, scope);
+
+            // Build a version 3 (Ironwood) compact action. `rho` is derived from the revealed
+            // nullifier exactly as the crate does internally (`Rho::from_nf_old(nf) ==
+            // Rho(nf.inner())`, which `Rho::from_bytes(&nf.to_bytes())` reconstructs), so the domain
+            // the scanner builds via `IronwoodDomain::for_compact_action` will match and decryption
+            // will succeed.
+            let nf_old =
+                orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                    .unwrap();
+            let rho = Rho::from_bytes(&nf_old.to_bytes()).unwrap();
+            let rseed = loop {
+                let mut bytes = [0u8; 32];
+                rng.fill_bytes(&mut bytes);
+                if let Some(rseed) = Option::from(RandomSeed::from_bytes(bytes, &rho)) {
+                    break rseed;
+                }
+            };
+            let note = Note::from_parts(
+                recipient,
+                NoteValue::from_raw(value),
+                rho,
+                rseed,
+                NoteVersion::V3,
+            )
+            .unwrap();
+            let encryptor = IronwoodNoteEncryption::new(
+                Some(orchard_fvk.to_ovk(Scope::External)),
+                note,
+                [0u8; 512],
+            );
+            let cmx = ExtractedNoteCommitment::from(note.commitment());
+            let ephemeral_key = IronwoodDomain::epk_bytes(encryptor.epk());
+            let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+            let action = CompactOrchardAction {
+                nullifier: nf_old.to_bytes().to_vec(),
+                cmx: cmx.to_bytes().to_vec(),
+                ephemeral_key: ephemeral_key.0.to_vec(),
+                ciphertext: enc_ciphertext.0[..::orchard::note_encryption::COMPACT_NOTE_SIZE].to_vec(),
+            };
+
+            let mut ctx = CompactTx::default();
+            let mut txid = vec![0u8; 32];
+            rng.fill_bytes(&mut txid);
+            ctx.txid = txid;
+            ctx.ironwood_actions.push(action);
+
+            let mut cb = CompactBlock {
+                hash: {
+                    let mut hash = vec![0u8; 32];
+                    rng.fill_bytes(&mut hash);
+                    hash
+                },
+                prev_hash: vec![0u8; 32],
+                height: 1,
+                ..Default::default()
+            };
+            cb.vtx.push(ctx);
+            // The block contains a single Ironwood action and no Sapling or Orchard outputs, so
+            // only the Ironwood tree grows (from 0 to 1).
+            cb.chain_metadata = Some(ChainMetadata {
+                sapling_commitment_tree_size: 0,
+                orchard_commitment_tree_size: 0,
+                ironwood_commitment_tree_size: 1,
+            });
+
+            let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
+            runners.add_block(&network, cb.clone()).unwrap();
+            runners.flush();
+
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
+                &network,
+                cb,
+                &scanning_keys,
+                &SpendIdentifiers::empty(),
+                Some(&BlockMetadata::from_parts(
+                    BlockHeight::from(0),
+                    BlockHash([0u8; 32]),
+                    Some(0),
+                    Some(0),
+                    Some(0),
+                )),
+                Some(&mut runners),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
+            )
+            .unwrap();
+
+            let txs = scanned_block.transactions();
+            prop_assert_eq!(txs.len(), 1);
+            let tx = &txs[0];
+            // The note appears as an Ironwood output, not an Orchard one.
+            prop_assert_eq!(tx.orchard_outputs().len(), 0);
+            prop_assert_eq!(tx.ironwood_outputs().len(), 1);
+            prop_assert_eq!(tx.ironwood_outputs()[0].account_id(), &account);
+            prop_assert_eq!(tx.ironwood_outputs()[0].note().0.value().inner(), value);
+            prop_assert_eq!(
+                tx.ironwood_outputs()[0].note_commitment_tree_position(),
+                Position::from(0)
+            );
+
+            prop_assert_eq!(scanned_block.ironwood().final_tree_size(), 1);
+            prop_assert_eq!(scanned_block.orchard().final_tree_size(), 0);
+        }
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn malformed_compact_ironwood_spend_nullifier_is_a_scan_error() {
+        let network = Network::TestNetwork;
+        let account = AccountId::ZERO;
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+        let scanning_keys =
+            ScanningKeys::from_account_ufvks([(account, usk.to_unified_full_viewing_key())]);
+
+        // A compact Ironwood action whose revealed nullifier is not 32 bytes, as a buggy or
+        // malicious lightwalletd might serve. The output fields are well-formed, so it is the
+        // spend-side nullifier validation that must reject the block (rather than panicking).
+        let action = CompactOrchardAction {
+            nullifier: vec![0u8; 31],
+            cmx: vec![0u8; 32],
+            ephemeral_key: vec![0u8; 32],
+            ciphertext: vec![0u8; 52],
+        };
+        let mut ctx = CompactTx {
+            txid: vec![0u8; 32],
+            ..Default::default()
+        };
+        ctx.ironwood_actions.push(action);
+        let mut cb = CompactBlock {
+            hash: vec![0u8; 32],
+            prev_hash: vec![0u8; 32],
+            height: 1,
+            ..Default::default()
+        };
+        cb.vtx.push(ctx);
+        cb.chain_metadata = Some(ChainMetadata {
+            sapling_commitment_tree_size: 0,
+            orchard_commitment_tree_size: 0,
+            ironwood_commitment_tree_size: 1,
+        });
+
+        // Single-threaded scan (no batch runners); the spend-side nullifier check runs first.
+        let result = scan_block_with_runners::<_, _, _, (), (), (), Infallible>(
+            &network,
+            cb,
+            &scanning_keys,
+            &SpendIdentifiers::empty(),
+            Some(&BlockMetadata::from_parts(
+                BlockHeight::from(0),
+                BlockHash([0u8; 32]),
+                Some(0),
+                Some(0),
+                Some(0),
+            )),
+            None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanBlockError::Scan(ScanError::EncodingInvalid {
+                    pool_type: ShieldedPool::Ironwood,
+                    index: 0,
+                    ..
+                }))
+            ),
+            "a malformed Ironwood spend nullifier must produce a handleable ScanError",
+        );
+    }
+
     #[test]
     fn scan_block_with_txs_after_my_tx() {
         fn go(scan_multithreaded: bool) {
@@ -705,7 +1259,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 3);
 
             let mut batch_runners = if scan_multithreaded {
-                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
                 runners
                     .add_block(&Network::TestNetwork, cb.clone())
                     .unwrap();
@@ -716,13 +1270,15 @@ mod tests {
                 None
             };
 
-            let scanned_block = scan_block_with_runners(
+            let scanned_block = scan_block_with_runners::<_, _, _, _, _, _, Infallible>(
                 &network,
                 cb,
                 &scanning_keys,
-                &Nullifiers::empty(),
+                &SpendIdentifiers::empty(),
                 None,
                 batch_runners.as_mut(),
+                #[cfg(feature = "transparent-inputs")]
+                |_addr| Ok::<_, Infallible>(None),
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -767,10 +1323,16 @@ mod tests {
         let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
 
         let nf = Nullifier([7; 32]);
-        let nullifiers = Nullifiers::new(
-            vec![(account, nf)],
-            #[cfg(feature = "orchard")]
-            vec![],
+        let spend_ids = SpendIdentifiers::new(
+            Nullifiers::new(
+                vec![(account, nf)],
+                #[cfg(feature = "orchard")]
+                vec![],
+                #[cfg(feature = "orchard")]
+                vec![],
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            HashMap::new(),
         );
 
         let cb = fake_compact_block(
@@ -784,7 +1346,16 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 2);
 
-        let scanned_block = scan_block(&network, cb, &scanning_keys, &nullifiers, None).unwrap();
+        let scanned_block = scan_block::<_, _, _, Infallible>(
+            &network,
+            cb,
+            &scanning_keys,
+            &spend_ids,
+            None,
+            #[cfg(feature = "transparent-inputs")]
+            |_addr| Ok::<_, Infallible>(None),
+        )
+        .unwrap();
         let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 

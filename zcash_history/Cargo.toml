@@ -1,6 +1,6 @@
 [package]
 name = "zcash_history"
-version = "0.4.0"
+version = "0.6.0"
 authors = ["NikVolf <nikvolf@gmail.com>"]
 edition.workspace = true
 rust-version.workspace = true
@@ -15,11 +15,14 @@ proptest.workspace = true
 
 [dependencies]
 primitive-types = { version = "0.12", default-features = false }
-byteorder.workspace = true
 blake2b_simd.workspace = true
+corez.workspace = true
+zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
 
 [features]
+default = ["std"]
+std = ["corez/std", "zcash_encoding/std"]
 test-dependencies = ["dep:proptest"]
 
 [lib]

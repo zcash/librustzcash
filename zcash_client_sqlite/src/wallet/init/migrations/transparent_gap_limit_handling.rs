@@ -1,10 +1,12 @@
 //! Add support for general transparent gap limit handling, and unify the `addresses` and
 //! `ephemeral_addresses` tables.
 
-use rand_core::RngCore;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-use std::sync::Mutex;
+use rand_core::Rng;
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Mutex,
+};
 use uuid::Uuid;
 
 use rusqlite::{Transaction, named_params};
@@ -31,14 +33,18 @@ use {
         },
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+    ReceiverRequirement::*,
+    transparent::keys::TransparentKeyScope,
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
     zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xc41dfc0e_e870_4859_be47_d2f572f5ca73);
+/// Add support for general transparent gap limit handling, and unify the `addresses` and
+/// `ephemeral_addresses` tables.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xc41dfc0e_e870_4859_be47_d2f572f5ca73);
 
-const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
 
 pub(super) struct Migration<P, C, R> {
     pub(super) params: P,
@@ -110,8 +116,6 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
         ":key_scope_external": KeyScope::EXTERNAL.encode()
     ])?;
     while let Some(row) = min_addr_rows.next()? {
-        use transparent::keys::TransparentKeyScope;
-
         let account_id = AccountRef(row.get("account_id")?);
         let uivk = decode_uivk(params, row.get("uivk")?)?;
         let ufvk = decode_ufvk(params, row.get::<_, Option<String>>("ufvk")?)?;
@@ -160,7 +164,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
     Ok(())
 }
 
-impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migration<P, C, R> {
+impl<P: consensus::Parameters, C: Clock, R: Rng> RusqliteMigration for Migration<P, C, R> {
     type Error = WalletMigrationError;
 
     fn up(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {
@@ -238,8 +242,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     let transparent_external = diversifier_index
                         .and_then(|di| NonHardenedChildIndex::try_from(di).ok())
                         .and_then(|idx| {
-                            uivk.transparent()
-                                .as_ref()
+                            uivk.p2pkh()
                                 .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
                                 .map(|t_addr| (idx, t_addr.encode(&self.params)))
                         });
@@ -741,10 +744,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
         // account id in each iteration of the loop.
         #[cfg(feature = "transparent-inputs")]
         for (account_id, (uivk, ufvk)) in account_ids {
-            use transparent::keys::TransparentKeyScope;
-
             for key_scope in [TransparentKeyScope::EXTERNAL, TransparentKeyScope::INTERNAL] {
-                use ReceiverRequirement::*;
                 let gap_limit = match key_scope {
                     TransparentKeyScope::EXTERNAL => GapLimits::default().external(),
                     TransparentKeyScope::INTERNAL => GapLimits::default().internal(),
