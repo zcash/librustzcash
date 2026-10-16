@@ -4,7 +4,7 @@ use rusqlite::{Transaction, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
 
 use crate::wallet::{chain_tip_height, init::WalletMigrationError};
 
@@ -56,7 +56,7 @@ impl RusqliteMigration for Migration {
              SET request_expiry = :manual_expiry
              WHERE request_expiry IS NULL",
             named_params! {
-                ":manual_expiry": chain_tip.map(|h| u32::from(h) + DEFAULT_TX_EXPIRY_DELTA)
+                ":manual_expiry": chain_tip.map(|h| u32::from(h) + BLOSSOM_DEFAULT_TX_EXPIRY_DELTA)
             },
         )?;
         Ok(())

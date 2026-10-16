@@ -209,13 +209,15 @@ pub(crate) fn select_single_spendable_sapling_note<P: consensus::Parameters>(
     )
 }
 
-pub(crate) fn select_unspent_note_meta(
+pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
+        params,
         ShieldedPool::Sapling,
         wallet_birthday,
         anchor_height,
@@ -468,6 +470,11 @@ pub(crate) mod tests {
     #[test]
     fn create_to_address_respects_recipient_expiry() {
         testing::pool::create_to_address_respects_recipient_expiry::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn create_proposed_transactions_uses_nu7_default_expiry() {
+        testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<SaplingPoolTester>()
     }
 
     #[test]

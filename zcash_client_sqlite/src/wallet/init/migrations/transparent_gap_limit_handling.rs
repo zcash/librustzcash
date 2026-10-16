@@ -36,7 +36,7 @@ use {
     ReceiverRequirement::*,
     transparent::keys::TransparentKeyScope,
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
-    zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
+    zcash_primitives::transaction::builder::BLOSSOM_DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
 
@@ -354,7 +354,7 @@ impl<P: consensus::Parameters, C: Clock, R: Rng> RusqliteMigration for Migration
             )?;
             let rows = ea_query
                 .query_and_then(
-                    named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA },
+                    named_params! {":expiry_delta": BLOSSOM_DEFAULT_TX_EXPIRY_DELTA },
                     |row| {
                         let account_id = AccountRef(row.get("account_id")?);
                         let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
