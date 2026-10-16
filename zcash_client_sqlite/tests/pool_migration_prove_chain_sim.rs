@@ -684,7 +684,9 @@ impl Run {
                 MaxSpendMode::MaxSpendable,
                 confirmations,
             )
-            .expect("proposes a send-max sweep of the account's spendable notes");
+            .expect("proposes a send-max sweep of the account's spendable notes")
+            .into_parts()
+            .0;
         // The wallet's own builder, with the testing harness's mock provers: nothing here
         // verifies the sweep's proofs, and what the migration must react to is the SPENDS the
         // scanner records, which are as real as any other transaction's.

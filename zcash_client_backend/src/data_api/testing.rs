@@ -97,7 +97,7 @@ use super::{
     error::Error,
     scanning::{ScanPriority, ScanRange},
     wallet::{
-        ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
+        ConfirmationsPolicy, SendMaxProposal, SpendingKeys, create_proposed_transactions,
         input_selection::{
             GreedyInputSelector, InputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
         },
@@ -1362,7 +1362,8 @@ where
         )
     }
 
-    /// Invokes [`propose_transfer`] with the given arguments.
+    /// Invokes [`propose_send_max_transfer`] with the given arguments, drawing on the Sapling
+    /// and Orchard pools.
     #[allow(clippy::type_complexity)]
     pub fn propose_send_max_transfer<FeeRuleT>(
         &mut self,
@@ -1373,7 +1374,7 @@ where
         mode: MaxSpendMode,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
-        Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+        SendMaxProposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeSendMaxErrT<DbT, Infallible, FeeRuleT>,
     >
     where

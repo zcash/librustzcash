@@ -25,7 +25,6 @@ use zcash_primitives::transaction::{
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{BlockHeight, BranchId},
-    constants::MAX_BLOCK_BYTES,
     value::Zatoshis,
 };
 use zip321::{TransactionRequest, Zip321Error};
@@ -40,6 +39,12 @@ use crate::{
     fees::TransactionBalance,
     wallet::{Note, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
+
+mod size_bound;
+pub use size_bound::{SizeBoundViolation, TransactionSizeBound};
+
+#[cfg(test)]
+mod size_bound_tests;
 
 /// Errors that can occur in construction of a [`Step`].
 #[derive(Debug, Clone)]
@@ -172,6 +177,21 @@ pub enum ProposalError {
         /// The number of Ironwood inputs the step spends, including prior-step inputs.
         #[cfg(feature = "orchard")]
         ironwood_input_count: usize,
+    },
+    /// The transaction the step at `step_index` describes exceeds a limit of the
+    /// [`TransactionSizeBound`] it was checked against, other than its byte limit (which is
+    /// reported as [`ProposalError::TransactionTooLarge`]).
+    ///
+    /// The counts are conservative estimates; see [`Step::estimated_pool_actions`]. As for an
+    /// oversized transaction, a caller may recover by spending fewer notes, for example with
+    /// [`MaxSpendMode::WithinSizeBound`] or by consolidating notes first.
+    ///
+    /// [`MaxSpendMode::WithinSizeBound`]: crate::data_api::MaxSpendMode::WithinSizeBound
+    ExceedsSizeBound {
+        /// The index of the first step of the proposal that exceeds the bound.
+        step_index: usize,
+        /// The limit that step exceeds.
+        violation: SizeBoundViolation,
     },
 }
 
@@ -319,6 +339,13 @@ impl Display for ProposalError {
                     "; reduce the payment amount or consolidate small notes before retrying."
                 )
             }
+            ProposalError::ExceedsSizeBound {
+                step_index,
+                violation,
+            } => write!(
+                f,
+                "The transaction of proposal step {step_index} exceeds the transaction size bound: {violation}."
+            ),
         }
     }
 }
@@ -573,7 +600,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
     /// Checks whether every step's estimated serialized size fits within the maximum
     /// a Zcash block may carry, returning [`ProposalError::TransactionTooLarge`] for
-    /// the first step that does not.
+    /// the first step that does not. This is
+    /// [`check_transaction_size_within`](Self::check_transaction_size_within) with
+    /// [`TransactionSizeBound::CONSENSUS`].
     ///
     /// This is called by the public `propose_transfer` / `propose_shielding` wrappers
     /// and the `create_proposed_transactions` / `create_pczt_from_proposal` build
@@ -581,47 +610,50 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// and all build paths. It is not called during proposal deserialization, so
     /// previously-persisted proposals remain recoverable.
     pub fn check_transaction_size(&self) -> Result<(), ProposalError> {
+        self.check_transaction_size_within(&TransactionSizeBound::CONSENSUS)
+    }
+
+    /// Checks whether the transaction of every step satisfies `bound`.
+    ///
+    /// For the first step that does not, returns [`ProposalError::TransactionTooLarge`]
+    /// (carrying [`TransactionSizeBound::max_bytes`] as its `limit`) if the step's estimated
+    /// serialized size exceeds the byte limit, and otherwise
+    /// [`ProposalError::ExceedsSizeBound`] naming the first other limit it exceeds. The
+    /// estimates are conservative, as described for [`Proposal::estimated_serialized_size`] and
+    /// [`Step::estimated_pool_actions`].
+    pub fn check_transaction_size_within(
+        &self,
+        bound: &TransactionSizeBound,
+    ) -> Result<(), ProposalError> {
         let steps = self.steps();
-        for step in steps.iter() {
-            let estimated_size = step
-                .estimated_serialized_size(&|s_ref| Self::resolve_prior_output_pool(steps, s_ref));
-            if estimated_size > MAX_BLOCK_BYTES {
+        let resolve = |s_ref: &StepOutput| Self::resolve_prior_output_pool(steps, s_ref);
+        for (step_index, step) in steps.iter().enumerate() {
+            let estimated_size = step.estimated_serialized_size(&resolve);
+            if estimated_size > bound.max_bytes() {
                 // Count per-pool shielded inputs (both the step's own and prior-step)
                 // so the counts match what the estimate charged.
-                let sapling_input_count = step.input_count_in_pool(PoolType::SAPLING)
-                    + step
-                        .prior_step_inputs()
-                        .iter()
-                        .filter(|s_ref| {
-                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::SAPLING
-                        })
-                        .count();
-                #[cfg(feature = "orchard")]
-                let orchard_input_count = step.input_count_in_pool(PoolType::ORCHARD)
-                    + step
-                        .prior_step_inputs()
-                        .iter()
-                        .filter(|s_ref| {
-                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::ORCHARD
-                        })
-                        .count();
-                #[cfg(feature = "orchard")]
-                let ironwood_input_count = step.input_count_in_pool(PoolType::IRONWOOD)
-                    + step
-                        .prior_step_inputs()
-                        .iter()
-                        .filter(|s_ref| {
-                            Self::resolve_prior_output_pool(steps, s_ref) == PoolType::IRONWOOD
-                        })
-                        .count();
+                let input_count = |pool: PoolType| {
+                    step.input_count_in_pool(pool)
+                        + step
+                            .prior_step_inputs()
+                            .iter()
+                            .filter(|s_ref| resolve(s_ref) == pool)
+                            .count()
+                };
                 return Err(ProposalError::TransactionTooLarge {
                     estimated_size,
-                    limit: MAX_BLOCK_BYTES,
-                    sapling_input_count,
+                    limit: bound.max_bytes(),
+                    sapling_input_count: input_count(PoolType::SAPLING),
                     #[cfg(feature = "orchard")]
-                    orchard_input_count,
+                    orchard_input_count: input_count(PoolType::ORCHARD),
                     #[cfg(feature = "orchard")]
-                    ironwood_input_count,
+                    ironwood_input_count: input_count(PoolType::IRONWOOD),
+                });
+            }
+            if let Some(violation) = bound.count_violation(&step.shape(&resolve)) {
+                return Err(ProposalError::ExceedsSizeBound {
+                    step_index,
+                    violation,
                 });
             }
         }
@@ -631,8 +663,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Resolves the pool of a prior-step output referenced by `s_ref`, by looking up
     /// the referenced step in the proposal's step list. Shared by
     /// [`estimated_serialized_size`](Self::estimated_serialized_size) and
-    /// [`check_transaction_size`](Self::check_transaction_size) to avoid duplicating the
-    /// `StepOutput`-to-`PoolType` resolution logic.
+    /// [`check_transaction_size_within`](Self::check_transaction_size_within) to avoid
+    /// duplicating the `StepOutput`-to-`PoolType` resolution logic.
     fn resolve_prior_output_pool(steps: &NonEmpty<Step<NoteRef>>, s_ref: &StepOutput) -> PoolType {
         let prior = &steps[s_ref.step_index()];
         match s_ref.output_index() {
@@ -1304,92 +1336,28 @@ impl<NoteRef> Step<NoteRef> {
         &self,
         resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
     ) -> usize {
-        // The maximum padding the default Orchard/Ironwood bundle type applies.
-        #[cfg(feature = "orchard")]
-        const ORCHARD_PADDING_ACTIONS: usize = 2;
+        let shape = self.shape(resolve_prior_pool);
 
-        // Single-pass tally of shielded inputs by pool, counting both the step's own
-        // shielded inputs and prior-step inputs that spend shielded outputs.
-        let mut sapling_spends = 0usize;
-        let mut orchard_spends = 0usize;
-        let mut ironwood_spends = 0usize;
-
-        if let Some(shielded) = self.shielded_inputs() {
-            for note in shielded.notes().iter() {
-                match note.note().pool() {
-                    ShieldedPool::Sapling => sapling_spends += 1,
-                    ShieldedPool::Orchard => orchard_spends += 1,
-                    ShieldedPool::Ironwood => ironwood_spends += 1,
-                }
-            }
-        }
-
-        // Prior-step inputs: each references an output of a preceding step. The closure
-        // resolves the pool of the referenced output. For transparent Payment-sourced
-        // prior inputs, use the consensus maximum input size (the recipient could be
-        // P2SH with a large scriptSig); for Change-sourced transparent prior inputs,
-        // use the P2PKH standard (ephemeral change outputs are wallet-internal P2PKH).
-        let mut prior_transparent_input_bytes = 0usize;
-        for s_ref in self.prior_step_inputs() {
-            let pool = resolve_prior_pool(s_ref);
-            match pool {
-                PoolType::Transparent => {
-                    let size = match s_ref.output_index() {
-                        StepOutputIndex::Payment(_) => MAX_TRANSPARENT_INPUT_SIZE,
-                        StepOutputIndex::Change(_) => P2PKH_STANDARD_INPUT_SIZE,
-                    };
-                    prior_transparent_input_bytes += size;
-                }
-                PoolType::SAPLING => sapling_spends += 1,
-                PoolType::ORCHARD => orchard_spends += 1,
-                PoolType::IRONWOOD => ironwood_spends += 1,
-            }
-        }
-
-        // Transparent inputs: use each input's actual serialized size where known, so
-        // that P2SH inputs are not under-counted. For inputs whose script size is
-        // unknown, use the consensus-maximum input size.
-        let transparent_input_bytes = self
-            .transparent_inputs()
-            .iter()
-            .map(
-                |input| match transparent_fees::InputView::serialized_size(input) {
-                    transparent_fees::InputSize::Known(size) => size,
-                    transparent_fees::InputSize::Unknown(_) => MAX_TRANSPARENT_INPUT_SIZE,
-                },
-            )
-            .sum::<usize>();
-
-        // Transparent outputs.
         let transparent_payment_outputs =
-            self.output_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
+            shape.transparent_payment_outputs * P2PKH_STANDARD_OUTPUT_SIZE;
         let transparent_change_outputs =
-            self.change_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
-        let transparent_present = !self.transparent_inputs().is_empty()
-            || prior_transparent_input_bytes > 0
+            shape.transparent_change_outputs * P2PKH_STANDARD_OUTPUT_SIZE;
+        let transparent_present = shape.transparent_input_count > 0
             || transparent_payment_outputs > 0
             || transparent_change_outputs > 0;
-
-        // Dummy outputs recorded by the change strategy. These pad the shielded bundles
-        // beyond the default `spends + outputs + 2` floor; the estimate must charge for
-        // them so a nonzero dummy count is never under-counted.
-        let dummy = self.balance().dummy_outputs();
 
         // Sapling spends and outputs. The default bundle type pads to at least two
         // outputs when there are any spends or outputs; adding 2 to each count covers
         // the padding floor. If the change strategy recorded dummy Sapling outputs,
         // charge for those too.
-        let sapling_outputs = self.output_count_in_pool(PoolType::SAPLING)
-            + self.change_count_in_pool(PoolType::SAPLING);
-        let sapling_dummy = dummy.map_or(0, |d| d.sapling());
-        let sapling_bundle_present = sapling_spends > 0 || sapling_outputs > 0 || sapling_dummy > 0;
+        let sapling_bundle_present = shape.sapling_bundle_present();
         let sapling_spend_bytes = if sapling_bundle_present {
-            (sapling_spends + 2) * SPEND_DESCRIPTION_SIZE
+            shape.padded_sapling_spends() * SPEND_DESCRIPTION_SIZE
         } else {
             0
         };
         let sapling_output_bytes = if sapling_bundle_present {
-            (sapling_outputs + 2 + sapling_dummy) * OUTPUT_DESCRIPTION_SIZE
+            shape.padded_sapling_outputs() * OUTPUT_DESCRIPTION_SIZE
         } else {
             0
         };
@@ -1399,33 +1367,26 @@ impl<NoteRef> Step<NoteRef> {
         // `Proof::expected_proof_size(num_actions)` (a fixed base plus a per-action
         // share), computed via the orchard crate's own `pub const fn`.
         #[cfg(feature = "orchard")]
-        let orchard_bundle_bytes = orchard_style_bundle_bytes(
-            orchard_spends,
-            self.output_count_in_pool(PoolType::ORCHARD)
-                + self.change_count_in_pool(PoolType::ORCHARD),
-            dummy.map_or(0, |d| d.orchard()),
-            ORCHARD_PADDING_ACTIONS,
-        );
+        let orchard_bundle_bytes = orchard_style_bundle_bytes(padded_orchard_style_actions(
+            shape.orchard_spends,
+            shape.orchard_outputs,
+            shape.orchard_dummy,
+        ));
         #[cfg(not(feature = "orchard"))]
         let orchard_bundle_bytes: usize = 0;
-        #[cfg(not(feature = "orchard"))]
-        let _ = (orchard_spends, ironwood_spends);
 
         #[cfg(feature = "orchard")]
-        let ironwood_bundle_bytes = orchard_style_bundle_bytes(
-            ironwood_spends,
-            self.output_count_in_pool(PoolType::IRONWOOD)
-                + self.change_count_in_pool(PoolType::IRONWOOD),
-            dummy.map_or(0, |d| d.ironwood()),
-            ORCHARD_PADDING_ACTIONS,
-        );
+        let ironwood_bundle_bytes = orchard_style_bundle_bytes(padded_orchard_style_actions(
+            shape.ironwood_spends,
+            shape.ironwood_outputs,
+            shape.ironwood_dummy,
+        ));
         #[cfg(not(feature = "orchard"))]
         let ironwood_bundle_bytes: usize = 0;
 
         TX_HEADER_SIZE
             + (transparent_present as usize) * TRANSPARENT_BUNDLE_OVERHEAD
-            + transparent_input_bytes
-            + prior_transparent_input_bytes
+            + shape.transparent_input_bytes
             + transparent_payment_outputs
             + transparent_change_outputs
             + (sapling_bundle_present as usize) * SAPLING_BUNDLE_OVERHEAD
@@ -1434,23 +1395,214 @@ impl<NoteRef> Step<NoteRef> {
             + orchard_bundle_bytes
             + ironwood_bundle_bytes
     }
+
+    /// Returns a conservative upper bound on the number of shielded actions the transaction
+    /// this step describes carries in the given pool, counted after padding and dummy outputs.
+    ///
+    /// For Sapling this is the number of spend descriptions plus the number of output
+    /// descriptions; for Orchard and Ironwood it is the number of actions. A pool in which the
+    /// step neither spends, pays, nor returns change has no bundle, and so zero actions.
+    ///
+    /// The count is derived from the same tally of the step's inputs (its own and prior-step
+    /// inputs), outputs, change, and dummy outputs that
+    /// [`Proposal::estimated_serialized_size`] charges for, with the same padding allowance,
+    /// so it never under-counts what the transaction builder will produce. Summed over the
+    /// shielded pools, it is the quantity that [`TransactionSizeBound::with_max_shielded_actions`]
+    /// bounds.
+    ///
+    /// `resolve_prior_output_pool` resolves the pool of each prior-step output this step
+    /// spends; [`Proposal::check_transaction_size_within`] passes a resolver over the
+    /// proposal's own steps.
+    pub fn estimated_pool_actions(
+        &self,
+        pool: ShieldedPool,
+        resolve_prior_output_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> usize {
+        self.shape(resolve_prior_output_pool).pool_actions(pool)
+    }
+
+    /// Tallies the elements of the transaction this step describes, counting both the step's
+    /// own inputs and the prior-step outputs it spends.
+    fn shape(&self, resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType) -> StepShape {
+        let mut shape = StepShape::default();
+
+        if let Some(shielded) = self.shielded_inputs() {
+            for note in shielded.notes().iter() {
+                match note.note().pool() {
+                    ShieldedPool::Sapling => shape.sapling_spends += 1,
+                    ShieldedPool::Orchard => shape.orchard_spends += 1,
+                    ShieldedPool::Ironwood => shape.ironwood_spends += 1,
+                }
+            }
+        }
+
+        // Prior-step inputs: each references an output of a preceding step. The closure
+        // resolves the pool of the referenced output. For transparent Payment-sourced
+        // prior inputs, use the consensus maximum input size (the recipient could be
+        // P2SH with a large scriptSig); for Change-sourced transparent prior inputs,
+        // use the P2PKH standard (ephemeral change outputs are wallet-internal P2PKH).
+        for s_ref in self.prior_step_inputs() {
+            match resolve_prior_pool(s_ref) {
+                PoolType::Transparent => {
+                    shape.transparent_input_count += 1;
+                    shape.transparent_input_bytes += match s_ref.output_index() {
+                        StepOutputIndex::Payment(_) => MAX_TRANSPARENT_INPUT_SIZE,
+                        StepOutputIndex::Change(_) => P2PKH_STANDARD_INPUT_SIZE,
+                    };
+                }
+                PoolType::SAPLING => shape.sapling_spends += 1,
+                PoolType::ORCHARD => shape.orchard_spends += 1,
+                PoolType::IRONWOOD => shape.ironwood_spends += 1,
+            }
+        }
+
+        // Transparent inputs: use each input's actual serialized size where known, so
+        // that P2SH inputs are not under-counted. For inputs whose script size is
+        // unknown, use the consensus-maximum input size.
+        for input in self.transparent_inputs() {
+            shape.transparent_input_count += 1;
+            shape.transparent_input_bytes +=
+                match transparent_fees::InputView::serialized_size(input) {
+                    transparent_fees::InputSize::Known(size) => size,
+                    transparent_fees::InputSize::Unknown(_) => MAX_TRANSPARENT_INPUT_SIZE,
+                };
+        }
+
+        shape.transparent_payment_outputs = self.output_count_in_pool(PoolType::Transparent);
+        shape.transparent_change_outputs = self.change_count_in_pool(PoolType::Transparent);
+
+        // Dummy outputs recorded by the change strategy pad the shielded bundles beyond the
+        // default floor; they are tallied so that a nonzero dummy count is never
+        // under-counted.
+        let dummy = self.balance().dummy_outputs();
+        shape.sapling_outputs = self.output_count_in_pool(PoolType::SAPLING)
+            + self.change_count_in_pool(PoolType::SAPLING);
+        shape.sapling_dummy = dummy.map_or(0, |d| d.sapling());
+        shape.orchard_outputs = self.output_count_in_pool(PoolType::ORCHARD)
+            + self.change_count_in_pool(PoolType::ORCHARD);
+        shape.ironwood_outputs = self.output_count_in_pool(PoolType::IRONWOOD)
+            + self.change_count_in_pool(PoolType::IRONWOOD);
+        #[cfg(feature = "orchard")]
+        {
+            shape.orchard_dummy = dummy.map_or(0, |d| d.orchard());
+            shape.ironwood_dummy = dummy.map_or(0, |d| d.ironwood());
+        }
+
+        shape.shielded_payment_outputs = self.output_count_in_pool(PoolType::SAPLING)
+            + self.output_count_in_pool(PoolType::ORCHARD)
+            + self.output_count_in_pool(PoolType::IRONWOOD);
+
+        shape
+    }
+}
+
+/// The maximum padding, in actions, that the default Orchard-family bundle type applies.
+const ORCHARD_PADDING_ACTIONS: usize = 2;
+
+/// The minimum number of Sapling spends, and separately of Sapling outputs, that the size and
+/// action estimates allow for padding whenever a Sapling bundle is present.
+const SAPLING_PADDING_DESCRIPTIONS: usize = 2;
+
+/// A tally of the elements of the transaction a [`Step`] describes, from which both its
+/// serialized size estimate and its per-pool shielded action counts are derived.
+#[derive(Debug, Default)]
+pub(crate) struct StepShape {
+    sapling_spends: usize,
+    orchard_spends: usize,
+    ironwood_spends: usize,
+    /// The number of transparent inputs, including prior-step transparent inputs.
+    transparent_input_count: usize,
+    /// The serialized size of those transparent inputs.
+    transparent_input_bytes: usize,
+    transparent_payment_outputs: usize,
+    transparent_change_outputs: usize,
+    /// Sapling payment and change outputs, excluding dummies.
+    sapling_outputs: usize,
+    sapling_dummy: usize,
+    /// Orchard payment and change outputs, excluding dummies.
+    orchard_outputs: usize,
+    orchard_dummy: usize,
+    /// Ironwood payment and change outputs, excluding dummies.
+    ironwood_outputs: usize,
+    ironwood_dummy: usize,
+    /// Shielded outputs paying a requested payment, as opposed to wallet-internal change.
+    shielded_payment_outputs: usize,
+}
+
+impl StepShape {
+    fn sapling_bundle_present(&self) -> bool {
+        self.sapling_spends > 0 || self.sapling_outputs > 0 || self.sapling_dummy > 0
+    }
+
+    /// The number of Sapling spend descriptions charged for when a Sapling bundle is present.
+    fn padded_sapling_spends(&self) -> usize {
+        self.sapling_spends + SAPLING_PADDING_DESCRIPTIONS
+    }
+
+    /// The number of Sapling output descriptions charged for when a Sapling bundle is present.
+    fn padded_sapling_outputs(&self) -> usize {
+        self.sapling_outputs + SAPLING_PADDING_DESCRIPTIONS + self.sapling_dummy
+    }
+
+    /// The conservative number of shielded actions in the given pool; see
+    /// [`Step::estimated_pool_actions`].
+    pub(crate) fn pool_actions(&self, pool: ShieldedPool) -> usize {
+        match pool {
+            ShieldedPool::Sapling => {
+                if self.sapling_bundle_present() {
+                    self.padded_sapling_spends() + self.padded_sapling_outputs()
+                } else {
+                    0
+                }
+            }
+            ShieldedPool::Orchard => present_orchard_style_actions(
+                self.orchard_spends,
+                self.orchard_outputs,
+                self.orchard_dummy,
+            ),
+            ShieldedPool::Ironwood => present_orchard_style_actions(
+                self.ironwood_spends,
+                self.ironwood_outputs,
+                self.ironwood_dummy,
+            ),
+        }
+    }
+
+    pub(crate) fn transparent_input_count(&self) -> usize {
+        self.transparent_input_count
+    }
+
+    pub(crate) fn transparent_output_count(&self) -> usize {
+        self.transparent_payment_outputs + self.transparent_change_outputs
+    }
+
+    pub(crate) fn shielded_payment_outputs(&self) -> usize {
+        self.shielded_payment_outputs
+    }
+}
+
+/// The number of actions charged for an Orchard-family bundle (Orchard or Ironwood) with the
+/// given numbers of spends, real outputs, and dummy outputs:
+/// `max(spends + outputs + padding, outputs + dummy)`, so that a nonzero dummy count is never
+/// under-counted.
+fn padded_orchard_style_actions(spends: usize, outputs: usize, dummy_outputs: usize) -> usize {
+    (spends + outputs + ORCHARD_PADDING_ACTIONS).max(outputs + dummy_outputs)
+}
+
+/// As [`padded_orchard_style_actions`], but zero when the step has no bundle in the pool, as
+/// the transaction builder omits an empty bundle.
+fn present_orchard_style_actions(spends: usize, outputs: usize, dummy_outputs: usize) -> usize {
+    if spends == 0 && outputs == 0 && dummy_outputs == 0 {
+        0
+    } else {
+        padded_orchard_style_actions(spends, outputs, dummy_outputs)
+    }
 }
 
 /// Computes the estimated byte size of an Orchard-family bundle (Orchard or Ironwood)
-/// for the given pool, given the number of shielded spends, real outputs, and dummy
-/// outputs the step directs to that pool. The action count is
-/// `max(spends + outputs + padding, outputs + dummy)`, so a nonzero dummy count is
-/// never under-counted.
+/// carrying `num_actions` actions.
 #[cfg(feature = "orchard")]
-fn orchard_style_bundle_bytes(
-    spends: usize,
-    outputs: usize,
-    dummy_outputs: usize,
-    padding_actions: usize,
-) -> usize {
-    let default_count = spends + outputs + padding_actions;
-    let dummy_count = outputs + dummy_outputs;
-    let num_actions = default_count.max(dummy_count);
+fn orchard_style_bundle_bytes(num_actions: usize) -> usize {
     if num_actions > 0 {
         ORCHARD_BUNDLE_OVERHEAD
             + Proof::expected_proof_size(num_actions)

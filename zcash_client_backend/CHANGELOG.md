@@ -15,6 +15,23 @@ workspace.
   (the latter under the `transparent-inputs` feature)
 - `zcash_client_backend::data_api::AccountMeta::change_receivers`
 - `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+- `zcash_client_backend::data_api::MaxSpendMode::WithinSizeBound`
+- `zcash_client_backend::data_api::wallet::{SendMaxProposal, SendMaxRemainder}`
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer_within`
+- `zcash_client_backend::proposal`:
+  - `TransactionSizeBound`
+  - `SizeBoundViolation`
+  - `ProposalError::ExceedsSizeBound`
+  - `Proposal::check_transaction_size_within`
+  - `Step::estimated_pool_actions`
+
+  These let a wallet bound a proposal below consensus, for example to a relay
+  policy, to the memory available for proving, or to the per-transaction limits
+  of an external signer. `TransactionSizeBound` limits each transaction's
+  estimated serialized size and, optionally, its number of shielded actions
+  (in total and per pool), transparent inputs and outputs, and shielded payment
+  outputs. The library default is unchanged: `TransactionSizeBound::CONSENSUS`,
+  which limits only the serialized size, to `MAX_BLOCK_BYTES`.
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
@@ -45,6 +62,25 @@ workspace.
   `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
   P2PKH address derived from the account's transparent key. An account whose
   transparent change is a P2SH output cannot pay a TEX address.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns a `SendMaxProposal` instead of a `Proposal`. Obtain the proposal with
+  `SendMaxProposal::proposal` or `SendMaxProposal::into_parts`. Under
+  `MaxSpendMode::MaxSpendable` and `MaxSpendMode::Everything` the remainder is
+  always zero.
+- `zcash_client_backend::data_api::MaxSpendMode` has a new variant,
+  `WithinSizeBound`. Implementations of `InputSource::select_spendable_notes`
+  that match on `MaxSpendMode` must handle it; it selects the same notes as
+  `MaxSpendable`.
+- `zcash_client_backend::data_api::testing::TestState::propose_send_max_transfer`
+  now returns a `SendMaxProposal`.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `Error::Proposal(ProposalError::TransactionTooLarge)` when a
+  transaction of the proposal would exceed the block size limit, as
+  `propose_transfer` and `propose_shielding` do. Previously the oversized
+  proposal was returned, and its inputs locked if requested, and it failed only
+  in `create_proposed_transactions`.
 
 ## [0.25.0-pre.2] - 2026-10-13
 
