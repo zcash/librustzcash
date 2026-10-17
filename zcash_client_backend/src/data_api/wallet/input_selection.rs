@@ -2628,3 +2628,134 @@ mod spend_policy_tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "orchard"))]
+mod greedy_selection_tests {
+    use ::sapling::zip32::ExtendedSpendingKey;
+    use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
+    use zcash_protocol::consensus::{Network, NetworkUpgrade, Parameters};
+    use zip321::Payment;
+
+    use super::*;
+    use crate::{
+        data_api::{anchor_retention::AnchorRetentionInterval, testing::FixedNotes},
+        fees::{DustOutputPolicy, zip317::SingleOutputChangeStrategy},
+    };
+
+    /// The account the fixture serves.
+    const ACCOUNT: u32 = 0;
+    /// More selections than any of these tests makes before the selector stops; a run that
+    /// reaches it is looping over the same selection.
+    const SELECTION_LIMIT: usize = 4;
+
+    /// A payment that a Sapling note of `SAPLING_NOTE_VALUE` covers alone, with change under
+    /// the ZIP 317 dust threshold.
+    const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(47_000);
+    /// The value of a Sapling note that covers `PAYMENT_VALUE` alone.
+    const SAPLING_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(60_000);
+    const SAPLING_NOTE_ID: u32 = 0;
+
+    /// How a proposal failed.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Failure {
+        InsufficientFunds {
+            available: Zatoshis,
+            required: Zatoshis,
+        },
+        Selection(GreedyInputSelectorError),
+    }
+
+    fn standard_strategy() -> SingleOutputChangeStrategy<Zip317FeeRule, FixedNotes> {
+        SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+    }
+
+    /// Proposes a payment of `payment` to a Sapling address from `wallet` with
+    /// `change_strategy`, returning the ids of the notes spent, or how the proposal failed.
+    fn propose_payment<S>(
+        wallet: &FixedNotes,
+        payment: Zatoshis,
+        change_strategy: &S,
+    ) -> Result<Vec<u32>, Failure>
+    where
+        S: ChangeStrategy<MetaSource = FixedNotes>,
+        S::Error: Debug,
+    {
+        let params = Network::TestNetwork;
+        let anchor_height = params
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("NU5 is active on testnet");
+        let (_, recipient) = ExtendedSpendingKey::master(&[])
+            .expect("the master key of the empty seed is valid")
+            .default_address();
+        let recipient = Address::from(recipient).to_zcash_address(&params);
+        let request = TransactionRequest::new(vec![Payment::without_memo(recipient, payment)])
+            .expect("a single payment is a valid request");
+
+        GreedyInputSelector::new()
+            .propose_transaction(
+                &params,
+                wallet,
+                TargetHeight::from(anchor_height + 1),
+                anchor_height,
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                ConfirmationsPolicy::default(),
+                ACCOUNT,
+                request,
+                change_strategy,
+                &SpendPolicy::default(),
+                None,
+            )
+            .map(|proposal| {
+                proposal
+                    .steps()
+                    .iter()
+                    .flat_map(|step| step.shielded_inputs())
+                    .flat_map(|inputs| inputs.notes().iter().map(|n| *n.internal_note_id()))
+                    .collect()
+            })
+            .map_err(|e| match e {
+                InputSelectorError::InsufficientFunds {
+                    available,
+                    required,
+                } => Failure::InsufficientFunds {
+                    available,
+                    required,
+                },
+                InputSelectorError::Selection(e) => Failure::Selection(e),
+                other => panic!("unexpected input selection error: {other:?}"),
+            })
+    }
+
+    /// The scenario in which the change from the preferred pool's note alone would be dust, so
+    /// a standard change strategy draws on a note in another pool as well.
+    mod across_pools {
+        use super::*;
+
+        /// The value of the Orchard note, which does not cover the payment alone.
+        const ORCHARD_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(20_000);
+        const ORCHARD_NOTE_ID: u32 = 1;
+
+        /// The Orchard note is listed first, so a selection that reaches the Sapling note
+        /// holds both, as a source that orders notes by value returns them.
+        fn two_pool_notes() -> FixedNotes {
+            FixedNotes::new(&[
+                (ShieldedPool::Orchard, ORCHARD_NOTE_ID, ORCHARD_NOTE_VALUE),
+                (ShieldedPool::Sapling, SAPLING_NOTE_ID, SAPLING_NOTE_VALUE),
+            ])
+            .with_selection_limit(SELECTION_LIMIT)
+        }
+
+        #[test]
+        fn a_standard_strategy_spends_both_notes_at_a_dust_shortfall() {
+            assert_eq!(
+                propose_payment(&two_pool_notes(), PAYMENT_VALUE, &standard_strategy()),
+                Ok(vec![SAPLING_NOTE_ID, ORCHARD_NOTE_ID])
+            );
+        }
+    }
+}
