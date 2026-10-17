@@ -2758,4 +2758,77 @@ mod greedy_selection_tests {
             );
         }
     }
+
+    /// The scenario in which the change strategy names a selected Sapling note as dust.
+    mod dust_exclusion {
+        use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+        use zcash_protocol::value::COIN;
+
+        use super::*;
+
+        /// A note of exactly the marginal fee, which the ZIP 317 change strategy reports as
+        /// uneconomic once the transaction has more spends than outputs, counting the change
+        /// output.
+        const DUST_NOTE_VALUE: Zatoshis = MARGINAL_FEE;
+        /// The value of each of the two notes that fund the payment. One of them, even with
+        /// the dust note, falls short of a payment of this value plus its fee; both together
+        /// cover it.
+        const FUNDING_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(COIN);
+        const DUST_NOTE_ID: u32 = 0;
+        const FIRST_FUNDING_NOTE_ID: u32 = 1;
+        const SECOND_FUNDING_NOTE_ID: u32 = 2;
+
+        /// The ZIP 317 fee of a transaction with two logical actions.
+        fn two_action_fee() -> Zatoshis {
+            (MARGINAL_FEE + MARGINAL_FEE).expect("no overflow")
+        }
+
+        /// A dust note followed by the two funding notes, in selection order.
+        fn dust_then_funding_notes() -> FixedNotes {
+            FixedNotes::new(&[
+                (ShieldedPool::Sapling, DUST_NOTE_ID, DUST_NOTE_VALUE),
+                (
+                    ShieldedPool::Sapling,
+                    FIRST_FUNDING_NOTE_ID,
+                    FUNDING_NOTE_VALUE,
+                ),
+                (
+                    ShieldedPool::Sapling,
+                    SECOND_FUNDING_NOTE_ID,
+                    FUNDING_NOTE_VALUE,
+                ),
+            ])
+            .with_selection_limit(SELECTION_LIMIT)
+        }
+
+        #[test]
+        fn excluding_a_dust_note_retries_the_remaining_selection() {
+            assert_eq!(
+                propose_payment(
+                    &dust_then_funding_notes(),
+                    FUNDING_NOTE_VALUE,
+                    &standard_strategy()
+                ),
+                Ok(vec![FIRST_FUNDING_NOTE_ID, SECOND_FUNDING_NOTE_ID])
+            );
+        }
+
+        #[test]
+        fn excluding_a_dust_note_still_reports_a_real_shortfall() {
+            let funding_value = (FUNDING_NOTE_VALUE + FUNDING_NOTE_VALUE).expect("no overflow");
+            // Two spends and one output cost the ZIP 317 minimum of two logical actions, so
+            // the funding notes fall one marginal fee short of the payment and its fee.
+            // Spending the dust note as well adds one marginal fee of value and one of fee,
+            // so nothing covers the payment.
+            let payment = (funding_value - MARGINAL_FEE).expect("no underflow");
+
+            assert_eq!(
+                propose_payment(&dust_then_funding_notes(), payment, &standard_strategy()),
+                Err(Failure::InsufficientFunds {
+                    available: funding_value,
+                    required: (payment + two_action_fee()).expect("no overflow"),
+                })
+            );
+        }
+    }
 }
