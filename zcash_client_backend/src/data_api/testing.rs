@@ -1,6 +1,7 @@
 //! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 use std::{
+    cell::Cell,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     fmt,
@@ -14,7 +15,7 @@ use std::{
 use super::wallet::{create_pczt_from_proposal, extract_and_store_transaction_from_pczt};
 use assert_matches::assert_matches;
 use group::ff::Field;
-use incrementalmerkletree::{Marking, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use rand::{CryptoRng, Rng, RngExt, SeedableRng};
 use rand_chacha::ChaChaRng;
@@ -44,10 +45,12 @@ use {
 };
 
 use ::sapling::{
+    Rseed,
     note_encryption::{SaplingDomain, sapling_note_encryption},
     prover::mock::{MockOutputProver, MockSpendProver},
     util::generate_random_rseed,
-    zip32::DiversifiableFullViewingKey,
+    value::NoteValue as SaplingNoteValue,
+    zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
 };
 use zcash_address::ZcashAddress;
 use zcash_keys::{
@@ -70,20 +73,23 @@ use zcash_protocol::{
 };
 #[cfg(feature = "transparent-key-import")]
 use zcash_script::script;
-use zip32::DiversifierIndex;
+use zip32::{DiversifierIndex, Scope};
 use zip321::Payment;
 #[cfg(feature = "orchard")]
 use {
     super::ORCHARD_SHARD_HEIGHT,
     crate::proto::compact_formats::CompactOrchardAction,
     ::orchard::{
+        keys::{FullViewingKey as OrchardFullViewingKey, SpendingKey as OrchardSpendingKey},
         note::{ExtractedNoteCommitment, Note as OrchardNote, NoteVersion, RandomSeed, Rho},
         note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
         tree::MerkleHashOrchard,
+        value::NoteValue as OrchardNoteValue,
     },
     group::ff::PrimeField,
     pasta_curves::pallas,
     zcash_note_encryption::ShieldedOutput,
+    zcash_protocol::consensus::NetworkConstants,
 };
 
 use super::{
@@ -3890,5 +3896,361 @@ impl WalletCommitmentTrees for MockWalletDb {
                     }),
             )
         })
+    }
+}
+
+/// How [`FixedNotes`] treats a filter argument (`sources` or `exclude`) of the selection
+/// methods of [`InputSource`].
+#[derive(Clone, Copy)]
+enum FilterHandling {
+    /// The filter is applied, as [`InputSource`] requires.
+    Honored,
+    /// The filter is ignored, breaking the contract of [`InputSource`], for tests of what input
+    /// selection does against such a source.
+    Ignored,
+}
+
+/// Errors of [`FixedNotes`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FixedNotesError {
+    /// More selections were made than [`FixedNotes::with_selection_limit`] allows.
+    SelectionLimitReached,
+    /// The fixture does not implement the operation.
+    Unsupported,
+}
+
+impl fmt::Display for FixedNotesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SelectionLimitReached => {
+                write!(f, "the fixture's selection limit was reached")
+            }
+            Self::Unsupported => write!(f, "the fixture does not implement the operation"),
+        }
+    }
+}
+
+impl std::error::Error for FixedNotesError {}
+
+/// A Sapling note of `value` to the default address of the master key of the empty seed.
+fn fixed_sapling_note(value: Zatoshis) -> ::sapling::Note {
+    let (_, recipient) = ExtendedSpendingKey::master(&[])
+        .expect("the master key of the empty seed is valid")
+        .default_address();
+    ::sapling::Note::from_parts(
+        recipient,
+        SaplingNoteValue::from_raw(value.into_u64()),
+        Rseed::AfterZip212([0; 32]),
+    )
+}
+
+/// An Orchard-protocol note of `value` and `version` to the default address of the account
+/// derived from the all-zero seed.
+#[cfg(feature = "orchard")]
+fn fixed_orchard_note(value: Zatoshis, version: NoteVersion) -> OrchardNote {
+    let sk = OrchardSpendingKey::from_zip32_seed(
+        &[0; 32],
+        NetworkConstants::coin_type(&Network::TestNetwork),
+        zip32::AccountId::ZERO,
+    )
+    .expect("the all-zero seed derives a valid Orchard spending key");
+    let recipient = OrchardFullViewingKey::from(&sk).address_at(0u32, Scope::External);
+    let rho = Option::from(Rho::from_bytes(&[0; 32])).expect("zero is a canonical rho");
+    let mut rng = ChaChaRng::from_seed([0; 32]);
+    let rseed = loop {
+        if let Some(rseed) = Option::from(RandomSeed::from_bytes(rng.random(), &rho)) {
+            break rseed;
+        }
+    };
+    Option::from(OrchardNote::from_parts(
+        recipient,
+        OrchardNoteValue::from_raw(value.into_u64()),
+        rho,
+        rseed,
+        version,
+    ))
+    .expect("the parts form a valid Orchard note")
+}
+
+/// A note held by [`FixedNotes`].
+enum FixedNote {
+    Sapling(ReceivedNote<u32, ::sapling::Note>),
+    #[cfg(feature = "orchard")]
+    Orchard(ReceivedNote<u32, OrchardNote>),
+    #[cfg(feature = "orchard")]
+    Ironwood(ReceivedNote<u32, OrchardNote>),
+}
+
+impl FixedNote {
+    /// Builds a note of `value` in `pool`, received at `output_index` of the all-zero txid.
+    fn new(pool: ShieldedPool, id: u32, value: Zatoshis, output_index: u16) -> Self {
+        fn received<NoteT>(id: u32, output_index: u16, note: NoteT) -> ReceivedNote<u32, NoteT> {
+            ReceivedNote::from_parts(
+                id,
+                TxId::from_bytes([0; 32]),
+                output_index,
+                note,
+                Scope::External,
+                Position::from(u64::from(output_index)),
+                None,
+                None,
+            )
+        }
+        match pool {
+            ShieldedPool::Sapling => {
+                Self::Sapling(received(id, output_index, fixed_sapling_note(value)))
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => Self::Orchard(received(
+                id,
+                output_index,
+                fixed_orchard_note(value, NoteVersion::V2),
+            )),
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => Self::Ironwood(received(
+                id,
+                output_index,
+                fixed_orchard_note(value, NoteVersion::V3),
+            )),
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => {
+                panic!("Orchard and Ironwood notes need the `orchard` feature")
+            }
+        }
+    }
+
+    fn pool(&self) -> ShieldedPool {
+        match self {
+            Self::Sapling(_) => ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            Self::Orchard(_) => ShieldedPool::Orchard,
+            #[cfg(feature = "orchard")]
+            Self::Ironwood(_) => ShieldedPool::Ironwood,
+        }
+    }
+
+    fn id(&self) -> u32 {
+        match self {
+            Self::Sapling(note) => *note.internal_note_id(),
+            #[cfg(feature = "orchard")]
+            Self::Orchard(note) | Self::Ironwood(note) => *note.internal_note_id(),
+        }
+    }
+
+    fn value(&self) -> Zatoshis {
+        match self {
+            Self::Sapling(note) => note.note_value(),
+            #[cfg(feature = "orchard")]
+            Self::Orchard(note) | Self::Ironwood(note) => note.note_value(),
+        }
+        .expect("the note was built from a valid value")
+    }
+}
+
+/// An [`InputSource`] holding a fixed list of shielded notes, for tests that drive input
+/// selection without a wallet database.
+///
+/// Selection takes the notes in the order given, within the pools asked for, until the target
+/// value is reached. Unlike `zcash_client_sqlite`, it does not withhold notes at or below the
+/// marginal fee. Every note is spendable by any account, and every account can receive change
+/// in every shielded pool and has no transparent receiver. The selection methods,
+/// [`InputSource::select_unspent_notes`] and [`InputSource::get_change_receivers`] are
+/// implemented; every other operation returns [`FixedNotesError::Unsupported`].
+pub struct FixedNotes {
+    notes: Vec<FixedNote>,
+    sources_handling: FilterHandling,
+    exclude_handling: FilterHandling,
+    selection_limit: Option<usize>,
+    selections: Cell<usize>,
+}
+
+impl FixedNotes {
+    /// Holds one note per entry, given as its pool, identifier and value in selection order.
+    /// Each note is received at its own output index of a single transaction.
+    ///
+    /// # Panics
+    ///
+    /// When the notes' total value exceeds the monetary range, when there are more notes than
+    /// a `u16` output index can number, and without the `orchard` feature on an Orchard or
+    /// Ironwood entry.
+    pub fn new(notes: &[(ShieldedPool, u32, Zatoshis)]) -> Self {
+        let notes: Vec<FixedNote> = notes
+            .iter()
+            .zip(0u16..)
+            .map(|((pool, id, value), output_index)| {
+                FixedNote::new(*pool, *id, *value, output_index)
+            })
+            .collect();
+        notes
+            .iter()
+            .map(FixedNote::value)
+            .sum::<Option<Zatoshis>>()
+            .expect("the notes' total value fits the monetary range");
+        Self {
+            notes,
+            sources_handling: FilterHandling::Honored,
+            exclude_handling: FilterHandling::Honored,
+            selection_limit: None,
+            selections: Cell::new(0),
+        }
+    }
+
+    /// Returns the source with the `sources` argument of the selection methods ignored, so
+    /// that it returns notes from pools it was not asked for, breaking the contract of
+    /// [`InputSource`].
+    pub fn ignoring_sources(self) -> Self {
+        Self {
+            sources_handling: FilterHandling::Ignored,
+            ..self
+        }
+    }
+
+    /// Returns the source with the `exclude` argument of the selection methods ignored, so
+    /// that it returns excluded notes, breaking the contract of [`InputSource`].
+    pub fn ignoring_exclude(self) -> Self {
+        Self {
+            exclude_handling: FilterHandling::Ignored,
+            ..self
+        }
+    }
+
+    /// Returns the source failing with [`FixedNotesError::SelectionLimitReached`] past `limit`
+    /// calls to [`InputSource::select_spendable_notes`], so that a test of input selection's
+    /// termination fails instead of hanging.
+    pub fn with_selection_limit(self, limit: usize) -> Self {
+        Self {
+            selection_limit: Some(limit),
+            ..self
+        }
+    }
+
+    /// Returns the notes in `sources` not excluded, in order, until their value reaches
+    /// `target`, or all of them when `target` is `None`.
+    fn select(
+        &self,
+        sources: &[ShieldedPool],
+        exclude: &[u32],
+        target: Option<Zatoshis>,
+    ) -> ReceivedNotes<u32> {
+        let in_sources = |pool: ShieldedPool| match self.sources_handling {
+            FilterHandling::Honored => sources.contains(&pool),
+            FilterHandling::Ignored => true,
+        };
+        let excluded = |id: u32| match self.exclude_handling {
+            FilterHandling::Honored => exclude.contains(&id),
+            FilterHandling::Ignored => false,
+        };
+        let mut selected_value = Zatoshis::ZERO;
+        let mut sapling = vec![];
+        #[cfg(feature = "orchard")]
+        let mut orchard = vec![];
+        #[cfg(feature = "orchard")]
+        let mut ironwood = vec![];
+        for note in &self.notes {
+            if target.is_some_and(|target| selected_value >= target) {
+                break;
+            }
+            if !in_sources(note.pool()) || excluded(note.id()) {
+                continue;
+            }
+            selected_value = (selected_value + note.value())
+                .expect("a partial sum of a total in the monetary range is in it too");
+            match note {
+                FixedNote::Sapling(note) => sapling.push(note.clone()),
+                #[cfg(feature = "orchard")]
+                FixedNote::Orchard(note) => orchard.push(note.clone()),
+                #[cfg(feature = "orchard")]
+                FixedNote::Ironwood(note) => ironwood.push(note.clone()),
+            }
+        }
+        ReceivedNotes::new(
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+        )
+    }
+}
+
+impl InputSource for FixedNotes {
+    type Error = FixedNotesError;
+    type AccountId = u32;
+    type NoteRef = u32;
+
+    fn get_spendable_note(
+        &self,
+        _txid: &TxId,
+        _protocol: ShieldedPool,
+        _index: u32,
+        _target_height: TargetHeight,
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+        Err(FixedNotesError::Unsupported)
+    }
+
+    fn anchor_computable(
+        &self,
+        _protocol: ShieldedPool,
+        _height: BlockHeight,
+    ) -> Result<bool, Self::Error> {
+        Err(FixedNotesError::Unsupported)
+    }
+
+    fn select_spendable_notes(
+        &self,
+        _account: Self::AccountId,
+        target_value: TargetValue,
+        sources: &[ShieldedPool],
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        let selections = self.selections.get() + 1;
+        if self.selection_limit.is_some_and(|limit| selections > limit) {
+            return Err(FixedNotesError::SelectionLimitReached);
+        }
+        self.selections.set(selections);
+        let target = match target_value {
+            TargetValue::AtLeast(target) => Some(target),
+            TargetValue::AllFunds(_) => None,
+        };
+        Ok(self.select(sources, exclude, target))
+    }
+
+    fn select_unspent_notes(
+        &self,
+        _account: Self::AccountId,
+        sources: &[ShieldedPool],
+        _target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(self.select(sources, exclude, None))
+    }
+
+    fn get_change_receivers(
+        &self,
+        _account: Self::AccountId,
+    ) -> Result<ChangeReceivers, Self::Error> {
+        Ok(ChangeReceivers::new(
+            true,
+            true,
+            #[cfg(feature = "transparent-inputs")]
+            None,
+        ))
+    }
+
+    fn get_account_metadata(
+        &self,
+        _account: Self::AccountId,
+        _selector: &NoteFilter,
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
+    ) -> Result<AccountMeta, Self::Error> {
+        Err(FixedNotesError::Unsupported)
     }
 }

@@ -15,6 +15,8 @@ workspace.
   (the latter under the `transparent-inputs` feature)
 - `zcash_client_backend::data_api::AccountMeta::change_receivers`
 - `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+- `zcash_client_backend::data_api::testing::{FixedNotes, FixedNotesError}`
+  (under the `test-dependencies` feature)
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
