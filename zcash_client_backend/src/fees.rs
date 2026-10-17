@@ -730,13 +730,15 @@ pub trait ChangeStrategy {
     /// The fee computed as part of this operation should take into account the prospective
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
-    /// [`ChangeError::InsufficientFunds`].
+    /// [`ChangeError::InsufficientFunds`], with a `required` value that exceeds the total
+    /// value of the inputs provided.
     ///
     /// If the inputs include notes or UTXOs that are not economic to spend in the context
     /// of this input selection, a [`ChangeError::DustInputs`] error can be returned
     /// indicating inputs that should be removed from the selection (all of which will
-    /// have value less than or equal to the marginal fee). The caller should order the
-    /// inputs from most to least preferred to spend within each pool, so that the most
+    /// have value less than or equal to the marginal fee). Every input it names must be
+    /// one of the inputs provided, and it must name at least one. The caller should order
+    /// the inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
     /// - `ironwood`: the Ironwood bundle view (behind the `orchard` feature). A V6

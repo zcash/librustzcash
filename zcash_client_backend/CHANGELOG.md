@@ -17,6 +17,7 @@ workspace.
 - `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
 - `zcash_client_backend::data_api::testing::{FixedNotes, FixedNotesError}`
   (under the `test-dependencies` feature)
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::{RequirementCovered, DustInputsNotGiven, ExcludedNoteSelected, UnrequestedPoolSelected}`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
@@ -47,6 +48,28 @@ workspace.
   `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
   P2PKH address derived from the account's transparent key. An account whose
   transparent change is a P2SH output cannot pay a TEX address.
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` must return a
+  `ChangeError::InsufficientFunds` whose `required` value exceeds the total
+  value of the inputs it was given, and a `ChangeError::DustInputs` that names
+  at least one of the inputs it was given and no others.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now returns `InputSelectorError::Selection` with a `GreedyInputSelectorError`
+  naming the broken contract, instead of `InsufficientFunds`, when the change
+  strategy reports a requirement its inputs already cover or dust inputs it was
+  not given, or when the data source returns a note it was asked to exclude or
+  a note from a pool it was not asked for.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now spends notes from a later shielded pool when the change from the
+  preferred pool's notes alone would fall below the dust threshold. Previously
+  it returned `InsufficientFunds` in that case, with `available` above
+  `required`.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  no longer returns `InsufficientFunds` when the change strategy reports a
+  selected shielded note as dust and the notes selected without it can fund the
+  transaction. Previously it reported insufficient funds, with `available`
+  above `required`.
 
 ## [0.25.0-pre.2] - 2026-10-13
 
