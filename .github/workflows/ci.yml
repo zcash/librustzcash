@@ -501,6 +501,36 @@ jobs:
         working-directory: ./ci-build
         run: cargo build --verbose --target ${{ matrix.target }}
 
+  size-assertions:
+    name: Structure sizes on ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv7em-none-eabihf
+        include:
+          - target: thumbv7em-none-eabihf
+            build_deps: >
+              gcc-arm-none-eabi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install linux build dependencies
+        run: sudo apt update && sudo apt install ${{ matrix.build_deps }}
+        if: matrix.build_deps != ''
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      # `pczt`'s size assertions are `const`, so type checking proves them: covering a
+      # 32-bit target needs no test runner, no emulator and no device. The 64-bit half
+      # is covered by the ordinary test job, which compiles the same module under
+      # `cfg(test)`.
+      - name: Check the 32-bit sizes of the structures a PCZT allocates
+        run: >
+          cargo check -p pczt --target ${{ matrix.target }}
+          --no-default-features
+          --features orchard,sapling,transparent,size-assertions
+
   bitrot:
     name: Bitrot check
     runs-on: ubuntu-latest
