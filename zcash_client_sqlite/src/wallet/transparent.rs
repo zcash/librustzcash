@@ -3035,19 +3035,32 @@ mod tests {
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
     use {
+        crate::testing::db::TestDb,
+        assert_matches::assert_matches,
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
-        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
-        zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState, testing::TestState},
+        zcash_protocol::{
+            consensus::{NetworkUpgrade, Parameters},
+            local_consensus::LocalNetwork,
+        },
     };
 
-    #[test]
+    /// The seed of the account whose default transparent receiver is imported as a standalone
+    /// address before the account is added.
     #[cfg(feature = "transparent-key-import")]
-    fn add_account_adopts_standalone_default_receiver() {
-        /// The seed of the account whose default transparent receiver is imported first.
-        const SEED_B: [u8; 32] = [42; 32];
+    const STANDALONE_DEFAULT_RECEIVER_SEED: [u8; 32] = [42; 32];
 
+    /// Returns a wallet whose test account tracks, as a standalone address, the default
+    /// transparent receiver of the account that [`STANDALONE_DEFAULT_RECEIVER_SEED`] derives.
+    /// Also returns that receiver, and a birthday for the account.
+    #[cfg(feature = "transparent-key-import")]
+    fn standalone_default_receiver_wallet() -> (
+        TestState<(), TestDb, LocalNetwork>,
+        TransparentAddress,
+        AccountBirthday,
+    ) {
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3055,20 +3068,20 @@ mod tests {
         let account_a = st.test_account().unwrap().id();
         let network = *st.network();
 
-        // Account A tracks, as a standalone address, the default transparent receiver of the
-        // account that seed B derives.
-        let (ufvk_b_address, _) =
-            UnifiedSpendingKey::from_seed(&network, &SEED_B, zip32::AccountId::ZERO)
-                .unwrap()
-                .to_unified_full_viewing_key()
-                .default_address(UnifiedAddressRequest::AllAvailableKeys)
-                .unwrap();
-        let taddr = *ufvk_b_address.transparent().unwrap();
+        let (default_address, _) = UnifiedSpendingKey::from_seed(
+            &network,
+            &STANDALONE_DEFAULT_RECEIVER_SEED,
+            zip32::AccountId::ZERO,
+        )
+        .unwrap()
+        .to_unified_full_viewing_key()
+        .default_address(UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap();
+        let taddr = *default_address.transparent().unwrap();
         st.wallet_mut()
             .import_standalone_transparent_address(account_a, taddr)
             .unwrap();
 
-        // Importing that account adopts the address.
         let birthday = AccountBirthday::from_parts(
             ChainState::empty(
                 network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
@@ -3076,12 +3089,16 @@ mod tests {
             ),
             None,
         );
-        let (account_b, _) = st
-            .wallet_mut()
-            .create_account("b", &Secret::new(SEED_B.to_vec()), &birthday, None)
-            .unwrap();
-        let rows = st
-            .wallet()
+        (st, taddr, birthday)
+    }
+
+    /// Returns the owning account and key scope of each address row of `taddr`.
+    #[cfg(feature = "transparent-key-import")]
+    fn receiver_rows(
+        st: &TestState<(), TestDb, LocalNetwork>,
+        taddr: &TransparentAddress,
+    ) -> Vec<(uuid::Uuid, i64)> {
+        st.wallet()
             .db()
             .conn
             .prepare(
@@ -3090,15 +3107,56 @@ mod tests {
                  WHERE cached_transparent_receiver_address = :taddr",
             )
             .unwrap()
-            .query_map(named_params! { ":taddr": taddr.encode(&network) }, |row| {
-                Ok((row.get::<_, uuid::Uuid>(0)?, row.get::<_, i64>(1)?))
-            })
+            .query_map(
+                named_params! { ":taddr": taddr.encode(st.network()) },
+                |row| Ok((row.get::<_, uuid::Uuid>(0)?, row.get::<_, i64>(1)?)),
+            )
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn add_account_adopts_standalone_default_receiver() {
+        let (mut st, taddr, birthday) = standalone_default_receiver_wallet();
+
+        let (account_b, _) = st
+            .wallet_mut()
+            .create_account(
+                "b",
+                &Secret::new(STANDALONE_DEFAULT_RECEIVER_SEED.to_vec()),
+                &birthday,
+                None,
+            )
             .unwrap();
         assert_eq!(
-            rows,
+            receiver_rows(&st, &taddr),
             [(account_b.expose_uuid(), KeyScope::EXTERNAL.encode())]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn add_account_adoption_rolls_back_on_error() {
+        let (mut st, taddr, birthday) = standalone_default_receiver_wallet();
+        let account_a = st.test_account().unwrap().id();
+
+        let result: Result<(), SqliteClientError> =
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                wdb.create_account(
+                    "b",
+                    &Secret::new(STANDALONE_DEFAULT_RECEIVER_SEED.to_vec()),
+                    &birthday,
+                    None,
+                )?;
+                // Fail after the adoption; the standalone row must be restored.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+        assert_eq!(
+            receiver_rows(&st, &taddr),
+            [(account_a.expose_uuid(), KeyScope::Foreign.encode())]
         );
     }
 
