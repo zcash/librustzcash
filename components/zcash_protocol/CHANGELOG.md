@@ -13,6 +13,9 @@ workspace.
 ### Added
 - `zcash_protocol::consensus::UPGRADES_IN_ORDER`
 - `zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO`
+- `zcash_protocol::consensus::{PRE_BLOSSOM_POW_TARGET_SPACING,
+  POST_BLOSSOM_POW_TARGET_SPACING, POST_NU7_POW_TARGET_SPACING}`
+- `zcash_protocol::consensus::{pow_target_spacing, target_time_between}`
 - `zcash_protocol::zip318::{AnchorGrid, BlockSpacing}`
 - `zcash_protocol::zip318::PoolMigrationConstants::anchor_grid`
 
@@ -30,6 +33,12 @@ workspace.
 - `zcash_protocol::zip318::AnchorBucketInterval::{is_boundary,
   boundary_at_or_below, boundary_at_or_above}`. Use the methods of the same
   names on `AnchorGrid`.
+
+### Deprecated
+- `zcash_protocol::consensus::{SECONDS_PER_BLOCK, BLOCKS_PER_HOUR}`. The target
+  block spacing depends on the block height; use
+  `zcash_protocol::consensus::pow_target_spacing` or
+  `zcash_protocol::consensus::target_time_between` instead.
 
 ## [0.11.0-pre.1] - 2026-10-13
 
