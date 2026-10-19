@@ -834,6 +834,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn proposal_counts_match_the_built_transaction() {
+        testing::pool::proposal_counts_match_the_built_transaction::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn proposal_counts_match_the_built_transaction_with_ironwood() {
+        testing::pool::proposal_counts_match_the_built_transaction_with_ironwood()
+    }
+
+    #[test]
+    fn proposal_counts_match_the_built_transaction_at_nu7() {
+        testing::pool::proposal_counts_match_the_built_transaction_at_nu7()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn insufficient_funds_counts_transparent_inputs() {
         testing::pool::insufficient_funds_counts_transparent_inputs::<OrchardPoolTester>()

@@ -21,7 +21,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
-        builder::DEFAULT_TX_EXPIRY_DELTA,
+        builder::{BundlePadding, DEFAULT_TX_EXPIRY_DELTA},
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -31,6 +31,7 @@ use zcash_protocol::{
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
+    zip218::{SAPLING_BLOCK_IO_LIMIT, ShieldedActionCounts, ShieldedBlockLimit},
 };
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
@@ -38,8 +39,8 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, TargetValue, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
@@ -48,8 +49,12 @@ use crate::{
             single_output_change_strategy,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            ConfirmationsPolicy, LockRequest, TargetHeight, TransferErrT,
+            decrypt_and_store_transaction,
+            input_selection::{
+                GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy, propose_send_max,
+            },
+            propose_send_max_transfer, propose_transfer,
         },
     },
     decrypt_transaction,
@@ -57,11 +62,12 @@ use crate::{
         self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
+    proposal::{Proposal, ProposalError},
     scanning::ScanError,
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
+    wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
 
-use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
+use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState, sapling::SaplingPoolTester};
 
 use crate::data_api::ll::wallet::PRUNING_DEPTH;
 use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
@@ -82,9 +88,8 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "orchard")]
 use {
     super::orchard::OrchardPoolTester,
-    crate::data_api::wallet::propose_transfer,
     std::collections::BTreeMap,
-    zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
+    zcash_primitives::transaction::TxVersion,
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
 };
 
@@ -94,15 +99,6 @@ use zcash_address::{
     unified::{self, Encoding as _, Receiver, Revision, Uitem},
 };
 
-// `ProposalError` also reaches this module through the `transparent-inputs` group below,
-// so this arm covers only the configuration in which that group is absent.
-#[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
-use crate::proposal::ProposalError;
-
-// `SpendPolicy` is used only by scenarios behind one of these two features.
-#[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
-use crate::data_api::wallet::input_selection::SpendPolicy;
-
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -111,7 +107,7 @@ use {
             wallet::input_selection::TransparentSpendPolicy,
         },
         fees::ChangeValue,
-        proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
+        proposal::{StepOutput, StepOutputIndex},
         wallet::{Exposure, TransparentAddressSource, WalletTransparentOutput},
     },
     secrecy::ExposeSecret,
@@ -142,13 +138,10 @@ use {
 };
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use {
-    crate::data_api::wallet::input_selection::LockedInputPolicy,
-    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
-};
+use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
 pub mod dsl;
-use dsl::{TestDsl, TestNoteConfig};
+use dsl::{TestDsl, TestNoteConfig, TestScenario};
 
 pub mod locking;
 pub use locking::*;
@@ -10138,4 +10131,545 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
         ),
         Ok(_)
     );
+}
+
+/// The seed of the external key to which the ZIP 218 tests pay.
+const EXTERNAL_RECIPIENT_SEED: [u8; 32] = [0xf5; 32];
+
+/// The value of each note that the ZIP 218 tests fund, in ZIP 317 marginal fees: enough that a note
+/// pays for its own spend, so that every note is worth spending.
+const NOTE_VALUE_IN_MARGINAL_FEES: u64 = 10;
+
+/// The owner on whose behalf the ZIP 218 tests ask proposals to lock their inputs.
+const LOCK_OWNER: LockOwner = LockOwner::new([1; 32]);
+
+/// The blocks past the target height for which those locks would last.
+const LOCK_FOR_BLOCKS: u32 = 100;
+
+/// The outputs to which a Sapling bundle that has a spend or an output is padded when it requests
+/// fewer.
+const SAPLING_PADDED_OUTPUTS: usize = 2;
+
+/// The most Sapling spends that a transaction with no more outputs than the padding can hold within
+/// the ZIP 218 limit on the Sapling spends and outputs of a block.
+const MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT: usize = SAPLING_BLOCK_IO_LIMIT - SAPLING_PADDED_OUTPUTS;
+
+/// Returns the default test network with every upgrade through NU6.3 active from the first block,
+/// as Sapling is.
+fn network_with_ironwood() -> LocalNetwork {
+    let default_network = TestBuilder::<(), ()>::DEFAULT_NETWORK;
+    let activation = default_network
+        .activation_height(NetworkUpgrade::Sapling)
+        .expect("the default test network activates Sapling");
+
+    LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..default_network
+    }
+}
+
+/// Returns the default test network with every upgrade through NU7 active from the first block,
+/// so that the ZIP 218 limits bind every transaction.
+fn network_with_nu7() -> LocalNetwork {
+    let network = network_with_ironwood();
+
+    LocalNetwork {
+        nu7: network.nu6_3,
+        ..network
+    }
+}
+
+/// Returns a wallet on `network` with an account born at Sapling activation, set up to test the
+/// pool that `T` tests.
+fn wallet_on<T, Cache, Dsf>(
+    network: LocalNetwork,
+    dsf: Dsf,
+    cache: Cache,
+) -> TestDsl<TestScenario<T, Cache, Dsf>>
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(dsf)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>()
+}
+
+/// Returns a proposal to send every note of a Sapling wallet, made with the input selector
+/// directly, which does not check the ZIP 218 limits.
+fn send_max_without_the_limit_check<Cache, Dsf>(
+    st: &TestDsl<TestScenario<SaplingPoolTester, Cache, Dsf>>,
+) -> Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>
+where
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    let network = *st.network();
+    let to =
+        SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&EXTERNAL_RECIPIENT_SEED))
+            .to_zcash_address(&network);
+    let (target_height, anchor_height) = st
+        .wallet()
+        .get_target_and_anchor_heights(ConfirmationsPolicy::MIN.trusted())
+        .unwrap()
+        .expect("the wallet has scanned blocks");
+
+    propose_send_max(
+        &network,
+        st.wallet(),
+        &StandardFeeRule::Zip317,
+        st.get_account().id(),
+        &[SaplingPoolTester::SHIELDED_PROTOCOL],
+        target_height,
+        anchor_height,
+        MaxSpendMode::Everything,
+        ConfirmationsPolicy::MIN,
+        to,
+        None,
+        &LockedInputPolicy::Exclude,
+    )
+    .expect("the input selector does not check the ZIP 218 limits")
+}
+
+/// Returns the payment that spends `notes` notes of `note_value` and leaves no change: their total
+/// less the ZIP 317 fee of a transaction with that many Sapling spends.
+fn payment_needing_every_note(note_value: Zatoshis, notes: usize) -> Zatoshis {
+    let notes = u64::try_from(notes).expect("a note count fits in a u64");
+    ((note_value * notes).unwrap() - (MARGINAL_FEE * notes).unwrap()).unwrap()
+}
+
+/// Builds `proposal`, which has one step, and checks that the transaction built from it holds the
+/// shielded components that [`Proposal::shielded_action_counts`] predicts for the padding the build
+/// uses. Returns those counts.
+fn assert_built_counts_match_prediction<T, Cache, Dsf>(
+    st: &mut TestDsl<TestScenario<T, Cache, Dsf>>,
+    proposal: &Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>,
+) -> ShieldedActionCounts
+where
+    T: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    let predicted = proposal
+        .shielded_action_counts(st.network(), BundlePadding::DEFAULT)
+        .expect("the steps of the proposal can be counted");
+    assert_eq!(predicted.len(), 1);
+
+    let txid = st.create_proposed_expecting(proposal, 1).head;
+    let tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("the built transaction is stored");
+
+    let built = tx.shielded_action_counts();
+    assert_eq!(built, predicted.head);
+    built
+}
+
+/// Tests that a send-max proposal whose transaction would hold more Sapling spends and outputs than
+/// ZIP 218 allows in a block is rejected once NU7 is active, and that one that fills the limit
+/// exactly is proposed and built.
+///
+/// The test:
+/// - Adds the most Sapling notes that a send-max to one Sapling recipient can spend within the
+///   limit: each note is a spend, and the one output is padded to two.
+/// - Proposes sending them all.
+/// - Adds notes one at a time until the wallet holds as many as the limit, and checks that each
+///   proposal that sends them all, and asks to lock its inputs, is rejected with the number of
+///   spends and outputs it would hold, before it locks any.
+/// - Builds the first proposal, and checks that its transaction holds exactly the limit.
+pub fn send_max_over_the_sapling_io_limit_is_rejected(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = wallet_on::<SaplingPoolTester, _, _>(network_with_nu7(), dsf, cache);
+    let account_id = st.get_account().id();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+    let to =
+        SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&EXTERNAL_RECIPIENT_SEED))
+            .to_zcash_address(st.network());
+    let fee_rule = StandardFeeRule::Zip317;
+
+    st.add_notes_checking_balance([vec![note_value; MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT]]);
+    let at_the_limit = st
+        .propose_send_max_transfer(
+            account_id,
+            &fee_rule,
+            to.clone(),
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("a transaction that fills the limit exactly is proposed");
+
+    let network = *st.network();
+    for notes in (MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT + 1)..=SAPLING_BLOCK_IO_LIMIT {
+        st.add_notes_checking_balance([[note_value]]);
+        assert_matches!(
+            propose_send_max_transfer::<_, _, _, Infallible>(
+                st.wallet_mut(),
+                &network,
+                account_id,
+                &[SaplingPoolTester::SHIELDED_PROTOCOL],
+                &fee_rule,
+                to.clone(),
+                None,
+                MaxSpendMode::Everything,
+                ConfirmationsPolicy::MIN,
+                &LockedInputPolicy::Exclude,
+                Some(LockRequest::new(LOCK_OWNER, LOCK_FOR_BLOCKS)),
+            ),
+            Err(Error::Proposal(ProposalError::ShieldedLimitExceeded {
+                step_index: 0,
+                exceeded,
+            })) if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+                && exceeded.count() == notes + SAPLING_PADDED_OUTPUTS
+        );
+        assert!(
+            st.wallet()
+                .get_locked_outputs(account_id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    // The proposal that fills the limit still builds, though the wallet has since gained notes.
+    let built = assert_built_counts_match_prediction(&mut st, &at_the_limit);
+    assert_eq!(
+        built.sapling_spends() + built.sapling_outputs(),
+        SAPLING_BLOCK_IO_LIMIT
+    );
+}
+
+/// Tests that a payment whose transaction would hold more Sapling spends and outputs than ZIP 218
+/// allows in a block is rejected once NU7 is active, and that one that fills the limit exactly is
+/// proposed.
+///
+/// The test:
+/// - Adds the most Sapling notes that a payment can spend within the limit: each note is a spend,
+///   and the one output is padded to two.
+/// - Proposes a payment that needs every note, and checks that the proposal fills the limit
+///   exactly.
+/// - Adds notes until the wallet holds as many as the limit, and checks that a payment that needs
+///   every note, and asks to lock its inputs, is rejected with the number of spends and outputs it
+///   would hold, before it locks any.
+pub fn propose_transfer_over_the_sapling_io_limit_is_rejected(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = wallet_on::<SaplingPoolTester, _, _>(network_with_nu7(), dsf, cache);
+    let account_id = st.get_account().id();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+    let to =
+        SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&EXTERNAL_RECIPIENT_SEED));
+
+    st.add_notes_checking_balance([vec![note_value; MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT]]);
+    let at_the_limit = st.propose_transfer_to(
+        &to,
+        payment_needing_every_note(note_value, MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT),
+    );
+    let proposed = at_the_limit
+        .shielded_action_counts(st.network(), BundlePadding::DEFAULT)
+        .expect("the step of the proposal can be counted")
+        .head;
+    assert_eq!(
+        proposed,
+        ShieldedActionCounts::ZERO
+            .with_sapling(MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT, SAPLING_PADDED_OUTPUTS)
+    );
+
+    st.add_notes_checking_balance([vec![
+        note_value;
+        SAPLING_BLOCK_IO_LIMIT
+            - MOST_SAPLING_SPENDS_WITHIN_THE_LIMIT
+    ]]);
+    let network = *st.network();
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(&network),
+        payment_needing_every_note(note_value, SAPLING_BLOCK_IO_LIMIT),
+    )])
+    .unwrap();
+    let change_strategy = single_output_change_strategy(
+        StandardFeeRule::Zip317,
+        None,
+        SaplingPoolTester::SHIELDED_PROTOCOL,
+    );
+    assert_matches!(
+        propose_transfer::<_, _, _, _, Infallible>(
+            st.wallet_mut(),
+            &network,
+            account_id,
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            Some(LockRequest::new(LOCK_OWNER, LOCK_FOR_BLOCKS)),
+            None,
+        ),
+        Err(Error::Proposal(ProposalError::ShieldedLimitExceeded {
+            step_index: 0,
+            exceeded,
+        })) if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+            && exceeded.count() == SAPLING_BLOCK_IO_LIMIT + SAPLING_PADDED_OUTPUTS
+    );
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Tests that a send-max proposal and a payment whose transactions would hold more Sapling spends
+/// and outputs than ZIP 218 allows in a block are proposed, and built, while NU7 is not active.
+///
+/// The test:
+/// - Adds as many Sapling notes as the limit counts to a wallet on a network where NU6.3 is active
+///   and NU7 never activates.
+/// - Proposes sending all of them, and a payment that needs all of them, and checks that each
+///   proposal exceeds the limit, as it would on a network where NU7 is active.
+/// - Builds the send-max.
+pub fn proposals_over_the_sapling_io_limit_are_accepted_before_nu7(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = wallet_on::<SaplingPoolTester, _, _>(network_with_ironwood(), dsf, cache);
+    let account_id = st.get_account().id();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+    let to =
+        SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&EXTERNAL_RECIPIENT_SEED));
+    let to_address = to.to_zcash_address(st.network());
+
+    st.add_notes_checking_balance([vec![note_value; SAPLING_BLOCK_IO_LIMIT]]);
+    let send_max = st
+        .propose_send_max_transfer(
+            account_id,
+            &StandardFeeRule::Zip317,
+            to_address,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("a send-max over the limit is proposed before NU7");
+    let payment = st.propose_transfer_to(
+        &to,
+        payment_needing_every_note(note_value, SAPLING_BLOCK_IO_LIMIT),
+    );
+
+    let nu7_active_network = network_with_nu7();
+    for proposal in [&send_max, &payment] {
+        assert_matches!(
+            proposal.check_shielded_limits(&nu7_active_network, BundlePadding::DEFAULT),
+            Err(ProposalError::ShieldedLimitExceeded { exceeded, .. })
+                if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+                    && exceeded.count() == SAPLING_BLOCK_IO_LIMIT + SAPLING_PADDED_OUTPUTS
+        );
+    }
+
+    assert_built_counts_match_prediction(&mut st, &send_max);
+}
+
+/// Tests that building a proposal that exceeds a ZIP 218 limit is refused once NU7 is active, as
+/// a proposal made without the proposal-time check, by a third-party input selector or from
+/// deserialization, can reach the build entry point.
+///
+/// The test:
+/// - Adds as many Sapling notes as the limit counts, so that spending them all exceeds it.
+/// - Selects all of them for sending with the input selector directly, which does not check the
+///   limit.
+/// - Checks that creating that proposal's transactions is rejected with the number of spends and
+///   outputs it would hold, and that the wallet's notes are left spendable.
+pub fn create_proposed_transactions_rejects_a_proposal_over_the_sapling_io_limit(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = wallet_on::<SaplingPoolTester, _, _>(network_with_nu7(), dsf, cache);
+    let account = st.get_account();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+
+    st.add_notes_checking_balance([vec![note_value; SAPLING_BLOCK_IO_LIMIT]]);
+    let balance = st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN);
+    let over_the_limit = send_max_without_the_limit_check(&st);
+
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &over_the_limit,
+        ),
+        Err(Error::Proposal(ProposalError::ShieldedLimitExceeded {
+            step_index: 0,
+            exceeded,
+        })) if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+            && exceeded.count() == SAPLING_BLOCK_IO_LIMIT + SAPLING_PADDED_OUTPUTS
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        balance
+    );
+}
+
+/// Tests that creating a PCZT from a proposal that exceeds a ZIP 218 limit is refused once NU7 is
+/// active, as creating its transactions is.
+///
+/// The test:
+/// - Adds as many Sapling notes as the limit counts, and selects all of them for sending with the
+///   input selector directly, which does not check the limit.
+/// - Checks that creating a PCZT from that proposal is rejected with the number of spends and
+///   outputs it would hold.
+#[cfg(feature = "pczt")]
+pub fn create_pczt_from_proposal_rejects_a_proposal_over_the_sapling_io_limit<Dsf>(
+    dsf: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: serde::Serialize,
+{
+    let mut st = wallet_on::<SaplingPoolTester, _, _>(network_with_nu7(), dsf, cache);
+    let account_id = st.get_account().id();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+
+    st.add_notes_checking_balance([vec![note_value; SAPLING_BLOCK_IO_LIMIT]]);
+    let over_the_limit = send_max_without_the_limit_check(&st);
+
+    assert_matches!(
+        st.create_pczt_from_proposal::<Infallible, _, Infallible>(
+            account_id,
+            OvkPolicy::Sender,
+            &over_the_limit,
+            None,
+        ),
+        Err(Error::Proposal(ProposalError::ShieldedLimitExceeded {
+            step_index: 0,
+            exceeded,
+        })) if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+            && exceeded.count() == SAPLING_BLOCK_IO_LIMIT + SAPLING_PADDED_OUTPUTS
+    );
+}
+
+/// Tests that the shielded components that a proposal predicts for its transaction are those of the
+/// transaction built from it, padding included, on the default test network.
+///
+/// The test:
+/// - Adds the notes for a payment that needs two notes and leaves change, and for a send-max of
+///   one note.
+/// - Proposes and builds the payment, and checks the counts of the built transaction against the
+///   proposal's prediction.
+/// - Does the same for the send-max, whose one spend and one output the bundle pads.
+pub fn proposal_counts_match_the_built_transaction<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    assert_proposal_counts_match_the_built_transaction::<T>(
+        TestBuilder::<(), ()>::DEFAULT_NETWORK,
+        dsf,
+        cache,
+    );
+}
+
+/// Tests that the shielded components that a proposal predicts for its transaction are those of the
+/// transaction built from it where Ironwood is active, so that a payment to an Orchard receiver is
+/// delivered through an Ironwood bundle of its own.
+///
+/// The test is [`proposal_counts_match_the_built_transaction`] for Orchard notes on a network
+/// where NU6.3 is active.
+#[cfg(feature = "orchard")]
+pub fn proposal_counts_match_the_built_transaction_with_ironwood(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let [payment, send_max] = assert_proposal_counts_match_the_built_transaction::<OrchardPoolTester>(
+        network_with_ironwood(),
+        dsf,
+        cache,
+    );
+
+    // Both are delivered through an Ironwood bundle.
+    assert_ne!(payment.ironwood_actions(), 0);
+    assert_ne!(send_max.ironwood_actions(), 0);
+}
+
+/// Tests that the ZIP 218 checks let ordinary proposals that spend Orchard notes through where NU7
+/// is active, and that the shielded components they predict are those of the transactions built
+/// from them.
+///
+/// The test is [`proposal_counts_match_the_built_transaction`] for Orchard notes on a network
+/// where NU7 is active.
+#[cfg(feature = "orchard")]
+pub fn proposal_counts_match_the_built_transaction_at_nu7(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    assert_proposal_counts_match_the_built_transaction::<OrchardPoolTester>(
+        network_with_nu7(),
+        dsf,
+        cache,
+    );
+}
+
+/// Runs the scenario of [`proposal_counts_match_the_built_transaction`] on `network`, returning
+/// the counts of the payment's transaction and of the send-max's.
+fn assert_proposal_counts_match_the_built_transaction<T: ShieldedPoolTester>(
+    network: LocalNetwork,
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) -> [ShieldedActionCounts; 2] {
+    /// The notes that the payment spends: several, so that it needs more than one note and
+    /// returns change.
+    const PAYMENT_NOTES: usize = 2;
+    /// The notes that the send-max spends: one, so that its spend and its only output fall short
+    /// of the padding floor.
+    const SEND_MAX_NOTES: usize = 1;
+
+    let mut st = wallet_on::<T, _, _>(network, dsf, cache);
+    let account_id = st.get_account().id();
+    let note_value = (MARGINAL_FEE * NOTE_VALUE_IN_MARGINAL_FEES).unwrap();
+    let to = T::sk_default_address(&T::sk(&EXTERNAL_RECIPIENT_SEED));
+
+    st.add_notes_checking_balance([vec![note_value; PAYMENT_NOTES + SEND_MAX_NOTES]]);
+
+    // More than a note holds, so that the payment needs two notes and returns change.
+    let payment = st.propose_transfer_to(&to, (note_value + MARGINAL_FEE).unwrap());
+    let step = payment.steps().first();
+    assert_eq!(
+        step.input_count_in_pool(PoolType::Shielded(T::SHIELDED_PROTOCOL)),
+        PAYMENT_NOTES
+    );
+    assert_eq!(step.balance().proposed_change().len(), 1);
+    let payment_counts = assert_built_counts_match_prediction(&mut st, &payment);
+    assert_ne!(payment_counts, ShieldedActionCounts::ZERO);
+
+    // The payment's change is not yet spendable, so the send-max spends the note it left.
+    let to = to.to_zcash_address(st.network());
+    let send_max = st
+        .propose_send_max_transfer(
+            account_id,
+            &StandardFeeRule::Zip317,
+            to,
+            None,
+            MaxSpendMode::MaxSpendable,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("the note that the payment left is sent");
+    let step = send_max.steps().first();
+    assert_eq!(
+        step.input_count_in_pool(PoolType::Shielded(T::SHIELDED_PROTOCOL)),
+        SEND_MAX_NOTES
+    );
+    assert!(step.balance().proposed_change().is_empty());
+    let send_max_counts = assert_built_counts_match_prediction(&mut st, &send_max);
+    assert_ne!(send_max_counts, ShieldedActionCounts::ZERO);
+
+    [payment_counts, send_max_counts]
 }

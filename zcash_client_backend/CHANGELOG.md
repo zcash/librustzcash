@@ -52,6 +52,14 @@ workspace.
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now returns
   `zcash_client_backend::proposal::ProposalError::TransactionTooLarge` when the
   proposed transaction cannot fit in a block.
+- `zcash_client_backend::data_api::wallet::{propose_transfer,
+  propose_standard_transfer_to_address, propose_shielding, shield_transparent_funds,
+  propose_send_max_transfer, create_proposed_transactions, create_pczt_from_proposal}`
+  now return `zcash_client_backend::proposal::ProposalError::ShieldedLimitExceeded`
+  when NU7 is active at the target height and a step would exceed a ZIP 218
+  per-block shielded limit. When NU7 is active there, they can also return
+  `zcash_client_backend::proposal::ProposalError::BundleShape` for a step whose
+  shielded components cannot form a bundle.
 
 ## [0.25.0-pre.2] - 2026-10-13
 

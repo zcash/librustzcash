@@ -1037,3 +1037,62 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
         BlockCache::new(),
     );
 }
+
+pub(crate) fn send_max_over_the_sapling_io_limit_is_rejected() {
+    zcash_client_backend::data_api::testing::pool::send_max_over_the_sapling_io_limit_is_rejected(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+pub(crate) fn propose_transfer_over_the_sapling_io_limit_is_rejected() {
+    zcash_client_backend::data_api::testing::pool::propose_transfer_over_the_sapling_io_limit_is_rejected(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+pub(crate) fn proposals_over_the_sapling_io_limit_are_accepted_before_nu7() {
+    zcash_client_backend::data_api::testing::pool::proposals_over_the_sapling_io_limit_are_accepted_before_nu7(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+pub(crate) fn create_proposed_transactions_rejects_a_proposal_over_the_sapling_io_limit() {
+    zcash_client_backend::data_api::testing::pool::create_proposed_transactions_rejects_a_proposal_over_the_sapling_io_limit(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn create_pczt_from_proposal_rejects_a_proposal_over_the_sapling_io_limit() {
+    zcash_client_backend::data_api::testing::pool::create_pczt_from_proposal_rejects_a_proposal_over_the_sapling_io_limit(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+pub(crate) fn proposal_counts_match_the_built_transaction<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::proposal_counts_match_the_built_transaction::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn proposal_counts_match_the_built_transaction_with_ironwood() {
+    zcash_client_backend::data_api::testing::pool::proposal_counts_match_the_built_transaction_with_ironwood(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn proposal_counts_match_the_built_transaction_at_nu7() {
+    zcash_client_backend::data_api::testing::pool::proposal_counts_match_the_built_transaction_at_nu7(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}

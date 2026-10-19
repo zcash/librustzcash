@@ -741,6 +741,11 @@ impl ConfirmationsPolicy {
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
 ///
+/// When NU7 is active at the target height, returns [`ProposalError::ShieldedLimitExceeded`] if
+/// the transaction of a step would exceed a ZIP 218 limit on the shielded components of a block,
+/// or [`ProposalError::BundleShape`] if a step cannot be counted against those limits, locking no
+/// inputs in either case; see [`Proposal::check_shielded_limits`].
+///
 /// When `lock_inputs` is `Some(request)`, every input selected by the returned proposal is
 /// locked via [`OutputLockStore::lock_outputs`] on behalf of the request's [`LockOwner`], with an
 /// expiry height of `target_height + request.for_blocks()`, so that the inputs are excluded from
@@ -945,6 +950,7 @@ where
         )?,
     };
     proposal.check_transaction_size()?;
+    proposal.check_shielded_limits(params, BundlePadding::DEFAULT)?;
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
         lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
@@ -1114,7 +1120,11 @@ where
 /// The wallet must have been scanned far enough to establish target and anchor heights;
 /// otherwise [`InputSelectorError::SyncRequired`] is returned. If the transaction that spends
 /// the selected inputs cannot fit in a block, [`ProposalError::TransactionTooLarge`] is
-/// returned and no inputs are locked.
+/// returned and no inputs are locked. If NU7 is active at the target height and that
+/// transaction would exceed a ZIP 218 limit on the shielded components of a block, or cannot
+/// be counted against those limits, [`ProposalError::ShieldedLimitExceeded`] or
+/// [`ProposalError::BundleShape`] respectively is returned and no inputs are locked; see
+/// [`Proposal::check_shielded_limits`].
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database.
@@ -1196,6 +1206,7 @@ where
     )?;
 
     proposal.check_transaction_size()?;
+    proposal.check_shielded_limits(params, BundlePadding::DEFAULT)?;
 
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
@@ -1210,6 +1221,11 @@ where
 ///
 /// The `output_filter` parameter controls which transparent outputs are eligible for
 /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
+///
+/// When NU7 is active at the target height, returns [`ProposalError::ShieldedLimitExceeded`] if
+/// the transaction of a step would exceed a ZIP 218 limit on the shielded components of a block,
+/// or [`ProposalError::BundleShape`] if a step cannot be counted against those limits, locking no
+/// inputs in either case; see [`Proposal::check_shielded_limits`].
 ///
 /// When `lock_inputs` is `Some(request)`, the inputs selected by the proposal are locked on
 /// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
@@ -1261,6 +1277,7 @@ where
         .map_err(Error::from)?;
 
     proposal.check_transaction_size()?;
+    proposal.check_shielded_limits(params, BundlePadding::DEFAULT)?;
 
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
@@ -1447,6 +1464,12 @@ impl Drop for SpendingKeys {
 /// [`min_target_height`](Proposal::min_target_height) is rejected with
 /// [`Error::ExpiryHeightBelowTargetHeight`]. An `expiry_height` of zero,
 /// which disables expiry, is exempt from this check.
+///
+/// When NU7 is active at a proposal's target height, the proposal is rejected, before any
+/// transaction is constructed, with [`ProposalError::ShieldedLimitExceeded`] if the transaction
+/// of a step would exceed a ZIP 218 limit on the shielded components of a block, or with
+/// [`ProposalError::BundleShape`] if a step cannot be counted against those limits; see
+/// [`Proposal::check_shielded_limits`].
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
@@ -1474,6 +1497,8 @@ where
     // proposal from a third-party input selector or a deserialized proposal that
     // bypassed the `propose_*` wrappers cannot reach the expensive proving path.
     proposal.check_transaction_size()?;
+    // The non-PCZT path always builds padded Orchard-pool bundles.
+    proposal.check_shielded_limits(params, BundlePadding::DEFAULT)?;
 
     if let Some(expiry_height) = expiry_height {
         let min_target_height = BlockHeight::from(proposal.min_target_height());
@@ -2971,6 +2996,12 @@ where
 /// proposal by [`Step::ironwood_bundle_padding`](crate::proposal::Step::ironwood_bundle_padding),
 /// so that it matches the action count the fee was computed from.
 ///
+/// When NU7 is active at the proposal's target height, the proposal is rejected with
+/// [`ProposalError::ShieldedLimitExceeded`] if its transaction, built with `orchard_pool_padding`,
+/// would exceed a ZIP 218 limit on the shielded components of a block, or with
+/// [`ProposalError::BundleShape`] if it cannot be counted against those limits; see
+/// [`Proposal::check_shielded_limits`].
+///
 /// `rng` supplies the randomness used to construct the PCZT and to sign its dummy spends.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -3006,6 +3037,7 @@ where
 
     // Defense-in-depth: reject oversized proposals at the build entry point.
     proposal.check_transaction_size()?;
+    proposal.check_shielded_limits(params, orchard_pool_padding)?;
 
     let fee_rule = proposal.fee_rule();
     let min_target_height = proposal.min_target_height();

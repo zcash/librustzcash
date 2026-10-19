@@ -539,6 +539,37 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_over_the_sapling_io_limit_is_rejected() {
+        testing::pool::send_max_over_the_sapling_io_limit_is_rejected()
+    }
+
+    #[test]
+    fn propose_transfer_over_the_sapling_io_limit_is_rejected() {
+        testing::pool::propose_transfer_over_the_sapling_io_limit_is_rejected()
+    }
+
+    #[test]
+    fn proposals_over_the_sapling_io_limit_are_accepted_before_nu7() {
+        testing::pool::proposals_over_the_sapling_io_limit_are_accepted_before_nu7()
+    }
+
+    #[test]
+    fn create_proposed_transactions_rejects_a_proposal_over_the_sapling_io_limit() {
+        testing::pool::create_proposed_transactions_rejects_a_proposal_over_the_sapling_io_limit()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn create_pczt_from_proposal_rejects_a_proposal_over_the_sapling_io_limit() {
+        testing::pool::create_pczt_from_proposal_rejects_a_proposal_over_the_sapling_io_limit()
+    }
+
+    #[test]
+    fn proposal_counts_match_the_built_transaction() {
+        testing::pool::proposal_counts_match_the_built_transaction::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn insufficient_funds_counts_transparent_inputs() {
         testing::pool::insufficient_funds_counts_transparent_inputs::<SaplingPoolTester>()
