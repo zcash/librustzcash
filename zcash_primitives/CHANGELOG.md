@@ -15,6 +15,13 @@ workspace.
 
 ### Changed
 - MSRV is now 1.89
+- `zcash_primitives::transaction::builder::Error` has a new variant,
+  `ShieldedLimitExceeded(zcash_protocol::zip218::ShieldedLimitExceeded)`. The
+  enum is exhaustive, so a `match` on it needs an arm for the new variant.
+  `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}` and
+  `zcash_primitives::transaction::builder::DeferredPcztBuilder::build_for_pczt`
+  return it when NU7 is active at the target height and the transaction would
+  exceed a ZIP 218 per-block shielded limit.
 
 ## [0.31.0-pre.2] - 2026-10-13
 

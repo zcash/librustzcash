@@ -13,7 +13,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
-    zip218::ShieldedActionCounts,
+    zip218::{self, ShieldedActionCounts, ShieldedLimitExceeded},
 };
 use zcash_script::opcode::PushValue;
 
@@ -128,6 +128,13 @@ pub enum Error<FE> {
     /// support a feature required by the transaction under construction, or the proposed
     /// transaction version is not supported on the given consensus branch.
     TargetIncompatible(BranchId, TxVersion, Option<PoolType>),
+    /// NU7 is active at the target height, and the transaction would contain more shielded
+    /// components than [ZIP 218] allows in a block. The padding and dummy components that the
+    /// builder adds are counted. To recover, build a transaction with fewer spends and outputs,
+    /// for example after consolidating notes in transactions that each stay within the limits.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    ShieldedLimitExceeded(ShieldedLimitExceeded),
 }
 
 impl<FE: fmt::Display> fmt::Display for Error<FE> {
@@ -198,6 +205,7 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                     "{t} is not supported for proposed transaction version {version:?} or consensus branch {branch_id:?}"
                 ),
             },
+            Error::ShieldedLimitExceeded(err) => err.fmt(f),
         }
     }
 }
@@ -454,6 +462,26 @@ fn orchard_builder_in_use(builder: &orchard::builder::Builder) -> bool {
     !builder.spends().is_empty() || !builder.outputs().is_empty() || !builder.changes().is_empty()
 }
 
+/// Verifies that, if the [ZIP 218] limits apply at `target_height`, the shielded components that
+/// `counts` returns for the transaction under construction stay within them. `counts` is called
+/// only if the limits apply.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+fn check_shielded_limits<P: consensus::Parameters, FE>(
+    params: &P,
+    target_height: BlockHeight,
+    counts: impl FnOnce() -> Result<ShieldedActionCounts, &'static str>,
+) -> Result<(), Error<FE>> {
+    if !zip218::limits_apply(params, target_height) {
+        return Ok(());
+    }
+
+    counts()
+        .map_err(|e| Error::Fee(FeeError::Bundle(e)))?
+        .check()
+        .map_err(Error::ShieldedLimitExceeded)
+}
+
 /// A builder for V6 and later transactions constructed as PCZTs with their
 /// Orchard-family anchors DEFERRED to proving time, per [ZIP 374].
 ///
@@ -671,7 +699,6 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
     /// # Errors
     ///
     /// Returns an error if a bundle type cannot represent the spends and outputs added so far.
-    #[allow(dead_code)]
     pub(crate) fn shielded_action_counts(&self) -> Result<ShieldedActionCounts, &'static str> {
         let orchard_actions = if orchard_builder_in_use(&self.orchard_builder) {
             orchard_action_count(&self.orchard_builder, false, self.orchard_bundle_version)?
@@ -699,11 +726,20 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
     /// result to the PCZT Creator (`build_from_parts`), then finalize, sign, and — at
     /// proving time — install the real anchor and witnesses through the PCZT Updater
     /// role before proving.
+    ///
+    /// Returns [`Error::ShieldedLimitExceeded`] if NU7 is active at the target height and the
+    /// PCZT would exceed a [ZIP 218] limit on the shielded components of a block.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
     pub fn build_for_pczt<R: Rng + CryptoRng, FR: FeeRule>(
         self,
         mut rng: R,
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
+        check_shielded_limits::<_, FR::Error>(&self.params, self.target_height, || {
+            self.shielded_action_counts()
+        })?;
+
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
 
         // After fees are accounted for, the value balance of the transaction must be zero.
@@ -913,7 +949,6 @@ impl<P, U> Builder<P, U> {
     /// # Errors
     ///
     /// Returns an error if a bundle type cannot represent the spends and outputs added so far.
-    #[allow(dead_code)]
     pub(crate) fn shielded_action_counts(&self) -> Result<ShieldedActionCounts, &'static str> {
         let (sapling_spends, sapling_outputs) = match self
             .sapling_builder
@@ -1479,9 +1514,13 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
     ///
     /// generated during the build process.
     ///
+    /// Returns [`Error::ShieldedLimitExceeded`] if NU7 is active at the target height and the
+    /// transaction would exceed a [ZIP 218] limit on the shielded components of a block.
+    ///
     /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
     /// [Orchard metadata]: ::orchard::builder::BundleMetadata
     /// [final transaction]: Transaction
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "circuits")]
     pub fn build<R: Rng + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
@@ -1576,6 +1615,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
     {
         self.check_version_compatibility::<FE>(self.tx_version)?;
         self.check_coinbase_expiry_height::<FE>()?;
+        check_shielded_limits::<_, FE>(&self.params, self.target_height, || {
+            self.shielded_action_counts()
+        })?;
 
         //
         // Consistency checks
@@ -1810,6 +1852,11 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     ///
     /// Experimental ZIP 233 builds reject nonzero ZIP 233 amounts because PCZT cannot
     /// preserve them through extraction.
+    ///
+    /// Returns [`Error::ShieldedLimitExceeded`] if NU7 is active at the target height and the
+    /// PCZT would exceed a [ZIP 218] limit on the shielded components of a block.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
     pub fn build_for_pczt<R: Rng + CryptoRng, FR: FeeRule>(
         self,
         mut rng: R,
@@ -1822,6 +1869,9 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
         self.check_version_compatibility::<FR::Error>(self.tx_version)?;
         self.check_coinbase_expiry_height::<FR::Error>()?;
+        check_shielded_limits::<_, FR::Error>(&self.params, self.target_height, || {
+            self.shielded_action_counts()
+        })?;
 
         //
         // Consistency checks
@@ -2026,7 +2076,7 @@ mod tests {
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
         assert_matches::assert_matches,
-        core::convert::Infallible,
+        core::{convert::Infallible, fmt::Debug},
         ff::Field,
         incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
         rand::rngs::SysRng,
@@ -2035,7 +2085,10 @@ mod tests {
             consensus::{BlockHeight, NetworkUpgrade, Parameters, TEST_NETWORK},
             memo::MemoBytes,
             value::{BalanceError, ZatBalance, Zatoshis},
-            zip218::ShieldedActionCounts,
+            zip218::{
+                GLOBAL_SHIELDED_BUDGET, ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+                SAPLING_BLOCK_IO_LIMIT, ShieldedActionCounts, ShieldedBlockLimit,
+            },
         },
     };
 
@@ -3249,17 +3302,17 @@ mod tests {
         }
     }
 
-    /// The target height of the counting tests' builds on `nu6_3_test_network`, where NU7 is
-    /// not active.
-    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    /// The target height of the shielded-component tests' builds where NU7 is not active: on
+    /// `nu6_3_test_network`, and on `nu7_test_network` the last height before NU7 activates.
+    #[cfg(feature = "circuits")]
     const PRE_NU7_TARGET_HEIGHT: BlockHeight = BlockHeight::from_u32(10);
 
-    /// The target height of the counting tests' builds on `nu7_test_network`, where NU7 is
-    /// active.
+    /// The target height of the shielded-component tests' builds on `nu7_test_network`, where
+    /// NU7 is active.
     #[cfg(feature = "circuits")]
     const NU7_TARGET_HEIGHT: BlockHeight = BlockHeight::from_u32(11);
 
-    /// The value of each output that the counting tests request.
+    /// The value of each output that the shielded-component tests request.
     #[cfg(feature = "circuits")]
     const COUNTED_OUTPUT_VALUE: Zatoshis = Zatoshis::const_from_u64(100_000);
 
@@ -3890,6 +3943,332 @@ mod tests {
             .unwrap();
         assert!(result.pczt_parts.ironwood.is_none());
         assert_eq!(pczt_counts(&result.pczt_parts), predicted);
+    }
+
+    /// The Ironwood outputs that the global-budget test requests.
+    #[cfg(feature = "circuits")]
+    const BUDGET_TEST_IRONWOOD_OUTPUTS: usize = 165;
+
+    /// The Sapling outputs that the global-budget test requests: together with the Ironwood
+    /// outputs, exactly the global shielded budget.
+    #[cfg(feature = "circuits")]
+    const BUDGET_TEST_SAPLING_OUTPUTS: usize =
+        GLOBAL_SHIELDED_BUDGET - BUDGET_TEST_IRONWOOD_OUTPUTS;
+
+    // The budget test must overrun the global budget, not a limit of one pool: each pool stays
+    // within its own limit, even with the one output that the test adds to overrun the budget.
+    #[cfg(feature = "circuits")]
+    const _: () = assert!(
+        BUDGET_TEST_IRONWOOD_OUTPUTS < ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT
+            && BUDGET_TEST_SAPLING_OUTPUTS < SAPLING_BLOCK_IO_LIMIT
+    );
+
+    /// Test helper: returns a builder on `params` that targets `target_height` and holds
+    /// `ironwood_outputs` Ironwood outputs and `sapling_outputs` Sapling outputs. No input funds
+    /// them, so a build that passes every check that precedes the value balance check fails on
+    /// the balance.
+    #[cfg(feature = "circuits")]
+    fn unfunded_builder<P: Parameters>(
+        params: P,
+        target_height: BlockHeight,
+        ironwood_outputs: usize,
+        sapling_outputs: usize,
+    ) -> Builder<P, ()> {
+        let builder = Builder::new(
+            params,
+            target_height,
+            BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: None,
+                ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
+        );
+        with_outputs(builder, ironwood_outputs, sapling_outputs)
+    }
+
+    /// Test helper: adds `ironwood_outputs` Ironwood outputs and `sapling_outputs` Sapling
+    /// outputs to `builder`.
+    #[cfg(feature = "circuits")]
+    fn with_outputs<P: Parameters>(
+        mut builder: Builder<P, ()>,
+        ironwood_outputs: usize,
+        sapling_outputs: usize,
+    ) -> Builder<P, ()> {
+        let ironwood_recipient =
+            counted_note_owner().address_at(0u32, orchard::keys::Scope::External);
+        let sapling_recipient = counted_sapling_recipient();
+
+        for _ in 0..ironwood_outputs {
+            builder
+                .add_ironwood_output::<Infallible>(
+                    None,
+                    ironwood_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+        }
+        for _ in 0..sapling_outputs {
+            builder
+                .add_sapling_output::<Infallible>(
+                    None,
+                    sapling_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+        }
+        builder
+    }
+
+    /// Test helper: returns a deferred-anchor builder on `params` that targets `target_height`
+    /// and holds `ironwood_outputs` Ironwood outputs, which no input funds.
+    #[cfg(feature = "circuits")]
+    fn unfunded_deferred_builder<P: Parameters>(
+        params: P,
+        target_height: BlockHeight,
+        ironwood_outputs: usize,
+    ) -> DeferredPcztBuilder<P> {
+        let recipient = counted_note_owner().address_at(0u32, orchard::keys::Scope::External);
+
+        let mut builder = DeferredPcztBuilder::new::<zip317::FeeError>(
+            params,
+            target_height,
+            BundlePadding::DEFAULT,
+            BundlePadding::DEFAULT,
+        )
+        .unwrap();
+        for _ in 0..ironwood_outputs {
+            builder
+                .add_ironwood_output::<zip317::FeeError>(
+                    None,
+                    recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+        }
+        builder
+    }
+
+    /// Test helper: asserts that `result` is a refusal to build because the transaction exceeds
+    /// `limit` with `count` components, the shielded components of the transaction being
+    /// `counts`.
+    #[cfg(feature = "circuits")]
+    fn assert_refused<T: Debug>(
+        result: Result<T, Error<zip317::FeeError>>,
+        limit: ShieldedBlockLimit,
+        count: usize,
+        counts: ShieldedActionCounts,
+    ) {
+        match result {
+            Err(Error::ShieldedLimitExceeded(exceeded)) => {
+                assert_eq!(exceeded.limit(), limit);
+                assert_eq!(exceeded.count(), count);
+                assert_eq!(exceeded.counts(), counts);
+            }
+            other => panic!("expected a refusal for exceeding the {limit} limit, got {other:?}"),
+        }
+    }
+
+    /// Test helper: asserts that `result` is not a refusal to build for exceeding a limit, but
+    /// the failure of a transaction that no input funds. That failure follows the limit check,
+    /// so it shows that the check passed the transaction.
+    #[cfg(feature = "circuits")]
+    fn assert_not_refused_for_the_limit<T: Debug>(result: Result<T, Error<zip317::FeeError>>) {
+        assert_matches!(result, Err(Error::InsufficientFunds(_)));
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn ironwood_outputs_over_the_action_limit_are_refused() {
+        let over = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1;
+        let builder = unfunded_builder(nu7_test_network(), NU7_TARGET_HEIGHT, over, NO_OUTPUTS);
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_refused(
+            result,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+            ShieldedActionCounts::ZERO.with_ironwood_actions(over),
+        );
+
+        // Exactly at the limit, the transaction is not refused for it.
+        let builder = unfunded_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+            NO_OUTPUTS,
+        );
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_not_refused_for_the_limit(result);
+
+        // A coinbase transaction, whose bundles are not padded, is refused for the same count.
+        let coinbase = Builder::new(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            BuildConfig::Coinbase { miner_data: None },
+        );
+        let builder = with_outputs(coinbase, over, NO_OUTPUTS);
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_refused(
+            result,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+            ShieldedActionCounts::ZERO.with_ironwood_actions(over),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn sapling_outputs_over_the_io_limit_are_refused() {
+        let over = SAPLING_BLOCK_IO_LIMIT + 1;
+        let builder = unfunded_builder(nu7_test_network(), NU7_TARGET_HEIGHT, NO_OUTPUTS, over);
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_refused(
+            result,
+            ShieldedBlockLimit::SaplingSpendsAndOutputs,
+            over,
+            ShieldedActionCounts::ZERO.with_sapling(NO_SPENDS, over),
+        );
+
+        // Exactly at the limit, the transaction is not refused for it.
+        let builder = unfunded_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            NO_OUTPUTS,
+            SAPLING_BLOCK_IO_LIMIT,
+        );
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_not_refused_for_the_limit(result);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn pools_together_over_the_global_budget_are_refused() {
+        // One more Sapling output than fills the budget: neither pool is over its own limit.
+        let builder = unfunded_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            BUDGET_TEST_IRONWOOD_OUTPUTS,
+            BUDGET_TEST_SAPLING_OUTPUTS + 1,
+        );
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_refused(
+            result,
+            ShieldedBlockLimit::GlobalShieldedBudget,
+            GLOBAL_SHIELDED_BUDGET + 1,
+            ShieldedActionCounts::ZERO
+                .with_ironwood_actions(BUDGET_TEST_IRONWOOD_OUTPUTS)
+                .with_sapling(NO_SPENDS, BUDGET_TEST_SAPLING_OUTPUTS + 1),
+        );
+
+        // Exactly filling the budget, the transaction is not refused for it.
+        let builder = unfunded_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            BUDGET_TEST_IRONWOOD_OUTPUTS,
+            BUDGET_TEST_SAPLING_OUTPUTS,
+        );
+
+        let result = builder.mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_not_refused_for_the_limit(result);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn limits_do_not_apply_before_nu7() {
+        let over = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1;
+        let params = nu6_3_test_network();
+        assert!(!params.is_nu_active(NetworkUpgrade::Nu7, PRE_NU7_TARGET_HEIGHT));
+
+        let result = unfunded_builder(params, PRE_NU7_TARGET_HEIGHT, over, NO_OUTPUTS).mock_build(
+            &TransparentSigningSet::new(),
+            &[],
+            &[],
+            UnwrapErr(SysRng),
+        );
+        assert_not_refused_for_the_limit(result);
+
+        let result = unfunded_builder(params, PRE_NU7_TARGET_HEIGHT, over, NO_OUTPUTS)
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_not_refused_for_the_limit(result);
+
+        let result = unfunded_deferred_builder(params, PRE_NU7_TARGET_HEIGHT, over)
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_not_refused_for_the_limit(result);
+
+        // Nor at the last height before NU7 activates, on a network where it does.
+        let params = nu7_test_network();
+        assert_eq!(
+            params.activation_height(NetworkUpgrade::Nu7),
+            Some(PRE_NU7_TARGET_HEIGHT + 1)
+        );
+
+        let result = unfunded_builder(params, PRE_NU7_TARGET_HEIGHT, over, NO_OUTPUTS).mock_build(
+            &TransparentSigningSet::new(),
+            &[],
+            &[],
+            UnwrapErr(SysRng),
+        );
+        assert_not_refused_for_the_limit(result);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn build_for_pczt_refuses_over_the_limit() {
+        let over = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1;
+        let refused_counts = ShieldedActionCounts::ZERO.with_ironwood_actions(over);
+
+        let result = unfunded_builder(nu7_test_network(), NU7_TARGET_HEIGHT, over, NO_OUTPUTS)
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_refused(
+            result,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+            refused_counts,
+        );
+
+        let result = unfunded_deferred_builder(nu7_test_network(), NU7_TARGET_HEIGHT, over)
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_refused(
+            result,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+            refused_counts,
+        );
+
+        // Exactly at the limit, neither is refused for it.
+        let result = unfunded_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+            NO_OUTPUTS,
+        )
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_not_refused_for_the_limit(result);
+
+        let result = unfunded_deferred_builder(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+        )
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+        assert_not_refused_for_the_limit(result);
     }
 
     #[cfg(all(feature = "circuits", feature = "std"))]
