@@ -23,6 +23,7 @@ use {
     zcash_protocol::{
         consensus::BranchId,
         value::{ZatBalance, Zatoshis},
+        zip218::ShieldedActionCounts,
     },
     zcash_script::script,
 };
@@ -222,6 +223,118 @@ fn tx_read_write() {
     let mut encoded = Vec::with_capacity(data.len());
     tx.write(&mut encoded).unwrap();
     assert_eq!(&data[..], &encoded[..]);
+}
+
+/// The JoinSplits in the transaction of the `tx_read_write` vector, which has no Sapling spends
+/// or outputs.
+#[cfg(test)]
+const TX_READ_WRITE_JOINSPLITS: usize = 1;
+
+/// The lock time of the transactions that the counting tests construct; it does not affect their
+/// counts.
+#[cfg(test)]
+const COUNTED_LOCK_TIME: u32 = 0;
+
+/// The expiry height of the transactions that the counting tests construct; it does not affect
+/// their counts.
+#[cfg(test)]
+const COUNTED_EXPIRY_HEIGHT: u32 = 1;
+
+/// The Orchard actions in the transaction that `shielded_action_counts_cover_every_pool` counts.
+#[cfg(test)]
+const COUNTED_ORCHARD_ACTIONS: usize = 3;
+
+/// The Ironwood actions in the same transaction: a different number from the Orchard actions,
+/// so that exchanging the two is detected.
+#[cfg(test)]
+const COUNTED_IRONWOOD_ACTIONS: usize = 5;
+
+/// Returns a V6 transaction with the given bundles and no transparent bundle.
+#[cfg(test)]
+fn counted_v6_tx_data(
+    sapling_bundle: Option<sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
+    orchard_bundle: Option<orchard::Bundle<orchard::bundle::Authorized, ZatBalance>>,
+    ironwood_bundle: Option<orchard::Bundle<orchard::bundle::Authorized, ZatBalance>>,
+) -> TransactionData<crate::transaction::Authorized> {
+    TransactionData::from_parts_v6(
+        BranchId::Nu7,
+        COUNTED_LOCK_TIME,
+        COUNTED_EXPIRY_HEIGHT.into(),
+        None,
+        sapling_bundle,
+        orchard_bundle,
+        ironwood_bundle,
+    )
+}
+
+/// Returns an Orchard-protocol bundle of the given version with the given number of actions.
+#[cfg(test)]
+fn orchard_bundle_with_actions(
+    runner: &mut proptest::test_runner::TestRunner,
+    actions: usize,
+    bundle_version: orchard::bundle::BundleVersion,
+) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
+    let tree = crate::transaction::components::orchard::testing::arb_bundle(actions)
+        .new_tree(runner)
+        .unwrap();
+    crate::transaction::components::orchard::testing::rebuild_with_version(
+        proptest::strategy::ValueTree::current(&tree),
+        bundle_version,
+    )
+}
+
+#[test]
+fn shielded_action_counts_count_sprout_joinsplits() {
+    let tx = Transaction::read(
+        &self::data::tx_read_write::TX_READ_WRITE[..],
+        BranchId::Canopy,
+    )
+    .unwrap();
+
+    assert_eq!(
+        tx.shielded_action_counts(),
+        ShieldedActionCounts::ZERO.with_sprout_joinsplits(TX_READ_WRITE_JOINSPLITS)
+    );
+}
+
+#[test]
+fn shielded_action_counts_cover_every_pool() {
+    let mut runner = proptest::test_runner::TestRunner::default();
+
+    // A Sapling bundle without spends tells its spends from its outputs.
+    let output_only = test_sapling_output_only_bundle(&mut runner);
+    let outputs = output_only.shielded_outputs().len();
+    let tx_data = counted_v6_tx_data(
+        Some(output_only),
+        Some(orchard_bundle_with_actions(
+            &mut runner,
+            COUNTED_ORCHARD_ACTIONS,
+            orchard::bundle::BundleVersion::orchard_v3(),
+        )),
+        Some(orchard_bundle_with_actions(
+            &mut runner,
+            COUNTED_IRONWOOD_ACTIONS,
+            orchard::bundle::BundleVersion::ironwood_v3(),
+        )),
+    );
+    assert_eq!(
+        tx_data.shielded_action_counts(),
+        ShieldedActionCounts::ZERO
+            .with_orchard_actions(COUNTED_ORCHARD_ACTIONS)
+            .with_ironwood_actions(COUNTED_IRONWOOD_ACTIONS)
+            .with_sapling(0, outputs)
+    );
+
+    let with_spends = test_sapling_bundle(&mut runner);
+    let (spends, outputs) = (
+        with_spends.shielded_spends().len(),
+        with_spends.shielded_outputs().len(),
+    );
+    let tx_data = counted_v6_tx_data(Some(with_spends), None, None);
+    assert_eq!(
+        tx_data.shielded_action_counts(),
+        ShieldedActionCounts::ZERO.with_sapling(spends, outputs)
+    );
 }
 
 #[test]

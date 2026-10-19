@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::TransactionData::shielded_action_counts`
+
 ### Changed
 - MSRV is now 1.89
 

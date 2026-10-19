@@ -24,6 +24,7 @@ use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
     value::{BalanceError, ZatBalance, Zatoshis},
+    zip218::ShieldedActionCounts,
 };
 // `valid_in_branch` matches on every branch by bare name.
 use zcash_protocol::consensus::BranchId::*;
@@ -660,6 +661,39 @@ impl<A: Authorization> TransactionData<A> {
 
     pub fn ironwood_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.ironwood_bundle.as_ref()
+    }
+
+    /// Returns the numbers of shielded components in this transaction, as counted against the
+    /// [ZIP 218] limits: the actions of its Orchard and Ironwood bundles, the spends and
+    /// outputs of its Sapling bundle, and the JoinSplits of its Sprout bundle. A bundle that
+    /// the transaction lacks counts as zero components.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    pub fn shielded_action_counts(&self) -> ShieldedActionCounts {
+        ShieldedActionCounts::ZERO
+            .with_orchard_actions(
+                self.orchard_bundle
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.actions().len()),
+            )
+            .with_ironwood_actions(
+                self.ironwood_bundle
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.actions().len()),
+            )
+            .with_sapling(
+                self.sapling_bundle
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.shielded_spends().len()),
+                self.sapling_bundle
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.shielded_outputs().len()),
+            )
+            .with_sprout_joinsplits(
+                self.sprout_bundle
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.joinsplits.len()),
+            )
     }
 
     /// Returns the configured experimental ZIP 233 amount, in zatoshis.

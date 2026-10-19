@@ -13,6 +13,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
+    zip218::ShieldedActionCounts,
 };
 use zcash_script::opcode::PushValue;
 
@@ -448,6 +449,11 @@ fn orchard_action_count(
     bundle_type.num_actions(flags, num_spends, num_outputs)
 }
 
+/// Returns `true` if any spend, output, or change output has been added to `builder`.
+fn orchard_builder_in_use(builder: &orchard::builder::Builder) -> bool {
+    !builder.spends().is_empty() || !builder.outputs().is_empty() || !builder.changes().is_empty()
+}
+
 /// A builder for V6 and later transactions constructed as PCZTs with their
 /// Orchard-family anchors DEFERRED to proving time, per [ZIP 374].
 ///
@@ -657,6 +663,37 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
             .map_err(FeeError::FeeRule)
     }
 
+    /// Returns the numbers of shielded components that [`Self::build_for_pczt`] will produce,
+    /// including the padding that the bundle types add. A pool to which nothing has been added
+    /// produces no bundle, and so no components; this builder constructs no Sapling or Sprout
+    /// components.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a bundle type cannot represent the spends and outputs added so far.
+    #[allow(dead_code)]
+    pub(crate) fn shielded_action_counts(&self) -> Result<ShieldedActionCounts, &'static str> {
+        let orchard_actions = if orchard_builder_in_use(&self.orchard_builder) {
+            orchard_action_count(&self.orchard_builder, false, self.orchard_bundle_version)?
+        } else {
+            0
+        };
+
+        let ironwood_actions = if orchard_builder_in_use(&self.ironwood_builder) {
+            orchard_action_count(
+                &self.ironwood_builder,
+                false,
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )?
+        } else {
+            0
+        };
+
+        Ok(ShieldedActionCounts::ZERO
+            .with_orchard_actions(orchard_actions)
+            .with_ironwood_actions(ironwood_actions))
+    }
+
     /// Builds the added spends and outputs into the parts of an unproven PCZT whose
     /// anchors and real-spend witnesses are ABSENT, deferred to proving time: pass the
     /// result to the PCZT Creator (`build_from_parts`), then finalize, sign, and — at
@@ -667,12 +704,6 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
         mut rng: R,
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
-        fn in_use(builder: &orchard::builder::Builder) -> bool {
-            !builder.spends().is_empty()
-                || !builder.outputs().is_empty()
-                || !builder.changes().is_empty()
-        }
-
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
 
         // After fees are accounted for, the value balance of the transaction must be zero.
@@ -698,7 +729,7 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
             Ordering::Equal => (),
         };
 
-        let (orchard_bundle, orchard_meta) = if in_use(&self.orchard_builder) {
+        let (orchard_bundle, orchard_meta) = if orchard_builder_in_use(&self.orchard_builder) {
             let (bundle, meta) = self
                 .orchard_builder
                 .build_for_pczt(&mut rng)
@@ -707,7 +738,7 @@ impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
         } else {
             (None, orchard::builder::BundleMetadata::empty())
         };
-        let (ironwood_bundle, ironwood_meta) = if in_use(&self.ironwood_builder) {
+        let (ironwood_bundle, ironwood_meta) = if orchard_builder_in_use(&self.ironwood_builder) {
             let (bundle, meta) = self
                 .ironwood_builder
                 .build_for_pczt(&mut rng)
@@ -871,6 +902,55 @@ impl<P, U> Builder<P, U> {
         self.ironwood_builder.as_ref().is_some_and(|b| {
             !b.spends().is_empty() || !b.outputs().is_empty() || !b.changes().is_empty()
         })
+    }
+
+    /// Returns the numbers of shielded components in the transaction or PCZT that this builder
+    /// will build, including the padding and dummy components that its bundle types add. A
+    /// builder constructs no Sprout components. Under a proposed transaction version without an
+    /// Ironwood bundle, [`Self::build_for_pczt`] omits an Ironwood bundle that is required but
+    /// empty, which this count still includes (an over-count).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a bundle type cannot represent the spends and outputs added so far.
+    #[allow(dead_code)]
+    pub(crate) fn shielded_action_counts(&self) -> Result<ShieldedActionCounts, &'static str> {
+        let (sapling_spends, sapling_outputs) = match self
+            .sapling_builder
+            .as_ref()
+            .zip(self.build_config.sapling_builder_config())
+        {
+            Some((builder, (bundle_type, _))) => {
+                let requested_spends = builder.inputs().len();
+                (
+                    bundle_type.num_spends(requested_spends)?,
+                    bundle_type.num_outputs(requested_spends, builder.outputs().len())?,
+                )
+            }
+            None => (0, 0),
+        };
+
+        let orchard_actions = self.orchard_builder.as_ref().map_or(Ok(0), |builder| {
+            orchard_action_count(
+                builder,
+                self.build_config.is_coinbase(),
+                self.orchard_bundle_version
+                    .expect("orchard builder present implies bundle version"),
+            )
+        })?;
+
+        let ironwood_actions = self.ironwood_builder.as_ref().map_or(Ok(0), |builder| {
+            orchard_action_count(
+                builder,
+                self.build_config.is_coinbase(),
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )
+        })?;
+
+        Ok(ShieldedActionCounts::ZERO
+            .with_sapling(sapling_spends, sapling_outputs)
+            .with_orchard_actions(orchard_actions)
+            .with_ironwood_actions(ironwood_actions))
     }
 
     /// Checks that the given version supports all features required by the inputs and
@@ -1938,10 +2018,10 @@ mod tests {
 
     #[cfg(feature = "circuits")]
     use {
-        super::{Builder, Error},
+        super::{Builder, DeferredPcztBuilder, Error, PcztParts},
         crate::transaction::{
             builder::{BuildConfig, BundlePadding},
-            fees::zip317::MINIMUM_FEE,
+            fees::zip317::{self, MINIMUM_FEE},
         },
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
@@ -1955,6 +2035,7 @@ mod tests {
             consensus::{BlockHeight, NetworkUpgrade, Parameters, TEST_NETWORK},
             memo::MemoBytes,
             value::{BalanceError, ZatBalance, Zatoshis},
+            zip218::ShieldedActionCounts,
         },
     };
 
@@ -3166,6 +3247,649 @@ mod tests {
                 Err(Error::TargetIncompatible(BranchId::Nu7, _, None))
             );
         }
+    }
+
+    /// The target height of the counting tests' builds on `nu6_3_test_network`, where NU7 is
+    /// not active.
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    const PRE_NU7_TARGET_HEIGHT: BlockHeight = BlockHeight::from_u32(10);
+
+    /// The target height of the counting tests' builds on `nu7_test_network`, where NU7 is
+    /// active.
+    #[cfg(feature = "circuits")]
+    const NU7_TARGET_HEIGHT: BlockHeight = BlockHeight::from_u32(11);
+
+    /// The value of each output that the counting tests request.
+    #[cfg(feature = "circuits")]
+    const COUNTED_OUTPUT_VALUE: Zatoshis = Zatoshis::const_from_u64(100_000);
+
+    /// The Ironwood outputs that the Ironwood counting test requests.
+    #[cfg(feature = "circuits")]
+    const COUNTED_IRONWOOD_OUTPUTS: usize = 3;
+
+    /// The outputs per shielded pool that the coinbase counting test requests; a coinbase
+    /// bundle is not padded, so it holds exactly this many.
+    #[cfg(feature = "circuits")]
+    const COUNTED_COINBASE_OUTPUTS: usize = 1;
+
+    /// The dummy actions that the counting tests require a bundle of an otherwise unused pool to
+    /// hold.
+    #[cfg(feature = "circuits")]
+    const COUNTED_DUMMY_ACTIONS: u8 = 3;
+
+    /// The outputs of a Sapling bundle that has any component: a smaller request is padded
+    /// with dummy outputs up to this many.
+    #[cfg(feature = "circuits")]
+    const SAPLING_PADDED_OUTPUTS: usize = 2;
+
+    /// The Sapling spends that the Sapling spend counting test requests: the one note it spends.
+    #[cfg(feature = "circuits")]
+    const COUNTED_SAPLING_SPENDS: usize = 1;
+
+    /// The Sapling outputs that the Sapling spend counting test requests in its second case:
+    /// more than a Sapling bundle is padded to, so that it holds exactly this many.
+    #[cfg(feature = "circuits")]
+    const COUNTED_SAPLING_OUTPUTS: usize = 3;
+
+    /// The spends that a shielded-component test requests of a pool to which it adds none.
+    #[cfg(feature = "circuits")]
+    const NO_SPENDS: usize = 0;
+
+    /// The outputs that a shielded-component test requests of a pool to which it adds none.
+    #[cfg(feature = "circuits")]
+    const NO_OUTPUTS: usize = 0;
+
+    /// The actions of a default-padded Orchard-protocol bundle that has any component: a
+    /// smaller request is padded with dummy actions up to this many.
+    #[cfg(feature = "circuits")]
+    const DEFAULT_PADDED_ACTIONS: usize = 2;
+
+    /// The actions of an unpadded Orchard-protocol bundle that requests one spend or one
+    /// output.
+    #[cfg(feature = "circuits")]
+    const UNPADDED_SINGLE_ACTIONS: usize = 1;
+
+    /// The actions of an unpadded Orchard bundle that requests one spend and one output: from
+    /// NU6.3 the Orchard pool disables cross-address transfers, so they do not share an action.
+    #[cfg(feature = "circuits")]
+    const ORCHARD_SPEND_AND_CHANGE_ACTIONS: usize = 2;
+
+    /// The transparent address that the counting tests pay to.
+    #[cfg(feature = "circuits")]
+    const COUNTED_TRANSPARENT_RECIPIENT: TransparentAddress =
+        TransparentAddress::PublicKeyHash([0; 20]);
+
+    /// The seed of the key that owns the notes that the counting tests spend.
+    #[cfg(feature = "circuits")]
+    const COUNTED_NOTE_OWNER_SEED: [u8; 32] = [7; 32];
+
+    /// The `rho` of the notes that the counting tests spend.
+    #[cfg(feature = "circuits")]
+    const COUNTED_NOTE_RHO: [u8; 32] = [1; 32];
+
+    /// The size in bytes of the random seed of an Orchard-protocol note.
+    #[cfg(feature = "circuits")]
+    const COUNTED_NOTE_RSEED_SIZE: usize = 32;
+
+    /// The bytes of the hash that the counting tests use for every sibling in a Merkle path.
+    #[cfg(feature = "circuits")]
+    const COUNTED_MERKLE_SIBLING: [u8; 32] = [0; 32];
+
+    /// The seed of the transparent account that funds the counting tests' transparent inputs.
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    const COUNTED_TRANSPARENT_SEED: [u8; 32] = [0; 32];
+
+    /// Test helper: returns the full viewing key of the counting tests' note owner.
+    #[cfg(feature = "circuits")]
+    fn counted_note_owner() -> orchard::keys::FullViewingKey {
+        orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes(COUNTED_NOTE_OWNER_SEED).unwrap(),
+        )
+    }
+
+    /// Test helper: returns the Sapling address that the shielded-component tests pay to.
+    #[cfg(feature = "circuits")]
+    fn counted_sapling_recipient() -> sapling::PaymentAddress {
+        ExtendedSpendingKey::master(&[])
+            .expect("the derivation path yields a valid key")
+            .to_diversifiable_full_viewing_key()
+            .default_address()
+            .1
+    }
+
+    /// Test helper: returns the full viewing key of the counting tests' note owner, a note of
+    /// the given `version` and `value` that it owns, a Merkle path to the note, and the anchor
+    /// that the path roots to.
+    #[cfg(feature = "circuits")]
+    fn counted_note(
+        version: orchard::note::NoteVersion,
+        value: Zatoshis,
+    ) -> (
+        orchard::keys::FullViewingKey,
+        orchard::Note,
+        orchard::tree::MerklePath,
+        orchard::Anchor,
+    ) {
+        let fvk = counted_note_owner();
+        let recipient = fvk.address_at(0u32, orchard::keys::Scope::External);
+        let rho = orchard::note::Rho::from_bytes(&COUNTED_NOTE_RHO).unwrap();
+        let rseed = (u8::MIN..=u8::MAX)
+            .find_map(|b| {
+                orchard::note::RandomSeed::from_bytes([b; COUNTED_NOTE_RSEED_SIZE], &rho)
+                    .into_option()
+            })
+            .expect("at least one test rseed is valid");
+        let note = orchard::Note::from_parts(
+            recipient,
+            orchard::value::NoteValue::from_raw(value.into()),
+            rho,
+            rseed,
+            version,
+        )
+        .unwrap();
+        let sibling =
+            orchard::tree::MerkleHashOrchard::from_bytes(&COUNTED_MERKLE_SIBLING).unwrap();
+        let merkle_path = orchard::tree::MerklePath::from_parts(
+            0,
+            [sibling; orchard::NOTE_COMMITMENT_TREE_DEPTH],
+        );
+        let anchor = merkle_path.root(note.commitment().into());
+
+        (fvk, note, merkle_path, anchor)
+    }
+
+    /// Test helper: counts the shielded components in the parts of a PCZT.
+    #[cfg(feature = "circuits")]
+    fn pczt_counts<P: Parameters>(parts: &PcztParts<P>) -> ShieldedActionCounts {
+        ShieldedActionCounts::ZERO
+            .with_orchard_actions(parts.orchard.as_ref().map_or(0, |b| b.actions().len()))
+            .with_ironwood_actions(parts.ironwood.as_ref().map_or(0, |b| b.actions().len()))
+            .with_sapling(
+                parts.sapling.as_ref().map_or(0, |b| b.spends().len()),
+                parts.sapling.as_ref().map_or(0, |b| b.outputs().len()),
+            )
+    }
+
+    #[test]
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    fn built_counts_match_the_builders_prediction_for_sapling() {
+        let mut transparent_signing_set = TransparentSigningSet::new();
+        let tsk =
+            AccountPrivKey::from_seed(&TEST_NETWORK, &COUNTED_TRANSPARENT_SEED, AccountId::ZERO)
+                .unwrap();
+        let sk = tsk
+            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+            .unwrap();
+        let pubkey = transparent_signing_set.add_key(sk);
+        let coin = |value| {
+            TxOut::new(
+                value,
+                tsk.to_account_pubkey()
+                    .derive_external_ivk()
+                    .unwrap()
+                    .derive_address(NonHardenedChildIndex::ZERO)
+                    .unwrap()
+                    .script()
+                    .into(),
+            )
+        };
+
+        // One transparent coin funds one Sapling output.
+        let builder_funded_with = |coin_value| {
+            let mut builder = Builder::new(
+                nu6_3_test_network(),
+                PRE_NU7_TARGET_HEIGHT,
+                BuildConfig::Standard {
+                    sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                    orchard_anchor: None,
+                    ironwood_anchor: None,
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            );
+            builder
+                .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), coin(coin_value))
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    None,
+                    counted_sapling_recipient(),
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+        };
+        // The fee depends on which components the builder holds, not on their values.
+        let fee = builder_funded_with(COUNTED_OUTPUT_VALUE)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with((COUNTED_OUTPUT_VALUE + fee).unwrap());
+
+        // The requested output is padded to the Sapling minimum; no spend is added.
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO.with_sapling(NO_SPENDS, SAPLING_PADDED_OUTPUTS)
+        );
+
+        let result = builder
+            .mock_build(&transparent_signing_set, &[], &[], UnwrapErr(SysRng))
+            .unwrap();
+        assert_eq!(result.transaction().shielded_action_counts(), predicted);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn built_counts_match_the_builders_prediction_for_a_sapling_spend() {
+        let extsk =
+            ExtendedSpendingKey::master(&[]).expect("the derivation path yields a valid key");
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let recipient = dfvk.default_address().1;
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+
+        // One Sapling note funds one transparent output and the given number of Sapling outputs.
+        let builder_funded_with = |note_value: Zatoshis, sapling_outputs: usize| {
+            let mut rng = UnwrapErr(SysRng);
+            let note = recipient.create_note(
+                sapling::value::NoteValue::from_raw(note_value.into()),
+                Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+            );
+            let mut tree = sapling::CommitmentTree::empty();
+            tree.append(Node::from_cmu(&note.cmu())).unwrap();
+            let witness = sapling::IncrementalWitness::from_tree(tree).unwrap();
+
+            let mut builder = Builder::new(
+                TEST_NETWORK,
+                tx_height,
+                BuildConfig::Standard {
+                    sapling_anchor: Some(witness.root().into()),
+                    orchard_anchor: None,
+                    ironwood_anchor: None,
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            );
+            builder
+                .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note, witness.path().unwrap())
+                .unwrap();
+            builder
+                .add_transparent_output(&COUNTED_TRANSPARENT_RECIPIENT, COUNTED_OUTPUT_VALUE)
+                .unwrap();
+            for _ in 0..sapling_outputs {
+                builder
+                    .add_sapling_output::<Infallible>(
+                        None,
+                        recipient,
+                        COUNTED_OUTPUT_VALUE,
+                        MemoBytes::empty(),
+                    )
+                    .unwrap();
+            }
+            builder
+        };
+
+        // Funds, predicts and builds a transaction that spends the note and requests the given
+        // number of Sapling outputs.
+        let check_counts = |sapling_outputs: usize, expected: ShieldedActionCounts| {
+            let shielded_outputs_value = (COUNTED_OUTPUT_VALUE * sapling_outputs).unwrap();
+            let outputs_value = (shielded_outputs_value + COUNTED_OUTPUT_VALUE).unwrap();
+            // The fee depends on which components the builder holds, not on their values.
+            let fee = builder_funded_with(outputs_value, sapling_outputs)
+                .get_fee(&zip317::FeeRule::standard())
+                .unwrap();
+            let builder = builder_funded_with((outputs_value + fee).unwrap(), sapling_outputs);
+
+            let predicted = builder.shielded_action_counts().unwrap();
+            assert_eq!(predicted, expected);
+
+            let result = builder
+                .mock_build(
+                    &TransparentSigningSet::new(),
+                    core::slice::from_ref(&extsk),
+                    &[],
+                    UnwrapErr(SysRng),
+                )
+                .unwrap();
+            assert_eq!(result.transaction().shielded_action_counts(), predicted);
+        };
+
+        // A spend forces the bundle to hold the minimum number of outputs even when none is
+        // requested (unshielding N notes builds N spends and the padded outputs).
+        check_counts(
+            NO_OUTPUTS,
+            ShieldedActionCounts::ZERO.with_sapling(COUNTED_SAPLING_SPENDS, SAPLING_PADDED_OUTPUTS),
+        );
+        // Outputs beyond the minimum are not padded.
+        check_counts(
+            COUNTED_SAPLING_OUTPUTS,
+            ShieldedActionCounts::ZERO
+                .with_sapling(COUNTED_SAPLING_SPENDS, COUNTED_SAPLING_OUTPUTS),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn built_counts_match_the_builders_prediction_for_ironwood() {
+        // One Ironwood spend funds the outputs.
+        let builder_funded_with = |note_value| {
+            let (fvk, note, merkle_path, anchor) =
+                counted_note(orchard::note::NoteVersion::V3, note_value);
+            let recipient = fvk.address_at(0u32, orchard::keys::Scope::External);
+            let mut builder = Builder::new(
+                nu7_test_network(),
+                NU7_TARGET_HEIGHT,
+                BuildConfig::Standard {
+                    sapling_anchor: None,
+                    orchard_anchor: None,
+                    ironwood_anchor: Some(anchor),
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
+                },
+            );
+            builder
+                .add_ironwood_spend::<Infallible>(fvk, note, merkle_path)
+                .unwrap();
+            for _ in 0..COUNTED_IRONWOOD_OUTPUTS {
+                builder
+                    .add_ironwood_output::<Infallible>(
+                        None,
+                        recipient,
+                        COUNTED_OUTPUT_VALUE,
+                        MemoBytes::empty(),
+                    )
+                    .unwrap();
+            }
+            builder
+        };
+        let outputs_value = (COUNTED_OUTPUT_VALUE * COUNTED_IRONWOOD_OUTPUTS).unwrap();
+        // The fee depends on which components the builder holds, not on their values.
+        let fee = builder_funded_with(outputs_value)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with((outputs_value + fee).unwrap());
+
+        // Ironwood permits cross-address transfers, so the spend shares an action with one of
+        // the outputs: the bundle holds one action per output.
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO.with_ironwood_actions(COUNTED_IRONWOOD_OUTPUTS)
+        );
+
+        let ask = orchard::keys::SpendAuthorizingKey::from(
+            &orchard::keys::SpendingKey::from_bytes(COUNTED_NOTE_OWNER_SEED).unwrap(),
+        );
+        let result = builder
+            .mock_build(
+                &TransparentSigningSet::new(),
+                &[],
+                &[ask],
+                UnwrapErr(SysRng),
+            )
+            .unwrap();
+        assert_eq!(result.transaction().shielded_action_counts(), predicted);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn built_counts_match_the_builders_prediction_for_a_coinbase() {
+        let sapling_recipient = counted_sapling_recipient();
+        let ironwood_recipient =
+            counted_note_owner().address_at(0u32, orchard::keys::Scope::External);
+
+        let mut builder = Builder::new(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            BuildConfig::Coinbase { miner_data: None },
+        );
+        for _ in 0..COUNTED_COINBASE_OUTPUTS {
+            builder
+                .add_sapling_output::<Infallible>(
+                    None,
+                    sapling_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_ironwood_output::<Infallible>(
+                    None,
+                    ironwood_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+        }
+
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO
+                .with_sapling(NO_SPENDS, COUNTED_COINBASE_OUTPUTS)
+                .with_ironwood_actions(COUNTED_COINBASE_OUTPUTS)
+        );
+
+        let result = builder
+            .mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng))
+            .unwrap();
+        assert_eq!(result.transaction().shielded_action_counts(), predicted);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn pczt_counts_match_the_builders_prediction() {
+        // One Orchard spend funds an Orchard change output and an Ironwood output.
+        let builder_funded_with = |note_value| {
+            let (fvk, note, merkle_path, anchor) =
+                counted_note(orchard::note::NoteVersion::V2, note_value);
+            let recipient = fvk.address_at(0u32, orchard::keys::Scope::External);
+            let change_recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+            let mut builder = Builder::new(
+                nu7_test_network(),
+                NU7_TARGET_HEIGHT,
+                BuildConfig::Standard {
+                    sapling_anchor: None,
+                    orchard_anchor: Some(anchor),
+                    ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                    orchard_padding: BundlePadding::UNPADDED,
+                    ironwood_padding: BundlePadding::UNPADDED,
+                },
+            );
+            builder
+                .add_orchard_spend::<Infallible>(fvk.clone(), note, merkle_path)
+                .unwrap();
+            builder
+                .add_orchard_change_output::<Infallible>(
+                    fvk,
+                    None,
+                    change_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_ironwood_output::<Infallible>(
+                    None,
+                    recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+        };
+        let outputs_value = (COUNTED_OUTPUT_VALUE + COUNTED_OUTPUT_VALUE).unwrap();
+        // The fee depends on which components the builder holds, not on their values.
+        let fee = builder_funded_with(outputs_value)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with((outputs_value + fee).unwrap());
+
+        // The Orchard pool disables cross-address transfers, so its spend and its output do not
+        // share an action; the Ironwood output is not padded.
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO
+                .with_orchard_actions(ORCHARD_SPEND_AND_CHANGE_ACTIONS)
+                .with_ironwood_actions(UNPADDED_SINGLE_ACTIONS)
+        );
+
+        let result = builder
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+            .unwrap();
+        assert_eq!(pczt_counts(&result.pczt_parts), predicted);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn pczt_counts_include_a_required_bundle_of_dummy_actions() {
+        // An Orchard spend pays only the fee. The Ironwood pool holds nothing, but it is required
+        // to produce a bundle, which then consists of dummy actions only.
+        let builder_funded_with = |note_value| {
+            let (fvk, note, merkle_path, anchor) =
+                counted_note(orchard::note::NoteVersion::V2, note_value);
+            let mut builder = Builder::new(
+                nu7_test_network(),
+                NU7_TARGET_HEIGHT,
+                BuildConfig::Standard {
+                    sapling_anchor: None,
+                    orchard_anchor: Some(anchor),
+                    ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                    orchard_padding: BundlePadding::UNPADDED,
+                    ironwood_padding: BundlePadding {
+                        bundle_required: true,
+                        pad_to_minimum: Some(COUNTED_DUMMY_ACTIONS),
+                    },
+                },
+            );
+            builder
+                .add_orchard_spend::<Infallible>(fvk, note, merkle_path)
+                .unwrap();
+            builder
+        };
+        // The fee depends on which components the builder holds, not on their values.
+        let fee = builder_funded_with(COUNTED_OUTPUT_VALUE)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with(fee);
+
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO
+                .with_orchard_actions(UNPADDED_SINGLE_ACTIONS)
+                .with_ironwood_actions(usize::from(COUNTED_DUMMY_ACTIONS))
+        );
+
+        let result = builder
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+            .unwrap();
+        assert_eq!(pczt_counts(&result.pczt_parts), predicted);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn deferred_pczt_counts_match_the_builders_prediction() {
+        // One Orchard spend funds an Orchard change output and an Ironwood output.
+        let builder_funded_with = |note_value| {
+            let (fvk, note, _, _) = counted_note(orchard::note::NoteVersion::V2, note_value);
+            let recipient = fvk.address_at(0u32, orchard::keys::Scope::External);
+            let change_recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+            let mut builder = DeferredPcztBuilder::new::<zip317::FeeError>(
+                nu7_test_network(),
+                NU7_TARGET_HEIGHT,
+                BundlePadding::UNPADDED,
+                BundlePadding::DEFAULT,
+            )
+            .unwrap();
+            builder
+                .add_orchard_spend::<zip317::FeeError>(fvk.clone(), note)
+                .unwrap();
+            builder
+                .add_orchard_change_output::<zip317::FeeError>(
+                    fvk,
+                    None,
+                    change_recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_ironwood_output::<zip317::FeeError>(
+                    None,
+                    recipient,
+                    COUNTED_OUTPUT_VALUE,
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+        };
+        let outputs_value = (COUNTED_OUTPUT_VALUE + COUNTED_OUTPUT_VALUE).unwrap();
+        // The fee depends on which components the builder holds, not on their values.
+        let fee = builder_funded_with(outputs_value)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with((outputs_value + fee).unwrap());
+
+        // The Orchard pool disables cross-address transfers, so its spend and its output do not
+        // share an action; the Ironwood output is padded to the default minimum.
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO
+                .with_orchard_actions(ORCHARD_SPEND_AND_CHANGE_ACTIONS)
+                .with_ironwood_actions(DEFAULT_PADDED_ACTIONS)
+        );
+
+        let result = builder
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+            .unwrap();
+        assert_eq!(pczt_counts(&result.pczt_parts), predicted);
+    }
+
+    /// Records current behaviour, with which `get_fee` disagrees: it prices the required padding.
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn deferred_pczt_counts_an_unused_pool_as_absent_even_when_its_bundle_is_required() {
+        // An Orchard spend alone; the Ironwood pool is required to produce a bundle but holds
+        // nothing.
+        let builder_funded_with = |note_value| {
+            let (fvk, note, _, _) = counted_note(orchard::note::NoteVersion::V2, note_value);
+            let mut builder = DeferredPcztBuilder::new::<zip317::FeeError>(
+                nu7_test_network(),
+                NU7_TARGET_HEIGHT,
+                BundlePadding::DEFAULT,
+                BundlePadding {
+                    bundle_required: true,
+                    pad_to_minimum: None,
+                },
+            )
+            .unwrap();
+            builder
+                .add_orchard_spend::<zip317::FeeError>(fvk, note)
+                .unwrap();
+            builder
+        };
+        // The note pays the fee and nothing else.
+        let fee = builder_funded_with(COUNTED_OUTPUT_VALUE)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = builder_funded_with(fee);
+
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO.with_orchard_actions(DEFAULT_PADDED_ACTIONS)
+        );
+
+        let result = builder
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+            .unwrap();
+        assert!(result.pczt_parts.ironwood.is_none());
+        assert_eq!(pczt_counts(&result.pczt_parts), predicted);
     }
 
     #[cfg(all(feature = "circuits", feature = "std"))]
