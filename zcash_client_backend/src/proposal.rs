@@ -607,11 +607,12 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// a Zcash block may carry, returning [`ProposalError::TransactionTooLarge`] for
     /// the first step that does not.
     ///
-    /// This is called by the public `propose_transfer` / `propose_shielding` wrappers
-    /// and the `create_proposed_transactions` / `create_pczt_from_proposal` build
-    /// entry points, so it protects all input selectors (including third-party ones)
-    /// and all build paths. It is not called during proposal deserialization, so
-    /// previously-persisted proposals remain recoverable.
+    /// This is called by the public `propose_transfer`, `propose_shielding` and
+    /// `propose_send_max_transfer` wrappers and the `create_proposed_transactions` /
+    /// `create_pczt_from_proposal` build entry points, so it protects all input
+    /// selectors (including third-party ones) and all build paths. It is not called
+    /// during proposal deserialization, so previously-persisted proposals remain
+    /// recoverable.
     pub fn check_transaction_size(&self) -> Result<(), ProposalError> {
         let steps = self.steps();
         for step in steps.iter() {

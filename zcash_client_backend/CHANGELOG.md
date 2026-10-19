@@ -49,6 +49,9 @@ workspace.
   `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
   P2PKH address derived from the account's transparent key. An account whose
   transparent change is a P2SH output cannot pay a TEX address.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now returns
+  `zcash_client_backend::proposal::ProposalError::TransactionTooLarge` when the
+  proposed transaction cannot fit in a block.
 
 ## [0.25.0-pre.2] - 2026-10-13
 
