@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip218` module
+
 ### Changed
 - MSRV is now 1.89
 
