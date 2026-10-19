@@ -1193,13 +1193,7 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     assert_eq!(input_notes.len(), 2);
     let input_pools = input_notes
         .iter()
-        .map(|n| match n.note() {
-            Note::Sapling(_) => ShieldedPool::Sapling,
-            Note::Orchard { pool, .. } => match pool {
-                ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
-                ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
-            },
-        })
+        .map(|n| n.note().pool())
         .collect::<BTreeSet<_>>();
     assert_eq!(
         input_pools,
@@ -1212,6 +1206,173 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     let (h, _) = st.generate_next_block_including(txids[0]);
     st.scan_cached_blocks(h, 1);
     assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// The value of the `P0` note of the across-pools dust shortfall scenario, which covers the
+/// payment alone.
+#[cfg(feature = "orchard")]
+const DUST_SHORTFALL_P0_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(60_000);
+/// The payment of the across-pools dust shortfall scenario. The `P0` note alone would leave
+/// change of 3000 zatoshis, below the dust threshold of one marginal fee, so the `P1` note is
+/// drawn on as well: two bundles, each padded to two logical actions.
+#[cfg(feature = "orchard")]
+const DUST_SHORTFALL_PAYMENT: Zatoshis = Zatoshis::const_from_u64(47_000);
+/// A `P1` note that covers its bundle's share of the two-bundle fee, so that both notes
+/// together fund the payment.
+#[cfg(feature = "orchard")]
+const DUST_SHORTFALL_P1_NOTE_COVERING_FEE: Zatoshis = Zatoshis::const_from_u64(20_000);
+/// A `P1` note that falls short of its bundle's share of the two-bundle fee, so that both
+/// notes together fall 1000 zatoshis short of the payment plus that fee.
+#[cfg(feature = "orchard")]
+const DUST_SHORTFALL_P1_NOTE_BELOW_FEE: Zatoshis = Zatoshis::const_from_u64(6_000);
+
+/// The ZIP 317 fee of a transaction spending from two shielded pools, each bundle padded to
+/// two logical actions.
+#[cfg(feature = "orchard")]
+fn two_bundle_fee() -> Zatoshis {
+    const BUNDLES: u64 = 2;
+    const PADDED_ACTIONS_PER_BUNDLE: u64 = 2;
+    (MARGINAL_FEE * (BUNDLES * PADDED_ACTIONS_PER_BUNDLE)).unwrap()
+}
+
+/// The across-pools dust shortfall scenario: an account holding a `P0` note and a smaller `P1`
+/// note, and a transfer to a `P0` recipient of an amount the `P0` note covers alone, but whose
+/// change from that note alone would fall below the dust threshold.
+#[cfg(feature = "orchard")]
+struct DustShortfallScenario<P0: ShieldedPoolTester, Cache, Dsf: DataStoreFactory> {
+    st: TestDsl<dsl::TestScenario<P0, Cache, Dsf>>,
+    recipient: Address,
+    amount: Zatoshis,
+    /// The value of both notes.
+    total: Zatoshis,
+}
+
+/// Builds the across-pools dust shortfall scenario with a `P1` note of `p1_note_value`, both
+/// notes scanned into the wallet.
+#[cfg(feature = "orchard")]
+fn dust_shortfall_across_pools<P0, P1, Cache, Dsf>(
+    ds_factory: Dsf,
+    cache: Cache,
+    p1_note_value: Zatoshis,
+) -> DustShortfallScenario<P0, Cache, Dsf>
+where
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+    Cache: TestCache,
+    Dsf: DataStoreFactory,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    st.generate_next_block(
+        &p0_fvk,
+        AddressType::DefaultExternal,
+        DUST_SHORTFALL_P0_NOTE_VALUE,
+    );
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, p1_note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    DustShortfallScenario {
+        st,
+        recipient: P0::sk_default_address(&P0::sk(&[0xf5; 32])),
+        amount: DUST_SHORTFALL_PAYMENT,
+        total: (DUST_SHORTFALL_P0_NOTE_VALUE + p1_note_value).unwrap(),
+    }
+}
+
+/// Tests that a transfer whose change from the preferred pool's note would be dust draws on
+/// a note in another pool instead of failing.
+///
+/// The test:
+/// - Builds the across-pools dust shortfall scenario with a `P1` note that covers the
+///   two-bundle fee.
+/// - Verifies that the proposal spends both notes, at the two-bundle fee, and that the
+///   change is the remainder of both.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+#[cfg(feature = "orchard")]
+pub fn transfer_grows_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let DustShortfallScenario {
+        mut st,
+        recipient,
+        amount,
+        total,
+    } = dust_shortfall_across_pools::<P0, P1, _, _>(
+        ds_factory,
+        cache,
+        DUST_SHORTFALL_P1_NOTE_COVERING_FEE,
+    );
+
+    let expected_fee = two_bundle_fee();
+    let expected_change = (total - amount - expected_fee).unwrap();
+
+    let proposal = st.propose_transfer_to(&recipient, amount);
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(amount)
+    );
+    let input_pools = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| n.note().pool())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        input_pools,
+        BTreeSet::from([P0::SHIELDED_PROTOCOL, P1::SHIELDED_PROTOCOL])
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(st.get_account().id()), expected_change);
+}
+
+/// Tests that a transfer which draws on a second pool at a dust shortfall reports
+/// `InsufficientFunds` over both pools when the second note cannot cover the two-bundle fee.
+///
+/// The test:
+/// - Builds the across-pools dust shortfall scenario with a `P1` note too small for the
+///   two-bundle fee.
+/// - Verifies that the proposal fails with `InsufficientFunds`, requiring the amount plus
+///   the two-bundle fee and reporting the value of both notes as available.
+#[cfg(feature = "orchard")]
+pub fn transfer_fails_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let DustShortfallScenario {
+        mut st,
+        recipient,
+        amount,
+        total,
+    } = dust_shortfall_across_pools::<P0, P1, _, _>(
+        ds_factory,
+        cache,
+        DUST_SHORTFALL_P1_NOTE_BELOW_FEE,
+    );
+
+    let required = (amount + two_bundle_fee()).unwrap();
+
+    st.expect_insufficient_funds(&recipient, amount, total, required);
 }
 
 /// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
