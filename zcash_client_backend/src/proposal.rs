@@ -6,13 +6,9 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::components::orchard::{
-    ACTION_SIZE as ORCHARD_ACTION_SIZE, BUNDLE_OVERHEAD as ORCHARD_BUNDLE_OVERHEAD,
-    SPEND_AUTH_SIG_SIZE as ORCHARD_AUTH_SIG_SIZE,
-};
 use zcash_primitives::transaction::{
     TxId, TxVersion,
+    builder::BundlePadding,
     components::sapling::{
         BUNDLE_OVERHEAD as SAPLING_BUNDLE_OVERHEAD, OUTPUT_DESCRIPTION_SIZE, SPEND_DESCRIPTION_SIZE,
     },
@@ -24,14 +20,19 @@ use zcash_primitives::transaction::{
 };
 use zcash_protocol::{
     PoolType, ShieldedPool,
-    consensus::{BlockHeight, BranchId},
+    consensus::{self, BlockHeight, BranchId},
     constants::MAX_BLOCK_BYTES,
     value::Zatoshis,
+    zip218::{self, ShieldedActionCounts, ShieldedLimitExceeded},
 };
 use zip321::{TransactionRequest, Zip321Error};
 #[cfg(feature = "orchard")]
 use {
-    orchard::Proof, zcash_primitives::transaction::builder::BundlePadding,
+    orchard::{Proof, ValuePool},
+    zcash_primitives::transaction::components::orchard::{
+        ACTION_SIZE as ORCHARD_ACTION_SIZE, BUNDLE_OVERHEAD as ORCHARD_BUNDLE_OVERHEAD,
+        SPEND_AUTH_SIG_SIZE as ORCHARD_AUTH_SIG_SIZE, bundle_version_for_branch,
+    },
     zcash_protocol::zip318::PoolMigrationConstants,
 };
 
@@ -173,6 +174,26 @@ pub enum ProposalError {
         #[cfg(feature = "orchard")]
         ironwood_input_count: usize,
     },
+    /// The transaction that a step describes, as built, exceeds a limit that [ZIP 218] places on
+    /// the shielded components of a block, so it cannot be included in any block at a height
+    /// where NU7 is active.
+    ///
+    /// Recovery for a caller that receives this error: spend fewer notes, for example by
+    /// lowering the payment amount, or first consolidate notes with send-to-self transactions
+    /// that each stay within the limits. For [`propose_send_max_transfer`] this error is a dead
+    /// end until notes are consolidated.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    /// [`propose_send_max_transfer`]: crate::data_api::wallet::propose_send_max_transfer
+    ShieldedLimitExceeded {
+        /// The zero-based index of the step whose transaction exceeds the limit.
+        step_index: usize,
+        /// The limit that was exceeded, with the counts that exceed it.
+        exceeded: ShieldedLimitExceeded,
+    },
+    /// The spends and outputs of a step in a shielded pool cannot form a bundle of the padding
+    /// and version that apply at the proposal's target height. The wrapped text states why.
+    BundleShape(&'static str),
 }
 
 impl Display for ProposalError {
@@ -319,6 +340,17 @@ impl Display for ProposalError {
                     "; reduce the payment amount or consolidate small notes before retrying."
                 )
             }
+            ProposalError::ShieldedLimitExceeded {
+                step_index,
+                exceeded,
+            } => write!(
+                f,
+                "The transaction of the proposal step at index {step_index} cannot be included in any block at a height where NU7 is active: {exceeded}; spend fewer notes, or consolidate notes in transactions that each stay within the limits, before retrying."
+            ),
+            ProposalError::BundleShape(reason) => write!(
+                f,
+                "The shielded components of a proposal step cannot form a bundle. {reason}."
+            ),
         }
     }
 }
@@ -628,10 +660,95 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         Ok(())
     }
 
+    /// Returns the numbers of shielded components in the transactions that the steps of this
+    /// proposal describe, one entry per step in step order, as the transaction builder builds
+    /// them at [`Proposal::min_target_height`].
+    ///
+    /// The counts include the padding and dummy components of each bundle: the Sapling bundle
+    /// is padded to at least two outputs, the Orchard bundle is padded as `orchard_padding`
+    /// says ([`BundlePadding::DEFAULT`] unless a PCZT is created with another padding), and
+    /// the Ironwood bundle is padded as the step directs (`Step::ironwood_bundle_padding`).
+    /// The outputs of earlier steps that a step spends count as spends of their pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProposalError::BundleShape`] if a step's spends and outputs in a pool cannot
+    /// form a bundle of that padding and of the version in effect at the target height; this
+    /// includes components in a pool that does not exist at that height, and any Orchard or
+    /// Ironwood component when the `orchard` feature is disabled.
+    pub fn shielded_action_counts<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        orchard_padding: BundlePadding,
+    ) -> Result<NonEmpty<ShieldedActionCounts>, ProposalError> {
+        let head = self.step_shielded_action_counts(&self.steps.head, params, orchard_padding)?;
+        let tail = self
+            .steps
+            .tail
+            .iter()
+            .map(|step| self.step_shielded_action_counts(step, params, orchard_padding))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(NonEmpty { head, tail })
+    }
+
+    /// Checks that the transaction of every step stays within the [ZIP 218] limits on the
+    /// shielded components of a block, returning [`ProposalError::ShieldedLimitExceeded`] for
+    /// the first step whose counts (see [`Proposal::shielded_action_counts`]) exceed one. A
+    /// count equal to a limit passes.
+    ///
+    /// The limits bind blocks at heights where NU7 is active, so this returns `Ok(())`
+    /// without counting unless NU7 is active at [`Proposal::min_target_height`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProposalError::BundleShape`] for the first step that cannot be counted, which
+    /// includes a step with any Orchard or Ironwood component when the `orchard` feature is
+    /// disabled.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    pub fn check_shielded_limits<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        orchard_padding: BundlePadding,
+    ) -> Result<(), ProposalError> {
+        if !zip218::limits_apply(params, self.min_target_height.into()) {
+            return Ok(());
+        }
+
+        for (step_index, step) in self.steps.iter().enumerate() {
+            self.step_shielded_action_counts(step, params, orchard_padding)?
+                .check()
+                .map_err(|exceeded| ProposalError::ShieldedLimitExceeded {
+                    step_index,
+                    exceeded,
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Returns the numbers of shielded components in the transaction that `step`, one of the
+    /// steps of this proposal, describes.
+    fn step_shielded_action_counts<P: consensus::Parameters>(
+        &self,
+        step: &Step<NoteRef>,
+        params: &P,
+        orchard_padding: BundlePadding,
+    ) -> Result<ShieldedActionCounts, ProposalError> {
+        step.shielded_action_counts(
+            params,
+            self.min_target_height.into(),
+            orchard_padding,
+            &|s_ref| Self::resolve_prior_output_pool(&self.steps, s_ref),
+        )
+    }
+
     /// Resolves the pool of a prior-step output referenced by `s_ref`, by looking up
     /// the referenced step in the proposal's step list. Shared by
-    /// [`estimated_serialized_size`](Self::estimated_serialized_size) and
-    /// [`check_transaction_size`](Self::check_transaction_size) to avoid duplicating the
+    /// [`estimated_serialized_size`](Self::estimated_serialized_size),
+    /// [`check_transaction_size`](Self::check_transaction_size) and
+    /// [`shielded_action_counts`](Self::shielded_action_counts) to avoid duplicating the
     /// `StepOutput`-to-`PoolType` resolution logic.
     fn resolve_prior_output_pool(steps: &NonEmpty<Step<NoteRef>>, s_ref: &StepOutput) -> PoolType {
         let prior = &steps[s_ref.step_index()];
@@ -1223,12 +1340,18 @@ impl<NoteRef> Step<NoteRef> {
     /// [`BundlePadding`] rather than a full bundle type: coinbase construction is a property of the
     /// whole transaction and is not representable here.
     ///
+    /// The count covers only this step's own inputs, not the outputs of earlier steps that it
+    /// spends, and counts an empty bundle that the padding requires at its padded size, though
+    /// the wallet does not build one; check a step against the [ZIP 218] limits with
+    /// [`Proposal::shielded_action_counts`] instead.
+    ///
     /// # Errors
     ///
     /// Returns an error if this step's Orchard spend and output counts are incompatible with
     /// the given padding and version.
     ///
     /// [`bundle_version_for_branch`]: zcash_primitives::transaction::components::orchard::bundle_version_for_branch
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
     #[cfg(feature = "orchard")]
     pub fn orchard_action_count(
         &self,
@@ -1245,10 +1368,17 @@ impl<NoteRef> Step<NoteRef> {
     /// permits cross-address transfers, so an Ironwood bundle requires
     /// `max(spends, outputs)` actions before padding.
     ///
+    /// The count covers only this step's own inputs, not the outputs of earlier steps that it
+    /// spends, and counts an empty bundle that the padding requires at its padded size, though
+    /// the wallet does not build one; check a step against the [ZIP 218] limits with
+    /// [`Proposal::shielded_action_counts`] instead.
+    ///
     /// # Errors
     ///
     /// Returns an error if this step's Ironwood spend and output counts are incompatible with
     /// the given padding and version.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
     #[cfg(feature = "orchard")]
     pub fn ironwood_action_count(
         &self,
@@ -1256,6 +1386,146 @@ impl<NoteRef> Step<NoteRef> {
         bundle_version: ::orchard::bundle::BundleVersion,
     ) -> Result<usize, &'static str> {
         self.orchard_style_action_count(PoolType::IRONWOOD, padding, bundle_version)
+    }
+
+    /// Returns the number of spends of the given pool in the transaction that this step
+    /// describes: its own inputs from the pool, and the outputs of earlier steps that it
+    /// spends and that resolve to the pool.
+    fn spend_count_in_pool(
+        &self,
+        pool_type: PoolType,
+        resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> usize {
+        let prior_step_spends = self
+            .prior_step_inputs()
+            .iter()
+            .filter(|s_ref| resolve_prior_pool(s_ref) == pool_type)
+            .count();
+
+        self.input_count_in_pool(pool_type)
+            .saturating_add(prior_step_spends)
+    }
+
+    /// Returns the number of outputs that this step requests of the given pool: its payments
+    /// and its change.
+    fn requested_output_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.output_count_in_pool(pool_type)
+            .saturating_add(self.change_count_in_pool(pool_type))
+    }
+
+    /// Returns the numbers of shielded components in the transaction that the wallet builds for
+    /// this step at `target_height`.
+    ///
+    /// The Sapling bundle is built with the default bundle type, the Orchard bundle with
+    /// `orchard_padding` and the Ironwood bundle with `Step::ironwood_bundle_padding`.
+    /// `resolve_prior_pool` gives the pool of each earlier-step output that the step spends.
+    fn shielded_action_counts<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        orchard_padding: BundlePadding,
+        resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> Result<ShieldedActionCounts, ProposalError> {
+        let sapling_bundle_type = sapling::builder::BundleType::DEFAULT;
+        let sapling_spends = self.spend_count_in_pool(PoolType::SAPLING, resolve_prior_pool);
+        let sapling_outputs = self.requested_output_count_in_pool(PoolType::SAPLING);
+
+        let actions = self.orchard_and_ironwood_actions(
+            params,
+            target_height,
+            orchard_padding,
+            resolve_prior_pool,
+        )?;
+
+        Ok(ShieldedActionCounts::ZERO
+            .with_sapling(
+                sapling_bundle_type
+                    .num_spends(sapling_spends)
+                    .map_err(ProposalError::BundleShape)?,
+                sapling_bundle_type
+                    .num_outputs(sapling_spends, sapling_outputs)
+                    .map_err(ProposalError::BundleShape)?,
+            )
+            .with_orchard_actions(actions.orchard)
+            .with_ironwood_actions(actions.ironwood))
+    }
+
+    /// Returns the numbers of Orchard and Ironwood actions in the transaction that the wallet
+    /// builds for this step; see [`Step::shielded_action_counts`].
+    ///
+    /// A pool to which the step adds nothing has no bundle, and so no actions, whatever its
+    /// padding.
+    #[cfg(feature = "orchard")]
+    fn orchard_and_ironwood_actions<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        orchard_padding: BundlePadding,
+        resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> Result<OrchardAndIronwoodActions, ProposalError> {
+        let branch_id = BranchId::for_height(params, target_height);
+
+        let actions = |value_pool: ValuePool, padding: BundlePadding| {
+            let pool_type =
+                PoolType::Shielded(crate::wallet::shielded_pool_for_value_pool(value_pool));
+            let spends = self.spend_count_in_pool(pool_type, resolve_prior_pool);
+            let outputs = self.requested_output_count_in_pool(pool_type);
+            if spends == 0 && outputs == 0 {
+                return Ok(0);
+            }
+
+            let Some(bundle_version) = bundle_version_for_branch(branch_id, value_pool) else {
+                return Err(ProposalError::BundleShape(match value_pool {
+                    ValuePool::Orchard => "The Orchard pool does not exist at the target height",
+                    ValuePool::Ironwood => "The Ironwood pool does not exist at the target height",
+                }));
+            };
+
+            crate::fees::orchard::transactional_action_count(
+                padding.bundle_type(),
+                bundle_version,
+                spends,
+                outputs,
+            )
+            .map_err(ProposalError::BundleShape)
+        };
+
+        Ok(OrchardAndIronwoodActions {
+            orchard: actions(ValuePool::Orchard, orchard_padding)?,
+            ironwood: actions(ValuePool::Ironwood, self.ironwood_bundle_padding())?,
+        })
+    }
+
+    /// Returns the numbers of Orchard and Ironwood actions in the transaction that the wallet
+    /// builds for this step; see [`Step::shielded_action_counts`].
+    ///
+    /// Without the `orchard` feature the wallet builds no bundle of either pool, so a step
+    /// with a component in one cannot be counted.
+    #[cfg(not(feature = "orchard"))]
+    fn orchard_and_ironwood_actions<P: consensus::Parameters>(
+        &self,
+        _params: &P,
+        _target_height: BlockHeight,
+        _orchard_padding: BundlePadding,
+        resolve_prior_pool: &impl Fn(&StepOutput) -> PoolType,
+    ) -> Result<OrchardAndIronwoodActions, ProposalError> {
+        let has_components = [PoolType::ORCHARD, PoolType::IRONWOOD]
+            .into_iter()
+            .any(|pool_type| {
+                self.spend_count_in_pool(pool_type, resolve_prior_pool) > 0
+                    || self.requested_output_count_in_pool(pool_type) > 0
+            });
+
+        if has_components {
+            Err(ProposalError::BundleShape(
+                "The step has Orchard or Ironwood components, but the `orchard` feature is not enabled",
+            ))
+        } else {
+            Ok(OrchardAndIronwoodActions {
+                orchard: 0,
+                ironwood: 0,
+            })
+        }
     }
 
     /// Returns a conservative upper-bound estimate of the serialized byte size of the
@@ -1436,6 +1706,12 @@ impl<NoteRef> Step<NoteRef> {
     }
 }
 
+/// The numbers of Orchard and Ironwood actions in the transaction that a step describes.
+struct OrchardAndIronwoodActions {
+    orchard: usize,
+    ironwood: usize,
+}
+
 /// Computes the estimated byte size of an Orchard-family bundle (Orchard or Ironwood)
 /// for the given pool, given the number of shielded spends, real outputs, and dummy
 /// outputs the step directs to that pool. The action count is
@@ -1495,6 +1771,7 @@ mod tests {
     use crate::{
         data_api::{
             anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            testing::TestBuilder,
             wallet::{ConfirmationsPolicy, TargetHeight},
         },
         fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
@@ -1504,7 +1781,12 @@ mod tests {
         PoolType, ShieldedPool,
         consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
         constants::MAX_BLOCK_BYTES,
+        local_consensus::LocalNetwork,
         value::{COIN, Zatoshis},
+        zip218::{
+            GLOBAL_SHIELDED_BUDGET, ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT,
+            ShieldedActionCounts, ShieldedBlockLimit,
+        },
         zip318::PoolMigrationConstants,
     };
     use zip321::{Payment, TransactionRequest};
@@ -1518,7 +1800,7 @@ mod tests {
     };
     use proptest::prelude::*;
 
-    use super::{Proposal, ProposalError, ShieldedInputs, Step};
+    use super::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex};
 
     // Builds an Orchard note of the given version and value. The recipient, rho, and rseed are
     // fixed; only the version and value vary, which is all `Note::pool`/`Note::protocol` depend on.
@@ -1536,15 +1818,54 @@ mod tests {
         ))
     }
 
+    // The seed of the Sapling key that owns the notes made by `sapling_note`.
+    const SAPLING_NOTE_OWNER_SEED: [u8; 32] = [0x2a; 32];
+
+    // The rseed of the notes made by `sapling_note`.
+    const SAPLING_NOTE_RSEED: [u8; 32] = [0x1b; 32];
+
+    // The address that receives the notes made by `sapling_note`.
+    fn sapling_recipient() -> sapling::PaymentAddress {
+        sapling::zip32::ExtendedSpendingKey::master(&SAPLING_NOTE_OWNER_SEED)
+            .expect("the seed derives a valid key")
+            .default_address()
+            .1
+    }
+
+    // Builds a Sapling note of the given value. The recipient and rseed are fixed; only the value
+    // varies, which is all `Note::pool` depends on.
+    fn sapling_note(value: u64) -> Note {
+        Note::Sapling(sapling::Note::from_parts(
+            sapling_recipient(),
+            sapling::value::NoteValue::from_raw(value),
+            sapling::Rseed::AfterZip212(SAPLING_NOTE_RSEED),
+        ))
+    }
+
+    // Builds `n` Sapling notes of the given value, deriving the recipient once.
+    fn sapling_notes(n: usize, value: u64) -> Vec<Note> {
+        if n == 0 {
+            return vec![];
+        }
+        std::iter::repeat_n(sapling_note(value), n).collect()
+    }
+
     // Wraps a list of notes as the shielded inputs of a step.
     fn shielded_inputs_for(notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
+        shielded_inputs_received_in(TxId::from_bytes([0; 32]), notes)
+    }
+
+    // Wraps a list of notes as the shielded inputs of a step, as received in the transaction
+    // `txid`. The steps of one proposal cannot spend the same note twice, so notes of different
+    // steps are received in different transactions.
+    fn shielded_inputs_received_in(txid: TxId, notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
         let received = notes
             .into_iter()
             .enumerate()
             .map(|(i, note)| {
                 crate::wallet::ReceivedNote::from_parts(
                     i as u32,
-                    TxId::from_bytes([0; 32]),
+                    txid,
                     i as u16,
                     note,
                     zip32::Scope::External,
@@ -2565,6 +2886,820 @@ mod tests {
             prop_assert_eq!(
                 proposal.input_count_in_pool(PoolType::IRONWOOD),
                 n_ironwood + m_ironwood
+            );
+        }
+    }
+
+    // The tests below count steps against the ZIP 218 limits. A count never depends on a value, so
+    // every note and change output carries this one.
+    const COUNTED_VALUE: u64 = 10_000;
+
+    // The outputs of a Sapling bundle that has any spend or output: a smaller request is padded up
+    // to this many.
+    const SAPLING_PADDED_OUTPUTS: usize = 2;
+
+    // The actions of a default-padded Orchard or Ironwood bundle that has any spend or output: a
+    // smaller request is padded up to this many.
+    const DEFAULT_PADDED_ACTIONS: usize = 2;
+
+    // The actions of an unpadded Orchard or Ironwood bundle that requests one.
+    const UNPADDED_SINGLE_ACTION: usize = 1;
+
+    // The Orchard spends and the Orchard change outputs of the step that shows how a pool pairs
+    // them. They differ, so that their sum shows apart from their maximum, and neither the sum nor
+    // the maximum is the padding floor.
+    const PAIRING_SPENDS: usize = 3;
+    const PAIRING_OUTPUTS: usize = 2;
+
+    // The payments and the change outputs that the step showing how both count as outputs directs
+    // to each of two pools. Their sum differs from either number and from the padding floor, so
+    // that neither gives the count alone.
+    const COUNTED_PAYMENTS: usize = 3;
+    const COUNTED_CHANGE_OUTPUTS: usize = 2;
+
+    // The transactions in which the notes of a proposal's first, second and third step were
+    // received.
+    const FIRST_STEP_TX: u8 = 1;
+    const SECOND_STEP_TX: u8 = 2;
+    const THIRD_STEP_TX: u8 = 3;
+
+    // The height at which the local networks below activate NU6 through NU6.3; the default test
+    // network activates Sapling through NU5 at the same height.
+    const LOCAL_NU6_3_ACTIVATION_HEIGHT: u32 = 100_000;
+
+    // A target height long after every activation height of the local networks below.
+    const FAR_FUTURE_TARGET_HEIGHT: u32 = 10_000_000;
+
+    // The first height at which NU7 is active on testnet.
+    fn nu7_activation_height() -> BlockHeight {
+        Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu7)
+            .expect("testnet has an NU7 activation height")
+    }
+
+    // A proposal of the given steps, to be built at the given target height.
+    fn proposal_at(target_height: BlockHeight, steps: Vec<Step<u32>>) -> Proposal<(), u32> {
+        Proposal::multi_step(
+            (),
+            TargetHeight::from(target_height),
+            ConfirmationsPolicy::default(),
+            NonEmpty::from_vec(steps).expect("a proposal has a step"),
+        )
+        .expect("the steps form a valid proposal")
+    }
+
+    // The counts of the one step of a proposal built at `target_height` on testnet.
+    fn counts_of(
+        step: Step<u32>,
+        target_height: BlockHeight,
+        orchard_padding: BundlePadding,
+    ) -> ShieldedActionCounts {
+        proposal_at(target_height, vec![step])
+            .shielded_action_counts(&Network::TestNetwork, orchard_padding)
+            .expect("the step can be counted")
+            .head
+    }
+
+    // Checks the one step of a proposal built at the first height at which NU7 is active on
+    // testnet, with the default Orchard padding.
+    fn check_at_nu7(step: Step<u32>) -> Result<(), ProposalError> {
+        proposal_at(nu7_activation_height(), vec![step])
+            .check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT)
+    }
+
+    // Asserts that `result` reports step `step_index` as exceeding `limit` with `count` of what
+    // the limit bounds.
+    fn assert_exceeds(
+        result: Result<(), ProposalError>,
+        step_index: usize,
+        limit: ShieldedBlockLimit,
+        count: usize,
+    ) {
+        assert_matches!(
+            result,
+            Err(ProposalError::ShieldedLimitExceeded { step_index: failed, exceeded })
+                if failed == step_index
+                    && exceeded.limit() == limit
+                    && exceeded.count() == count
+        );
+    }
+
+    // Builds `n` notes of the given pool.
+    fn notes_in(pool: ShieldedPool, n: usize) -> Vec<Note> {
+        match pool {
+            ShieldedPool::Sapling => sapling_notes(n, COUNTED_VALUE),
+            ShieldedPool::Orchard => orchard_and_ironwood_notes((n, COUNTED_VALUE), (0, 0)),
+            ShieldedPool::Ironwood => orchard_and_ironwood_notes((0, 0), (n, COUNTED_VALUE)),
+        }
+    }
+
+    // A step with one payment to each of the given pools, all addressed to one unified address
+    // with an Orchard and a Sapling receiver. It spends nothing and returns no change.
+    fn payment_step(pools: &[PoolType]) -> Step<u32> {
+        let orchard_recipient = orchard_note(COUNTED_VALUE, NoteVersion::V2)
+            .expect("the note is valid")
+            .recipient();
+        let unified_address = UnifiedAddress::from_receivers(
+            Some(orchard_recipient),
+            Some(sapling_recipient()),
+            None,
+            None,
+            None,
+        )
+        .expect("the address has receivers");
+        let recipient =
+            Address::Unified(Box::new(unified_address)).to_zcash_address(&Network::TestNetwork);
+        let payment = Payment::without_memo(recipient, Zatoshis::const_from_u64(COUNTED_VALUE));
+
+        Step {
+            transaction_request: TransactionRequest::new(vec![payment; pools.len()])
+                .expect("the request is valid"),
+            payment_pools: pools.iter().copied().enumerate().collect(),
+            ..step_with_notes(vec![])
+        }
+    }
+
+    // A step that spends `spends` Ironwood notes, received in the transaction numbered
+    // `received_in`, and returns one Ironwood change output.
+    fn ironwood_spend_step(received_in: u8, spends: usize) -> Step<u32> {
+        Step {
+            shielded_inputs: shielded_inputs_received_in(
+                TxId::from_bytes([received_in; 32]),
+                notes_in(ShieldedPool::Ironwood, spends),
+            ),
+            ..step_with_notes_and_change(
+                vec![],
+                vec![shielded_change(ShieldedPool::Ironwood, COUNTED_VALUE)],
+            )
+        }
+    }
+
+    #[test]
+    fn ironwood_spends_over_the_action_limit_are_rejected() {
+        let at_limit = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT;
+        let over = at_limit + 1;
+
+        // The Ironwood pool permits cross-address transfers, so the change output shares an action
+        // with a spend: the bundle holds one action per spend.
+        let counts_of_spending = |spends| {
+            counts_of(
+                ironwood_spend_step(FIRST_STEP_TX, spends),
+                nu7_activation_height(),
+                BundlePadding::DEFAULT,
+            )
+        };
+        assert_eq!(
+            counts_of_spending(at_limit),
+            ShieldedActionCounts::ZERO.with_ironwood_actions(at_limit)
+        );
+        assert_matches!(
+            check_at_nu7(ironwood_spend_step(FIRST_STEP_TX, at_limit)),
+            Ok(())
+        );
+
+        let counts = counts_of_spending(over);
+        assert_eq!(
+            counts,
+            ShieldedActionCounts::ZERO.with_ironwood_actions(over)
+        );
+        let result = check_at_nu7(ironwood_spend_step(FIRST_STEP_TX, over));
+        assert_exceeds(result.clone(), 0, ShieldedBlockLimit::IronwoodActions, over);
+        assert_matches!(
+            result,
+            Err(ProposalError::ShieldedLimitExceeded { exceeded, .. })
+                if exceeded.maximum() == ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT
+                    && exceeded.counts() == counts
+        );
+    }
+
+    #[test]
+    fn orchard_actions_at_the_limit_are_accepted_and_one_above_is_rejected() {
+        let spending = |spends| step_with_notes(notes_in(ShieldedPool::Orchard, spends));
+
+        assert_matches!(
+            check_at_nu7(spending(ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT)),
+            Ok(())
+        );
+        assert_exceeds(
+            check_at_nu7(spending(ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1)),
+            0,
+            ShieldedBlockLimit::OrchardActions,
+            ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1,
+        );
+    }
+
+    #[test]
+    fn orchard_spends_count_one_action_each_after_nu6_3() {
+        let nu6_3 = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("testnet has an NU6.3 activation height");
+
+        // From NU6.3 the Orchard pool disables cross-address transfers, so each spend and each
+        // output takes an action of its own; before it, a spend and an output share one.
+        let paired_step = || {
+            step_with_notes_and_change(
+                notes_in(ShieldedPool::Orchard, PAIRING_SPENDS),
+                std::iter::repeat_n(
+                    shielded_change(ShieldedPool::Orchard, COUNTED_VALUE),
+                    PAIRING_OUTPUTS,
+                )
+                .collect(),
+            )
+        };
+        for height in [nu6_3, nu7_activation_height()] {
+            assert_eq!(
+                counts_of(paired_step(), height, BundlePadding::DEFAULT).orchard_actions(),
+                PAIRING_SPENDS + PAIRING_OUTPUTS
+            );
+        }
+        assert_eq!(
+            counts_of(paired_step(), nu6_3 - 1, BundlePadding::DEFAULT).orchard_actions(),
+            PAIRING_SPENDS.max(PAIRING_OUTPUTS)
+        );
+
+        // A payment funded by Orchard notes returns its change to the Ironwood pool: the Orchard
+        // bundle holds an action per spend, and the Ironwood bundle pads its one output to the
+        // default floor.
+        let spending = |spends| {
+            step_with_notes_and_change(
+                notes_in(ShieldedPool::Orchard, spends),
+                vec![shielded_change(ShieldedPool::Ironwood, COUNTED_VALUE)],
+            )
+        };
+        let within_budget = GLOBAL_SHIELDED_BUDGET - DEFAULT_PADDED_ACTIONS;
+        assert_eq!(
+            counts_of(
+                spending(within_budget),
+                nu7_activation_height(),
+                BundlePadding::DEFAULT
+            ),
+            ShieldedActionCounts::ZERO
+                .with_orchard_actions(within_budget)
+                .with_ironwood_actions(DEFAULT_PADDED_ACTIONS)
+        );
+
+        // The Ironwood padding takes up part of the budget, so the budget is reached before the
+        // Orchard limit is: one spend past it, the global budget is the limit exceeded.
+        assert_matches!(check_at_nu7(spending(within_budget)), Ok(()));
+        assert_exceeds(
+            check_at_nu7(spending(within_budget + 1)),
+            0,
+            ShieldedBlockLimit::GlobalShieldedBudget,
+            GLOBAL_SHIELDED_BUDGET + 1,
+        );
+
+        // Past the Orchard limit too, the Orchard limit is reported: it is checked first.
+        assert_exceeds(
+            check_at_nu7(spending(ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1)),
+            0,
+            ShieldedBlockLimit::OrchardActions,
+            ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1,
+        );
+    }
+
+    #[test]
+    fn sapling_spends_and_outputs_over_the_io_limit_are_rejected() {
+        // A payment funded by Sapling notes returns one Sapling change output, which the Sapling
+        // bundle pads to its output floor.
+        let spending = |spends| {
+            step_with_notes_and_change(
+                notes_in(ShieldedPool::Sapling, spends),
+                vec![shielded_change(ShieldedPool::Sapling, COUNTED_VALUE)],
+            )
+        };
+        let most_spends = SAPLING_BLOCK_IO_LIMIT - SAPLING_PADDED_OUTPUTS;
+
+        assert_eq!(
+            counts_of(
+                spending(most_spends),
+                nu7_activation_height(),
+                BundlePadding::DEFAULT
+            ),
+            ShieldedActionCounts::ZERO.with_sapling(most_spends, SAPLING_PADDED_OUTPUTS)
+        );
+        assert_matches!(check_at_nu7(spending(most_spends)), Ok(()));
+
+        assert_eq!(
+            counts_of(
+                spending(most_spends + 1),
+                nu7_activation_height(),
+                BundlePadding::DEFAULT
+            ),
+            ShieldedActionCounts::ZERO.with_sapling(most_spends + 1, SAPLING_PADDED_OUTPUTS)
+        );
+        assert_exceeds(
+            check_at_nu7(spending(most_spends + 1)),
+            0,
+            ShieldedBlockLimit::SaplingSpendsAndOutputs,
+            SAPLING_BLOCK_IO_LIMIT + 1,
+        );
+
+        // Outputs weigh as much as spends, and alone are padded to the same floor.
+        let paying = |outputs| {
+            step_with_notes_and_change(
+                vec![],
+                std::iter::repeat_n(
+                    shielded_change(ShieldedPool::Sapling, COUNTED_VALUE),
+                    outputs,
+                )
+                .collect(),
+            )
+        };
+        assert_eq!(
+            counts_of(paying(1), nu7_activation_height(), BundlePadding::DEFAULT),
+            ShieldedActionCounts::ZERO.with_sapling(0, SAPLING_PADDED_OUTPUTS)
+        );
+        assert_matches!(check_at_nu7(paying(SAPLING_BLOCK_IO_LIMIT)), Ok(()));
+        assert_exceeds(
+            check_at_nu7(paying(SAPLING_BLOCK_IO_LIMIT + 1)),
+            0,
+            ShieldedBlockLimit::SaplingSpendsAndOutputs,
+            SAPLING_BLOCK_IO_LIMIT + 1,
+        );
+    }
+
+    #[test]
+    fn the_global_budget_bounds_the_pools_together() {
+        // Each pool stays within its own limit, but together they use more than the budget.
+        let first_share = GLOBAL_SHIELDED_BUDGET / 2;
+        let second_share = GLOBAL_SHIELDED_BUDGET - first_share;
+        let spending = |orchard, ironwood| {
+            step_with_notes(
+                [
+                    notes_in(ShieldedPool::Orchard, orchard),
+                    notes_in(ShieldedPool::Ironwood, ironwood),
+                ]
+                .concat(),
+            )
+        };
+
+        assert_matches!(check_at_nu7(spending(first_share, second_share)), Ok(()));
+        assert_exceeds(
+            check_at_nu7(spending(first_share, second_share + 1)),
+            0,
+            ShieldedBlockLimit::GlobalShieldedBudget,
+            GLOBAL_SHIELDED_BUDGET + 1,
+        );
+    }
+
+    #[test]
+    fn the_limits_do_not_apply_before_nu7() {
+        let over = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT + 1;
+        let at_height =
+            |height| proposal_at(height, vec![ironwood_spend_step(FIRST_STEP_TX, over)]);
+        let activation = nu7_activation_height();
+
+        // A step over a limit is accepted up to the last height before NU7 activates, though it is
+        // counted in full there, and refused from the activation height on.
+        let before_nu7 = at_height(activation - 1);
+        assert_matches!(
+            before_nu7.check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            Ok(())
+        );
+        assert_eq!(
+            before_nu7
+                .shielded_action_counts(&Network::TestNetwork, BundlePadding::DEFAULT)
+                .expect("the step can be counted")
+                .head
+                .ironwood_actions(),
+            over
+        );
+        assert_exceeds(
+            at_height(activation)
+                .check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            0,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+        );
+
+        // A network on which NU7 never activates imposes the limits at no height.
+        let activation_height = BlockHeight::from_u32(LOCAL_NU6_3_ACTIVATION_HEIGHT);
+        let without_nu7 = LocalNetwork {
+            nu6: Some(activation_height),
+            nu6_1: Some(activation_height),
+            nu6_2: Some(activation_height),
+            nu6_3: Some(activation_height),
+            nu7: None,
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        let far_future = at_height(BlockHeight::from_u32(FAR_FUTURE_TARGET_HEIGHT));
+        assert_matches!(
+            far_future.check_shielded_limits(&without_nu7, BundlePadding::DEFAULT),
+            Ok(())
+        );
+
+        // The same network with NU7 scheduled imposes them.
+        let with_nu7 = LocalNetwork {
+            nu7: Some(activation_height),
+            ..without_nu7
+        };
+        assert_exceeds(
+            far_future.check_shielded_limits(&with_nu7, BundlePadding::DEFAULT),
+            0,
+            ShieldedBlockLimit::IronwoodActions,
+            over,
+        );
+    }
+
+    #[test]
+    fn each_step_is_checked_on_its_own() {
+        let at_limit = ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT;
+        let over = at_limit + 1;
+        let proposal = |first, second, third| {
+            proposal_at(
+                nu7_activation_height(),
+                vec![
+                    ironwood_spend_step(FIRST_STEP_TX, first),
+                    ironwood_spend_step(SECOND_STEP_TX, second),
+                    ironwood_spend_step(THIRD_STEP_TX, third),
+                ],
+            )
+        };
+        let check = |first, second, third| {
+            proposal(first, second, third)
+                .check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT)
+        };
+
+        // The steps are separate transactions: three at the limit are three within it, though
+        // together they hold more than a block may.
+        assert_matches!(check(at_limit, at_limit, at_limit), Ok(()));
+
+        // There is one count per step, in step order.
+        let sizes = [at_limit, at_limit - 1, at_limit - 2];
+        let counts = proposal(sizes[0], sizes[1], sizes[2])
+            .shielded_action_counts(&Network::TestNetwork, BundlePadding::DEFAULT)
+            .expect("the steps can be counted");
+        assert_eq!(
+            counts
+                .iter()
+                .map(ShieldedActionCounts::ironwood_actions)
+                .collect::<Vec<_>>(),
+            sizes
+        );
+
+        // The step over the limit is the one reported, and the first of several is.
+        for over_index in 0..sizes.len() {
+            let mut one_over = sizes.map(|_| at_limit);
+            one_over[over_index] = over;
+            let [first, second, third] = one_over;
+            assert_exceeds(
+                check(first, second, third),
+                over_index,
+                ShieldedBlockLimit::IronwoodActions,
+                over,
+            );
+        }
+        let result = check(at_limit, over, over);
+        assert_exceeds(result.clone(), 1, ShieldedBlockLimit::IronwoodActions, over);
+
+        // The message names the step by its zero-based index.
+        assert_eq!(
+            result
+                .expect_err("the second step exceeds the limit")
+                .to_string(),
+            format!(
+                "The transaction of the proposal step at index 1 cannot be included in any block \
+                 at a height where NU7 is active: {over} Ironwood actions exceed the {at_limit} \
+                 that ZIP 218 allows in a block; spend fewer notes, or consolidate notes in \
+                 transactions that each stay within the limits, before retrying."
+            )
+        );
+    }
+
+    #[test]
+    fn prior_step_shielded_inputs_count_as_spends() {
+        // For each pool: the most spends that one step holds within the limit of that pool when
+        // it requests no outputs of it.
+        let cases = [
+            (
+                ShieldedPool::Sapling,
+                ShieldedBlockLimit::SaplingSpendsAndOutputs,
+                SAPLING_BLOCK_IO_LIMIT - SAPLING_PADDED_OUTPUTS,
+            ),
+            (
+                ShieldedPool::Orchard,
+                ShieldedBlockLimit::OrchardActions,
+                ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+            ),
+            (
+                ShieldedPool::Ironwood,
+                ShieldedBlockLimit::IronwoodActions,
+                ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT,
+            ),
+        ];
+
+        for (pool, limit, most_spends) in cases {
+            // The first step returns half of the spends as change; the second step spends that
+            // change, and notes of its own for the rest. The notes of the second step alone are
+            // well within the limit.
+            let from_prior_step = most_spends / 2;
+            let prior_step = step_with_notes_and_change(
+                vec![],
+                std::iter::repeat_n(shielded_change(pool, COUNTED_VALUE), from_prior_step)
+                    .collect(),
+            );
+            let spending_prior_step = |own_spends| Step {
+                prior_step_inputs: (0..from_prior_step)
+                    .map(|i| StepOutput::new(0, StepOutputIndex::Change(i)))
+                    .collect(),
+                ..step_with_notes(notes_in(pool, own_spends))
+            };
+            let check = |own_spends| {
+                proposal_at(
+                    nu7_activation_height(),
+                    vec![prior_step.clone(), spending_prior_step(own_spends)],
+                )
+                .check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT)
+            };
+
+            let own_spends = most_spends - from_prior_step;
+            assert_matches!(check(own_spends), Ok(()), "{pool:?} at the limit");
+            assert_exceeds(check(own_spends + 1), 1, limit, limit.maximum() + 1);
+        }
+    }
+
+    #[test]
+    fn counts_follow_the_given_orchard_padding() {
+        let nu7 = nu7_activation_height();
+        let one_spend = || step_with_notes(notes_in(ShieldedPool::Orchard, 1));
+
+        // The default padding raises a lone Orchard spend to two actions; the unpadded padding that
+        // a crossing opts into leaves it as one.
+        assert_eq!(
+            counts_of(one_spend(), nu7, BundlePadding::DEFAULT),
+            ShieldedActionCounts::ZERO.with_orchard_actions(DEFAULT_PADDED_ACTIONS)
+        );
+        assert_eq!(
+            counts_of(one_spend(), nu7, BundlePadding::UNPADDED),
+            ShieldedActionCounts::ZERO.with_orchard_actions(UNPADDED_SINGLE_ACTION)
+        );
+
+        // The given padding is the Orchard bundle's alone. The Ironwood bundle follows the step: a
+        // canonical crossing, which spends one Orchard note, builds a single unpadded Ironwood
+        // action whichever padding the Orchard bundle has.
+        let crossing = || ironwood_payment_step(COIN, vec![]);
+        for (orchard_padding, orchard_actions) in [
+            (BundlePadding::DEFAULT, DEFAULT_PADDED_ACTIONS),
+            (BundlePadding::UNPADDED, UNPADDED_SINGLE_ACTION),
+        ] {
+            assert_eq!(
+                counts_of(crossing(), nu7, orchard_padding),
+                ShieldedActionCounts::ZERO
+                    .with_orchard_actions(orchard_actions)
+                    .with_ironwood_actions(UNPADDED_SINGLE_ACTION)
+            );
+        }
+
+        // A transaction that fills the global budget with its Orchard bundle unpadded is over it
+        // when that bundle is padded.
+        let sapling_spends = SAPLING_BLOCK_IO_LIMIT - SAPLING_PADDED_OUTPUTS;
+        let ironwood_spends =
+            GLOBAL_SHIELDED_BUDGET - SAPLING_BLOCK_IO_LIMIT - UNPADDED_SINGLE_ACTION;
+        let filling = proposal_at(
+            nu7,
+            vec![step_with_notes(
+                [
+                    notes_in(ShieldedPool::Sapling, sapling_spends),
+                    notes_in(ShieldedPool::Orchard, 1),
+                    notes_in(ShieldedPool::Ironwood, ironwood_spends),
+                ]
+                .concat(),
+            )],
+        );
+        assert_matches!(
+            filling.check_shielded_limits(&Network::TestNetwork, BundlePadding::UNPADDED),
+            Ok(())
+        );
+        assert_exceeds(
+            filling.check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            0,
+            ShieldedBlockLimit::GlobalShieldedBudget,
+            GLOBAL_SHIELDED_BUDGET + 1,
+        );
+
+        // A pool that the step adds nothing to has no bundle, even if its padding requires one.
+        let required = BundlePadding {
+            bundle_required: true,
+            pad_to_minimum: None,
+        };
+        assert_eq!(
+            counts_of(step_with_notes(vec![]), nu7, required),
+            ShieldedActionCounts::ZERO
+        );
+        assert_eq!(
+            counts_of(
+                step_with_notes(notes_in(ShieldedPool::Sapling, 1)),
+                nu7,
+                required
+            ),
+            ShieldedActionCounts::ZERO.with_sapling(1, SAPLING_PADDED_OUTPUTS)
+        );
+    }
+
+    #[test]
+    fn payments_and_change_both_count_as_outputs_of_their_pool() {
+        let nu6_3 = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("testnet has an NU6.3 activation height");
+
+        // A payment and a change output to a pool are outputs of the same bundle.
+        let paying = [
+            vec![PoolType::SAPLING; COUNTED_PAYMENTS],
+            vec![PoolType::IRONWOOD; COUNTED_PAYMENTS],
+        ]
+        .concat();
+        let change = [
+            vec![ShieldedPool::Sapling; COUNTED_CHANGE_OUTPUTS],
+            vec![ShieldedPool::Ironwood; COUNTED_CHANGE_OUTPUTS],
+        ]
+        .concat();
+        let step = Step {
+            balance: TransactionBalance::new(
+                change
+                    .into_iter()
+                    .map(|pool| shielded_change(pool, COUNTED_VALUE))
+                    .collect(),
+                Zatoshis::ZERO,
+            )
+            .expect("the balance is valid"),
+            ..payment_step(&paying)
+        };
+        let outputs = COUNTED_PAYMENTS + COUNTED_CHANGE_OUTPUTS;
+        assert_eq!(
+            counts_of(step, nu7_activation_height(), BundlePadding::DEFAULT),
+            ShieldedActionCounts::ZERO
+                .with_sapling(0, outputs)
+                .with_ironwood_actions(outputs)
+        );
+
+        // Before NU6.3 a payment to an Orchard receiver is an output of the Orchard pool.
+        assert_eq!(
+            counts_of(
+                payment_step(&[PoolType::ORCHARD; COUNTED_PAYMENTS]),
+                nu6_3 - 1,
+                BundlePadding::DEFAULT
+            ),
+            ShieldedActionCounts::ZERO.with_orchard_actions(COUNTED_PAYMENTS)
+        );
+    }
+
+    #[test]
+    fn components_in_a_pool_that_does_not_exist_yet_cannot_be_counted() {
+        let before_nu6_3 = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("testnet has an NU6.3 activation height")
+            - 1;
+        let before_nu5 = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("testnet has an NU5 activation height")
+            - 1;
+        let counted_at = |step: Step<u32>, height| {
+            proposal_at(height, vec![step])
+                .shielded_action_counts(&Network::TestNetwork, BundlePadding::DEFAULT)
+        };
+
+        // The Ironwood pool does not exist before NU6.3, so a step cannot have a component in it
+        // then; a step with none in it is counted as usual.
+        let ironwood_step = || {
+            step_with_notes_and_change(
+                vec![],
+                vec![shielded_change(ShieldedPool::Ironwood, COUNTED_VALUE)],
+            )
+        };
+        let err = counted_at(ironwood_step(), before_nu6_3)
+            .expect_err("an Ironwood component cannot be counted before NU6.3");
+        assert_matches!(err, ProposalError::BundleShape(_));
+        assert_eq!(
+            err.to_string(),
+            "The shielded components of a proposal step cannot form a bundle. The Ironwood pool \
+             does not exist at the target height."
+        );
+        assert_matches!(
+            counted_at(step_with_notes(notes_in(ShieldedPool::Orchard, 1)), before_nu6_3),
+            Ok(counts) if counts.head
+                == ShieldedActionCounts::ZERO.with_orchard_actions(DEFAULT_PADDED_ACTIONS)
+        );
+
+        // Nor does the Orchard pool before NU5.
+        assert_matches!(
+            counted_at(
+                step_with_notes(notes_in(ShieldedPool::Orchard, 1)),
+                before_nu5
+            ),
+            Err(ProposalError::BundleShape(_))
+        );
+        assert_matches!(
+            counted_at(step_with_notes(notes_in(ShieldedPool::Sapling, 1)), before_nu5),
+            Ok(counts) if counts.head
+                == ShieldedActionCounts::ZERO.with_sapling(1, SAPLING_PADDED_OUTPUTS)
+        );
+
+        // Before NU7 the limits are not checked, so no step is refused for the shape of a bundle.
+        assert_matches!(
+            proposal_at(before_nu6_3, vec![ironwood_step()])
+                .check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            Ok(())
+        );
+    }
+}
+
+/// The counting tests that do not need an Orchard-protocol type, so that they also run without the
+/// `orchard` feature, where only Sapling exists.
+#[cfg(all(test, not(feature = "orchard")))]
+mod sapling_only_tests {
+    use std::collections::BTreeMap;
+
+    use nonempty::NonEmpty;
+    use zcash_primitives::transaction::builder::BundlePadding;
+    use zcash_protocol::{
+        ShieldedPool,
+        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+        zip218::{SAPLING_BLOCK_IO_LIMIT, ShieldedActionCounts, ShieldedBlockLimit},
+    };
+    use zip321::TransactionRequest;
+
+    use super::{Proposal, ProposalError, Step};
+    use crate::{
+        data_api::wallet::{ConfirmationsPolicy, TargetHeight},
+        fees::{ChangeValue, TransactionBalance},
+    };
+
+    // The value of each change output; a count never depends on a value.
+    const CHANGE_VALUE: Zatoshis = Zatoshis::const_from_u64(10_000);
+
+    // The anchor height of the steps below.
+    const ANCHOR_HEIGHT: BlockHeight = BlockHeight::from_u32(100);
+
+    // A proposal of one step that returns `change_outputs` change outputs to the given pool and
+    // has no other component, to be built at the first height at which NU7 is active on testnet.
+    fn proposal_returning(pool: ShieldedPool, change_outputs: usize) -> Proposal<(), u32> {
+        let change = std::iter::repeat_n(
+            ChangeValue::shielded(pool, CHANGE_VALUE, None),
+            change_outputs,
+        )
+        .collect();
+        let step = Step {
+            transaction_request: TransactionRequest::empty(),
+            payment_pools: BTreeMap::new(),
+            transparent_inputs: vec![],
+            shielded_inputs: None,
+            anchor_height: Some(ANCHOR_HEIGHT),
+            prior_step_inputs: vec![],
+            balance: TransactionBalance::new(change, Zatoshis::ZERO).expect("the balance is valid"),
+            is_shielding: false,
+        };
+
+        Proposal::multi_step(
+            (),
+            TargetHeight::from(
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu7)
+                    .expect("testnet has an NU7 activation height"),
+            ),
+            ConfirmationsPolicy::default(),
+            NonEmpty::singleton(step),
+        )
+        .expect("the step forms a valid proposal")
+    }
+
+    #[test]
+    fn sapling_outputs_are_limited_without_the_orchard_feature() {
+        let at_limit = proposal_returning(ShieldedPool::Sapling, SAPLING_BLOCK_IO_LIMIT);
+        assert_eq!(
+            at_limit
+                .shielded_action_counts(&Network::TestNetwork, BundlePadding::DEFAULT)
+                .expect("the step can be counted")
+                .head,
+            ShieldedActionCounts::ZERO.with_sapling(0, SAPLING_BLOCK_IO_LIMIT)
+        );
+        assert_matches!(
+            at_limit.check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            Ok(())
+        );
+
+        let over = proposal_returning(ShieldedPool::Sapling, SAPLING_BLOCK_IO_LIMIT + 1);
+        assert_matches!(
+            over.check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+            Err(ProposalError::ShieldedLimitExceeded { step_index: 0, exceeded })
+                if exceeded.limit() == ShieldedBlockLimit::SaplingSpendsAndOutputs
+                    && exceeded.count() == SAPLING_BLOCK_IO_LIMIT + 1
+        );
+    }
+
+    #[test]
+    fn orchard_protocol_components_cannot_be_counted_without_the_orchard_feature() {
+        for pool in [ShieldedPool::Orchard, ShieldedPool::Ironwood] {
+            let proposal = proposal_returning(pool, 1);
+            assert_matches!(
+                proposal.shielded_action_counts(&Network::TestNetwork, BundlePadding::DEFAULT),
+                Err(ProposalError::BundleShape(_)),
+                "{pool:?}"
+            );
+            assert_matches!(
+                proposal.check_shielded_limits(&Network::TestNetwork, BundlePadding::DEFAULT),
+                Err(ProposalError::BundleShape(_)),
+                "{pool:?}"
             );
         }
     }

@@ -15,6 +15,10 @@ workspace.
   (the latter under the `transparent-inputs` feature)
 - `zcash_client_backend::data_api::AccountMeta::change_receivers`
 - `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+- `zcash_client_backend::proposal::Proposal::{shielded_action_counts,
+  check_shielded_limits}`
+- `zcash_client_backend::proposal::ProposalError::{ShieldedLimitExceeded,
+  BundleShape}`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
