@@ -21,13 +21,15 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
-        builder::DEFAULT_TX_EXPIRY_DELTA,
+        builder::{
+            BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
+        },
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
 use zcash_protocol::{
     ShieldedPool,
-    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
@@ -148,7 +150,7 @@ use {
 };
 
 pub mod dsl;
-use dsl::{TestDsl, TestNoteConfig};
+use dsl::{TestDsl, TestNoteConfig, TestScenario};
 
 pub mod locking;
 pub use locking::*;
@@ -4068,10 +4070,10 @@ where
             .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
     );
 
-    // Now advance the chain by 40 blocks; even though a record for the transaction that created
+    // Now advance the chain by the pre-NU7 default expiry delta; even though a record for the transaction that created
     // `spent_outpoint` exists in the wallet database, the transaction can't be enhanced because
     // the outpoint was fake. Advancing the chain will cause the request for enhancement to expire.
-    for _ in 0..DEFAULT_TX_EXPIRY_DELTA {
+    for _ in 0..BLOSSOM_DEFAULT_TX_EXPIRY_DELTA {
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
@@ -4080,7 +4082,7 @@ where
     }
     st.scan_cached_blocks(
         scan_result.scanned_range().end,
-        usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap(),
+        usize::try_from(BLOSSOM_DEFAULT_TX_EXPIRY_DELTA).unwrap(),
     );
 
     // Simulate the situation where the enhancement request results in `TxidNotRecognized`
@@ -10248,9 +10250,12 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
 
     // The transaction's expiry height may equal the address's expiry height; only a
     // transaction expiry strictly greater than the address's is forbidden. The default
-    // transaction expiry is the target height plus `DEFAULT_TX_EXPIRY_DELTA`, and the
-    // target height is the block after the chain tip.
-    let recipient = with_expiry(Some(chain_tip + 1 + DEFAULT_TX_EXPIRY_DELTA), None);
+    // transaction expiry is the target height plus the default expiry delta for the
+    // consensus branch in effect there, and the target height is the block after the chain tip.
+    let target_height = chain_tip + 1;
+    let default_expiry_height =
+        target_height + default_tx_expiry_delta(BranchId::for_height(st.network(), target_height));
+    let recipient = with_expiry(Some(default_expiry_height), None);
     let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
         Address::from(recipient).to_zcash_address(st.network()),
         payment_value,
@@ -10299,4 +10304,134 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
         ),
         Ok(_)
     );
+}
+
+/// The number of blocks between Sapling activation and NU7 activation on the network used by the
+/// NU7 default-expiry tests. It leaves room for the funding blocks below NU7 activation.
+const NU7_ACTIVATION_OFFSET: u32 = 10;
+
+/// Returns a test network on which every upgrade through NU6.3 activates at Sapling activation,
+/// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later.
+fn nu7_activating_network() -> LocalNetwork {
+    let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .sapling
+        .expect("the default test network activates Sapling");
+    LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        nu7: Some(activation + NU7_ACTIVATION_OFFSET),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    }
+}
+
+/// Builds a wallet on [`nu7_activating_network`] that holds two spendable notes, with its chain
+/// tip two blocks below NU7 activation. The next transaction then targets the block before
+/// activation.
+fn nu7_default_expiry_scenario<T: ShieldedPoolTester, Cache: TestCache, Dsf: DataStoreFactory>(
+    dsf: Dsf,
+    cache: Cache,
+) -> (TestDsl<TestScenario<T, Cache, Dsf>>, BlockHeight) {
+    let network = nu7_activating_network();
+    let nu7_activation = network
+        .activation_height(NetworkUpgrade::Nu7)
+        .expect("the test network activates NU7");
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(dsf)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>();
+
+    st.add_notes_checking_balance([
+        [Zatoshis::const_from_u64(100_000)],
+        [Zatoshis::const_from_u64(100_000)],
+    ]);
+    let tip = st.wallet().chain_height().unwrap().unwrap();
+    let blocks_to_add = u32::from(nu7_activation) - 2 - u32::from(tip);
+    st.add_empty_blocks(usize::try_from(blocks_to_add).expect("block count fits in a usize"));
+    (st, nu7_activation)
+}
+
+/// Tests that a transaction that the wallet creates with no explicit expiry height expires after
+/// the default expiry delta for its target height: 40 blocks before NU7 activation, and 120 blocks
+/// from NU7 activation onward.
+pub fn create_proposed_transactions_uses_nu7_default_expiry<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let (mut st, nu7_activation) = nu7_default_expiry_scenario::<T, _, _>(dsf, cache);
+    let recipient = T::fvk_default_address(&T::sk_to_fvk(&T::sk(&[0xf5; 32])));
+    let payment_value = Zatoshis::const_from_u64(20_000);
+
+    for (expected_target_height, expected_delta) in [
+        (nu7_activation - 1, BLOSSOM_DEFAULT_TX_EXPIRY_DELTA),
+        (nu7_activation, NU7_DEFAULT_TX_EXPIRY_DELTA),
+    ] {
+        let proposal = st.propose_transfer_to(&recipient, payment_value);
+        let target_height = BlockHeight::from(proposal.min_target_height());
+        assert_eq!(target_height, expected_target_height);
+
+        let txids = st.create_proposed_expecting(&proposal, 1);
+        let tx = st
+            .wallet()
+            .get_transaction(txids[0])
+            .unwrap()
+            .expect("the created transaction is stored");
+        assert_eq!(
+            tx.expiry_height(),
+            target_height + expected_delta,
+            "default expiry height for target height {target_height}",
+        );
+
+        st.add_empty_blocks(1);
+    }
+}
+
+/// Tests that a PCZT that the wallet creates with no explicit expiry height expires after the
+/// default expiry delta for its target height: 40 blocks before NU7 activation, and 120 blocks
+/// from NU7 activation onward.
+///
+/// The test network's heights lie in the ZIP 212 grace period, in which the wallet cannot create a
+/// PCZT with Sapling outputs. `T` must therefore not be the Sapling pool.
+#[cfg(feature = "pczt")]
+pub fn create_pczt_uses_nu7_default_expiry<T: ShieldedPoolTester, Dsf>(
+    dsf: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let (mut st, nu7_activation) = nu7_default_expiry_scenario::<T, _, _>(dsf, cache);
+    let account_id = st.get_account().id();
+    let recipient = T::fvk_default_address(&T::sk_to_fvk(&T::sk(&[0xf5; 32])));
+    let payment_value = Zatoshis::const_from_u64(20_000);
+
+    for (expected_target_height, expected_delta) in [
+        (nu7_activation - 1, BLOSSOM_DEFAULT_TX_EXPIRY_DELTA),
+        (nu7_activation, NU7_DEFAULT_TX_EXPIRY_DELTA),
+    ] {
+        let proposal = st.propose_transfer_to(&recipient, payment_value);
+        let target_height = BlockHeight::from(proposal.min_target_height());
+        assert_eq!(target_height, expected_target_height);
+
+        let pczt = st
+            .create_pczt_from_proposal::<Infallible, _, Infallible>(
+                account_id,
+                OvkPolicy::Sender,
+                &proposal,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            *pczt.global().expiry_height(),
+            u32::from(target_height + expected_delta),
+            "default expiry height for target height {target_height}",
+        );
+
+        st.add_empty_blocks(1);
+    }
 }

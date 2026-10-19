@@ -10,8 +10,27 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `default_tx_expiry_delta`
+  - `OVERWINTER_DEFAULT_TX_EXPIRY_DELTA`
+  - `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`
+  - `NU7_DEFAULT_TX_EXPIRY_DELTA`
+  - `Builder::expiry_height`
+
 ### Changed
 - MSRV is now 1.89
+- `zcash_primitives::transaction::builder::{Builder, DeferredPcztBuilder}::new` now set
+  the default expiry height of a non-coinbase transaction to its target height plus
+  `default_tx_expiry_delta` for the consensus branch in effect at that height. The
+  delta is 120 blocks from NU7 activation onward, and 20 blocks before Blossom
+  activation; it remains 40 blocks between those upgrades. To keep a different
+  expiry, set it with `with_expiry_height`.
+
+### Removed
+- `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA`. Use
+  `default_tx_expiry_delta`, or `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA` for the
+  pre-NU7 value.
 
 ## [0.31.0-pre.2] - 2026-10-13
 

@@ -60,6 +60,21 @@ pub(crate) fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>
     )
 }
 
+pub(crate) fn create_proposed_transactions_uses_nu7_default_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn create_pczt_uses_nu7_default_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::create_pczt_uses_nu7_default_expiry::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn scan_full_block_detects_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_full_block_detects_outputs::<T>(
         TestDbFactory::default(),

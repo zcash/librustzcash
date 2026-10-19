@@ -924,8 +924,11 @@ mod tests {
             let h = BlockHeight::from_u32(height);
             assert_eq!(Zip318Params.canonical_expiry(h), expiry_height(h));
             assert!(Zip318Params.is_canonical_expiry(expiry_height(h), h));
-            // The `DEFAULT_TX_EXPIRY_DELTA` of an ordinary transaction is 40 blocks.
-            assert!(!Zip318Params.is_canonical_expiry(h + 40, h));
+            // An ordinary transaction's default expiry delta is 40 blocks before NU7 activation,
+            // and 120 blocks from NU7 activation onward.
+            for ordinary_expiry_delta in [40, 120] {
+                assert!(!Zip318Params.is_canonical_expiry(h + ordinary_expiry_delta, h));
+            }
         }
     }
 
