@@ -12,6 +12,10 @@ workspace.
 
 ### Changed
 - MSRV is now 1.89
+- Sprout recipients are now rejected when parsing a payment request or constructing
+  a `Payment`, as required by ZIP 321. Parsing returns the new
+  `Zip321Error::SproutRecipient` variant and `Payment::new` returns the new
+  `PaymentError::SproutAddress` variant.
 
 ## [0.10.0-pre.2] - 2026-10-13
 

@@ -31,6 +31,9 @@ pub enum PaymentError {
     /// A zero-valued output was requested for a transparent recipient address, which is
     /// disallowed by the Zcash consensus rules.
     ZeroValuedTransparentOutput,
+    /// The recipient is a Sprout address, which is not supported in payment requests per
+    /// ZIP 321.
+    SproutAddress,
 }
 
 impl Display for PaymentError {
@@ -42,6 +45,10 @@ impl Display for PaymentError {
             PaymentError::ZeroValuedTransparentOutput => write!(
                 f,
                 "Zero-valued transparent outputs are disallowed by consensus"
+            ),
+            PaymentError::SproutAddress => write!(
+                f,
+                "Sprout recipients are not supported in payment requests (ZIP 321)"
             ),
         }
     }
@@ -57,6 +64,7 @@ impl PaymentError {
             PaymentError::ZeroValuedTransparentOutput => {
                 Zip321Error::ZeroValuedTransparentOutput(index)
             }
+            PaymentError::SproutAddress => Zip321Error::SproutRecipient(index),
         }
     }
 }
@@ -81,6 +89,9 @@ pub enum Zip321Error {
     /// The payment at the wrapped index requested a zero-valued output to a transparent recipient
     /// address, which is disallowed by the Zcash consensus rules.
     ZeroValuedTransparentOutput(usize),
+    /// The payment at the wrapped index requests payment to a Sprout address, which is not
+    /// supported in payment requests per ZIP 321.
+    SproutRecipient(usize),
     /// The payment at the wrapped index did not include a recipient address.
     RecipientMissing(usize),
     /// The ZIP 321 URI was malformed and failed to parse.
@@ -120,6 +131,10 @@ impl Display for Zip321Error {
             Zip321Error::ZeroValuedTransparentOutput(idx) => write!(
                 f,
                 "Payment {idx} is invalid: zero-valued transparent outputs are disallowed by consensus"
+            ),
+            Zip321Error::SproutRecipient(idx) => write!(
+                f,
+                "Payment {idx} is invalid: Sprout recipients are not supported in payment requests (ZIP 321)"
             ),
             Zip321Error::RecipientMissing(idx) => {
                 write!(f, "Payment {idx} is missing its recipient address")
@@ -195,8 +210,9 @@ impl Payment {
     ///   purpose of this payment within the larger structure of the transaction request.
     /// - `other_params`: A list of other arbitrary key/value pairs associated with this payment.
     ///
-    /// Returns an error if the payment requests that a memo be sent to a recipient that cannot
-    /// receive a memo or a zero-valued output be sent to a transparent address.
+    /// Returns an error if the recipient is a Sprout address, if the payment requests that a
+    /// memo be sent to a recipient that cannot receive a memo, or if a zero-valued output would
+    /// be sent to a transparent address.
     pub fn new(
         recipient_address: ZcashAddress,
         amount: Option<Zatoshis>,
@@ -205,7 +221,9 @@ impl Payment {
         message: Option<String>,
         other_params: Vec<(String, String)>,
     ) -> Result<Self, PaymentError> {
-        if memo.is_some() && !recipient_address.can_receive_memo() {
+        if recipient_address.is_sprout() {
+            Err(PaymentError::SproutAddress)
+        } else if memo.is_some() && !recipient_address.can_receive_memo() {
             Err(PaymentError::TransparentMemo)
         } else if recipient_address.is_transparent_only() && amount == Some(Zatoshis::ZERO) {
             Err(PaymentError::ZeroValuedTransparentOutput)
@@ -672,8 +690,13 @@ mod parse {
             _otherwise => None,
         });
 
+        let recipient_address = *addr.ok_or(Zip321Error::RecipientMissing(i))?;
+        if recipient_address.is_sprout() {
+            return Err(Zip321Error::SproutRecipient(i));
+        }
+
         let mut payment = Payment {
-            recipient_address: *addr.ok_or(Zip321Error::RecipientMissing(i))?,
+            recipient_address,
             amount: None,
             memo: None,
             label: None,
@@ -886,7 +909,11 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_zip321_payment(network: NetworkType)(
-            (recipient_address, amount) in arb_address(network).prop_flat_map(|addr| {
+            (recipient_address, amount) in arb_address(network)
+                .prop_filter("Sprout recipients are not supported in payment requests", |addr| {
+                    !addr.is_sprout()
+                })
+                .prop_flat_map(|addr| {
                 arb_zatoshis().prop_filter_map(
                     "zero-valued outputs to transparent addresses are disallowed by consensus",
                     move |zat| (!addr.is_transparent_only() || zat > Zatoshis::ZERO).then_some(
@@ -965,6 +992,8 @@ mod tests {
         memo::{Memo, MemoBytes},
         value::{Zatoshis, testing::arb_zatoshis},
     };
+
+    use crate::{PaymentError, Zip321Error};
 
     use super::{
         Payment, TransactionRequest, memo_from_base64, memo_to_base64,
@@ -1213,6 +1242,37 @@ mod tests {
             "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.45&req-unknown=x";
         let i12r = TransactionRequest::from_uri(invalid_12);
         assert!(i12r.is_err());
+    }
+
+    #[test]
+    fn sprout_recipients_are_rejected() {
+        // The Sprout address test vector from the `zcash_address::encoding` tests.
+        const SPROUT: &str = "zc8E5gYid86n4bo2Usdq1cpr7PpfoJGzttwBHEEgGhGkLUg7SPPVFNB2AkRFXZ7usfphup5426dt1buMmY3fkYeRrQGLa8y";
+
+        // Lead address, reproducing the issue.
+        assert!(matches!(
+            TransactionRequest::from_uri(&format!("zcash:{SPROUT}?amount=1&memo=aGk")),
+            Err(Zip321Error::SproutRecipient(0))
+        ));
+
+        // `address` query parameter.
+        assert!(matches!(
+            TransactionRequest::from_uri(&format!("zcash:?address={SPROUT}&amount=1")),
+            Err(Zip321Error::SproutRecipient(0))
+        ));
+
+        // Indexed `address` query parameter.
+        assert!(matches!(
+            TransactionRequest::from_uri(&format!("zcash:?address.3={SPROUT}&amount.3=1")),
+            Err(Zip321Error::SproutRecipient(3))
+        ));
+
+        // Direct construction via `Payment::new`.
+        let addr = ZcashAddress::try_from_encoded(SPROUT).unwrap();
+        assert!(matches!(
+            Payment::new(addr, None, None, None, None, vec![]),
+            Err(PaymentError::SproutAddress)
+        ));
     }
 
     proptest! {

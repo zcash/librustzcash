@@ -74,6 +74,8 @@ workspace.
   `zcash_protocol::zip318::AnchorGrid` in place of an `AnchorBucketInterval`.
 - A ZIP 318 canonical crossing's anchor and expiry follow the scaled grid and
   expiry modulus at heights from NU7 activation.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method
+  `set_account_name`.
 
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
