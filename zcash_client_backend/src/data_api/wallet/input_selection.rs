@@ -2881,7 +2881,10 @@ mod greedy_selection_tests {
                 wallet,
                 TargetHeight::from(anchor_height + 1),
                 anchor_height,
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 ConfirmationsPolicy::default(),
                 ACCOUNT,
                 request,

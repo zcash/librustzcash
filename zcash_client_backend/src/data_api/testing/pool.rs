@@ -271,6 +271,17 @@ pub trait ShieldedPoolTester {
     ) -> Result<(), pczt::roles::signer::Error>;
 }
 
+/// The boundaries of `interval` on the chain that `network` describes.
+fn anchor_grid<P: consensus::Parameters>(
+    network: &P,
+    interval: zcash_protocol::zip318::AnchorBucketInterval,
+) -> zcash_protocol::zip318::AnchorGrid {
+    zcash_protocol::zip318::AnchorGrid::new(
+        interval,
+        zcash_protocol::zip318::BlockSpacing::for_network(network),
+    )
+}
+
 /// Tests sending funds within the given shielded pool in a single transaction.
 ///
 /// The test:
@@ -4459,7 +4470,9 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
 
     // The first interval-aligned anchor height at or above the retention floor and strictly above
     // the received note, so the note's position precedes the anchor's checkpoint.
-    let mut anchor = u32::from(interval.boundary_at_or_above(BlockHeight::from(floor)));
+    let mut anchor = u32::from(
+        anchor_grid(st.network(), interval).boundary_at_or_above(BlockHeight::from(floor)),
+    );
     while anchor <= received {
         anchor += interval_blocks;
     }
@@ -4524,7 +4537,7 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
     // Exactly the interval-aligned checkpoints at or above the retention floor are retained.
     let expected_anchors: BTreeSet<BlockHeight> = (floor..=tip)
         .map(BlockHeight::from)
-        .filter(|h| interval.is_boundary(*h))
+        .filter(|h| anchor_grid(st.network(), interval).is_boundary(*h))
         .collect();
     assert_eq!(
         retained, expected_anchors,
@@ -4602,7 +4615,7 @@ pub fn empty_boundary_blocks_are_checkpointed_and_retained<
     // The first two boundaries strictly above the received note, plus slack so neither boundary
     // is the final block of the batch.
     let first_boundary = {
-        let mut b = u32::from(interval.boundary_at_or_above(activation));
+        let mut b = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(activation));
         while b <= received {
             b += interval_blocks;
         }
@@ -4616,16 +4629,17 @@ pub fn empty_boundary_blocks_are_checkpointed_and_retained<
     // of its own.
     let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     for height in (received + 1)..=tip {
-        let generated = if interval.is_boundary(BlockHeight::from_u32(height)) {
-            st.generate_empty_block().0
-        } else {
-            st.generate_next_block(
-                &not_our_fvk,
-                AddressType::DefaultExternal,
-                Zatoshis::const_from_u64(10_000),
-            )
-            .0
-        };
+        let generated =
+            if anchor_grid(st.network(), interval).is_boundary(BlockHeight::from_u32(height)) {
+                st.generate_empty_block().0
+            } else {
+                st.generate_next_block(
+                    &not_our_fvk,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(10_000),
+                )
+                .0
+            };
         assert_eq!(u32::from(generated), height, "cache height must track");
     }
     // One batch, covering both boundaries.
@@ -9345,7 +9359,9 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     let interval_blocks = interval.block_count().get();
     // Deliberately OFF a boundary: the ordinary anchor must not be a grid boundary by accident,
     // or an assertion that a canonical crossing was bucketed would pass trivially.
-    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(received_height))
+        + 3 * interval_blocks
+        + 5;
     let filler_count = tip - received;
 
     // Fillers pay a non-wallet key, so each block adds a commitment (and thus a checkpoint)
@@ -9391,12 +9407,15 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
         .anchor_height()
         .expect("a shielded step binds an anchor");
     assert!(
-        interval.is_boundary(anchor),
+        anchor_grid(st.network(), interval).is_boundary(anchor),
         "a canonical crossing must anchor to a grid boundary, got {anchor:?}"
     );
     assert_eq!(step.input_count_in_pool(PoolType::ORCHARD), 1);
     assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 0);
-    assert!(step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee));
+    assert!(step.is_canonical_crossing(
+        &st.wallet().pool_migration_params(st.network()),
+        canonical_fee
+    ));
     assert_eq!(
         step.ironwood_action_count(
             step.ironwood_bundle_padding(),
@@ -9413,7 +9432,10 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     )
     .unwrap();
     let step = off_by_one.steps().first();
-    assert!(!step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee));
+    assert!(!step.is_canonical_crossing(
+        &st.wallet().pool_migration_params(st.network()),
+        canonical_fee
+    ));
     assert_eq!(
         step.ironwood_action_count(
             step.ironwood_bundle_padding(),
@@ -9422,7 +9444,7 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
         Ok(2)
     );
     assert!(
-        !interval.is_boundary(step.anchor_height().unwrap()),
+        !anchor_grid(st.network(), interval).is_boundary(step.anchor_height().unwrap()),
         "a non-canonical payment must not pay for a bucketed anchor"
     );
 
@@ -9501,9 +9523,10 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     let tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
     assert_eq!(
         tx.expiry_height(),
-        Some(zcash_protocol::zip318::expiry_height(BlockHeight::from(
-            canonical.min_target_height()
-        ))),
+        Some(zcash_protocol::zip318::expiry_height(
+            &zcash_protocol::zip318::BlockSpacing::for_network(st.network()),
+            BlockHeight::from(canonical.min_target_height())
+        )),
         "a canonical crossing must carry the ZIP 318 rolling expiry"
     );
     assert_eq!(
@@ -9559,11 +9582,13 @@ pub fn canonical_crossing_builds_at_empty_boundary_block<Dsf: DataStoreFactory>(
     // empty, while the other fillers pay a non-wallet key. The bucketed anchor the proposal picks
     // is a boundary, and every boundary in the range is an empty block, so the anchor necessarily
     // lands on one.
-    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(received_height))
+        + 3 * interval_blocks
+        + 5;
     let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
     let mut empty_heights = Vec::new();
     for height in (received + 1)..=tip {
-        if interval.is_boundary(BlockHeight::from_u32(height)) {
+        if anchor_grid(st.network(), interval).is_boundary(BlockHeight::from_u32(height)) {
             let (h, _) = st.generate_empty_block();
             empty_heights.push(h);
         } else {
@@ -9606,7 +9631,10 @@ pub fn canonical_crossing_builds_at_empty_boundary_block<Dsf: DataStoreFactory>(
         .anchor_height()
         .expect("a shielded step binds an anchor");
     assert!(
-        step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee),
+        step.is_canonical_crossing(
+            &st.wallet().pool_migration_params(st.network()),
+            canonical_fee
+        ),
         "the payment must be recognized as a canonical crossing"
     );
     assert!(
@@ -9678,7 +9706,9 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
     st.scan_cached_blocks(first_height + 1, 2);
 
     let interval_blocks = interval.block_count().get();
-    let tip = u32::from(interval.boundary_at_or_above(first_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(first_height))
+        + 3 * interval_blocks
+        + 5;
     let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
     let filler_count = tip - u32::from(first_height) - 2;
     for _ in 0..filler_count {
@@ -9708,7 +9738,7 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
         .expect("three notes together can fund the payment");
 
     let step = proposal.steps().first();
-    let zip318 = st.wallet().pool_migration_params();
+    let zip318 = st.wallet().pool_migration_params(st.network());
     let canonical_fee = crate::fees::canonical_crossing_fee(
         st.network(),
         BlockHeight::from(proposal.min_target_height()),
@@ -9720,7 +9750,7 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
     );
     assert!(!step.is_canonical_crossing(&zip318, canonical_fee));
     assert!(
-        !interval.is_boundary(step.anchor_height().unwrap()),
+        !anchor_grid(st.network(), interval).is_boundary(step.anchor_height().unwrap()),
         "a multi-input transaction must not pay for a bucketed anchor"
     );
     assert_eq!(
@@ -9783,7 +9813,9 @@ pub fn canonical_crossing_prefers_single_note<Dsf: DataStoreFactory>(
     st.scan_cached_blocks(first_height + 1, 2);
 
     let interval_blocks = interval.block_count().get();
-    let tip = u32::from(interval.boundary_at_or_above(first_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(first_height))
+        + 3 * interval_blocks
+        + 5;
     let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
     let filler_count = tip - u32::from(first_height) - 2;
     for _ in 0..filler_count {
@@ -9814,7 +9846,7 @@ pub fn canonical_crossing_prefers_single_note<Dsf: DataStoreFactory>(
     // The canonical payment takes the single-note shape, spending the LARGE note.
     let canonical = propose(&mut st, MAX_RESIDUAL_VALUE).expect("the wallet can fund this");
     let step = canonical.steps().first();
-    let zip318 = st.wallet().pool_migration_params();
+    let zip318 = st.wallet().pool_migration_params(st.network());
     let canonical_fee = crate::fees::canonical_crossing_fee(
         st.network(),
         BlockHeight::from(canonical.min_target_height()),
@@ -9905,7 +9937,9 @@ pub fn canonical_crossing_abandoned_without_anchor_checkpoint<Dsf, TC>(
         st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(10_000_000));
     let received = u32::from(received_height);
     let interval_blocks = interval.block_count().get();
-    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(received_height))
+        + 3 * interval_blocks
+        + 5;
     let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
     let filler_count = tip - received;
     for _ in 0..filler_count {
@@ -9942,7 +9976,7 @@ pub fn canonical_crossing_abandoned_without_anchor_checkpoint<Dsf, TC>(
     // reimplementing the arithmetic.
     let canonical = propose(&mut st);
     let step = canonical.steps().first();
-    let zip318 = st.wallet().pool_migration_params();
+    let zip318 = st.wallet().pool_migration_params(st.network());
     let canonical_fee = crate::fees::canonical_crossing_fee(
         st.network(),
         BlockHeight::from(canonical.min_target_height()),
@@ -10038,7 +10072,9 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
         st.scan_cached_blocks(from, count as usize);
     };
 
-    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let tip = u32::from(anchor_grid(st.network(), interval).boundary_at_or_above(received_height))
+        + 3 * interval_blocks
+        + 5;
     advance(
         &mut st,
         received_height + 1,
@@ -10048,7 +10084,7 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
-    let zip318 = st.wallet().pool_migration_params();
+    let zip318 = st.wallet().pool_migration_params(st.network());
 
     // First crossing: funded from the original Orchard note.
     let request = TransactionRequest::new(vec![Payment::without_memo(

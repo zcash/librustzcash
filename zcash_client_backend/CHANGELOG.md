@@ -18,6 +18,7 @@ workspace.
 - `zcash_client_backend::data_api::testing::{FixedNotes, FixedNotesError}`
   (under the `test-dependencies` feature)
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::{RequirementCovered, DustInputsNotGiven, ExcludedNoteSelected, UnrequestedPoolSelected}`
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetention::spacing`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
@@ -62,8 +63,23 @@ workspace.
   create_pczt_from_proposal}`: when no `expiry_height` is given, a transaction that
   is not a ZIP 318 canonical crossing now expires 120 blocks after its target height
   if NU7 is active at that height, instead of 40 blocks.
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetention::{new, union}`
+  take a `zcash_protocol::zip318::BlockSpacing` argument. From NU7 activation the
+  policy retains the boundaries of the scaled anchor grid.
+- `zcash_client_backend::data_api::anchor_retention::PoolMigrationParams::new`
+  takes a `BlockSpacing` argument.
+- `zcash_client_backend::data_api::WalletRead::pool_migration_params` takes the
+  consensus parameters of the wallet's network.
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed` takes a
+  `zcash_protocol::zip318::AnchorGrid` in place of an `AnchorBucketInterval`.
+- A ZIP 318 canonical crossing's anchor and expiry follow the scaled grid and
+  expiry modulus at heights from NU7 activation.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method
   `set_account_name`.
+
+### Removed
+- `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
+  Use `PoolMigrationParams::new`.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`

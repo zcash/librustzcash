@@ -593,7 +593,10 @@ where
             // Parameters are the SPECIFIED defaults, exactly as the enhance path reasons: the only
             // wallet-overridable value is the anchor bucket interval, and this evidence source
             // cannot evaluate the anchor clause at all, so the override cannot change the answer.
-            let migration_params = PoolMigrationParams::from(AnchorRetentionInterval::default());
+            let migration_params = PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::for_network(params),
+                AnchorRetentionInterval::default(),
+            );
             let classification = classify_decrypted_tx(
                 &tx,
                 decrypted.orchard_outputs(),

@@ -2344,16 +2344,23 @@ pub trait WalletRead {
         anchor_retention::AnchorRetentionInterval::ZIP_318
     }
 
-    /// Returns the ZIP 318 pool-migration parameters in force for this wallet: the specified
-    /// values, with the anchor bucket grid taken from [`Self::anchor_retention_interval`].
+    /// Returns the ZIP 318 pool-migration parameters in force for this wallet on the network that
+    /// `params` describe: the specified values, with the anchor bucket grid taken from
+    /// [`Self::anchor_retention_interval`].
     ///
     /// Every decision that depends on the grid must consult this rather than the network defaults,
     /// so that a wallet retaining a non-standard interval is treated consistently: bucketing an
     /// anchor and judging the resulting transaction a canonical crossing are the same question
     /// asked twice, and they must be asked of the same grid. Overriding
     /// [`Self::anchor_retention_interval`] is sufficient; this composes it.
-    fn pool_migration_params(&self) -> anchor_retention::PoolMigrationParams {
-        anchor_retention::PoolMigrationParams::new(self.anchor_retention_interval())
+    fn pool_migration_params<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> anchor_retention::PoolMigrationParams {
+        anchor_retention::PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::for_network(params),
+            self.anchor_retention_interval(),
+        )
     }
 
     /// Returns the block hash for the block at the given height, if the

@@ -5,6 +5,7 @@ use core::convert::TryFrom;
 use core::fmt;
 use core::num::TryFromIntError;
 use core::ops::{Add, Bound, RangeBounds, Sub};
+use core::time::Duration;
 
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
@@ -26,10 +27,27 @@ memuse::impl_no_dynamic_usage!(BlockHeight);
 pub const H0: BlockHeight = BlockHeight(0);
 
 /// The target time between blocks, in seconds (the post-Blossom target spacing).
+#[deprecated(
+    since = "0.11.0",
+    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
+)]
 pub const SECONDS_PER_BLOCK: u32 = 75;
 
 /// The approximate number of blocks produced per hour at [`SECONDS_PER_BLOCK`].
+#[deprecated(
+    since = "0.11.0",
+    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
+)]
+#[allow(deprecated)]
 pub const BLOCKS_PER_HOUR: u32 = 3600 / SECONDS_PER_BLOCK;
+
+/// The factor by which NU7 divides the target block spacing, from 75 seconds to 25 seconds
+/// ([ZIP 218]'s `NU7PoWTargetSpacingRatio`).
+///
+/// A duration that spans `n` blocks before NU7 activation spans `n` times this ratio after it.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const NU7_POW_TARGET_SPACING_RATIO: u32 = 3;
 
 impl BlockHeight {
     pub const fn from_u32(v: u32) -> BlockHeight {
@@ -745,6 +763,84 @@ pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 /// [txnconsensus]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub const COINBASE_MATURITY_BLOCKS: u32 = 100;
 
+/// The target spacing between consecutive blocks before Blossom activation, as defined by
+/// [ZIP 208].
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+pub const PRE_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(150);
+
+/// The target spacing between consecutive blocks from Blossom activation until NU7 activation,
+/// as defined by [ZIP 208].
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+pub const POST_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(75);
+
+/// The target spacing between consecutive blocks from NU7 activation, as defined by [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const POST_NU7_POW_TARGET_SPACING: Duration = Duration::from_secs(25);
+
+/// Returns the target spacing between the block at `height` and its parent, as defined by
+/// [ZIP 208] and [ZIP 218].
+///
+/// This is [`PRE_BLOSSOM_POW_TARGET_SPACING`] if Blossom is not active at `height`,
+/// [`POST_BLOSSOM_POW_TARGET_SPACING`] if Blossom is active and NU7 is not, and
+/// [`POST_NU7_POW_TARGET_SPACING`] if both are active. A network on which NU7 is active and
+/// Blossom is not therefore has the pre-Blossom spacing.
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub fn pow_target_spacing<P: Parameters>(params: &P, height: BlockHeight) -> Duration {
+    if !params.is_nu_active(NetworkUpgrade::Blossom, height) {
+        PRE_BLOSSOM_POW_TARGET_SPACING
+    } else if !params.is_nu_active(NetworkUpgrade::Nu7, height) {
+        POST_BLOSSOM_POW_TARGET_SPACING
+    } else {
+        POST_NU7_POW_TARGET_SPACING
+    }
+}
+
+/// Returns the target time from the block at height `from` to the block at height `to`.
+///
+/// This is the sum of [`pow_target_spacing`] over the heights in `(from, to]`: the block at each
+/// height is targeted to follow its parent by the spacing at that height. Returns
+/// [`Duration::ZERO`] if `to <= from`.
+pub fn target_time_between<P: Parameters>(
+    params: &P,
+    from: BlockHeight,
+    to: BlockHeight,
+) -> Duration {
+    if to <= from {
+        return Duration::ZERO;
+    }
+    // The number of heights in `(from, to]` at or above `start`, or zero if `start` is `None`.
+    // `from < to`, so `from + 1` does not saturate.
+    let heights_at_or_above = |start: Option<BlockHeight>| -> u64 {
+        start.map_or(0, |start| {
+            let first = start.max(from + 1);
+            if first > to {
+                0
+            } else {
+                u64::from(to) - u64::from(first) + 1
+            }
+        })
+    };
+    // `pow_target_spacing` changes value only at Blossom activation and at the first height at
+    // which both Blossom and NU7 are active, which splits `(from, to]` into at most three runs.
+    let blossom = params.activation_height(NetworkUpgrade::Blossom);
+    let post_nu7_start = blossom
+        .zip(params.activation_height(NetworkUpgrade::Nu7))
+        .map(|(blossom_height, nu7_height)| blossom_height.max(nu7_height));
+    let all_heights = u64::from(to - from);
+    let post_blossom_or_later = heights_at_or_above(blossom);
+    let post_nu7 = heights_at_or_above(post_nu7_start);
+    Duration::from_secs(
+        (all_heights - post_blossom_or_later) * PRE_BLOSSOM_POW_TARGET_SPACING.as_secs()
+            + (post_blossom_or_later - post_nu7) * POST_BLOSSOM_POW_TARGET_SPACING.as_secs()
+            + post_nu7 * POST_NU7_POW_TARGET_SPACING.as_secs(),
+    )
+}
+
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
 /// Each branch ID in this enum corresponds to one of the epochs between a pair of Zcash
@@ -1065,6 +1161,9 @@ pub mod testing {
         }
     }
 }
+
+#[cfg(test)]
+mod spacing_tests;
 
 #[cfg(test)]
 mod tests {

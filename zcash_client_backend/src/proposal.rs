@@ -1146,7 +1146,7 @@ impl<NoteRef> Step<NoteRef> {
                 .is_some_and(|value| params.is_canonical_denomination(value))
             && self
                 .anchor_height()
-                .is_some_and(|anchor| params.anchor_bucket_interval().is_boundary(anchor))
+                .is_some_and(|anchor| params.anchor_grid().is_boundary(anchor))
             // ZIP 318 forbids a non-standard fee, which would partition the anonymity set as
             // surely as a non-standard shape. A `ChangeStrategy` may be built on any fee rule,
             // including a fixed non-standard one, so a structurally perfect crossing can still
@@ -1612,7 +1612,10 @@ mod tests {
     /// parameters from a wallet-shaped value, as production code does; there is deliberately no
     /// implementation of `PoolMigrationConstants` for a network type.
     fn zip318() -> PoolMigrationParams {
-        PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318)
+        PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::UNIFORM,
+            AnchorRetentionInterval::ZIP_318,
+        )
     }
 
     fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
@@ -1748,6 +1751,10 @@ mod tests {
         #[derive(Clone)]
         struct SmallCap;
         impl PoolMigrationConstants for SmallCap {
+            fn block_spacing(&self) -> zcash_protocol::zip318::BlockSpacing {
+                zcash_protocol::zip318::BlockSpacing::UNIFORM
+            }
+
             fn denomination_cap(&self) -> Zatoshis {
                 Zatoshis::const_from_u64(COIN)
             }

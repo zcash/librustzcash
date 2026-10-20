@@ -491,8 +491,7 @@ where
                 _ => false,
             }
             && constants
-                .anchor_bucket_interval()
-                .is_boundary(_anchor_height)
+                .anchor_grid().is_boundary(_anchor_height)
     };
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change: OutputManifest| {
@@ -1125,9 +1124,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
                         [output] => constants.is_canonical_denomination(output.value()),
                         _ => false,
                     }
-                    && constants
-                        .anchor_bucket_interval()
-                        .is_boundary(anchor_height);
+                    && constants.anchor_grid().is_boundary(anchor_height);
                 if canonical {
                     BundlePadding::UNPADDED
                 } else {
