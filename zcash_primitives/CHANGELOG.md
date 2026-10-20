@@ -19,6 +19,10 @@ workspace.
   - `Builder::expiry_height`
 
 ### Changed
+- `transaction::components::sapling::zip212_enforcement` ends the ZIP 212 grace
+  period at the NU5 activation height when that comes first. Mainnet and testnet
+  are unaffected; on regtest-style networks where every upgrade activates at
+  height 1, ZIP 212 is enforced from the start so Sapling PCZTs can be built.
 - MSRV is now 1.89
 - `zcash_primitives::transaction::builder::{Builder, DeferredPcztBuilder}::new` now set
   the default expiry height of a non-coinbase transaction to its target height plus

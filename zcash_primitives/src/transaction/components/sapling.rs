@@ -79,10 +79,21 @@ const EPHEMERAL_KEY_BYTE_SIZE: usize = size_of::<EphemeralKeyBytes>();
 pub const BUNDLE_OVERHEAD: usize = 9 + 9 + 8 + 32 + 64;
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
+///
+/// The grace period ends [`ZIP212_GRACE_PERIOD`] blocks after Canopy, or at the NU5
+/// activation height if that comes first. On mainnet and testnet the grace period ended
+/// long before NU5, so the cap changes nothing there; on a network whose upgrades
+/// activate at adjacent heights (e.g. regtest) it lets ZIP 212 outputs be constructed
+/// from the start instead of after 32256 blocks, so that Sapling PCZTs can be built.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
     if params.is_nu_active(NetworkUpgrade::Canopy, height) {
-        let grace_period_end_height =
+        let mut grace_period_end_height =
             params.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD;
+        if let Some(nu5) = params.activation_height(NetworkUpgrade::Nu5) {
+            if nu5 < grace_period_end_height {
+                grace_period_end_height = nu5;
+            }
+        }
 
         if height < grace_period_end_height {
             Zip212Enforcement::GracePeriod
@@ -687,5 +698,77 @@ mod tests {
                 GROTH_PROOF_SIZE
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod zip212_tests {
+    use zcash_protocol::consensus::{
+        BlockHeight, MAIN_NETWORK, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD,
+    };
+    use zcash_protocol::local_consensus::LocalNetwork;
+
+    use super::zip212_enforcement;
+    use sapling::note_encryption::Zip212Enforcement;
+
+    #[test]
+    fn mainnet_grace_period_is_unchanged() {
+        let canopy = MAIN_NETWORK
+            .activation_height(NetworkUpgrade::Canopy)
+            .unwrap();
+        let end = canopy + ZIP212_GRACE_PERIOD;
+        assert_eq!(
+            zip212_enforcement(&MAIN_NETWORK, canopy - 1),
+            Zip212Enforcement::Off
+        );
+        assert_eq!(
+            zip212_enforcement(&MAIN_NETWORK, canopy),
+            Zip212Enforcement::GracePeriod
+        );
+        assert_eq!(
+            zip212_enforcement(&MAIN_NETWORK, end - 1),
+            Zip212Enforcement::GracePeriod
+        );
+        assert_eq!(
+            zip212_enforcement(&MAIN_NETWORK, end),
+            Zip212Enforcement::On
+        );
+    }
+
+    #[test]
+    fn grace_period_ends_at_nu5_when_nu5_comes_first() {
+        let h = Some(BlockHeight::from_u32(1));
+        let regtest = LocalNetwork {
+            overwinter: h,
+            sapling: h,
+            blossom: h,
+            heartwood: h,
+            canopy: h,
+            nu5: h,
+            nu6: h,
+            nu6_1: h,
+            nu6_2: h,
+            nu6_3: h,
+            nu7: h,
+            #[cfg(zcash_unstable = "nutachyon")]
+            nu_tachyon: h,
+        };
+        assert_eq!(
+            zip212_enforcement(&regtest, BlockHeight::from_u32(1)),
+            Zip212Enforcement::On
+        );
+        // Without NU5 the grace period runs its full length.
+        let no_nu5 = LocalNetwork {
+            nu5: None,
+            ..regtest
+        };
+        assert_eq!(
+            zip212_enforcement(&no_nu5, BlockHeight::from_u32(1)),
+            Zip212Enforcement::GracePeriod
+        );
+        assert_eq!(
+            zip212_enforcement(&no_nu5, BlockHeight::from_u32(1) + ZIP212_GRACE_PERIOD),
+            Zip212Enforcement::On
+        );
     }
 }
