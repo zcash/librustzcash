@@ -19,6 +19,31 @@ workspace.
   (under the `test-dependencies` feature)
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::{RequirementCovered, DustInputsNotGiven, ExcludedNoteSelected, UnrequestedPoolSelected}`
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetention::spacing`
+- `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
+- `zcash_client_backend::data_api::PutBlocksError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
+- `zcash_client_backend::data_api::chain::error::Error` implements
+  `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
+- `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
+- `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
+- `zcash_client_backend::data_api::ll::PutBlockMetaError`
+- `zcash_client_backend::data_api::testing::pool::{anchor_is_policy_depth_state_or_absent,
+  b_note_stable_across_rewind_below_birthday, BoundaryScanOrder,
+  completed_shard_note_spendable_across_older_birthday_import,
+  completed_shard_note_spendable_after_rewind_once_window_rescanned,
+  completed_shard_note_spendable_after_scanning_anchor_window,
+  completed_shard_note_spendable_with_unscanned_gap_below_it,
+  note_in_recently_completed_shard_spendable_once_confirmed,
+  open_shard_note_spendable_across_commitment_free_stretch,
+  open_shard_note_spendable_across_older_birthday_import,
+  reorg_below_scanned_height_is_a_continuity_error,
+  retained_boundaries_below_window_are_usable_anchors,
+  shard_completeness_derives_from_scan_queue,
+  spendable_balance_agrees_with_note_selection,
+  stabilized_note_rewind_above_shard_end,
+  stabilized_note_rewind_un_mines_shard_completion,
+  stabilized_note_settled_height_invalidated_by_reorg,
+  stabilized_note_spendable_across_small_tip_advance}`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `fs-mistrust 0.14`.
@@ -76,10 +101,74 @@ workspace.
   expiry modulus at heights from NU7 activation.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method
   `set_account_name`.
+- `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
+  `height` to be at or below the wallet birthday. An implementation returns an
+  error, and leaves the scan queue unchanged, for a `height` above the wallet
+  birthday.
+- `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
+  `Anchor`, ordered between `ChainTip` and `Verify`.
+- `zcash_client_backend::data_api::WalletWrite::{put_received_transparent_utxo,
+  store_decrypted_tx, set_transaction_status}` and
+  `zcash_client_backend::data_api::ll::LowLevelWalletWrite::set_transaction_status`
+  now require a mined height to be the height of a block on the main chain. An
+  implementation must advance its chain tip to a mined height above it, and
+  treat the blocks above the previous chain tip as not yet scanned.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
+  returns `Result<(), PutBlockMetaError<Self::Error>>`. An implementation that
+  already holds a block at the given height with a different hash returns
+  `PutBlockMetaError::HashMismatch`, carrying the stored hash, and stores
+  nothing; any other failure is `PutBlockMetaError::Storage`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` reports a block at
+  an already-scanned height whose hash differs from the hash the wallet recorded
+  there as `PutBlocksError::Continuity(ScanError::BlockHashMismatch)`, and
+  `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
+  `Error::Scan(ScanError::BlockHashMismatch)`. Both are continuity errors at
+  that height. Previously the conflict surfaced as a storage error.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now returns
+  `Result<(), PutBlocksError<Self::Error>>`. Implementations report a note
+  commitment tree conflict as `PutBlocksError::Continuity` and any other failure
+  as `PutBlocksError::Wallet`; callers that matched on `Self::Error` match on
+  `PutBlocksError::Wallet` instead.
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a note
+  commitment tree conflict as `Error::Scan(ScanError::CommitmentTreeConflict)`,
+  a continuity error at the first block of the batch, instead of as
+  `Error::Wallet`.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks` takes the wallet's
+  view of the chain tip as a new `chain_tip: Option<BlockHeight>` argument, and
+  `zcash_client_backend::data_api::ll::wallet::update_tree` takes a
+  `checkpoint_floor: BlockHeight` argument and its `missing_checkpoints`
+  argument unconditionally. `Checkpoint` retention is now used only within
+  `PRUNING_DEPTH` blocks of the chain tip: every scanned height in that window
+  receives a checkpoint in every tree, whether or not a block there carries a
+  commitment, and a block-end checkpoint below the window is not created; such
+  a commitment keeps only the marking that protects a wallet note.
+  `update_tree` adds every entry of `missing_checkpoints`, including one below
+  the tree's oldest checkpoint, which it previously skipped. If an entry lies at
+  the position of the frontier and the frontier is not checkpointed at its own
+  height, the frontier carries that entry's checkpoint.
+  `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights` takes the
+  window's heights as a new argument,
+  `zcash_client_backend::data_api::ll::wallet::ensure_checkpoints` takes the set
+  of checkpoints the batch creates and the block-end tree positions as separate
+  arguments. `batch_ensure_heights`, `ensure_checkpoints`,
+  `checkpoint_positions`, and `cross_pool_ensure_heights` in
+  `zcash_client_backend::data_api::ll::wallet` are available without the
+  `orchard` feature.
+- `zcash_client_backend::data_api::WalletRead::get_target_and_anchor_heights` is
+  now documented to return an anchor whose tree state is exactly the state at
+  `min_confirmations` below the target, and `None` when the backend cannot
+  identify such a state, for example because blocks between its latest
+  checkpoint and that depth are unscanned. An implementation that returned the
+  most recent checkpoint at or below that depth without this condition must be
+  updated. `WalletRead::get_wallet_summary` is now documented to report no
+  shielded value as spendable while `get_target_and_anchor_heights` returns
+  `None`.
 
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
   Use `PoolMigrationParams::new`.
+- `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
+  newly_discovered_notes_become_stabilized}`.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`

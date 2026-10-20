@@ -12,13 +12,13 @@ use std::{
     hash::Hash,
 };
 
-use incrementalmerkletree::{Marking, Position, Retention};
+use incrementalmerkletree::{Address, Marking, Position, Retention};
 use sapling::{SaplingIvk, note_encryption::SaplingDomain};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
-use zcash_primitives::transaction::TxId;
+use zcash_primitives::{block::BlockHash, transaction::TxId};
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight},
@@ -737,6 +737,28 @@ pub enum ScanError {
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
 
+    /// A block at a height the wallet has already scanned carries a hash other than the one the
+    /// wallet recorded there: the chain has reorganized below the scanned range.
+    BlockHashMismatch {
+        /// The height of the conflicting block.
+        at_height: BlockHeight,
+        /// The hash that the wallet recorded at `at_height`.
+        stored: BlockHash,
+        /// The hash of the block that was scanned at `at_height`.
+        scanned: BlockHash,
+    },
+
+    /// The note commitment data of a batch of scanned blocks, or the chain state the batch
+    /// extends, conflicts with note commitment tree state the wallet already holds.
+    CommitmentTreeConflict {
+        /// The shielded pool whose note commitment tree rejected the data.
+        pool: ShieldedPool,
+        /// The height of the first block of the rejected batch.
+        at_height: BlockHeight,
+        /// The address of the tree node at which the conflict was detected.
+        address: Address,
+    },
+
     /// The block height field of the proposed new block is not equal to the height of the previous
     /// block + 1.
     BlockHeightDiscontinuity {
@@ -795,6 +817,8 @@ impl ScanError {
         match self {
             EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
+            BlockHashMismatch { .. } => true,
+            CommitmentTreeConflict { .. } => true,
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
             TreeSizeUnknown { .. } => false,
@@ -810,6 +834,8 @@ impl ScanError {
         match self {
             EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
+            BlockHashMismatch { at_height, .. } => *at_height,
+            CommitmentTreeConflict { at_height, .. } => *at_height,
             BlockHeightDiscontinuity { new_height, .. } => *new_height,
             TreeSizeMismatch { at_height, .. } => *at_height,
             TreeSizeUnknown { at_height, .. } => *at_height,
@@ -836,6 +862,22 @@ impl fmt::Display for ScanError {
             PrevHashMismatch { at_height } => write!(
                 f,
                 "The parent hash of proposed block does not correspond to the block hash at height {at_height}."
+            ),
+            BlockHashMismatch {
+                at_height,
+                stored,
+                scanned,
+            } => write!(
+                f,
+                "The block at height {at_height} has hash {scanned}, but the wallet recorded {stored} at that height."
+            ),
+            CommitmentTreeConflict {
+                pool,
+                at_height,
+                address,
+            } => write!(
+                f,
+                "The {pool:?} note commitment data of the batch of blocks beginning at height {at_height} conflicts with the wallet's note commitment tree at {address:?}."
             ),
             BlockHeightDiscontinuity {
                 prev_height,
