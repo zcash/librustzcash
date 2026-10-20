@@ -1,4 +1,4 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Params {
     pub(crate) n: u32,
     pub(crate) k: u32,

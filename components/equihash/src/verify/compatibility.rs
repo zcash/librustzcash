@@ -68,16 +68,17 @@ impl Drop for MutationRun {
     }
 }
 
-struct TestVector {
-    n: u32,
-    k: u32,
-    valid: bool,
-    input: Vec<u8>,
-    nonce: Vec<u8>,
-    solution: Vec<u8>,
+#[derive(Clone, Debug)]
+pub(super) struct TestVector {
+    pub(super) n: u32,
+    pub(super) k: u32,
+    pub(super) valid: bool,
+    pub(super) input: Vec<u8>,
+    pub(super) nonce: Vec<u8>,
+    pub(super) solution: Vec<u8>,
 }
 
-fn test_vectors() -> Vec<TestVector> {
+pub(super) fn test_vectors() -> Vec<TestVector> {
     include_str!("../test_vectors/random.txt")
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
@@ -126,13 +127,13 @@ impl TestVector {
         expected
     }
 
-    fn index_bits(&self) -> usize {
+    pub(super) fn index_bits(&self) -> usize {
         usize::try_from(self.n / (self.k + 1) + 1).unwrap()
     }
 
     // Read and write individual bits instead of copying either verifier's
     // accumulator-based minimal-encoding implementation.
-    fn indices(&self) -> Vec<u32> {
+    pub(super) fn indices(&self) -> Vec<u32> {
         self.solution
             .iter()
             .flat_map(|byte| (0..8).rev().map(move |bit| u32::from((byte >> bit) & 1)))
@@ -142,7 +143,7 @@ impl TestVector {
             .collect()
     }
 
-    fn encode(&self, indices: &[u32]) -> Vec<u8> {
+    pub(super) fn encode(&self, indices: &[u32]) -> Vec<u8> {
         let bits = self.index_bits();
         let mut encoded = vec![0; indices.len() * bits / 8];
         for (i, index) in indices.iter().enumerate() {
