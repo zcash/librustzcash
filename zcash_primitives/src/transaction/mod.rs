@@ -666,7 +666,8 @@ impl<A: Authorization> TransactionData<A> {
     /// Returns the numbers of shielded components in this transaction, as counted against the
     /// [ZIP 218] limits: the actions of its Orchard and Ironwood bundles, the spends and
     /// outputs of its Sapling bundle, and the JoinSplits of its Sprout bundle. A bundle that
-    /// the transaction lacks counts as zero components.
+    /// the transaction lacks counts as zero components, as does an Ironwood bundle held by a
+    /// transaction whose version has no Ironwood field, because its encoding and txid omit it.
     ///
     /// [ZIP 218]: https://zips.z.cash/zip-0218
     pub fn shielded_action_counts(&self) -> ShieldedActionCounts {
@@ -679,6 +680,7 @@ impl<A: Authorization> TransactionData<A> {
             .with_ironwood_actions(
                 self.ironwood_bundle
                     .as_ref()
+                    .filter(|_| self.version.has_ironwood())
                     .map_or(0, |bundle| bundle.actions().len()),
             )
             .with_sapling(

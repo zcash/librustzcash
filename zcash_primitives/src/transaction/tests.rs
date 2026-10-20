@@ -240,12 +240,14 @@ const COUNTED_LOCK_TIME: u32 = 0;
 #[cfg(test)]
 const COUNTED_EXPIRY_HEIGHT: u32 = 1;
 
-/// The Orchard actions in the transaction that `shielded_action_counts_cover_every_pool` counts.
+/// The Orchard actions in the Orchard bundle of each transaction that the counting tests
+/// construct with one.
 #[cfg(test)]
 const COUNTED_ORCHARD_ACTIONS: usize = 3;
 
-/// The Ironwood actions in the same transaction: a different number from the Orchard actions,
-/// so that exchanging the two is detected.
+/// The Ironwood actions in the Ironwood bundle of each transaction that the counting tests
+/// construct with one: a different number from the Orchard actions, so that exchanging the two
+/// is detected.
 #[cfg(test)]
 const COUNTED_IRONWOOD_ACTIONS: usize = 5;
 
@@ -334,6 +336,36 @@ fn shielded_action_counts_cover_every_pool() {
     assert_eq!(
         tx_data.shielded_action_counts(),
         ShieldedActionCounts::ZERO.with_sapling(spends, outputs)
+    );
+}
+
+#[test]
+fn shielded_action_counts_omit_an_ironwood_bundle_the_version_cannot_carry() {
+    let mut runner = proptest::test_runner::TestRunner::default();
+
+    // V5 has no Ironwood field, so the encoding and the txid of this transaction omit the
+    // Ironwood bundle that its data holds.
+    let tx_data = TransactionData {
+        version: TxVersion::V5,
+        ..counted_v6_tx_data(
+            None,
+            Some(orchard_bundle_with_actions(
+                &mut runner,
+                COUNTED_ORCHARD_ACTIONS,
+                orchard::bundle::BundleVersion::orchard_v3(),
+            )),
+            Some(orchard_bundle_with_actions(
+                &mut runner,
+                COUNTED_IRONWOOD_ACTIONS,
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )),
+        )
+    };
+    assert!(tx_data.ironwood_bundle().is_some());
+
+    assert_eq!(
+        tx_data.shielded_action_counts(),
+        ShieldedActionCounts::ZERO.with_orchard_actions(COUNTED_ORCHARD_ACTIONS)
     );
 }
 

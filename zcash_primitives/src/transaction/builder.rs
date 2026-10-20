@@ -942,9 +942,8 @@ impl<P, U> Builder<P, U> {
 
     /// Returns the numbers of shielded components in the transaction or PCZT that this builder
     /// will build, including the padding and dummy components that its bundle types add. A
-    /// builder constructs no Sprout components. Under a proposed transaction version without an
-    /// Ironwood bundle, [`Self::build_for_pczt`] omits an Ironwood bundle that is required but
-    /// empty, which this count still includes (an over-count).
+    /// builder constructs no Sprout components. Ironwood actions are counted only under a
+    /// transaction version that has an Ironwood field.
     ///
     /// # Errors
     ///
@@ -974,13 +973,17 @@ impl<P, U> Builder<P, U> {
             )
         })?;
 
-        let ironwood_actions = self.ironwood_builder.as_ref().map_or(Ok(0), |builder| {
-            orchard_action_count(
-                builder,
-                self.build_config.is_coinbase(),
-                orchard::bundle::BundleVersion::ironwood_v3(),
-            )
-        })?;
+        let ironwood_actions = self
+            .ironwood_builder
+            .as_ref()
+            .filter(|_| self.tx_version.has_ironwood())
+            .map_or(Ok(0), |builder| {
+                orchard_action_count(
+                    builder,
+                    self.build_config.is_coinbase(),
+                    orchard::bundle::BundleVersion::ironwood_v3(),
+                )
+            })?;
 
         Ok(ShieldedActionCounts::ZERO
             .with_sapling(sapling_spends, sapling_outputs)
@@ -3841,6 +3844,32 @@ mod tests {
             .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
             .unwrap();
         assert_eq!(pczt_counts(&result.pczt_parts), predicted);
+
+        // V5 has no Ironwood field: its PCZT omits the required bundle, which the prediction does
+        // not count either.
+        let v5_builder_funded_with = |note_value| {
+            let mut builder = builder_funded_with(note_value);
+            builder
+                .propose_version::<zip317::FeeError>(TxVersion::V5)
+                .unwrap();
+            builder
+        };
+        let v5_fee = v5_builder_funded_with(COUNTED_OUTPUT_VALUE)
+            .get_fee(&zip317::FeeRule::standard())
+            .unwrap();
+        let builder = v5_builder_funded_with(v5_fee);
+
+        let predicted = builder.shielded_action_counts().unwrap();
+        assert_eq!(
+            predicted,
+            ShieldedActionCounts::ZERO.with_orchard_actions(UNPADDED_SINGLE_ACTIONS)
+        );
+
+        let result = builder
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+            .unwrap();
+        assert!(result.pczt_parts.ironwood.is_none());
+        assert_eq!(pczt_counts(&result.pczt_parts), predicted);
     }
 
     #[test]
@@ -4269,6 +4298,76 @@ mod tests {
         )
         .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
         assert_not_refused_for_the_limit(result);
+    }
+
+    /// The dummy actions that the V5 omission test requires of an Ironwood bundle that no output
+    /// uses: one more than the global shielded budget leaves beside `SAPLING_BLOCK_IO_LIMIT`
+    /// Sapling outputs, so that counting them overruns the budget.
+    #[cfg(feature = "circuits")]
+    const V5_OMITTED_IRONWOOD_PADDING: u8 = {
+        let padding = GLOBAL_SHIELDED_BUDGET - SAPLING_BLOCK_IO_LIMIT + 1;
+        assert!(padding <= u8::MAX as usize);
+        padding as u8
+    };
+
+    /// Test helper: returns a builder that targets `NU7_TARGET_HEIGHT` on `nu7_test_network` and
+    /// holds `SAPLING_BLOCK_IO_LIMIT` Sapling outputs, which no input funds. Its Ironwood pool
+    /// holds nothing but is required to produce a bundle of `V5_OMITTED_IRONWOOD_PADDING` dummy
+    /// actions.
+    #[cfg(feature = "circuits")]
+    fn builder_with_an_unused_required_ironwood_bundle()
+    -> Builder<zcash_protocol::local_consensus::LocalNetwork, ()> {
+        let builder = Builder::new(
+            nu7_test_network(),
+            NU7_TARGET_HEIGHT,
+            BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: None,
+                ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding {
+                    bundle_required: true,
+                    pad_to_minimum: Some(V5_OMITTED_IRONWOOD_PADDING),
+                },
+            },
+        );
+        with_outputs(builder, NO_OUTPUTS, SAPLING_BLOCK_IO_LIMIT)
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn a_v5_build_does_not_count_an_ironwood_bundle_it_omits() {
+        // V5 has no Ironwood field: a PCZT omits the bundle, and a transaction's encoding and
+        // txid drop it. Only the Sapling outputs, which are within their limit, count.
+        let v5_builder = || {
+            let mut builder = builder_with_an_unused_required_ironwood_bundle();
+            builder
+                .propose_version::<zip317::FeeError>(TxVersion::V5)
+                .unwrap();
+            builder
+        };
+
+        let result = v5_builder().build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+
+        assert_not_refused_for_the_limit(result);
+
+        let result =
+            v5_builder().mock_build(&TransparentSigningSet::new(), &[], &[], UnwrapErr(SysRng));
+
+        assert_not_refused_for_the_limit(result);
+
+        // Under V6, which carries the bundle, its dummy actions overrun the global budget.
+        let result = builder_with_an_unused_required_ironwood_bundle()
+            .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard());
+
+        assert_refused(
+            result,
+            ShieldedBlockLimit::GlobalShieldedBudget,
+            GLOBAL_SHIELDED_BUDGET + 1,
+            ShieldedActionCounts::ZERO
+                .with_ironwood_actions(usize::from(V5_OMITTED_IRONWOOD_PADDING))
+                .with_sapling(NO_SPENDS, SAPLING_BLOCK_IO_LIMIT),
+        );
     }
 
     #[cfg(all(feature = "circuits", feature = "std"))]
