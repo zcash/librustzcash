@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `ZcashAddress::is_sprout`
+
 ### Changed
 - MSRV is now 1.89
 
