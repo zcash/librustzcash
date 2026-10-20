@@ -361,11 +361,12 @@ impl Run {
     /// chain's current tip.
     fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
         let targets = self.targets();
+        let network = self.network;
         let mut store = self.store();
         // A seeded RNG per drive call (only the overdue shift's anchor redraw consumes it), so
         // the simulation stays deterministic.
         let mut rng = ChaCha8Rng::seed_from_u64(0x318);
-        satisfiability::advance_migration(&mut store, state, targets, &ADVANCE, &mut rng)
+        satisfiability::advance_migration(&network, &mut store, state, targets, &ADVANCE, &mut rng)
             .expect("the store and its satisfiability oracle answer")
             .step()
             .clone()
@@ -1609,7 +1610,11 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
                 .anchor_boundary()
                 .expect("every committed transfer carries its boundary");
             assert!(
-                interval.is_boundary(boundary),
+                zcash_pool_migration::scheduling::AnchorGrid::new(
+                    interval,
+                    zcash_pool_migration::scheduling::BlockSpacing::UNIFORM,
+                )
+                .is_boundary(boundary),
                 "anchor {boundary:?} is not on the wallet's {}-block retention grid",
                 interval.block_count(),
             );

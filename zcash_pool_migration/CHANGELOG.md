@@ -7,8 +7,27 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_pool_migration::scheduling::{AnchorGrid, BlockSpacing}` (re-exported from
+  `zcash_protocol::zip318`).
+
 ### Changed
 - MSRV is now 1.89
+- A migration's schedule keeps its duration across the NU7 block spacing change:
+  from NU7 activation, the delays between broadcasts, the anchor grid, and the
+  canonical expiry span three times as many blocks, and a delay that crosses
+  activation keeps its exact length in time.
+- `zcash_pool_migration::scheduling::{schedule, schedule_broadcast_heights,
+  schedule_prep_broadcast_heights}` take a `&BlockSpacing` argument.
+- `zcash_pool_migration::scheduling::{draw_anchor_boundary,
+  redraw_anchor_boundary, earliest_broadcast_height}` take an `AnchorGrid` in place
+  of an `AnchorBucketInterval`.
+- `zcash_pool_migration::scheduling::expiry_height` takes a `&BlockSpacing`
+  argument.
+- `zcash_pool_migration::satisfiability::advance_migration` takes the consensus
+  parameters of the migration's network as its first argument. The overdue-shift
+  tolerance is measured in time, and a shift moves the pending schedule by the
+  time the wallet was behind.
 
 ## [0.2.0-pre.2] - 2026-10-13
 

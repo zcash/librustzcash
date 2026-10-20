@@ -981,12 +981,15 @@ where
     // future clause ever consults the grid.
     #[cfg(feature = "orchard")]
     {
-        let params = PoolMigrationParams::from(AnchorRetentionInterval::default());
+        let migration_params = PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::for_network(params),
+            AnchorRetentionInterval::default(),
+        );
         let classification = crate::data_api::zip318::classify_decrypted_tx(
             d_tx.tx(),
             d_tx.orchard_outputs(),
             d_tx.ironwood_outputs(),
-            &params,
+            &migration_params,
         );
         wallet_db.put_zip318_classification(tx_ref, classification)?;
     }
@@ -1960,7 +1963,11 @@ mod tests {
         ] {
             let blocks = interval.block_count().get();
             let floor = BlockHeight::from(4 * blocks);
-            let policy = AnchorRetention::new(floor, interval);
+            let policy = AnchorRetention::new(
+                floor,
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                interval,
+            );
             let retention = Some(&policy);
 
             // With retention disabled, nothing is retained, even on the interval.
@@ -2071,6 +2078,7 @@ mod tests {
         // ordinary case on a sparse chain: most blocks carry no shielded output at all.
         let retention = AnchorRetention::new(
             h(1_000),
+            zcash_protocol::zip318::BlockSpacing::UNIFORM,
             AnchorRetentionInterval::custom(NonZeroU32::new(12).unwrap()),
         );
 

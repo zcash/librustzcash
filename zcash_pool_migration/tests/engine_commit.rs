@@ -533,10 +533,17 @@ fn commits_a_multi_layer_migration_in_one_pass() {
             .expect("the committed migration has transactions")
     };
     let targets = DuenessTargets::at(latest_scheduled(&state));
-    match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
-        .expect("the store answers")
-        .step()
-        .clone()
+    match advance_migration(
+        &params,
+        &mut backend,
+        &mut state,
+        targets,
+        &config,
+        &mut rng,
+    )
+    .expect("the store answers")
+    .step()
+    .clone()
     {
         AdvanceStep::Prove { transactions } => {
             assert!(
@@ -559,10 +566,17 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.id())
         .collect();
     let targets = DuenessTargets::at(latest_scheduled(&state));
-    match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
-        .expect("the store answers")
-        .step()
-        .clone()
+    match advance_migration(
+        &params,
+        &mut backend,
+        &mut state,
+        targets,
+        &config,
+        &mut rng,
+    )
+    .expect("the store answers")
+    .step()
+    .clone()
     {
         AdvanceStep::Prove { transactions } => {
             assert!(
@@ -582,10 +596,17 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
     }
     let targets = DuenessTargets::at(latest_scheduled(&state));
-    match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
-        .expect("the store answers")
-        .step()
-        .clone()
+    match advance_migration(
+        &params,
+        &mut backend,
+        &mut state,
+        targets,
+        &config,
+        &mut rng,
+    )
+    .expect("the store answers")
+    .step()
+    .clone()
     {
         step @ (AdvanceStep::Prove { .. } | AdvanceStep::Broadcast { .. }) => {
             let id = match &step {
@@ -771,6 +792,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
     backend.replace_migration(&state).unwrap();
 
     advance_migration(
+        &regtest_network(true),
         &mut backend,
         &mut state,
         DuenessTargets::at(BlockHeight::from_u32(TARGET_HEIGHT + 10)),

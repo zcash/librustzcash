@@ -10,7 +10,7 @@ use ::transparent::{
 };
 use zcash_protocol::{
     PoolType,
-    consensus::{self, BlockHeight, BranchId, Parameters},
+    consensus::{self, BlockHeight, BranchId, NU7_POW_TARGET_SPACING_RATIO, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
@@ -62,10 +62,12 @@ pub const OVERWINTER_DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 pub const BLOSSOM_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// The default transaction expiry delta, in blocks, for transactions targeting a height from NU7
-/// activation onward ([ZIP 218]). It is about 50 minutes at the 25-second target block spacing.
+/// activation onward ([ZIP 218]): 120 blocks, the same 50 minutes as
+/// [`BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`] at the 25-second target block spacing.
 ///
 /// [ZIP 218]: https://zips.z.cash/zip-0218#default-expiry-delta
-pub const NU7_DEFAULT_TX_EXPIRY_DELTA: u32 = 120;
+pub const NU7_DEFAULT_TX_EXPIRY_DELTA: u32 =
+    NU7_POW_TARGET_SPACING_RATIO * BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
 
 /// Returns the default expiry delta, in blocks, for a transaction built under the rules of the
 /// given consensus branch.

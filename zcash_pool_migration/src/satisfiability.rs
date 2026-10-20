@@ -20,12 +20,12 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use rand_core::{CryptoRng, Rng};
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{BlockHeight, Parameters};
 
 use crate::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use crate::scheduling::{DelayDistribution, PROVABLE_ANCHOR_DEPTH, SchedulingParams};
+use crate::scheduling::{BlockSpacing, DelayDistribution, PROVABLE_ANCHOR_DEPTH, SchedulingParams};
 use crate::state::{AdvanceStep, StepKind};
 
 /// The share of planned transfer value (an integer percent) above which a migration with
@@ -335,11 +335,11 @@ pub fn classify_input_observations(
     StepSatisfiability::Satisfiable { as_of_height }
 }
 
-/// How many blocks a named step's scheduled height may lag the SERVED target
+/// How many reference blocks a named step's scheduled height may lag the SERVED target
 /// ([`DuenessTargets::effective`]) before [`advance_migration`] re-spreads the remaining
 /// schedule: a quarter of `transfer_delay`'s mean inter-broadcast gap, clamped to at least one
-/// block. Under the ZIP 318 parameters (a 66-block mean) that is 16 blocks, about 20 minutes at
-/// the target block spacing.
+/// reference block. Under the ZIP 318 parameters (a 66-reference-block mean) that is 16 reference
+/// blocks, about 20 minutes: 16 blocks before NU7 activation, 48 blocks from activation.
 ///
 /// A lag within the tolerance is ordinary wake-up slop (an OS timer delivered late, a block or
 /// two of estimation error), and the step is served as scheduled. A larger lag means the wallet
@@ -713,10 +713,16 @@ impl Advance {
 /// driving the migration after broadcasting and leaves the offered proving work to its next sync
 /// wake-up.
 ///
+/// `params` are the consensus parameters of the network the migration runs on. They supply the
+/// block spacing ([`BlockSpacing::for_network`]) that the overdue re-spread measures its tolerance
+/// and its shift in, so that a schedule's durations are judged on the same chain they were drawn
+/// for.
+///
 /// [`prove_transfer`]: crate::engine::prove_transfer
 /// [`prove_preparation`]: crate::engine::prove_preparation
 /// [`rebuild_expired_transfer`]: crate::engine::rebuild_expired_transfer
-pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
+pub fn advance_migration<P: Parameters, St: PoolMigrationWrite, R: Rng + CryptoRng>(
+    params: &P,
     store: &mut St,
     state: &mut MigrationState,
     targets: DuenessTargets,
@@ -904,6 +910,9 @@ pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
         &SchedulingParams::new_with_default_distributions(state.anchor_bucket_interval())
             .transfer_delay(),
     );
+    // The tolerance is in reference blocks; the network's block spacing converts it, and the
+    // shift, into blocks at the heights involved.
+    let spacing = BlockSpacing::for_network(params);
 
     // Plan, verify, record, plan again: ask the kernel for a step, and put every transaction
     // the step names — its CANDIDATES: the members of a `Prove` batch, or the single
@@ -1012,9 +1021,13 @@ pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
                 })
                 .min();
             if let Some((overdue_from, scheduled)) = most_overdue {
-                let served = u32::from(targets.effective());
-                if overdue_from.saturating_add(overdue_tolerance) < served {
-                    state.shift_schedule(served - scheduled, rng);
+                let served = targets.effective();
+                if spacing.exceeds(
+                    BlockHeight::from_u32(overdue_from),
+                    served,
+                    overdue_tolerance,
+                ) {
+                    state.shift_schedule(&spacing, BlockHeight::from_u32(scheduled), served, rng);
                     dirty = true;
                     continue;
                 }
@@ -1203,6 +1216,8 @@ mod advance_tests {
     use alloc::collections::BTreeMap;
     use core::cell::Cell;
     use zcash_protocol::{TxId, value::Zatoshis};
+
+    use zcash_protocol::local_consensus::LocalNetwork;
 
     use crate::denomination::DenominationPlan;
     use crate::engine::{MigrationStatus, MigrationTransaction, MigrationTxKind};
@@ -1426,6 +1441,12 @@ mod advance_tests {
         AdvanceConfig::new(ReorgSettleDepth::new(10))
     }
 
+    /// The network every drive here runs on: NU6.3 active at a low height, and no NU7, so the
+    /// block spacing is uniform.
+    fn params() -> LocalNetwork {
+        crate::engine::tests::test_net()
+    }
+
     /// A fresh seeded RNG per drive call; only the overdue shift's anchor redraw consumes it, so
     /// tests that never shift are unaffected by the draws.
     fn rng() -> rand_chacha::ChaCha8Rng {
@@ -1565,6 +1586,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1630,6 +1652,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1681,6 +1704,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1720,6 +1744,7 @@ mod advance_tests {
             },
         );
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1755,6 +1780,7 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1785,6 +1811,7 @@ mod advance_tests {
         );
         let mut store = TestStore::new(1600, []);
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut waiting,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1837,6 +1864,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1901,6 +1929,7 @@ mod advance_tests {
         store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1960,6 +1989,7 @@ mod advance_tests {
         store.set_mined(TxId::from_bytes([1; 32]), 1590);
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -1998,6 +2028,7 @@ mod advance_tests {
         store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
         advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2040,6 +2071,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2109,6 +2141,7 @@ mod advance_tests {
         );
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2163,6 +2196,7 @@ mod advance_tests {
         let mut store = FailingStore::new(Failure::Oracle, 1600, []);
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2194,6 +2228,7 @@ mod advance_tests {
         );
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2239,6 +2274,7 @@ mod advance_tests {
 
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2277,6 +2313,7 @@ mod advance_tests {
         store.as_of_height = BlockHeight::from_u32(1700);
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1701)),
@@ -2328,6 +2365,7 @@ mod advance_tests {
         let mut store = TestStore::new(1700, [(MigrationTransferId(1), spent(1700))]);
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1701)),
@@ -2389,6 +2427,7 @@ mod advance_tests {
 
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2444,6 +2483,7 @@ mod advance_tests {
 
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2499,6 +2539,7 @@ mod advance_tests {
 
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1601)),
@@ -2561,10 +2602,17 @@ mod advance_tests {
         let targets = DuenessTargets::new(BlockHeight::from_u32(1501), BlockHeight::from_u32(1701));
 
         assert_eq!(
-            advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-                .expect("the store never fails")
-                .step()
-                .clone(),
+            advance_migration(
+                &params(),
+                &mut store,
+                &mut state,
+                targets,
+                &config(),
+                &mut rng()
+            )
+            .expect("the store never fails")
+            .step()
+            .clone(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(2)
             },
@@ -2586,6 +2634,7 @@ mod advance_tests {
         state.mark_broadcast(MigrationTransferId(2));
         assert_eq!(
             advance_migration(
+                &params(),
                 &mut store,
                 &mut state,
                 DuenessTargets::at(BlockHeight::from_u32(1691)),
@@ -2624,6 +2673,7 @@ mod advance_tests {
         // Scanned to 1_010 (target 1_011); the wall-clock estimate has the tip at 2_000 (target
         // 2_001), so the named broadcast is 1_001 blocks overdue.
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::new(BlockHeight::from_u32(1_011), BlockHeight::from_u32(2_001)),
@@ -2715,6 +2765,7 @@ mod advance_tests {
         let mut state = make();
         let mut store = TestStore::new(1_000 + tolerance, []);
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance)),
@@ -2741,6 +2792,7 @@ mod advance_tests {
         let mut state = make();
         let mut store = TestStore::new(1_000 + tolerance + 1, []);
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance + 1)),
@@ -2766,6 +2818,65 @@ mod advance_tests {
             1_050 + tolerance + 1,
         );
         assert_eq!(store.replaced.get(), 1);
+    }
+
+    /// After NU7 activation the overdue tolerance spans the spacing ratio times as many blocks,
+    /// and the shift moves the pending schedule by the same number of blocks the trigger lagged.
+    #[test]
+    fn overdue_shift_tolerance_scales_from_nu7() {
+        let ratio = zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO;
+        let tolerance =
+            ratio * overdue_shift_tolerance(&SchedulingParams::ZIP_318.transfer_delay());
+        let nu7_params = LocalNetwork {
+            nu7: Some(BlockHeight::from_u32(0)),
+            ..params()
+        };
+        let make = || {
+            state_with_crossings(
+                &[50_000_000, 50_000_000],
+                vec![
+                    tx(0, prep(0, 0), mined(10)),
+                    scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                    scheduled_transfer(2, 1, 720, 1_050, MigrationTxState::Signed),
+                ],
+            )
+        };
+
+        // A lag of the scaled tolerance holds the schedule, though it exceeds the unscaled one.
+        let mut state = make();
+        let mut store = TestStore::new(1_000 + tolerance, []);
+        advance_migration(
+            &nu7_params,
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance)),
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+        assert_eq!(u32::from(state.transactions()[1].scheduled_height()), 1_000);
+        assert_eq!(store.replaced.get(), 0);
+
+        // One block past it, the pending schedule shifts by the lag.
+        let mut state = make();
+        let mut store = TestStore::new(1_000 + tolerance + 1, []);
+        advance_migration(
+            &nu7_params,
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance + 1)),
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+        assert_eq!(
+            u32::from(state.transactions()[1].scheduled_height()),
+            1_000 + tolerance + 1,
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            1_050 + tolerance + 1,
+        );
     }
 
     /// The tolerance is a function of the schedule's own scale: a quarter of the mean transfer
@@ -2810,6 +2921,7 @@ mod advance_tests {
         let mut store = TestStore::new(2_000, []);
 
         let step = advance_migration(
+            &params(),
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(2_001)),
@@ -2844,8 +2956,15 @@ mod advance_tests {
         let mut store = TestStore::new(1_000, []);
         let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
 
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert!(
             matches!(advance.step(), AdvanceStep::Prove { transactions } if *transactions == [pt(1, prep(0, 0))]),
             "the due preparation's prove is the step: {:?}",
@@ -2864,8 +2983,15 @@ mod advance_tests {
                 scheduled_transfer(1, 0, 720, 1_200, MigrationTxState::Signed),
             ],
         );
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert!(
             matches!(advance.step(), AdvanceStep::Prove { transactions } if *transactions == [pt(1, transfer(0))]),
             "the settled-boundary transfer's prove is the step: {:?}",
@@ -2897,8 +3023,15 @@ mod advance_tests {
         let mut store = TestStore::new(1_000, []);
         let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
 
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
@@ -2915,8 +3048,15 @@ mod advance_tests {
                 scheduled_transfer(2, 1, 720, 1_000, MigrationTxState::Proved),
             ],
         );
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(
             advance.step(),
             &AdvanceStep::Broadcast {
@@ -2958,8 +3098,15 @@ mod advance_tests {
             )],
         );
         let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
@@ -2976,8 +3123,15 @@ mod advance_tests {
             ],
         );
         let mut store = TestStore::new(1_000, []);
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
@@ -2991,8 +3145,15 @@ mod advance_tests {
         expired.expiry_height = BlockHeight::from_u32(950);
         let mut state =
             state_with_crossings(&[100_000_000], vec![tx(0, prep(0, 0), mined(10)), expired]);
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(
             advance.step(),
             &AdvanceStep::Rebuild {
@@ -3031,8 +3192,15 @@ mod advance_tests {
         );
         let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
 
-        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-            .expect("the store never fails");
+        let advance = advance_migration(
+            &params(),
+            &mut store,
+            &mut state,
+            targets,
+            &config(),
+            &mut rng(),
+        )
+        .expect("the store never fails");
         assert_eq!(
             advance.step(),
             &AdvanceStep::Prove {
