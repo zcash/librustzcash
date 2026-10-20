@@ -280,35 +280,33 @@ impl BlockSpacing {
         self.time_of(to).saturating_sub(self.time_of(from)) > u64::from(reference_blocks) * ratio
     }
 
-    /// The NU7 activation height as a `u64`, or one past `u32::MAX` when NU7 does not activate,
-    /// so that every height is below it.
-    fn activation(&self) -> u64 {
-        self.nu7_activation
-            .map_or(u64::from(u32::MAX) + 1, |h| u64::from(u32::from(h)))
-    }
-
     /// The time at which `height` is reached, in units of the post-NU7 target spacing, measured
     /// from the genesis block. Each block before activation adds the spacing ratio, and each block
     /// from activation adds one.
     fn time_of(&self, height: BlockHeight) -> u64 {
         let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        let activation = self.activation();
         let h = u64::from(u32::from(height));
-        if h <= activation {
-            h * ratio
-        } else {
-            activation * ratio + (h - activation)
+        match self.nu7_activation {
+            Some(activation) if height > activation => {
+                let activation = u64::from(u32::from(activation));
+                activation * ratio + (h - activation)
+            }
+            // At or before activation, and on a chain where NU7 does not activate, every block
+            // is a reference block.
+            _ => h * ratio,
         }
     }
 
     /// The least height reached at or after `time`. Saturates at `u32::MAX`.
     fn height_at(&self, time: u64) -> BlockHeight {
         let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        let activation = self.activation();
-        let h = if time <= activation * ratio {
-            time.div_ceil(ratio)
-        } else {
-            activation + (time - activation * ratio)
+        let h = match self.nu7_activation.map(|a| u64::from(u32::from(a))) {
+            Some(activation) if time > activation * ratio => {
+                activation + (time - activation * ratio)
+            }
+            // At or before the time of activation, and on a chain where NU7 does not activate,
+            // every block is a reference block.
+            _ => time.div_ceil(ratio),
         };
         BlockHeight::from_u32(u32::try_from(h).unwrap_or(u32::MAX))
     }
@@ -344,57 +342,65 @@ impl AnchorGrid {
     }
 
     /// The distance in blocks between boundaries at heights from `height` onward, while the
-    /// spacing does not change.
-    fn step_at(&self, height: u64) -> u64 {
-        let ratio = if height >= self.spacing.activation() {
-            NU7_POW_TARGET_SPACING_RATIO
-        } else {
-            1
-        };
-        u64::from(self.interval.block_count().get()) * u64::from(ratio)
+    /// spacing does not change. In `u64`, so that rounding a `u32` height to a multiple of it
+    /// cannot overflow.
+    fn step_at(&self, height: BlockHeight) -> u64 {
+        u64::from(self.interval.block_count().get())
+            * u64::from(self.spacing.blocks_per_reference_block(height))
     }
 
     /// Returns whether `height` is a boundary of this grid, i.e. whether the checkpoint at
     /// `height` is retained as a durable anchor.
     pub fn is_boundary(&self, height: BlockHeight) -> bool {
-        let h = u64::from(u32::from(height));
-        h.is_multiple_of(self.step_at(h))
+        u64::from(u32::from(height)).is_multiple_of(self.step_at(height))
     }
 
     /// Returns the greatest boundary height that does not exceed `height`.
     pub fn boundary_at_or_below(&self, height: BlockHeight) -> BlockHeight {
-        let h = u64::from(u32::from(height));
-        let activation = self.spacing.activation();
-        let below = if h >= activation {
-            let candidate = h - h % self.step_at(h);
-            if candidate >= activation {
-                candidate
-            } else {
-                // No boundary lies in `[activation, h]`. Activation is positive here, because 0
-                // is a boundary of every step, so the greatest boundary below activation exists.
-                let last_before = activation - 1;
-                last_before - last_before % self.step_at(last_before)
+        let round_down = |h: BlockHeight| {
+            let step = self.step_at(h);
+            let h = u64::from(u32::from(h));
+            h - h % step
+        };
+        let below = match self.spacing.nu7_activation() {
+            Some(activation) if height >= activation => {
+                let candidate = round_down(height);
+                if candidate >= u64::from(u32::from(activation)) {
+                    candidate
+                } else {
+                    // No boundary lies in `[activation, height]`, so the answer is the last
+                    // boundary before activation. Activation is positive here, because 0 is a
+                    // boundary of every grid, so that boundary exists.
+                    round_down(BlockHeight::from_u32(u32::from(activation) - 1))
+                }
             }
-        } else {
-            h - h % self.step_at(h)
+            // Before activation, and on a chain where NU7 does not activate, the grid is
+            // uniform below `height`.
+            _ => round_down(height),
         };
         BlockHeight::from_u32(u32::try_from(below).expect("at most `height`"))
     }
 
     /// Returns the least boundary height that is not below `height`. Saturates at `u32::MAX`.
     pub fn boundary_at_or_above(&self, height: BlockHeight) -> BlockHeight {
-        let h = u64::from(u32::from(height));
-        let activation = self.spacing.activation();
-        let round_up = |h: u64, step: u64| h.div_ceil(step) * step;
-        let above = if h >= activation {
-            round_up(h, self.step_at(h))
-        } else {
-            let candidate = round_up(h, self.step_at(h));
-            if candidate < activation {
-                candidate
-            } else {
-                round_up(activation, self.step_at(activation))
+        let round_up = |h: BlockHeight| {
+            let step = self.step_at(h);
+            u64::from(u32::from(h)).div_ceil(step) * step
+        };
+        let above = match self.spacing.nu7_activation() {
+            Some(activation) if height < activation => {
+                let candidate = round_up(height);
+                if candidate < u64::from(u32::from(activation)) {
+                    candidate
+                } else {
+                    // No boundary lies in `[height, activation)`, so the answer is the first
+                    // boundary at or after activation.
+                    round_up(activation)
+                }
             }
+            // From activation, and on a chain where NU7 does not activate, the grid is uniform
+            // above `height`.
+            _ => round_up(height),
         };
         BlockHeight::from_u32(u32::try_from(above).unwrap_or(u32::MAX))
     }
