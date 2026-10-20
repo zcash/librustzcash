@@ -10,7 +10,6 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_pool_migration::scheduling::{AnchorGrid, BlockSpacing}` (re-exported from
   `zcash_protocol::zip318`).
-- `zcash_pool_migration::satisfiability::AdvanceConfig::block_spacing`
 
 ### Changed
 - MSRV is now 1.89
@@ -25,10 +24,10 @@ and this library adheres to Rust's notion of
   of an `AnchorBucketInterval`.
 - `zcash_pool_migration::scheduling::expiry_height` takes a `&BlockSpacing`
   argument.
-- `zcash_pool_migration::satisfiability::AdvanceConfig::new` takes the
-  `BlockSpacing` of the migration's network. The overdue-shift tolerance is
-  measured in time, and a shift moves the pending schedule by the time the
-  wallet was behind.
+- `zcash_pool_migration::satisfiability::advance_migration` takes the consensus
+  parameters of the migration's network as its first argument. The overdue-shift
+  tolerance is measured in time, and a shift moves the pending schedule by the
+  time the wallet was behind.
 
 ## [0.2.0-pre.2] - 2026-10-13
 

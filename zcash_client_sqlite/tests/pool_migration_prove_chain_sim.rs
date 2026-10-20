@@ -76,11 +76,7 @@ use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver, Walle
 
 /// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
 /// the satisfiability oracle judges anchor displacements under.
-/// The test network does not activate NU7, so its block spacing is uniform.
-const ADVANCE: AdvanceConfig = AdvanceConfig::new(
-    ReorgSettleDepth::new(10),
-    zcash_pool_migration::scheduling::BlockSpacing::UNIFORM,
-);
+const ADVANCE: AdvanceConfig = AdvanceConfig::new(ReorgSettleDepth::new(10));
 
 /// A cap on the empty blocks a drive loop will mine waiting for the migration's schedule, so a
 /// migration that can never make progress fails the test rather than spinning. The privacy
@@ -365,11 +361,12 @@ impl Run {
     /// chain's current tip.
     fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
         let targets = self.targets();
+        let network = self.network;
         let mut store = self.store();
         // A seeded RNG per drive call (only the overdue shift's anchor redraw consumes it), so
         // the simulation stays deterministic.
         let mut rng = ChaCha8Rng::seed_from_u64(0x318);
-        satisfiability::advance_migration(&mut store, state, targets, &ADVANCE, &mut rng)
+        satisfiability::advance_migration(&network, &mut store, state, targets, &ADVANCE, &mut rng)
             .expect("the store and its satisfiability oracle answer")
             .step()
             .clone()
