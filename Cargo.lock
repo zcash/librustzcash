@@ -7465,7 +7465,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.25.0-pre.2"
+version = "0.25.0"
 dependencies = [
  "ambassador",
  "arti-client",
