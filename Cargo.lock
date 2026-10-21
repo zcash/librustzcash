@@ -7956,7 +7956,7 @@ dependencies = [
 
 [[package]]
 name = "zip321"
-version = "0.10.0-pre.2"
+version = "0.10.0"
 dependencies = [
  "base64",
  "nom",
