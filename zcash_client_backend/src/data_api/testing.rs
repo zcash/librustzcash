@@ -60,7 +60,9 @@ use zcash_keys::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
+    transaction::{
+        Transaction, TxId, TxVersion, components::sapling::zip212_enforcement, fees::FeeRule,
+    },
 };
 #[cfg(feature = "pczt")]
 use zcash_proofs::prover::LocalTxProver;
@@ -103,11 +105,12 @@ use super::{
     error::Error,
     scanning::{ScanPriority, ScanRange},
     wallet::{
-        ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
+        ConfirmationsPolicy, LockRequest, SpendingKeys, create_proposed_transactions,
         input_selection::{
             GreedyInputSelector, InputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
         },
-        propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
+        propose_fee_included_transfer, propose_send_max_transfer,
+        propose_standard_transfer_to_address, propose_transfer,
     },
 };
 
@@ -1437,6 +1440,53 @@ where
             fallback_change_pool,
             None,
             None,
+        );
+
+        if let Ok(proposal) = &result {
+            check_proposal_serialization_roundtrip(&network, self.wallet(), proposal);
+        }
+
+        result
+    }
+
+    /// Invokes [`propose_fee_included_transfer`] with the given arguments, checking that a
+    /// successful proposal round-trips through its serialized form.
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_fee_included_transfer<InputsT, ChangeT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        input_selector: &InputsT,
+        change_strategy: &ChangeT,
+        recipient: ZcashAddress,
+        memo: Option<MemoBytes>,
+        amount: Zatoshis,
+        confirmations_policy: ConfirmationsPolicy,
+        spend_policy: &SpendPolicy,
+        lock_inputs: Option<LockRequest>,
+        proposed_version: Option<TxVersion>,
+    ) -> Result<
+        Proposal<StandardFeeRule, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
+    >
+    where
+        InputsT: InputSelector<InputSource = DbT>,
+        ChangeT: ChangeStrategy<MetaSource = DbT, FeeRule = StandardFeeRule>,
+    {
+        let network = self.network().clone();
+        let result = propose_fee_included_transfer::<_, _, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            input_selector,
+            change_strategy,
+            recipient,
+            memo,
+            amount,
+            confirmations_policy,
+            spend_policy,
+            lock_inputs,
+            proposed_version,
         );
 
         if let Ok(proposal) = &result {

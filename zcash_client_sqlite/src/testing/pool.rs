@@ -194,6 +194,229 @@ pub(crate) fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester
     )
 }
 
+pub(crate) fn fee_included_exact_balance_empties_the_account<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_exact_balance_empties_the_account::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_amount_below_balance_returns_change<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_amount_below_balance_returns_change::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fee_included_dust_band_leaves_the_residual_as_change<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_dust_band_leaves_the_residual_as_change::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_dust_band_adds_a_second_note<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_dust_band_adds_a_second_note::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_fee_consumes_the_amount<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_fee_consumes_the_amount::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_balance_at_the_fee_finds_no_payment<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_balance_at_the_fee_finds_no_payment::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fee_included_no_fitting_payment_reports_the_smallest_debit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_no_fitting_payment_reports_the_smallest_debit::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_pays_one_zatoshi_at_the_boundary<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_pays_one_zatoshi_at_the_boundary::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_balance_below_amount_is_an_error<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_balance_below_amount_is_an_error::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_splits_change_when_the_strategy_asks<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_splits_change_when_the_strategy_asks::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fee_included_spends_several_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_spends_several_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_bisects_to_an_exact_debit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_bisects_to_an_exact_debit::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_finds_a_payment_below_a_consuming_fee<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_finds_a_payment_below_a_consuming_fee::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_keeps_a_selection_below_the_amount<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_keeps_a_selection_below_the_amount::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fee_included_finds_no_payment_at_the_selection_limit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_finds_no_payment_at_the_selection_limit::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_returns_the_candidate_at_the_selection_limit<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_returns_the_candidate_at_the_selection_limit::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_stops_at_a_report_without_shortfall<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_stops_at_a_report_without_shortfall::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn fee_included_report_without_shortfall_below_the_amount_is_a_balance_error<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_report_without_shortfall_below_the_amount_is_a_balance_error::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_report_without_shortfall_finds_no_payment<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_report_without_shortfall_finds_no_payment::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fee_included_to_transparent_recipient<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_to_transparent_recipient::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fee_included_with_transparent_source<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_with_transparent_source::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fee_included_transparent_inputs_to_transparent_recipient<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_transparent_inputs_to_transparent_recipient::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn fee_included_across_pools<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_across_pools::<P0, P1>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn fee_included_dust_band_across_pools<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_dust_band_across_pools::<P0, P1>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn fee_included_dust_band_with_a_small_note_across_pools<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_dust_band_with_a_small_note_across_pools::<P0, P1>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn fee_included_locks_only_the_returned_proposal_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_locks_only_the_returned_proposal_inputs::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn fee_included_v5_to_orchard_receiver_requires_ironwood() {
+    zcash_client_backend::data_api::testing::pool::fee_included_v5_to_orchard_receiver_requires_ironwood(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn fee_included_after_nu6_3_pays_through_ironwood() {
+    zcash_client_backend::data_api::testing::pool::fee_included_after_nu6_3_pays_through_ironwood(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fee_included_to_tex_recipient<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_to_tex_recipient::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+pub(crate) fn fee_included_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fee_included_to_tex_fails_without_transparent_inputs::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<

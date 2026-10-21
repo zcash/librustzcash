@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     cmp::Eq,
     collections::HashSet,
     convert::Infallible,
@@ -20,7 +21,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     transaction::{
-        Transaction,
+        Transaction, TxVersion,
         builder::{
             BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
         },
@@ -40,9 +41,9 @@ use zip321::{Payment, TransactionRequest};
 use crate::{
     data_api::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
-        anchor_retention::AnchorRetentionInterval,
+        MaxSpendMode, NoteFilter, OutputLockStore, Ratio, TargetValue, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletTest, WalletWrite,
+        anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
         testing::{
@@ -50,17 +51,21 @@ use crate::{
             single_output_change_strategy,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, LockFilter},
+            ConfirmationsPolicy, FEE_INCLUDED_SELECTION_LIMIT, LockRequest, ProposeTransferErrT,
+            TargetHeight, TransferErrT, decrypt_and_store_transaction,
+            input_selection::{
+                GreedyInputSelector, InputSelector, InputSelectorError, LockFilter, SpendPolicy,
+            },
         },
     },
     decrypt_transaction,
     fees::{
-        self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
+        self, ChangeStrategy, DustOutputPolicy, SplitPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
     },
+    proposal::Proposal,
     scanning::ScanError,
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
+    wallet::{LockOwner, Note, NoteId, OvkPolicy, ReceivedNote},
 };
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
@@ -86,7 +91,7 @@ use {
     super::orchard::OrchardPoolTester,
     crate::data_api::wallet::propose_transfer,
     std::collections::BTreeMap,
-    zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
+    zcash_primitives::transaction::builder::BundlePadding,
     zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
 };
 
@@ -101,10 +106,6 @@ use zcash_address::{
 #[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
 use crate::proposal::ProposalError;
 
-// `SpendPolicy` is used only by scenarios behind one of these two features.
-#[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
-use crate::data_api::wallet::input_selection::SpendPolicy;
-
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -113,7 +114,7 @@ use {
             wallet::input_selection::TransparentSpendPolicy,
         },
         fees::ChangeValue,
-        proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
+        proposal::{ProposalError, StepOutput, StepOutputIndex},
         wallet::{Exposure, TransparentAddressSource, WalletTransparentOutput},
     },
     secrecy::ExposeSecret,
@@ -2284,6 +2285,1834 @@ pub fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>(
         ),
         Err(Error::InsufficientFunds { available, required })
             if available == expected_available && required == expected_required
+    );
+}
+
+/// Tests a fee-included transfer of the account's exact balance, held in a single note.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer of the note's full value to an external address in
+///   the same pool.
+/// - Verifies that the payment plus the fee is the amount, that the note is the only input,
+///   and that the change is a single zero-valued output.
+/// - Builds and mines the transaction, and verifies that the account is left empty.
+pub fn fee_included_exact_balance_empties_the_account<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+
+    // One spend, the payment and the zero-valued change are two logical actions.
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (note_value - expected_fee).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, note_value).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+    assert_eq!(
+        change[0].output_pool(),
+        PoolType::Shielded(T::SHIELDED_PROTOCOL)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(1)
+    );
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests a fee-included transfer of less than the account's balance.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer of part of the note's value.
+/// - Verifies that the payment plus the fee is the amount, and that the change is the
+///   note's value less the amount.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+pub fn fee_included_amount_below_balance_returns_change<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(40_000);
+
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (amount - expected_fee).unwrap();
+    let expected_change = (note_value - amount).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
+/// Tests a fee-included transfer whose exact debit would leave dust change, when the
+/// account holds no other note to add.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer of an amount that leaves the note's remainder
+///   below the dust threshold.
+/// - Verifies that the payment shrinks until the change reaches the threshold, so that
+///   the debit is below the amount and the residual stays in the account.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+pub fn fee_included_dust_band_leaves_the_residual_as_change<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(57_000);
+
+    // Debiting exactly the amount would leave change of 3000 zatoshis, below the dust
+    // threshold of one marginal fee, and no other note can be added; the payment shrinks
+    // until the change reaches the threshold.
+    let expected_fee = MINIMUM_FEE;
+    let expected_change = MARGINAL_FEE;
+    let expected_payment = (note_value - expected_fee - expected_change).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+    // The debit is the note less the change, and falls short of the amount.
+    let debit = (step.transaction_request().payments()[&0].amount().unwrap()
+        + step.balance().fee_required())
+    .unwrap();
+    assert_eq!(debit, (note_value - change[0].value()).unwrap());
+    assert!(debit < amount);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+
+    // A note worth exactly the marginal fee is uneconomic to spend, so the balance leaves
+    // it out; the transaction history shows that it was received.
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+    let sent_tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
+    assert!(sent_tx.has_change());
+    assert_eq!(sent_tx.total_received(), expected_change);
+}
+
+/// Tests a fee-included transfer whose exact debit would leave dust change from one note,
+/// when the account holds a second note to add.
+///
+/// The test:
+/// - Adds funds to the wallet in two notes.
+/// - Proposes a fee-included transfer of an amount that leaves the first note's remainder
+///   below the dust threshold.
+/// - Verifies that the second note is spent and the debit is exactly the amount.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+pub fn fee_included_dust_band_adds_a_second_note<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let first_note_value = Zatoshis::const_from_u64(60_000);
+    let second_note_value = Zatoshis::const_from_u64(20_000);
+    st.add_notes_checking_balance([[first_note_value, second_note_value]]);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(57_000);
+
+    // Two spends and two outputs are two logical actions.
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (amount - expected_fee).unwrap();
+    let expected_change = (first_note_value + second_note_value - amount).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(2)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
+/// Tests that a fee-included transfer whose amount the fee alone would consume is an error.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes fee-included transfers of exactly the fee, of less than the fee, and of zero.
+/// - Verifies that all fail with `NoPaymentWithinAmount`, reporting the amount and, as the
+///   smallest debit, the fee plus one zatoshi for the smallest payment, or no debit for the
+///   zero amount, which runs no selection.
+pub fn fee_included_fee_consumes_the_amount<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let fee = MINIMUM_FEE;
+    let smallest_payable = (fee + Zatoshis::const_from_u64(1)).unwrap();
+
+    for amount in [fee, MARGINAL_FEE] {
+        assert_matches!(
+            st.propose_fee_included_to(&to, amount),
+            Err(Error::NoPaymentWithinAmount { amount: reported, smallest_debit })
+                if reported == amount && smallest_debit == Some(smallest_payable)
+        );
+    }
+
+    assert_matches!(
+        st.propose_fee_included_to(&to, Zatoshis::ZERO),
+        Err(Error::NoPaymentWithinAmount { amount, smallest_debit })
+            if amount == Zatoshis::ZERO && smallest_debit.is_none()
+    );
+}
+
+/// Tests that a fee-included transfer from a balance no larger than the fee finds no
+/// payment.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note worth exactly the fee.
+/// - Proposes a fee-included transfer of the note's full value.
+/// - Verifies that it fails with `NoPaymentWithinAmount` and no smallest debit: no selection
+///   succeeds, since the note cannot pay the fee and a nonzero payment.
+pub fn fee_included_balance_at_the_fee_finds_no_payment<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let note_value = MINIMUM_FEE;
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+
+    assert_matches!(
+        st.propose_fee_included_to(&to, note_value),
+        Err(Error::NoPaymentWithinAmount { amount, smallest_debit })
+            if amount == note_value && smallest_debit.is_none()
+    );
+}
+
+/// Tests that a fee-included transfer with no payment that fits the amount reports the
+/// smallest debit found, when the balance covers the amount but not the fee on top of it.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note worth more than the fee.
+/// - Proposes a fee-included transfer of an amount below the note's value but above the
+///   note's value less the fee and the dust threshold, so that every payment either costs
+///   more than the amount or leaves dust change.
+/// - Verifies that it fails with `NoPaymentWithinAmount`, reporting the note's value as the
+///   smallest debit: the payment that spends the note with zero-valued change.
+pub fn fee_included_no_fitting_payment_reports_the_smallest_debit<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let note_value = Zatoshis::const_from_u64(14_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(13_000);
+
+    // Paying the amount needs the fee on top of it; paying the amount less the fee leaves
+    // change below the dust threshold, and nothing smaller debits the amount.
+    let fee = MINIMUM_FEE;
+    assert!((amount + fee).unwrap() > note_value);
+    assert!((note_value - amount).unwrap() < MARGINAL_FEE);
+
+    assert_matches!(
+        st.propose_fee_included_to(&to, amount),
+        Err(Error::NoPaymentWithinAmount { amount: reported, smallest_debit })
+            if reported == amount && smallest_debit == Some(note_value)
+    );
+}
+
+/// Tests a fee-included transfer of an amount one zatoshi above the fee, from a note of
+/// that exact value.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note worth the fee plus one zatoshi.
+/// - Proposes a fee-included transfer of the note's full value.
+/// - Verifies that the payment is one zatoshi, with zero-valued change.
+/// - Builds and mines the transaction, and verifies that the account is left empty.
+pub fn fee_included_pays_one_zatoshi_at_the_boundary<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = Zatoshis::const_from_u64(1);
+    let note_value = (expected_fee + expected_payment).unwrap();
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+
+    let proposal = st.propose_fee_included_to(&to, note_value).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests that a fee-included transfer of more than the spendable balance is an error, not
+/// a smaller transfer, when the account holds funds that are not yet spendable.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note, mines empty blocks, and adds a second note.
+/// - Proposes a fee-included transfer, under a confirmations policy that leaves the second
+///   note unspendable, of more than the first note's value.
+/// - Verifies that it fails with `InsufficientFunds`, reporting the amount as required and
+///   the first note's value as available.
+pub fn fee_included_balance_below_amount_is_an_error<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let spendable_value = Zatoshis::const_from_u64(60_000);
+    st.add_notes_checking_balance([
+        Some(spendable_value),
+        None,
+        None,
+        Some(Zatoshis::const_from_u64(123_456)),
+    ]);
+
+    let confirmations_policy = ConfirmationsPolicy::new_symmetrical_unchecked(
+        2,
+        #[cfg(feature = "transparent-inputs")]
+        true,
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.id(), confirmations_policy),
+        spendable_value
+    );
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(100_000);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    let recipient = to.to_zcash_address(st.network());
+    assert_matches!(
+        st.propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            amount,
+            confirmations_policy,
+            &SpendPolicy::default(),
+            None,
+            None,
+        ),
+        Err(Error::InsufficientFunds { available, required })
+            if available == spendable_value && required == amount
+    );
+}
+
+/// Tests a fee-included transfer under a change strategy that splits the change into
+/// several outputs, where the split raises the fee.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer under a two-output split policy, of an amount whose
+///   change splits only once the fee has been taken from the payment.
+/// - Verifies that the payment plus the fee for two change outputs is the amount, and that
+///   the change is split evenly.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+pub fn fee_included_splits_change_when_the_strategy_asks<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(100_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(72_000);
+
+    let min_split_output_value = Zatoshis::const_from_u64(10_000);
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::MultiOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+        SplitPolicy::with_min_output_value(NonZeroUsize::new(2).unwrap(), min_split_output_value),
+    );
+
+    // Debiting exactly the amount leaves change too small to split, at the two-action fee;
+    // paying that fee's worth less leaves enough to split, at a three-action fee; paying
+    // the three-action fee's worth less keeps the split.
+    let expected_fee = (MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (amount - expected_fee).unwrap();
+    let expected_change = (note_value - amount).unwrap();
+    let expected_split = *expected_change
+        .div_with_remainder(NonZeroU64::new(2).unwrap())
+        .quotient();
+
+    let recipient = to.to_zcash_address(st.network());
+    let proposal = st
+        .propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            amount,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            None,
+            None,
+        )
+        .unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 2);
+    assert_eq!(change[0].value(), expected_split);
+    assert_eq!(change[1].value(), expected_split);
+    assert_eq!(
+        (change[0].value() + change[1].value()).unwrap(),
+        expected_change
+    );
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
+/// Tests a fee-included transfer funded from several notes, where the input count raises
+/// the fee.
+///
+/// The test:
+/// - Adds funds to the wallet in three notes.
+/// - Proposes a fee-included transfer that needs all three.
+/// - Verifies that the payment plus the three-spend fee is the amount.
+/// - Builds and mines the transaction, and verifies that the change is all that remains.
+pub fn fee_included_spends_several_notes<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(30_000);
+    st.add_notes_checking_balance([[note_value, note_value, note_value]]);
+    let total = (note_value * 3u64).unwrap();
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(80_000);
+
+    // Three spends and two outputs are three logical actions.
+    let expected_fee = (MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (amount - expected_fee).unwrap();
+    let expected_change = (total - amount).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(3)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
+/// Tests a fee-included transfer from equal notes, where following each selection's fee
+/// alternates between two payments and bisecting between them finds the exact debit.
+///
+/// The test:
+/// - Adds funds to the wallet in ten equal notes.
+/// - Proposes a fee-included transfer of an amount that nine of the notes cover exactly at
+///   the nine-spend fee.
+/// - Verifies that the proposal spends nine notes and debits exactly the amount, with
+///   zero-valued change.
+/// - Builds and mines the transaction, and verifies that the tenth note is all that remains.
+pub fn fee_included_bisects_to_an_exact_debit<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(10_000);
+    st.add_notes_checking_balance([[note_value; 10]]);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(90_000);
+
+    // The amount less the ten-spend fee needs all ten notes and debits more than the
+    // amount; the amount less that fee's successor, the eight-spend fee, needs eight notes
+    // and debits less. Nine spends and two outputs are nine logical actions, and the payment
+    // that fee leaves is what nine notes cover exactly.
+    let expected_fee = (MARGINAL_FEE * 9u64).unwrap();
+    let expected_payment = (amount - expected_fee).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(9)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), note_value);
+}
+
+/// Tests a fee-included transfer whose first selection's fee consumes the amount, when a
+/// smaller payment needs fewer notes and fits exactly.
+///
+/// The test:
+/// - Adds funds to the wallet in three equal notes.
+/// - Proposes a fee-included transfer of an amount for which paying it all needs the three
+///   notes at a three-spend fee equal to the amount.
+/// - Verifies that the proposal spends two notes and debits exactly the amount.
+pub fn fee_included_finds_a_payment_below_a_consuming_fee<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let note_value = Zatoshis::const_from_u64(13_000);
+    st.add_notes_checking_balance([[note_value; 3]]);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = (MARGINAL_FEE * 3u64).unwrap();
+
+    // Two spends and two outputs are two logical actions; the payment that fee leaves keeps
+    // change from two notes above the dust threshold.
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (amount - expected_fee).unwrap();
+    let expected_change = ((note_value * 2u64).unwrap() - amount).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(2)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+}
+
+/// Tests a fee-included transfer whose payment is funded by fewer notes than the amount
+/// needs, so that the selected inputs fall below the amount.
+///
+/// The test:
+/// - Adds funds to the wallet in three notes.
+/// - Proposes a fee-included transfer of an amount that needs all three notes.
+/// - Verifies that the payment is the amount less the three-spend fee, which the first two
+///   notes cover exactly at the two-spend fee, with zero-valued change, so that the debit
+///   falls short of the amount and the third note is untouched.
+/// - Builds and mines the transaction, and verifies that the third note is all that remains.
+pub fn fee_included_keeps_a_selection_below_the_amount<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let first_note_value = Zatoshis::const_from_u64(40_000);
+    let second_note_value = Zatoshis::const_from_u64(35_000);
+    let third_note_value = Zatoshis::const_from_u64(30_000);
+    st.add_notes_checking_balance([
+        Some(first_note_value),
+        Some(second_note_value),
+        Some(third_note_value),
+    ]);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(80_000);
+
+    // Paying the amount needs all three notes, at a three-action fee; the payment that fee
+    // leaves is covered by the first two notes exactly, at a two-action fee, and no payment
+    // in between can be funded within the amount.
+    let expected_payment = (amount - (MARGINAL_FEE * 3u64).unwrap()).unwrap();
+    let expected_fee = MINIMUM_FEE;
+    assert_eq!(
+        (expected_payment + expected_fee).unwrap(),
+        (first_note_value + second_note_value).unwrap()
+    );
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(2)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), third_note_value);
+}
+
+/// A reply that a [`ScriptedInputSelector`] gives to one selection.
+#[derive(Clone, Copy)]
+enum ScriptedReply {
+    /// Delegates the selection to a [`GreedyInputSelector`].
+    Greedy,
+    /// Reports insufficient funds with these figures.
+    InsufficientFunds {
+        available: Zatoshis,
+        required: Zatoshis,
+    },
+}
+
+/// An input selector that replies to each selection from a script, repeating the script's
+/// last reply once it runs out, and records the payment each selection was asked for.
+struct ScriptedInputSelector<DbT> {
+    greedy: GreedyInputSelector<DbT>,
+    script: Vec<ScriptedReply>,
+    payments: RefCell<Vec<Zatoshis>>,
+}
+
+impl<DbT: InputSource> InputSelector for ScriptedInputSelector<DbT> {
+    type Error = GreedyInputSelectorError;
+    type InputSource = DbT;
+
+    #[allow(clippy::type_complexity)]
+    fn propose_transaction<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        target_height: TargetHeight,
+        anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
+        confirmations_policy: ConfirmationsPolicy,
+        account: <DbT as InputSource>::AccountId,
+        transaction_request: TransactionRequest,
+        change_strategy: &ChangeT,
+        spend_policy: &SpendPolicy,
+        proposed_version: Option<TxVersion>,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
+    {
+        let selection_index = {
+            let mut payments = self.payments.borrow_mut();
+            payments.extend(
+                transaction_request
+                    .payments()
+                    .get(&0)
+                    .and_then(Payment::amount),
+            );
+            payments.len() - 1
+        };
+        let reply = self
+            .script
+            .get(selection_index)
+            .or(self.script.last())
+            .copied()
+            .unwrap_or(ScriptedReply::Greedy);
+        match reply {
+            ScriptedReply::Greedy => self.greedy.propose_transaction(
+                params,
+                wallet_db,
+                target_height,
+                anchor_height,
+                zip318,
+                confirmations_policy,
+                account,
+                transaction_request,
+                change_strategy,
+                spend_policy,
+                proposed_version,
+            ),
+            ScriptedReply::InsufficientFunds {
+                available,
+                required,
+            } => Err(InputSelectorError::InsufficientFunds {
+                available,
+                required,
+            }),
+        }
+    }
+}
+
+/// Proposes a fee-included transfer of `amount` through a [`ScriptedInputSelector`] with
+/// the given script, from a wallet holding a single note of `note_value`, and returns the
+/// result together with the payments the selector was asked for.
+#[allow(clippy::type_complexity)]
+fn propose_fee_included_scripted<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
+    dsf: Dsf,
+    cache: impl TestCache,
+    note_value: Zatoshis,
+    amount: Zatoshis,
+    script: Vec<ScriptedReply>,
+) -> (
+    Result<
+        Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>,
+        ProposeTransferErrT<
+            Dsf::DataStore,
+            Infallible,
+            ScriptedInputSelector<Dsf::DataStore>,
+            SingleOutputChangeStrategy<Dsf::DataStore>,
+        >,
+    >,
+    Vec<Zatoshis>,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let recipient = to.to_zcash_address(st.network());
+    let input_selector = ScriptedInputSelector {
+        greedy: GreedyInputSelector::new(),
+        script,
+        payments: RefCell::new(vec![]),
+    };
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    let result = st.propose_fee_included_transfer(
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        recipient,
+        None,
+        amount,
+        ConfirmationsPolicy::MIN,
+        &SpendPolicy::default(),
+        None,
+        None,
+    );
+    (result, input_selector.payments.into_inner())
+}
+
+/// Tests that a fee-included search with no candidate stops at the selection limit and finds
+/// no payment.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer through a selector that always reports a one-zatoshi
+///   shortfall.
+/// - Verifies that the search asks for one payment per selection up to the limit, each one
+///   zatoshi below the last, and fails with `NoPaymentWithinAmount` and no smallest debit.
+pub fn fee_included_finds_no_payment_at_the_selection_limit<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let note_value = Zatoshis::const_from_u64(60_000);
+    let amount = Zatoshis::const_from_u64(50_000);
+    let one_zatoshi = Zatoshis::const_from_u64(1);
+    let reported_required = (note_value + one_zatoshi).unwrap();
+
+    let (result, payments) = propose_fee_included_scripted::<T, _>(
+        dsf,
+        cache,
+        note_value,
+        amount,
+        vec![ScriptedReply::InsufficientFunds {
+            available: note_value,
+            required: reported_required,
+        }],
+    );
+
+    assert_matches!(
+        result,
+        Err(Error::NoPaymentWithinAmount { amount: reported, smallest_debit })
+            if reported == amount && smallest_debit.is_none()
+    );
+    let expected_payments = (0u64..)
+        .take(FEE_INCLUDED_SELECTION_LIMIT)
+        .map(|step| (amount - Zatoshis::const_from_u64(step)).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(payments, expected_payments);
+}
+
+/// Tests that a fee-included search holding a candidate returns it at the selection limit.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer through a selector that first reports a shortfall
+///   large enough for the greedy selector to fund the next payment below the amount, then
+///   delegates that selection, then always reports a one-zatoshi shortfall.
+/// - Verifies that the search makes as many selections as the limit allows and returns the
+///   candidate.
+pub fn fee_included_returns_the_candidate_at_the_selection_limit<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let note_value = Zatoshis::const_from_u64(60_000);
+    let amount = Zatoshis::const_from_u64(50_000);
+    let candidate_payment = Zatoshis::const_from_u64(35_000);
+    let first_shortfall = (amount - candidate_payment).unwrap();
+
+    let (result, payments) = propose_fee_included_scripted::<T, _>(
+        dsf,
+        cache,
+        note_value,
+        amount,
+        vec![
+            ScriptedReply::InsufficientFunds {
+                available: note_value,
+                required: (note_value + first_shortfall).unwrap(),
+            },
+            ScriptedReply::Greedy,
+            ScriptedReply::InsufficientFunds {
+                available: note_value,
+                required: (note_value + Zatoshis::const_from_u64(1)).unwrap(),
+            },
+        ],
+    );
+
+    let proposal = result.unwrap();
+    assert_matches!(
+        proposal.steps().head.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(candidate_payment)
+    );
+    assert_eq!(payments.len(), FEE_INCLUDED_SELECTION_LIMIT);
+}
+
+/// Tests that an insufficient-funds report with no shortfall ends a fee-included search that
+/// holds a candidate, which it then returns.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer through a selector that first reports a shortfall
+///   large enough for the greedy selector to fund the next payment below the amount, then
+///   delegates that selection, then reports `required` equal to `available`.
+/// - Verifies that the search makes no selection after that report and returns the
+///   candidate.
+pub fn fee_included_stops_at_a_report_without_shortfall<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let note_value = Zatoshis::const_from_u64(60_000);
+    let amount = Zatoshis::const_from_u64(50_000);
+    let candidate_payment = Zatoshis::const_from_u64(35_000);
+    let first_shortfall = (amount - candidate_payment).unwrap();
+    let expected_fee = MINIMUM_FEE;
+
+    let (result, payments) = propose_fee_included_scripted::<T, _>(
+        dsf,
+        cache,
+        note_value,
+        amount,
+        vec![
+            ScriptedReply::InsufficientFunds {
+                available: note_value,
+                required: (note_value + first_shortfall).unwrap(),
+            },
+            ScriptedReply::Greedy,
+            ScriptedReply::InsufficientFunds {
+                available: note_value,
+                required: note_value,
+            },
+        ],
+    );
+
+    let proposal = result.unwrap();
+    assert_matches!(
+        proposal.steps().head.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(candidate_payment)
+    );
+    assert_eq!(
+        payments,
+        vec![amount, candidate_payment, (amount - expected_fee).unwrap()]
+    );
+}
+
+/// Tests that an insufficient-funds report with no shortfall, when no selection reached the
+/// amount, ends a fee-included search with the balance error.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer through a selector that reports `required` equal to
+///   an `available` below the amount.
+/// - Verifies that the search makes one selection and fails with `InsufficientFunds`,
+///   reporting the amount as required and the reported value as available.
+pub fn fee_included_report_without_shortfall_below_the_amount_is_a_balance_error<
+    T: ShieldedPoolTester,
+>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let note_value = Zatoshis::const_from_u64(60_000);
+    let amount = Zatoshis::const_from_u64(50_000);
+    let reported_available = Zatoshis::const_from_u64(40_000);
+
+    let (result, payments) = propose_fee_included_scripted::<T, _>(
+        dsf,
+        cache,
+        note_value,
+        amount,
+        vec![ScriptedReply::InsufficientFunds {
+            available: reported_available,
+            required: reported_available,
+        }],
+    );
+
+    assert_matches!(
+        result,
+        Err(Error::InsufficientFunds { available, required })
+            if available == reported_available && required == amount
+    );
+    assert_eq!(payments, vec![amount]);
+}
+
+/// Tests that an insufficient-funds report with no shortfall, when the reported value covers
+/// the amount, ends a fee-included search that holds no candidate.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer through a selector that reports `required` equal to
+///   an `available` at or above the amount.
+/// - Verifies that the search makes one selection and fails with `NoPaymentWithinAmount`
+///   and no smallest debit.
+pub fn fee_included_report_without_shortfall_finds_no_payment<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let note_value = Zatoshis::const_from_u64(60_000);
+    let amount = Zatoshis::const_from_u64(50_000);
+
+    let (result, payments) = propose_fee_included_scripted::<T, _>(
+        dsf,
+        cache,
+        note_value,
+        amount,
+        vec![ScriptedReply::InsufficientFunds {
+            available: note_value,
+            required: note_value,
+        }],
+    );
+
+    assert_matches!(
+        result,
+        Err(Error::NoPaymentWithinAmount { amount: reported, smallest_debit })
+            if reported == amount && smallest_debit.is_none()
+    );
+    assert_eq!(payments, vec![amount]);
+}
+
+/// Tests a fee-included transfer to a transparent recipient.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Verifies that a memo for the transparent recipient is rejected.
+/// - Proposes a fee-included transfer of the note's full value to the transparent address.
+/// - Verifies that the payment plus the fee for a transparent output is the amount.
+/// - Builds and mines the transaction, and verifies that the account is left empty.
+#[cfg(feature = "transparent-inputs")]
+pub fn fee_included_to_transparent_recipient<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to: Address = Address::Transparent(TransparentAddress::PublicKeyHash([0x7f; 20]));
+    let recipient = to.to_zcash_address(st.network());
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    let memo = "Test fee-included memo".parse::<Memo>().unwrap();
+    assert_matches!(
+        st.propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient.clone(),
+            Some(MemoBytes::from(memo)),
+            note_value,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            None,
+            None,
+        ),
+        Err(Error::Payment(zip321::PaymentError::TransparentMemo))
+    );
+
+    // One shielded spend with its zero-valued change (padded to two shielded outputs) and
+    // one transparent output are three logical actions.
+    let expected_fee = (MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (note_value - expected_fee).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, note_value).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_eq!(
+        step.payment_pools(),
+        &std::collections::BTreeMap::from([(0, PoolType::TRANSPARENT)])
+    );
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests a fee-included transfer that draws on the account's transparent outputs as well
+/// as its notes.
+///
+/// The test:
+/// - Adds a shielded note and a transparent UTXO to the account.
+/// - Proposes a fee-included transfer of more than their combined value, permitting
+///   transparent spends, and verifies that it fails with `InsufficientFunds` reporting the
+///   combined value as available.
+/// - Proposes a fee-included transfer of exactly their combined value, and verifies that
+///   both are spent and that the payment plus the fee is the amount.
+/// - Builds and mines the transaction, and verifies that the account is left empty.
+#[cfg(feature = "transparent-inputs")]
+pub fn fee_included_with_transparent_source<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    let note_value = Zatoshis::const_from_u64(50_000);
+    let (h, _, _) = st.add_a_single_note_checking_balance(note_value);
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    let utxo_value = Zatoshis::const_from_u64(30_000);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(utxo_value, taddr.script().into()),
+        Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+    let total = (note_value + utxo_value).unwrap();
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let recipient = to.to_zcash_address(st.network());
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let spend_policy =
+        SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr());
+
+    let excessive_amount = Zatoshis::const_from_u64(100_000);
+    assert_matches!(
+        st.propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient.clone(),
+            None,
+            excessive_amount,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+            None,
+            None,
+        ),
+        Err(Error::InsufficientFunds { available, required })
+            if available == total && required == excessive_amount
+    );
+
+    // One transparent input, one shielded spend, and the payment with its zero-valued
+    // change in the shielded pool are three logical actions.
+    let expected_fee = (MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (total - expected_fee).unwrap();
+
+    let proposal = st
+        .propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            total,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+            None,
+            None,
+        )
+        .unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(step.transparent_inputs().len(), 1);
+    assert_eq!(
+        step.shielded_inputs().map(|inputs| inputs.notes().len()),
+        Some(1)
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests a fee-included transfer funded only from transparent outputs, to a transparent
+/// recipient.
+///
+/// The test:
+/// - Adds a transparent UTXO to an account holding no notes.
+/// - Proposes a fee-included transfer of the UTXO's full value to a transparent address,
+///   permitting transparent spends.
+/// - Verifies that the proposal is fully transparent, with no change output, and that the
+///   payment plus the fee is the amount.
+/// - Builds the transaction.
+#[cfg(feature = "transparent-inputs")]
+pub fn fee_included_transparent_inputs_to_transparent_recipient<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    // Mine a block that pays someone else, so that the chain has a height to spend at
+    // while the account holds no notes.
+    let h = st.mine_decoy_block(0xf6, Zatoshis::const_from_u64(10_000));
+    st.scan_cached_blocks(h, 1);
+
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(utxo_value, taddr.script().into()),
+        Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let to: Address = Address::Transparent(TransparentAddress::PublicKeyHash([0x7f; 20]));
+    let recipient = to.to_zcash_address(st.network());
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let spend_policy =
+        SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr());
+
+    // One transparent input and one transparent output are two logical actions.
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (utxo_value - expected_fee).unwrap();
+
+    let proposal = st
+        .propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            utxo_value,
+            ConfirmationsPolicy::MIN,
+            &spend_policy,
+            None,
+            None,
+        )
+        .unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    assert_eq!(step.transparent_inputs().len(), 1);
+    assert!(step.shielded_inputs().is_none());
+    assert_eq!(step.balance().proposed_change(), []);
+
+    st.create_proposed_expecting(&proposal, 1);
+}
+
+/// Tests fee-included transfers from an account holding notes in two shielded pools.
+///
+/// The test:
+/// - Adds one note in each of the `P0` and `P1` pools.
+/// - Proposes a fee-included transfer to a `P1` recipient that the `P1` note covers alone,
+///   and verifies that only that note is spent, at the single-bundle fee.
+/// - Proposes a fee-included transfer to the same recipient that needs both notes, and
+///   verifies that both are spent, at the two-bundle fee, with the payment plus the fee
+///   equal to the amount in both cases.
+/// - Builds and mines the second transaction, and verifies that the change is all that
+///   remains.
+#[cfg(feature = "orchard")]
+pub fn fee_included_across_pools<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let note_value = Zatoshis::const_from_u64(350_000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+    let total = (note_value * 2u64).unwrap();
+
+    let to: Address = P1::sk_default_address(&P1::sk(&[0xf5; 32]));
+
+    let input_pools = |proposal: &Proposal<StandardFeeRule, _>| {
+        proposal
+            .steps()
+            .head
+            .shielded_inputs()
+            .expect("the proposal has shielded inputs")
+            .notes()
+            .iter()
+            .map(|n| match n.note() {
+                Note::Sapling(_) => ShieldedPool::Sapling,
+                Note::Orchard { pool, .. } => match pool {
+                    ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+                    ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
+                },
+            })
+            .collect::<BTreeSet<_>>()
+    };
+
+    // An amount the P1 note covers alone is funded from that note only: one spend and two
+    // outputs in one bundle are two logical actions.
+    let single_pool_amount = Zatoshis::const_from_u64(300_000);
+    let single_pool_fee = MINIMUM_FEE;
+    let proposal = st.propose_fee_included_to(&to, single_pool_amount).unwrap();
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), single_pool_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some((single_pool_amount - single_pool_fee).unwrap())
+    );
+    assert_eq!(
+        input_pools(&proposal),
+        BTreeSet::from([P1::SHIELDED_PROTOCOL])
+    );
+
+    // An amount above either note is funded from both: two bundles, each padded to two
+    // logical actions.
+    let both_pools_amount = Zatoshis::const_from_u64(500_000);
+    let both_pools_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_change = (total - both_pools_amount).unwrap();
+    let proposal = st.propose_fee_included_to(&to, both_pools_amount).unwrap();
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), both_pools_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some((both_pools_amount - both_pools_fee).unwrap())
+    );
+    assert_eq!(
+        input_pools(&proposal),
+        BTreeSet::from([P0::SHIELDED_PROTOCOL, P1::SHIELDED_PROTOCOL])
+    );
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), expected_change);
+}
+
+/// Tests a fee-included transfer whose exact debit would leave dust change from the note in
+/// the recipient's pool, when the account's other note is in another pool.
+///
+/// The test:
+/// - Adds one note in the `P0` pool and a smaller one in the `P1` pool.
+/// - Proposes a fee-included transfer to a `P0` recipient of an amount that leaves the `P0`
+///   note's remainder below the dust threshold.
+/// - Verifies that the proposal spends the `P0` note alone, paying as much as leaves change
+///   at the dust threshold, so that the debit falls short of the amount and the `P1` note is
+///   untouched.
+/// - Builds and mines the transaction, and verifies that the `P1` note is the balance left
+///   and that the change was received.
+#[cfg(feature = "orchard")]
+pub fn fee_included_dust_band_across_pools<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p0_note_value = Zatoshis::const_from_u64(60_000);
+    let p1_note_value = Zatoshis::const_from_u64(20_000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, p0_note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, p1_note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    let to: Address = P0::sk_default_address(&P0::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(57_000);
+
+    // Any payment that leaves the `P0` note's change below the dust threshold makes the
+    // selector add the `P1` note, and the two-bundle fee then debits more than the amount.
+    // The largest payment that fits leaves change at the threshold, from the `P0` note alone.
+    let expected_fee = MINIMUM_FEE;
+    let expected_change = MARGINAL_FEE;
+    let expected_payment = (p0_note_value - expected_fee - expected_change).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let input_values = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| n.note().value())
+        .collect::<Vec<_>>();
+    assert_eq!(input_values, vec![p0_note_value]);
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+    assert_eq!(
+        change[0].output_pool(),
+        PoolType::Shielded(P0::SHIELDED_PROTOCOL)
+    );
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+
+    // A note worth exactly the marginal fee is uneconomic to spend, so the balance leaves
+    // it out; the transaction history shows that it was received.
+    assert_eq!(st.get_total_balance(account.id()), p1_note_value);
+    let sent_tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
+    assert!(sent_tx.has_change());
+    assert_eq!(sent_tx.total_received(), expected_change);
+}
+
+/// Tests a fee-included transfer whose exact debit would leave dust change from the note in
+/// the recipient's pool, when the account's other note, in another pool, is too small for
+/// both notes to fund any payment within the amount.
+///
+/// The test:
+/// - Adds one note in the `P0` pool and a much smaller one in the `P1` pool.
+/// - Proposes a fee-included transfer to a `P0` recipient of an amount that leaves the `P0`
+///   note's remainder below the dust threshold.
+/// - Verifies that the proposal spends the `P0` note alone, paying as much as leaves change
+///   at the dust threshold.
+#[cfg(feature = "orchard")]
+pub fn fee_included_dust_band_with_a_small_note_across_pools<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p0_note_value = Zatoshis::const_from_u64(60_000);
+    let p1_note_value = Zatoshis::const_from_u64(8_000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, p0_note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, p1_note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    let to: Address = P0::sk_default_address(&P0::sk(&[0xf5; 32]));
+    let amount = Zatoshis::const_from_u64(57_000);
+
+    // A payment that leaves the `P0` note's change below the dust threshold makes the
+    // selector add the `P1` note, whose second bundle costs more than it adds, so the
+    // shortfall it reports points below payments that the `P0` note alone funds. The largest
+    // payment that fits still leaves change at the threshold.
+    let expected_fee = MINIMUM_FEE;
+    let expected_change = MARGINAL_FEE;
+    let expected_payment = (p0_note_value - expected_fee - expected_change).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, amount).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let input_values = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| n.note().value())
+        .collect::<Vec<_>>();
+    assert_eq!(input_values, vec![p0_note_value]);
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), expected_change);
+}
+
+/// Tests that a fee-included transfer locks the inputs of the proposal it returns, and
+/// only those, and that a locked note is excluded from a later fee-included transfer.
+///
+/// The test:
+/// - Adds funds to the wallet in two notes, the larger one first.
+/// - Proposes a fee-included transfer that locks its inputs and requests transaction
+///   version 5, of an amount that the larger note covers alone but that the first candidate
+///   payment needed both notes for.
+/// - Verifies that the proposal records the requested version, spends the larger note only,
+///   and that only that note is locked afterwards.
+/// - Proposes a second fee-included transfer under the default spend policy, and verifies
+///   that it spends the smaller note.
+pub fn fee_included_locks_only_the_returned_proposal_inputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let larger_note_value = Zatoshis::const_from_u64(50_000);
+    let smaller_note_value = Zatoshis::const_from_u64(30_000);
+    st.add_notes_checking_balance([Some(larger_note_value), Some(smaller_note_value)]);
+
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let recipient = to.to_zcash_address(st.network());
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    // The first candidate payment is the amount, which needs both notes to cover with the
+    // fee; the payment kept is the amount less the fee, which the larger note covers alone.
+    let amount = Zatoshis::const_from_u64(45_000);
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (amount - expected_fee).unwrap();
+
+    let owner = LockOwner::new([1; 32]);
+    let proposal = st
+        .propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            amount,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            Some(LockRequest::new(owner, 100)),
+            Some(TxVersion::V5),
+        )
+        .unwrap();
+
+    assert_eq!(proposal.proposed_version(), Some(TxVersion::V5));
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    let input_values = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| n.note().value())
+        .collect::<Vec<_>>();
+    assert_eq!(input_values, vec![larger_note_value]);
+
+    assert_eq!(
+        st.wallet().get_locked_outputs(account.id()).unwrap(),
+        vec![st.note_ref_by_value(larger_note_value)]
+    );
+
+    // The locked note is excluded, so the smaller note funds the next transfer.
+    let proposal = st.propose_fee_included_to(&to, smaller_note_value).unwrap();
+    let step = &proposal.steps().head;
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some((smaller_note_value - expected_fee).unwrap())
+    );
+    let input_values = step
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes()
+        .iter()
+        .map(|n| n.note().value())
+        .collect::<Vec<_>>();
+    assert_eq!(input_values, vec![smaller_note_value]);
+}
+
+/// Tests that a fee-included transfer to an Orchard receiver with transaction version 5
+/// requested is rejected once Ironwood is active, as the payment would have to be
+/// delivered through the Ironwood bundle.
+#[cfg(feature = "orchard")]
+pub fn fee_included_v5_to_orchard_receiver_requires_ironwood<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    let to = OrchardPoolTester::sk_default_address(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let recipient = to.to_zcash_address(st.network());
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+
+    let account = st.get_account();
+    assert_matches!(
+        st.propose_fee_included_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            Zatoshis::const_from_u64(20_000),
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            None,
+            Some(TxVersion::V5),
+        ),
+        Err(Error::Proposal(
+            ProposalError::OrchardReceiverRequiresIronwood(TxVersion::V5)
+        ))
+    );
+}
+
+/// Tests a fee-included transfer of an Orchard note to an Orchard receiver once Ironwood
+/// is active, where the payment and the change are delivered through the Ironwood bundle.
+///
+/// The test:
+/// - Activates Ironwood and funds the wallet with a single Orchard note.
+/// - Proposes a fee-included transfer of the note's full value to an Orchard receiver.
+/// - Verifies that the payment goes to the Ironwood pool while the zero-valued change stays
+///   in the Orchard pool, and that the payment plus the fee for an Orchard bundle and an
+///   Ironwood bundle is the amount.
+/// - Builds and mines the transaction, and verifies that the account is left empty.
+#[cfg(feature = "orchard")]
+pub fn fee_included_after_nu6_3_pays_through_ironwood<Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+{
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+    let account = st.get_account();
+
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let to = OrchardPoolTester::sk_default_address(&OrchardPoolTester::sk(&[0xf5; 32]));
+
+    // The Orchard bundle carries the spend and the zero-valued change, which no longer share
+    // an action once Ironwood is active; the Ironwood bundle carries the payment, padded to
+    // two actions.
+    let expected_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_payment = (note_value - expected_fee).unwrap();
+
+    let proposal = st.propose_fee_included_to(&to, note_value).unwrap();
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_eq!(step.payment_pools().get(&0), Some(&PoolType::IRONWOOD));
+    assert_matches!(
+        step.transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+    // The spend removes more value from the Orchard pool than the change returns to it, so
+    // the turnstile lets the change stay in Orchard.
+    let change = step.balance().proposed_change();
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].value(), Zatoshis::ZERO);
+    assert_eq!(change[0].output_pool(), PoolType::ORCHARD);
+
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let (h, _) = st.generate_next_block_including(txids[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests a fee-included transfer to a TEX recipient, which is delivered by a ZIP 320 pair
+/// of transactions.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a fee-included transfer of the note's full value to a TEX address.
+/// - Verifies that the payment plus the fees of both steps is the amount, and that the
+///   ephemeral output of the first step is the payment plus the second step's fee.
+/// - Builds and mines both transactions, and verifies that the account is left empty.
+#[cfg(feature = "transparent-inputs")]
+pub fn fee_included_to_tex_recipient<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+
+    let note_value = Zatoshis::const_from_u64(100_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    let tex_addr = Address::Tex([0x4; 20]);
+
+    // The first step spends the note into the ephemeral transparent output, with
+    // zero-valued shielded change (padded to two shielded outputs): three logical actions.
+    // The second step spends the ephemeral output to the TEX address: two logical actions.
+    let expected_step0_fee = (MARGINAL_FEE * 3u64).unwrap();
+    let expected_step1_fee = MINIMUM_FEE;
+    let expected_payment = (note_value - expected_step0_fee - expected_step1_fee).unwrap();
+    let expected_ephemeral_value = (expected_payment + expected_step1_fee).unwrap();
+
+    let proposal = st.propose_fee_included_to(&tex_addr, note_value).unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
+    assert_eq!(
+        steps[0].balance().proposed_change(),
+        [
+            ChangeValue::shielded(T::SHIELDED_PROTOCOL, Zatoshis::ZERO, None),
+            ChangeValue::ephemeral_transparent(expected_ephemeral_value),
+        ]
+    );
+    assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
+    assert_eq!(steps[1].balance().proposed_change(), []);
+    assert_matches!(
+        steps[1].transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+
+    let txids = st.create_proposed_expecting(&proposal, 2);
+    for txid in txids.iter() {
+        let (h, _) = st.generate_next_block_including(*txid);
+        st.scan_cached_blocks(h, 1);
+    }
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests that a fee-included transfer to a TEX recipient fails with a meaningful error
+/// when the `transparent-inputs` feature is not enabled.
+#[cfg(not(feature = "transparent-inputs"))]
+pub fn fee_included_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    let tex_addr = Address::Tex([0x4; 20]);
+    assert_matches!(
+        st.propose_fee_included_to(&tex_addr, Zatoshis::const_from_u64(60_000)),
+        Err(Error::NoteSelection(
+            GreedyInputSelectorError::UnsupportedTexAddress
+        ))
     );
 }
 
