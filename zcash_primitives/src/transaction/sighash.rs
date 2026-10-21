@@ -141,8 +141,10 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the transaction is a pre-Overwinter transaction, or if `signable_input`
-    /// is a transparent input and the transaction has no transparent bundle.
+    /// Panics if the transaction is a pre-Overwinter transaction, or if it is version 4
+    /// or earlier and `signable_input` is a transparent input but the transaction has
+    /// no transparent bundle. (In the latter case for v5 and later, the result is the
+    /// same as if `SignableInput::Shielded` were provided.)
     pub fn signature_hash(&self, signable_input: &SignableInput) -> SignatureHash {
         let inputs_digests = self.transparent_inputs_digests.as_ref();
         SignatureHash(match &self.tx_digests {
