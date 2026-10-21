@@ -564,7 +564,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_146_400)),
             NetworkUpgrade::Nu6_2 => Some(BlockHeight(3_364_600)),
             NetworkUpgrade::Nu6_3 => Some(BlockHeight(3_428_143)),
-            NetworkUpgrade::Nu7 => None,
+            NetworkUpgrade::Nu7 => Some(BlockHeight(3_543_405)),
             #[cfg(zcash_unstable = "nutachyon")]
             NetworkUpgrade::NuTachyon => None,
         }
@@ -677,9 +677,9 @@ pub enum NetworkUpgrade {
     Nu6_2,
     /// The Ironwood / NU6.3 network upgrade.
     Nu6_3,
-    /// The [Nu7 (proposed)] network upgrade.
+    /// The [Nu7] network upgrade.
     ///
-    /// [Nu7 (proposed)]: https://z.cash/upgrade/nu7/
+    /// [Nu7]: https://z.cash/upgrade/nu7/
     Nu7,
     /// The NuTachyon network upgrade.
     #[cfg(zcash_unstable = "nutachyon")]
@@ -1168,8 +1168,7 @@ mod spacing_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, TEST_NETWORK,
-        UPGRADES_IN_ORDER,
+        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER,
     };
 
     #[test]
@@ -1355,32 +1354,15 @@ mod tests {
             BranchId::Nu6_3,
         );
         assert_eq!(
-            BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Nu6_3,
-        );
-    }
-
-    #[test]
-    fn nu7_activates_on_testnet_only() {
-        /// The height at which NU7 activates on Testnet.
-        const TESTNET_NU7_ACTIVATION: BlockHeight = BlockHeight(4_465_026);
-
-        assert_eq!(MAIN_NETWORK.activation_height(NetworkUpgrade::Nu7), None);
-        assert_eq!(
-            BranchId::for_height(&MAIN_NETWORK, BlockHeight(u32::MAX)),
-            BranchId::Nu6_3,
-        );
-
-        assert_eq!(
-            TEST_NETWORK.activation_height(NetworkUpgrade::Nu7),
-            Some(TESTNET_NU7_ACTIVATION),
-        );
-        assert_eq!(
-            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION - 1),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(3_543_404)),
             BranchId::Nu6_3,
         );
         assert_eq!(
-            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(3_543_405)),
+            BranchId::Nu7,
+        );
+        assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(10_000_000)),
             BranchId::Nu7,
         );
     }

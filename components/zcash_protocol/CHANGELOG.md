@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+This release sets the NU7 mainnet activation height to 3543405.
+
 ### Added
 - `zcash_protocol::consensus::UPGRADES_IN_ORDER`
 - `zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO`
@@ -21,6 +23,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.89
+- Mainnet activation height has been set for `consensus::BranchId::Nu7`.
 - The ZIP 318 durations (the delay distributions, `AnchorBucketInterval`, and the
   expiry modulus and window) are now numbers of reference blocks, which are
   scaled by `NU7_POW_TARGET_SPACING_RATIO` at heights from NU7 activation.
