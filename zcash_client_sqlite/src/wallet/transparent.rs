@@ -769,31 +769,6 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
     key_scope: TransparentKeyScope,
     address_list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
 ) -> Result<(), SqliteClientError> {
-    // If the address being derived was previously imported as a standalone (`Foreign`)
-    // receiver, upgrade that row in place to its derived form rather than inserting a second row
-    // for the same transparent receiver (which the UNIQUE index on
-    // `cached_transparent_receiver_address` forbids). The row `id` is preserved, so any UTXOs,
-    // exposure, and spend-search state already attached to the imported receiver carry over and
-    // become spendable.
-    //
-    // The import may have been made under a *different* account: deriving the address is itself
-    // proof that the deriving account owns it, so in that case the row's account attribution
-    // (and that of any outputs received at the address) moves to the deriving account. The
-    // receiver-uniqueness index guarantees at most one row per receiver, and the deriving
-    // account cannot already hold a row at this (key scope, child index) — such a row would be
-    // this same receiver — so retargeting the row cannot violate the address-tuple constraint.
-    //
-    // The lookup below reads only columns present at every schema version at which
-    // `store_address_range` runs, so it is safe when this function is called from a migration.
-    // The upgrade `UPDATE` clears the `imported_transparent_receiver_*` columns, so it is only
-    // ever prepared and executed when a `Foreign` row exists — which cannot occur before those
-    // columns have been added.
-    let mut stmt_lookup_foreign = conn.prepare_cached(
-        "SELECT id, account_id FROM addresses
-         WHERE cached_transparent_receiver_address = :transparent_address
-           AND key_scope = :foreign_scope",
-    )?;
-
     // exposed_at_height is initially NULL
     let mut stmt_insert_address = conn.prepare_cached(
         "INSERT INTO addresses (
@@ -815,92 +790,139 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
             .clone()
             .convert::<ReceiverFlags>()
             .expect("address is valid");
+        let derived_scope = KeyScope::try_from(key_scope)?;
 
-        let derived_scope = KeyScope::try_from(key_scope)?.encode();
-        let diversifier_index_be = encode_diversifier_index_be(transparent_child_index.into());
-        let transparent_address_enc = transparent_address.encode(params);
-        let address_enc = zcash_address.encode();
-        let child_index = transparent_child_index.index();
-        let flags = receiver_flags.bits();
-
-        let foreign_row: Option<(i64, i64)> = stmt_lookup_foreign
-            .query_row(
-                named_params![
-                    ":transparent_address": transparent_address_enc,
-                    ":foreign_scope": KeyScope::Foreign.encode(),
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-
-        if let Some((foreign_id, foreign_account)) = foreign_row {
-            conn.execute(
-                "UPDATE addresses
-                 SET account_id = :account_id,
-                     key_scope = :key_scope,
-                     diversifier_index_be = :diversifier_index_be,
-                     address = :address,
-                     transparent_child_index = :transparent_child_index,
-                     receiver_flags = :receiver_flags,
-                     imported_transparent_receiver_pubkey = NULL,
-                     imported_transparent_receiver_script = NULL
-                 WHERE id = :id",
-                named_params![
-                    ":account_id": account_id.0,
-                    ":key_scope": derived_scope,
-                    ":diversifier_index_be": diversifier_index_be,
-                    ":address": address_enc,
-                    ":transparent_child_index": child_index,
-                    ":receiver_flags": flags,
-                    ":id": foreign_id,
-                ],
-            )?;
-
-            // If the import was recorded under a different account, the outputs received at
-            // the address follow the (derivation-proven) attribution to this account.
-            //
-            // Only the transparent update can match today: a `Foreign` row is a transparent-only
-            // import, so no shielded note can be attached to it. A shielded note's `address_id`
-            // is only ever produced by `upsert_address`, which always writes the external key
-            // scope and a non-null diversifier index, whereas the `addresses` check constraint
-            // requires a `Foreign` row to have a null diversifier index; and no code path demotes
-            // an existing row to the `Foreign` scope. The shielded pools are nonetheless updated
-            // here so that this reattribution stays complete if that invariant is ever relaxed:
-            // mis-attributing a shielded note to the wrong account is silent and permanent,
-            // whereas these statements cost nothing on a path that only runs when an import is
-            // upgraded across accounts.
-            if foreign_account != account_id.0 {
-                for table in [
-                    "transparent_received_outputs",
-                    "sapling_received_notes",
-                    "orchard_received_notes",
-                    "ironwood_received_notes",
-                ] {
-                    conn.execute(
-                        &format!(
-                            "UPDATE {table} SET account_id = :account_id
-                             WHERE address_id = :address_id"
-                        ),
-                        named_params![
-                            ":account_id": account_id.0,
-                            ":address_id": foreign_id,
-                        ],
-                    )?;
-                }
-            }
-        } else {
+        if !adopt_standalone_receiver(
+            conn,
+            params,
+            account_id,
+            derived_scope,
+            transparent_child_index,
+            &zcash_address.encode(),
+            receiver_flags,
+            &transparent_address,
+        )? {
             stmt_insert_address.execute(named_params![
                 ":account_id": account_id.0,
-                ":diversifier_index_be": diversifier_index_be,
-                ":key_scope": derived_scope,
-                ":address": address_enc,
-                ":transparent_child_index": child_index,
-                ":transparent_address": transparent_address_enc,
-                ":receiver_flags": flags,
+                ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
+                ":key_scope": derived_scope.encode(),
+                ":address": zcash_address.encode(),
+                ":transparent_child_index": transparent_child_index.index(),
+                ":transparent_address": transparent_address.encode(params),
+                ":receiver_flags": receiver_flags.bits(),
             ])?;
         }
     }
     Ok(())
+}
+
+/// Upgrades the row of `transparent_address`, if the wallet tracks it as a standalone
+/// (`Foreign`) receiver, in place to the address of `account_id` at `key_scope` and
+/// `transparent_child_index`.
+///
+/// Returns `true` if a row was upgraded. The caller must not then insert a second row for the
+/// same transparent receiver, which the UNIQUE index on `cached_transparent_receiver_address`
+/// forbids. The row `id` is preserved, so any UTXOs, exposure, and spend-search state already
+/// attached to the imported receiver carry over and become spendable.
+///
+/// This issues several writes, which the caller must apply in one transaction.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn adopt_standalone_receiver<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountRef,
+    key_scope: KeyScope,
+    transparent_child_index: NonHardenedChildIndex,
+    address: &str,
+    receiver_flags: ReceiverFlags,
+    transparent_address: &TransparentAddress,
+) -> Result<bool, SqliteClientError> {
+    // The import may have been made under a *different* account: deriving the address is itself
+    // proof that the deriving account owns it, so in that case the row's account attribution
+    // (and that of any outputs received at the address) moves to the deriving account. The
+    // receiver-uniqueness index guarantees at most one row per receiver, and the deriving
+    // account cannot already hold a row at this (key scope, child index) — such a row would be
+    // this same receiver — so retargeting the row cannot violate the address-tuple constraint.
+    //
+    // The lookup below reads only columns present at every schema version at which this
+    // function runs, so it is safe when called from a migration. The upgrade `UPDATE` clears the
+    // `imported_transparent_receiver_*` columns, so it is only ever prepared and executed when a
+    // `Foreign` row exists — which cannot occur before those columns have been added.
+    let foreign_row: Option<(i64, i64)> = conn
+        .prepare_cached(
+            "SELECT id, account_id FROM addresses
+             WHERE cached_transparent_receiver_address = :transparent_address
+               AND key_scope = :foreign_scope",
+        )?
+        .query_row(
+            named_params![
+                ":transparent_address": transparent_address.encode(params),
+                ":foreign_scope": KeyScope::Foreign.encode(),
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    let Some((foreign_id, foreign_account)) = foreign_row else {
+        return Ok(false);
+    };
+
+    conn.execute(
+        "UPDATE addresses
+         SET account_id = :account_id,
+             key_scope = :key_scope,
+             diversifier_index_be = :diversifier_index_be,
+             address = :address,
+             transparent_child_index = :transparent_child_index,
+             receiver_flags = :receiver_flags,
+             imported_transparent_receiver_pubkey = NULL,
+             imported_transparent_receiver_script = NULL
+         WHERE id = :id",
+        named_params![
+            ":account_id": account_id.0,
+            ":key_scope": key_scope.encode(),
+            ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
+            ":address": address,
+            ":transparent_child_index": transparent_child_index.index(),
+            ":receiver_flags": receiver_flags.bits(),
+            ":id": foreign_id,
+        ],
+    )?;
+
+    // If the import was recorded under a different account, the outputs received at
+    // the address follow the (derivation-proven) attribution to this account.
+    //
+    // Only the transparent update can match today: a `Foreign` row is a transparent-only
+    // import, so no shielded note can be attached to it. A shielded note's `address_id`
+    // is only ever produced by `upsert_address`, which always writes the external key
+    // scope and a non-null diversifier index, whereas the `addresses` check constraint
+    // requires a `Foreign` row to have a null diversifier index; and no code path demotes
+    // an existing row to the `Foreign` scope. The shielded pools are nonetheless updated
+    // here so that this reattribution stays complete if that invariant is ever relaxed:
+    // mis-attributing a shielded note to the wrong account is silent and permanent,
+    // whereas these statements cost nothing on a path that only runs when an import is
+    // upgraded across accounts.
+    if foreign_account != account_id.0 {
+        for table in [
+            "transparent_received_outputs",
+            "sapling_received_notes",
+            "orchard_received_notes",
+            "ironwood_received_notes",
+        ] {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET account_id = :account_id
+                     WHERE address_id = :address_id"
+                ),
+                named_params![
+                    ":account_id": account_id.0,
+                    ":address_id": foreign_id,
+                ],
+            )?;
+        }
+    }
+
+    Ok(true)
 }
 
 /// Extend the range of preallocated addresses in an account to ensure that a full `gap_limit` of
@@ -3020,6 +3042,8 @@ mod tests {
         },
     };
     use rusqlite::named_params;
+    #[cfg(feature = "transparent-key-import")]
+    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_keys::{
         address::{Address, UnifiedAddress},
         encoding::AddressCodec,
@@ -3028,12 +3052,130 @@ mod tests {
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
     use {
+        crate::testing::db::TestDb,
+        assert_matches::assert_matches,
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
-        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
-        zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState, testing::TestState},
+        zcash_protocol::{
+            consensus::{NetworkUpgrade, Parameters},
+            local_consensus::LocalNetwork,
+        },
     };
+
+    /// The seed of the account whose default transparent receiver is imported as a standalone
+    /// address before the account is added.
+    #[cfg(feature = "transparent-key-import")]
+    const STANDALONE_DEFAULT_RECEIVER_SEED: [u8; 32] = [42; 32];
+
+    /// Returns a wallet whose test account tracks, as a standalone address, the default
+    /// transparent receiver of the account that [`STANDALONE_DEFAULT_RECEIVER_SEED`] derives.
+    /// Also returns that receiver, and a birthday for the account.
+    #[cfg(feature = "transparent-key-import")]
+    fn standalone_default_receiver_wallet() -> (
+        TestState<(), TestDb, LocalNetwork>,
+        TransparentAddress,
+        AccountBirthday,
+    ) {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_a = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        let (default_address, _) = UnifiedSpendingKey::from_seed(
+            &network,
+            &STANDALONE_DEFAULT_RECEIVER_SEED,
+            zip32::AccountId::ZERO,
+        )
+        .unwrap()
+        .to_unified_full_viewing_key()
+        .default_address(UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap();
+        let taddr = *default_address.transparent().unwrap();
+        st.wallet_mut()
+            .import_standalone_transparent_address(account_a, taddr)
+            .unwrap();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
+                BlockHash([0; 32]),
+            ),
+            None,
+        );
+        (st, taddr, birthday)
+    }
+
+    /// Returns the owning account and key scope of each address row of `taddr`.
+    #[cfg(feature = "transparent-key-import")]
+    fn receiver_rows(
+        st: &TestState<(), TestDb, LocalNetwork>,
+        taddr: &TransparentAddress,
+    ) -> Vec<(uuid::Uuid, i64)> {
+        st.wallet()
+            .db()
+            .conn
+            .prepare(
+                "SELECT accounts.uuid, addresses.key_scope
+                 FROM addresses JOIN accounts ON accounts.id = addresses.account_id
+                 WHERE cached_transparent_receiver_address = :taddr",
+            )
+            .unwrap()
+            .query_map(
+                named_params! { ":taddr": taddr.encode(st.network()) },
+                |row| Ok((row.get::<_, uuid::Uuid>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn add_account_adopts_standalone_default_receiver() {
+        let (mut st, taddr, birthday) = standalone_default_receiver_wallet();
+
+        let (account_b, _) = st
+            .wallet_mut()
+            .create_account(
+                "b",
+                &Secret::new(STANDALONE_DEFAULT_RECEIVER_SEED.to_vec()),
+                &birthday,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            receiver_rows(&st, &taddr),
+            [(account_b.expose_uuid(), KeyScope::EXTERNAL.encode())]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn add_account_adoption_rolls_back_on_error() {
+        let (mut st, taddr, birthday) = standalone_default_receiver_wallet();
+        let account_a = st.test_account().unwrap().id();
+
+        let result: Result<(), SqliteClientError> =
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                wdb.create_account(
+                    "b",
+                    &Secret::new(STANDALONE_DEFAULT_RECEIVER_SEED.to_vec()),
+                    &birthday,
+                    None,
+                )?;
+                // Fail after the adoption; the standalone row must be restored.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+        assert_eq!(
+            receiver_rows(&st, &taddr),
+            [(account_a.expose_uuid(), KeyScope::Foreign.encode())]
+        );
+    }
 
     #[test]
     fn put_received_transparent_utxo() {
