@@ -34,7 +34,8 @@ workspace.
   named `TxDigests` is now `Zip244Digests`; its fields are private, and are
   read through its accessor methods.
 - `zcash_primitives::transaction::txid::TxIdDigester` now produces
-  `Zip244Digests`, and `txid::to_txid` takes `&Zip244Digests`.
+  `Zip244Digests`, and `txid::to_txid` takes `&Zip244Digests` and returns
+  `Option<TxId>` (`None` if `TxVersion` is incompatible).
 
 ### Removed
 - `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA`. Use

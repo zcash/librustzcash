@@ -878,6 +878,7 @@ mod extraction_tests {
         let expected = hex::decode(EXPECTED_DIGEST).unwrap();
         assert_eq!(
             to_txid(data.version(), data.consensus_branch_id(), &digests)
+                .expect("Creator::new returns a compatible version")
                 .as_ref()
                 .as_slice(),
             expected

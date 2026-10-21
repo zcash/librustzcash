@@ -296,6 +296,10 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
 /// This expects and relies upon the existence of canonical encodings for
 /// each effecting component of a transaction.
 ///
+/// Note that this cannot be used to compute the transaction ID for v4 or
+/// earlier transactions; those used `SHA-256(SHA-256(tx_encoding))` and are
+/// malleable.
+///
 /// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
 pub struct TxIdDigester;
 
@@ -462,6 +466,8 @@ pub(crate) fn to_hash_v6(
 
 /// Combines transaction component digests into a transaction ID.
 ///
+/// Returns `None` if `txversion` is incompatible with `digests`.
+///
 /// V6 and later transactions include the Ironwood bundle digest as a separate
 /// Orchard-shaped digest using Ironwood personalization. If any shielded bundle digest is
 /// absent, this substitutes the protocol-defined empty bundle digest for that pool.
@@ -469,7 +475,17 @@ pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
     digests: &Zip244Digests<Blake2bHash>,
-) -> TxId {
+) -> Option<TxId> {
+    match txversion {
+        // These versions cannot produce a txid just from digests, because they use
+        // SHA-256d over the entire tx encoding which is unavailable here.
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => return None,
+        // These versions are compatible with `Zip244Digests`.
+        TxVersion::V5 | TxVersion::V6 => (),
+        #[cfg(zcash_unstable = "nutachyon")]
+        TxVersion::V7 => (),
+    }
+
     let txid_digest = if txversion.has_ironwood() {
         to_hash_v6(
             consensus_branch_id,
@@ -490,7 +506,9 @@ pub fn to_txid(
         )
     };
 
-    TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
+    Some(TxId::from_bytes(
+        <[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap(),
+    ))
 }
 
 /// Digester which constructs a digest of only the witness data.

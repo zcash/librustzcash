@@ -716,7 +716,7 @@ impl<A: Authorization> TransactionData<A> {
             .map_err(E::from)
     }
 
-    /// Computes this transaction's digest using the provided digest strategy.
+    /// Computes this transaction's digests using the provided digest strategy.
     ///
     /// V6 and later transactions include the Ironwood bundle digest as a separate
     /// Orchard-shaped digest with Ironwood personalization. Earlier transaction
@@ -934,21 +934,30 @@ impl Transaction {
     }
 
     fn from_data_v5(data: TransactionData<Authorized>) -> Self {
+        assert_eq!(data.version, TxVersion::V5);
+
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
             &data.digest(TxIdDigester),
-        );
+        )
+        .expect("is v5 tx");
 
         Transaction { txid, data }
     }
 
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
+        #[cfg(not(zcash_unstable = "nutachyon"))]
+        assert_eq!(data.version, TxVersion::V6);
+        #[cfg(zcash_unstable = "nutachyon")]
+        assert!(matches!(data.version, TxVersion::V6 | TxVersion::V7));
+
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
             &data.digest(TxIdDigester),
-        );
+        )
+        .expect("is v6 tx");
 
         Transaction { txid, data }
     }
