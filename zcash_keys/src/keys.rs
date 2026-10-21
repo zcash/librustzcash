@@ -2383,6 +2383,8 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::proptest;
+    use secp256k1::{PublicKey, SecretKey};
+    use zcash_encoding::CompactSize;
 
     #[cfg(all(
         feature = "transparent-inputs",
@@ -3424,31 +3426,53 @@ mod tests {
         );
     }
 
-    /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
-    /// interpreted, so it is retained as an unknown item and recorded as unconverted in
-    /// the derived incoming viewing key. Otherwise that derived key describes the account
-    /// as having no transparent receiving capability at all.
     #[test]
-    #[cfg(not(feature = "transparent-inputs"))]
     fn p2sh_item_is_unconverted_without_transparent_inputs() {
         use zcash_address::unified::{Encoding, Fvk, Revision, Ufvk, Uitem};
 
-        /// The typecode ZIP 316 assigns to a P2SH viewing key item.
-        const P2SH_TYPECODE: u32 = 0x01;
+        /// The shortest ZIP 48 P2SH FVK item.
+        ///
+        /// The shortest possible P2SH FVK item would be `sh(pk(@0/**))`), but
+        /// `P2shFullViewingKey::parse` only supports ZIP 48.
+        const TEMPLATE: &str = "sh(sortedmulti(1,@0/**))";
 
-        let payload = vec![0u8; 8];
+        let secret_key = SecretKey::from_secret_bytes([1; 32]).unwrap();
+        let public_key = PublicKey::from_secret_key(&secret_key);
+
+        let mut payload = vec![];
+        CompactSize::write(&mut payload, TEMPLATE.len()).unwrap();
+        payload.extend_from_slice(TEMPLATE.as_bytes());
+        CompactSize::write(&mut payload, 1).unwrap();
+        // A BIP 32 chain code is 32 bytes.
+        payload.extend_from_slice(&[0; 32]);
+        payload.extend_from_slice(&public_key.serialize());
+
         let ufvk =
             Ufvk::try_from_items(Revision::R2, vec![Uitem::Data(Fvk::P2sh(payload.clone()))])
                 .unwrap();
 
         let parsed = super::UnifiedFullViewingKey::parse(&ufvk).unwrap();
-        assert_eq!(parsed.unknown, vec![(P2SH_TYPECODE, payload)]);
-        assert_eq!(
-            parsed
-                .to_unified_incoming_viewing_key()
-                .unconverted_typecodes,
-            vec![P2SH_TYPECODE]
-        );
+
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(parsed.p2sh().unwrap().to_bytes(), payload);
+
+        // Without the `transparent-inputs` feature a P2SH viewing key item cannot be
+        // interpreted, so it is retained as an unknown item and recorded as unconverted in
+        // the derived incoming viewing key. Otherwise that derived key describes the account
+        // as having no transparent receiving capability at all.
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            // The typecode ZIP 316 assigns to a P2SH viewing key item.
+            const P2SH_TYPECODE: u32 = 0x01;
+
+            assert_eq!(parsed.unknown, vec![(P2SH_TYPECODE, payload)]);
+            assert_eq!(
+                parsed
+                    .to_unified_incoming_viewing_key()
+                    .unconverted_typecodes,
+                vec![P2SH_TYPECODE]
+            );
+        }
     }
 
     #[cfg(feature = "unstable")]
