@@ -10,22 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- MSRV is now 1.89
-
-## [0.10.0-pre.2] - 2026-10-13
-
-### Changed
-- Migrated to `zcash_primitives 0.31.0-pre.2`, `zcash_protocol 0.11.0-pre.1`,
-  and `zcash_transparent 0.11.0-pre.2`.
-
-## [0.10.0-pre.1] - 2026-10-06
-
-### Changed
-- Migrated to `zcash_primitives 0.31.0-pre.1` and
-  `zcash_transparent 0.11.0-pre.1`.
-
-## [0.10.0-pre.0] - 2026-10-02
+## [0.10.0] - 2026-10-21
 
 ### Added
 - Experimental support for creating and extracting V7 PCZTs under NuTachyon,
@@ -38,11 +23,11 @@ workspace.
 - `pczt::common::SecretKeyBytes`
 
 ### Changed
+- MSRV is now 1.89
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `jubjub 0.11`, `orchard 0.16`,
   `pasta_curves 0.6`, `rand_core 0.10`, `redjubjub 0.9`, `sapling-crypto 0.9`,
-  `secp256k1 0.33`, `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
-  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and
-  `zcash_transparent 0.11.0-pre.0`.
+  `secp256k1 0.33`, `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0`,
+  `zcash_protocol 0.11.0`, `zcash_script 0.6`, and `zcash_transparent 0.11.0`.
 - `pczt::roles::io_finalizer::IoFinalizer::finalize_io`,
   `pczt::roles::prover::Prover::{create_orchard_proof, create_ironwood_proof,
   create_sapling_proofs}`, `pczt::roles::signer::Signer::{sign_orchard,
