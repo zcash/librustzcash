@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-21
+
 This release sets the NU7 mainnet activation height to 3543405.
 
 ### Added
@@ -18,12 +20,22 @@ This release sets the NU7 mainnet activation height to 3543405.
 - `zcash_protocol::consensus::{PRE_BLOSSOM_POW_TARGET_SPACING,
   POST_BLOSSOM_POW_TARGET_SPACING, POST_NU7_POW_TARGET_SPACING}`
 - `zcash_protocol::consensus::{pow_target_spacing, target_time_between}`
+- `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
+  `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
+  without the `--cfg zcash_unstable="nu7"` configuration flag.
 - `zcash_protocol::zip318::{AnchorGrid, BlockSpacing}`
 - `zcash_protocol::zip318::PoolMigrationConstants::anchor_grid`
 
 ### Changed
 - MSRV is now 1.89
-- Mainnet activation height has been set for `consensus::BranchId::Nu7`.
+- Migrated to `incrementalmerkletree 0.9` and `incrementalmerkletree-testing 0.4`
+  (under the `test-dependencies` feature).
+- `BranchId::height_bounds` and `height_range` now match `for_height` for local
+  schedules with skipped or out-of-order upgrades.
+- `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
+  (was the placeholder `0xFFFFFFFF`).
+- `TestNetwork` now activates NU7 at height `4465026`, and the mainnet
+  activation height has been set for `BranchId::Nu7`.
 - The ZIP 318 durations (the delay distributions, `AnchorBucketInterval`, and the
   expiry modulus and window) are now numbers of reference blocks, which are
   scaled by `NU7_POW_TARGET_SPACING_RATIO` at heights from NU7 activation.
@@ -42,10 +54,6 @@ This release sets the NU7 mainnet activation height to 3543405.
   block spacing depends on the block height; use
   `zcash_protocol::consensus::pow_target_spacing` or
   `zcash_protocol::consensus::target_time_between` instead.
-
-## [0.11.0-pre.1] - 2026-10-13
-
-### Deprecated
 - The address encoding prefix constants in
   `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants
   of the same names in `zcash_address::constants::{mainnet, testnet, regtest}`:
@@ -64,46 +72,6 @@ This release sets the NU7 mainnet activation height to 3543405.
   address encodings) or `zcash_keys::constants` (for key encodings), which take
   a `NetworkType`. A caller holding consensus parameters passes
   `params.network_type()`.
-
-### Removed
-- `zcash_protocol::address` module, including `Revision`. Use
-  `zcash_address::unified::Revision` instead.
-- `zcash_protocol::consensus::NetworkConstants::{hrp_unified_address_r2,
-  hrp_unified_address_r2_ti, hrp_unified_fvk_r2, hrp_unified_ivk_r2}`. Use the
-  functions of the same names in `zcash_address::constants` instead.
-- `zcash_protocol::constants::{mainnet, testnet, regtest}::{HRP_UNIFIED_ADDRESS_R2,
-  HRP_UNIFIED_ADDRESS_R2_TI, HRP_UNIFIED_FVK_R2, HRP_UNIFIED_IVK_R2}`. Use the
-  constants of the same names in `zcash_address::constants::{mainnet, testnet,
-  regtest}` instead.
-
-## [0.11.0-pre.0] - 2026-09-30
-
-This release sets the NU7 activation height to 4465026 on testnet.
-
-### Added
-- `zcash_protocol::address` module.
-- `zcash_protocol::address::Revision`
-- `zcash_protocol::consensus::NetworkConstants`:
-  - `fn hrp_unified_address_r2`
-  - `fn hrp_unified_address_r2_ti`
-  - `fn hrp_unified_fvk_r2`
-  - `fn hrp_unified_ivk_r2`
-- HRP constants for ZIP 316 Revision 2 unified encodings added to
-  `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
-  for transparent-including UAs have the `TI` suffix.
-- `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
-  `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
-  without the `--cfg zcash_unstable="nu7"` configuration flag.
-
-### Changed
-- Migrated to `incrementalmerkletree 0.9` and `incrementalmerkletree-testing 0.4`
-  (under the `test-dependencies` feature).
-- `BranchId::height_bounds` and `height_range` now match `for_height` for local
-  schedules with skipped or out-of-order upgrades.
-- `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
-  (was the placeholder `0xFFFFFFFF`).
-- `TestNetwork` now activates NU7 at height `4465026`. Mainnet has no NU7
-  activation height.
 
 ## [0.10.6] - 2026-09-04
 
