@@ -7,17 +7,24 @@ use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2
 use core::fmt;
 use corez::io::Write;
 
-use crate::{
-    minimal::{expand_array, indices_from_minimal},
-    params::Params,
-};
+use crate::{minimal::indices_from_minimal, params::Params};
 
+#[cfg(test)]
+use crate::minimal::expand_array;
+
+mod tree;
+
+#[cfg(all(test, feature = "std"))]
+mod compatibility;
+
+#[cfg(test)]
 #[derive(Clone)]
 struct Node {
     hash: Vec<u8>,
     indices: Vec<u32>,
 }
 
+#[cfg(test)]
 impl Node {
     fn new(p: &Params, state: &Blake2bState, i: u32) -> Self {
         let hash = generate_hash(state, i / p.indices_per_hash_output());
@@ -136,6 +143,7 @@ fn generate_hash(base_state: &Blake2bState, i: u32) -> Blake2bHash {
     state.finalize()
 }
 
+#[cfg(test)]
 fn has_collision(a: &Node, b: &Node, len: usize) -> bool {
     a.hash
         .iter()
@@ -144,6 +152,7 @@ fn has_collision(a: &Node, b: &Node, len: usize) -> bool {
         .all(|(a, b)| a == b)
 }
 
+#[cfg(test)]
 fn distinct_indices(a: &Node, b: &Node) -> bool {
     for i in &(a.indices) {
         for j in &(b.indices) {
@@ -155,6 +164,7 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
     true
 }
 
+#[cfg(test)]
 fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> Result<(), Kind> {
     if !has_collision(a, b, p.collision_byte_length()) {
         Err(Kind::Collision)
@@ -205,6 +215,7 @@ fn is_valid_solution_iterative(
     }
 }
 
+#[cfg(test)]
 fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<Node, Error> {
     if indices.len() > 1 {
         let end = indices.len();
@@ -218,7 +229,8 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<N
     }
 }
 
-fn is_valid_solution_recursive(
+#[cfg(test)]
+pub(crate) fn is_valid_solution_recursive(
     p: Params,
     input: &[u8],
     nonce: &[u8],
@@ -250,13 +262,27 @@ pub fn is_valid_solution(
     let p = Params::new(n, k).ok_or(Error(Kind::InvalidParams))?;
     let indices = indices_from_minimal(p, soln).ok_or(Error(Kind::InvalidParams))?;
 
-    // Recursive validation is faster
-    is_valid_solution_recursive(p, input, nonce, &indices)
+    if let Some(hasher) = crate::leaf_hash::LeafHasher::new(&p, input, nonce) {
+        return tree::validate_tree(&p, &indices, |blocks, digests| hasher.hash(blocks, digests))
+            .map_err(Error);
+    }
+
+    let mut state = initialise_state(p.n, p.k, p.hash_output());
+    state.update(input);
+    state.update(nonce);
+    tree::validate_tree(&p, &indices, |blocks, digests| {
+        for (block, digest) in blocks.iter().zip(digests) {
+            let hash = generate_hash(&state, *block);
+            digest[..hash.as_bytes().len()].copy_from_slice(hash.as_bytes());
+        }
+    })
+    .map_err(Error)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{is_valid_solution, is_valid_solution_iterative, is_valid_solution_recursive};
+    use crate::minimal::minimal_from_indices;
     use crate::test_vectors::{INVALID_TEST_VECTORS, VALID_TEST_VECTORS};
 
     #[test]
@@ -265,6 +291,8 @@ mod tests {
             for soln in tv.solutions {
                 is_valid_solution_iterative(tv.params, tv.input, &tv.nonce, soln).unwrap();
                 is_valid_solution_recursive(tv.params, tv.input, &tv.nonce, soln).unwrap();
+                let encoded = crate::minimal::minimal_from_indices(tv.params, soln);
+                is_valid_solution(tv.params.n, tv.params.k, tv.input, &tv.nonce, &encoded).unwrap();
             }
         }
     }
@@ -284,6 +312,49 @@ mod tests {
                     .0,
                 tv.error
             );
+            let encoded = minimal_from_indices(tv.params, tv.solution);
+            assert_eq!(
+                is_valid_solution(tv.params.n, tv.params.k, tv.input, &tv.nonce, &encoded)
+                    .unwrap_err()
+                    .0,
+                tv.error
+            );
+        }
+    }
+
+    #[test]
+    fn zcash_block_headers() {
+        use crate::test_vectors::{
+            MAINNET_415000_HEADER, MAINNET_415000_NONCE, MAINNET_415000_SOLUTION,
+            REGTEST_GENESIS_HEADER, REGTEST_GENESIS_NONCE, REGTEST_GENESIS_SOLUTION,
+        };
+        for (n, k, header, nonce, solution) in [
+            (
+                200,
+                9,
+                MAINNET_415000_HEADER,
+                MAINNET_415000_NONCE,
+                MAINNET_415000_SOLUTION,
+            ),
+            (
+                48,
+                5,
+                REGTEST_GENESIS_HEADER,
+                REGTEST_GENESIS_NONCE,
+                REGTEST_GENESIS_SOLUTION,
+            ),
+        ] {
+            let header = hex::decode(header).unwrap();
+            let nonce = hex::decode(nonce).unwrap();
+            let solution = hex::decode(solution).unwrap();
+            is_valid_solution(n, k, &header, &nonce, &solution).unwrap();
+            let prefix = [&header[..], &nonce[..]].concat();
+            is_valid_solution(n, k, &prefix, &[], &solution).unwrap();
+            for i in 0..solution.len() * 8 {
+                let mut mutated = solution.clone();
+                mutated[i / 8] ^= 1 << (i % 8);
+                is_valid_solution(n, k, &header, &nonce, &mutated).unwrap_err();
+            }
         }
     }
 

@@ -1595,10 +1595,11 @@ name = "equihash"
 version = "0.3.0"
 dependencies = [
  "blake2b_simd",
- "cc",
  "corez",
+ "criterion 0.5.1",
  "document-features",
  "hex",
+ "rand 0.8.5",
 ]
 
 [[package]]

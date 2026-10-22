@@ -269,28 +269,35 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
+          path: crates
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        id: toolchain
+        with:
+          toolchain: stable
+      # This maintenance branch only releases `equihash`. The rest of the workspace
+      # depends on versions of `orchard` (and of its dependencies) that have since
+      # been yanked, so the workspace as a whole can no longer be resolved without
+      # the lockfile. We instead resolve `equihash` alone against the latest
+      # dependencies, from a synthetic crate outside the workspace.
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: latest
-      - uses: dtolnay/rust-toolchain@stable
-        id: toolchain
+          workspaces: ci-build
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
+        working-directory: ./ci-build
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
-      - name: Remove lockfile to build with latest dependencies
-        run: rm Cargo.lock
+      - name: Add equihash as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --path ../crates/components/equihash --features solver
       - name: Build crates
-        run: >
-          cargo build
-          --workspace
-          --all-targets
-          ${{ steps.prepare.outputs.feature-flags }}
-          --verbose
-      - name: Verify working directory is clean (excluding lockfile)
-        run: git diff --exit-code ':!Cargo.lock'
+        working-directory: ./ci-build
+        run: cargo build --verbose
+      - name: Verify working directory is clean
+        run: git -C crates diff --exit-code
 
   build-nodefault:
     name: Build target ${{ matrix.target }}
@@ -323,14 +330,16 @@ jobs:
         run: |
           echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
           cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      # `cargo add` re-resolves the dependency graph, and pruning drops locked
+      # entries the synthetic crate does not (yet) use. This maintenance branch
+      # depends on yanked crates (e.g. `orchard 0.13`) that can only be used when
+      # already locked, so we restore the pinned lockfile before every `cargo add`.
       - name: Add zcash_proofs as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/zcash_proofs
+        run: cp ../crates/Cargo.lock . && cargo add --no-default-features --path ../crates/zcash_proofs
       - name: Add zcash_client_backend as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --path ../crates/zcash_client_backend
-      - name: Copy pinned dependencies into synthetic crate
-        run: cp crates/Cargo.lock ci-build/
+        run: cp ../crates/Cargo.lock . && cargo add --path ../crates/zcash_client_backend
       - name: Add target
         working-directory: ./ci-build
         run: rustup target add ${{ matrix.target }}
@@ -372,20 +381,22 @@ jobs:
       - name: Add no_std pragma to lib.rs
         run: |
           echo "#![no_std]" > ./ci-build/src/lib.rs
+      # `cargo add` re-resolves the dependency graph, and pruning drops locked
+      # entries the synthetic crate does not (yet) use. This maintenance branch
+      # depends on yanked crates (e.g. `orchard 0.13`) that can only be used when
+      # already locked, so we restore the pinned lockfile before every `cargo add`.
       - name: Add zcash_keys as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/zcash_keys
+        run: cp ../crates/Cargo.lock . && cargo add --no-default-features --path ../crates/zcash_keys
       - name: Add pczt as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/pczt
+        run: cp ../crates/Cargo.lock . && cargo add --no-default-features --path ../crates/pczt
       - name: Add zcash_primitives as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/zcash_primitives
+        run: cp ../crates/Cargo.lock . && cargo add --no-default-features --path ../crates/zcash_primitives
       - name: Add lazy_static with the spin_no_std feature
         working-directory: ./ci-build
-        run: cargo add lazy_static --features "spin_no_std"
-      - name: Copy pinned dependencies into synthetic crate
-        run: cp crates/Cargo.lock ci-build/
+        run: cp ../crates/Cargo.lock . && cargo add lazy_static --features "spin_no_std"
       - name: Add target
         working-directory: ./ci-build
         run: rustup target add ${{ matrix.target }}
