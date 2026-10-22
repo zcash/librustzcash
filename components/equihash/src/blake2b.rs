@@ -8,28 +8,42 @@ use blake2b_simd::State;
 
 use crate::params::Params;
 
-/// Owns the reference state used to generate solver hash batches.
+#[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+mod native;
+
+/// Owns the reference state and an optional cache for solver hash batches.
 pub(super) struct SolverHashState {
     reference: State,
     hash_len: usize,
+    #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+    native: Option<native::Context>,
 }
 
 impl SolverHashState {
     /// The owned state must already include `input` and `nonce` with `params`.
     pub(super) fn new(reference: State, input: &[u8], nonce: &[u8], params: Params) -> Self {
-        let _ = (input, nonce);
+        #[cfg(not(all(feature = "unsafe-solver", target_arch = "x86_64")))]
+        let _ = (input, nonce, params);
         Self {
             reference,
             hash_len: params.hash_output() as usize,
+            #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+            native: native::Context::new(
+                input,
+                nonce,
+                params.n,
+                params.k,
+                params.hash_output() as usize,
+            ),
         }
     }
 
     /// Tries to generate complete eight-lane batches of digest words.
     ///
-    /// The native word-oriented backend is not included in the safe solver, so
-    /// this always returns `false` without modifying `output`. `WORDS` must
-    /// match the configured digest length rounded to whole words. The last
-    /// block index must fit in [`u32`].
+    /// The native word-oriented backend is not included in this stage, so this
+    /// always returns `false` without modifying `output`. `WORDS` must match the
+    /// configured digest length rounded to whole words. The last block index
+    /// must fit in [`u32`].
     pub(super) fn try_generate_words<const WORDS: usize>(
         &self,
         first_index: u32,
@@ -61,6 +75,11 @@ impl SolverHashState {
                     .checked_add(u32::try_from(count - 1).unwrap())
                     .is_some()
         );
+        #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+        if let Some(native) = &self.native {
+            native.generate(first_index, output);
+            return;
+        }
         for (offset, output) in output.chunks_exact_mut(self.hash_len).enumerate() {
             let mut hash_state = self.reference.clone();
             hash_state.update(&(first_index + offset as u32).to_le_bytes());
@@ -90,6 +109,8 @@ mod tests {
             SolverHashState {
                 reference: state.clone(),
                 hash_len: hash_len as usize,
+                #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+                native: None,
             },
             SolverHashState::new(state, &header, &[0x5a; 32], PARAMS),
         ];
@@ -152,27 +173,35 @@ mod tests {
             let mut reference = initialise_state(PARAMS.n, PARAMS.k, PARAMS.hash_output());
             reference.update(&prefix);
             let split = prefix_len / 2;
-            let state = SolverHashState::new(
+            let cached = SolverHashState::new(
                 reference.clone(),
                 &prefix[..split],
                 &prefix[split..],
                 PARAMS,
             );
-            for blocks in [0, 1, 2, 8] {
-                for first in [0, 65530, u32::MAX - 63] {
-                    let guard = [[0xfeed_face_cafe_beef; LANES]; WORDS];
-                    let mut output = vec![guard; blocks + 2];
-                    let generated = state.try_generate_words(first, &mut output[1..blocks + 1]);
-                    assert!(!generated);
-                    assert!(output.iter().all(|&batch| batch == guard));
-                    let mut compact = vec![0; blocks * LANES * state.hash_len];
-                    state.generate(first, &mut compact);
-                    for (offset, digest) in compact.chunks_exact(state.hash_len).enumerate() {
-                        let mut expected = reference.clone();
-                        expected.update(&(first + offset as u32).to_le_bytes());
-                        assert_eq!(digest, expected.finalize().as_bytes());
+            let fallback = SolverHashState {
+                reference: reference.clone(),
+                hash_len: PARAMS.hash_output() as usize,
+                #[cfg(all(feature = "unsafe-solver", target_arch = "x86_64"))]
+                native: None,
+            };
+            for state in [cached, fallback] {
+                for blocks in [0, 1, 2, 8] {
+                    for first in [0, 65530, u32::MAX - 63] {
+                        let guard = [[0xfeed_face_cafe_beef; LANES]; WORDS];
+                        let mut output = vec![guard; blocks + 2];
+                        let generated = state.try_generate_words(first, &mut output[1..blocks + 1]);
+                        assert!(!generated);
+                        assert!(output.iter().all(|&batch| batch == guard));
+                        let mut compact = vec![0; blocks * LANES * state.hash_len];
+                        state.generate(first, &mut compact);
+                        for (offset, digest) in compact.chunks_exact(state.hash_len).enumerate() {
+                            let mut expected = reference.clone();
+                            expected.update(&(first + offset as u32).to_le_bytes());
+                            assert_eq!(digest, expected.finalize().as_bytes());
+                        }
+                        assert_eq!(state.reference.finalize(), reference.finalize());
                     }
-                    assert_eq!(state.reference.finalize(), reference.finalize());
                 }
             }
         }
