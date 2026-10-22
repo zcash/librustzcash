@@ -1,17 +1,27 @@
-//! Scalar BLAKE2b leaf hashing for Equihash verification.
+//! Batched BLAKE2b leaf hashing for Equihash verification.
 //!
 //! Every leaf of an Equihash solution hashes the same personalized
 //! `input || nonce` prefix followed by a little-endian block index. For the
 //! Zcash block-header layout (a 108-byte header and a 32-byte nonce), the
 //! final BLAKE2b block holds only the last 12 prefix bytes and the index, so
 //! message words 2 through 15 are zero. This module caches the prefix
-//! midstate and compresses final blocks with those zero words folded away.
+//! midstate and compresses several final blocks at once with those zero words
+//! folded away. Verification supports only this layout.
 //!
 //! Reference: <https://www.rfc-editor.org/rfc/rfc7693#section-3.2>.
 
 use blake2b_simd::BLOCKBYTES;
 
 use crate::params::Params;
+
+#[cfg(all(
+    feature = "unsafe-verifier",
+    target_arch = "aarch64",
+    target_feature = "neon"
+))]
+mod aarch64;
+#[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+mod x86_64;
 
 /// A BLAKE2b digest of up to 64 bytes. Bytes past the digest length are zero.
 pub(crate) type Digest = [u8; 64];
@@ -53,84 +63,83 @@ pub(crate) const NONCE_BYTES: usize = 32;
 /// Prefix bytes left in the final block for the Zcash header layout.
 const TAIL_BYTES: usize = (HEADER_BYTES + NONCE_BYTES) % BLOCKBYTES;
 
-/// The only lane count supported by the scalar backend.
-const MAX_LANES: usize = 1;
+/// The widest lane count any backend uses.
+const MAX_LANES: usize = 4;
 
 /// Independent BLAKE2b state words, one per lane.
+///
+/// Implementations for SIMD types are only called from functions compiled
+/// with the matching target features.
 trait Lanes: Copy {
     const LANES: usize;
 
-    fn splat(x: u64) -> Self;
-    fn load(words: &[u64; MAX_LANES]) -> Self;
-    fn store(self, words: &mut [u64; MAX_LANES]);
-    fn add(self, other: Self) -> Self;
-    fn xor(self, other: Self) -> Self;
+    unsafe fn splat(x: u64) -> Self;
+    /// Loads the first `LANES` words.
+    unsafe fn load(words: &[u64; MAX_LANES]) -> Self;
+    /// Stores into the first `LANES` words.
+    unsafe fn store(self, words: &mut [u64; MAX_LANES]);
+    unsafe fn add(self, other: Self) -> Self;
+    unsafe fn xor(self, other: Self) -> Self;
     /// Returns `(self ^ other).rotate_right(32)`, and similarly below.
-    fn xor_rotr32(self, other: Self) -> Self;
-    fn xor_rotr24(self, other: Self) -> Self;
-    fn xor_rotr16(self, other: Self) -> Self;
-    fn xor_rotr63(self, other: Self) -> Self;
+    unsafe fn xor_rotr32(self, other: Self) -> Self;
+    unsafe fn xor_rotr24(self, other: Self) -> Self;
+    unsafe fn xor_rotr16(self, other: Self) -> Self;
+    unsafe fn xor_rotr63(self, other: Self) -> Self;
 }
 
 impl Lanes for u64 {
     const LANES: usize = 1;
 
     #[inline(always)]
-    fn splat(x: u64) -> Self {
+    unsafe fn splat(x: u64) -> Self {
         x
     }
-
     #[inline(always)]
-    fn load(words: &[u64; MAX_LANES]) -> Self {
+    unsafe fn load(words: &[u64; MAX_LANES]) -> Self {
         words[0]
     }
-
     #[inline(always)]
-    fn store(self, words: &mut [u64; MAX_LANES]) {
+    unsafe fn store(self, words: &mut [u64; MAX_LANES]) {
         words[0] = self;
     }
-
     #[inline(always)]
-    fn add(self, other: Self) -> Self {
+    unsafe fn add(self, other: Self) -> Self {
         self.wrapping_add(other)
     }
-
     #[inline(always)]
-    fn xor(self, other: Self) -> Self {
+    unsafe fn xor(self, other: Self) -> Self {
         self ^ other
     }
-
     #[inline(always)]
-    fn xor_rotr32(self, other: Self) -> Self {
+    unsafe fn xor_rotr32(self, other: Self) -> Self {
         (self ^ other).rotate_right(32)
     }
-
     #[inline(always)]
-    fn xor_rotr24(self, other: Self) -> Self {
+    unsafe fn xor_rotr24(self, other: Self) -> Self {
         (self ^ other).rotate_right(24)
     }
-
     #[inline(always)]
-    fn xor_rotr16(self, other: Self) -> Self {
+    unsafe fn xor_rotr16(self, other: Self) -> Self {
         (self ^ other).rotate_right(16)
     }
-
     #[inline(always)]
-    fn xor_rotr63(self, other: Self) -> Self {
+    unsafe fn xor_rotr63(self, other: Self) -> Self {
         (self ^ other).rotate_right(63)
     }
 }
 
 #[inline(always)]
-fn g<L: Lanes>(v: &mut [L; 16], a: usize, b: usize, c: usize, d: usize, x: L, y: L) {
-    v[a] = v[a].add(v[b]).add(x);
-    v[d] = v[d].xor_rotr32(v[a]);
-    v[c] = v[c].add(v[d]);
-    v[b] = v[b].xor_rotr24(v[c]);
-    v[a] = v[a].add(v[b]).add(y);
-    v[d] = v[d].xor_rotr16(v[a]);
-    v[c] = v[c].add(v[d]);
-    v[b] = v[b].xor_rotr63(v[c]);
+unsafe fn g<L: Lanes>(v: &mut [L; 16], a: usize, b: usize, c: usize, d: usize, x: L, y: L) {
+    unsafe {
+        v[a] = v[a].add(v[b]).add(x);
+        v[d] = v[d].xor_rotr32(v[a]);
+        v[c] = v[c].add(v[d]);
+        v[b] = v[b].xor_rotr24(v[c]);
+        v[a] = v[a].add(v[b]).add(y);
+        v[d] = v[d].xor_rotr16(v[a]);
+        v[c] = v[c].add(v[d]);
+        v[b] = v[b].xor_rotr63(v[c]);
+    }
 }
 
 // Expands each round with constant message-word selections, so words known to
@@ -158,7 +167,10 @@ fn compress_prefix_block(h: &mut [u64; 8], block: &[u8; BLOCKBYTES], count: u64)
     v[..8].copy_from_slice(h);
     v[8..].copy_from_slice(&IV);
     v[12] ^= count;
-    rounds!(v, word; 0 1 2 3 4 5 6 7 8 9 10 11);
+    // SAFETY: the scalar `Lanes` implementation has no safety requirements.
+    unsafe {
+        rounds!(v, word; 0 1 2 3 4 5 6 7 8 9 10 11);
+    }
     for i in 0..8 {
         h[i] ^= v[i] ^ v[i + 8];
     }
@@ -222,59 +234,117 @@ impl Midstate {
     /// Hashes `L::LANES` block indices. `blocks` and `out` must each hold
     /// exactly that many entries.
     #[inline(always)]
-    fn compress<L: Lanes>(&self, blocks: &[u32], out: &mut [Digest]) {
+    unsafe fn compress<L: Lanes>(&self, blocks: &[u32], out: &mut [Digest]) {
         debug_assert_eq!(blocks.len(), L::LANES);
         debug_assert_eq!(out.len(), L::LANES);
-        let mut words = [0u64; MAX_LANES];
-        for (word, block) in words.iter_mut().zip(blocks) {
-            *word = self.m1_low | (u64::from(*block) << 32);
-        }
-        let zero = L::splat(0);
-        let m0 = L::splat(self.m0);
-        let m1 = L::load(&words);
-        let word = |i: usize| match i {
-            0 => m0,
-            1 => m1,
-            _ => zero,
-        };
+        unsafe {
+            let mut words = [0u64; MAX_LANES];
+            for (word, block) in words.iter_mut().zip(blocks) {
+                *word = self.m1_low | (u64::from(*block) << 32);
+            }
+            let zero = L::splat(0);
+            let m0 = L::splat(self.m0);
+            let m1 = L::load(&words);
+            let word = |i: usize| match i {
+                0 => m0,
+                1 => m1,
+                _ => zero,
+            };
 
-        let mut v = [zero; 16];
-        for i in 0..8 {
-            v[i] = L::splat(self.h[i]);
-            v[8 + i] = L::splat(IV[i]);
-        }
-        v[12] = L::splat(IV[4] ^ self.count);
-        // Final-block flag.
-        v[14] = L::splat(!IV[6]);
-        rounds!(v, word; 0 1 2 3 4 5 6 7 8 9 10 11);
+            let mut v = [zero; 16];
+            for i in 0..8 {
+                v[i] = L::splat(self.h[i]);
+                v[8 + i] = L::splat(IV[i]);
+            }
+            v[12] = L::splat(IV[4] ^ self.count);
+            // Final-block flag.
+            v[14] = L::splat(!IV[6]);
+            rounds!(v, word; 0 1 2 3 4 5 6 7 8 9 10 11);
 
-        for i in 0..8 {
-            L::splat(self.h[i])
-                .xor(v[i].xor(v[i + 8]))
-                .store(&mut words);
-            for (digest, word) in out.iter_mut().zip(&words) {
-                digest[8 * i..8 * i + 8].copy_from_slice(&word.to_le_bytes());
+            for i in 0..8 {
+                L::splat(self.h[i])
+                    .xor(v[i].xor(v[i + 8]))
+                    .store(&mut words);
+                for (digest, word) in out.iter_mut().zip(&words) {
+                    digest[8 * i..8 * i + 8].copy_from_slice(&word.to_le_bytes());
+                }
             }
         }
     }
 
     fn compress_portable(&self, blocks: &[u32], out: &mut [Digest]) {
         for (block, digest) in blocks.iter().zip(out) {
-            self.compress::<u64>(core::slice::from_ref(block), core::slice::from_mut(digest));
+            // SAFETY: the scalar `Lanes` implementation has no safety
+            // requirements, and each call passes one block and one digest.
+            unsafe {
+                self.compress::<u64>(core::slice::from_ref(block), core::slice::from_mut(digest));
+            }
         }
     }
 }
 
-/// A leaf-hashing backend.
+/// A leaf-hashing backend selected for the running CPU.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kernel {
     Portable,
+    #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+    Avx2,
+    #[cfg(all(
+        feature = "unsafe-verifier",
+        target_arch = "aarch64",
+        target_feature = "neon"
+    ))]
+    Neon,
+    #[cfg(all(
+        feature = "unsafe-verifier",
+        target_arch = "aarch64",
+        target_feature = "neon"
+    ))]
+    NeonSha3,
 }
 
 impl Kernel {
-    /// Every kernel supported by this implementation.
+    /// Every kernel compiled for this target, supported or not.
+    #[cfg(test)]
+    const ALL: &[Kernel] = &[
+        Kernel::Portable,
+        #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+        Kernel::Avx2,
+        #[cfg(all(
+            feature = "unsafe-verifier",
+            target_arch = "aarch64",
+            target_feature = "neon"
+        ))]
+        Kernel::Neon,
+        #[cfg(all(
+            feature = "unsafe-verifier",
+            target_arch = "aarch64",
+            target_feature = "neon"
+        ))]
+        Kernel::NeonSha3,
+    ];
+
+    /// Every kernel the running CPU supports, fastest first.
     pub(crate) fn supported() -> impl Iterator<Item = Kernel> {
-        [Kernel::Portable].into_iter()
+        [
+            #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+            (Kernel::Avx2, x86_64::has_avx2()),
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
+            (Kernel::NeonSha3, aarch64::has_sha3()),
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
+            (Kernel::Neon, true),
+            (Kernel::Portable, true),
+        ]
+        .into_iter()
+        .filter_map(|(kernel, supported)| supported.then_some(kernel))
     }
 
     fn detect() -> Self {
@@ -284,6 +354,14 @@ impl Kernel {
     fn lanes(self) -> usize {
         match self {
             Kernel::Portable => 1,
+            #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+            Kernel::Avx2 => 4,
+            #[cfg(all(
+                feature = "unsafe-verifier",
+                target_arch = "aarch64",
+                target_feature = "neon"
+            ))]
+            Kernel::Neon | Kernel::NeonSha3 => 4,
         }
     }
 }
@@ -301,7 +379,9 @@ impl LeafHasher {
         Self::with_kernel(p, input, nonce, Kernel::detect())
     }
 
-    /// Uses `kernel`, if the prefix has the required length.
+    /// Uses `kernel`. Returns `None` if the CPU does not support `kernel`,
+    /// since hashing then runs its target-feature code without further
+    /// checks.
     pub(crate) fn with_kernel(
         p: &Params,
         input: &[u8],
@@ -322,15 +402,37 @@ impl LeafHasher {
     /// entry of `out`.
     pub(crate) fn hash(&self, blocks: &[u32], out: &mut [Digest]) {
         assert_eq!(blocks.len(), out.len());
-        let lanes = self.kernel.lanes();
+        let (midstate, kernel) = (&self.midstate, self.kernel);
+        let lanes = kernel.lanes();
+        let whole = blocks.len() / lanes * lanes;
+        let (blocks, tail_blocks) = blocks.split_at(whole);
+        let (out, tail_out) = out.split_at_mut(whole);
         for (blocks, out) in blocks.chunks_exact(lanes).zip(out.chunks_exact_mut(lanes)) {
-            match self.kernel {
-                Kernel::Portable => self.midstate.compress_portable(blocks, out),
+            // SAFETY: `kernel` came from `Kernel::supported`, so the CPU has
+            // its target features, and each chunk holds exactly
+            // `kernel.lanes()` entries.
+            match kernel {
+                Kernel::Portable => midstate.compress_portable(blocks, out),
+                #[cfg(all(feature = "unsafe-verifier", target_arch = "x86_64"))]
+                Kernel::Avx2 => unsafe { x86_64::compress_avx2(midstate, blocks, out) },
+                #[cfg(all(
+                    feature = "unsafe-verifier",
+                    target_arch = "aarch64",
+                    target_feature = "neon"
+                ))]
+                Kernel::Neon => unsafe { aarch64::compress_neon(midstate, blocks, out) },
+                #[cfg(all(
+                    feature = "unsafe-verifier",
+                    target_arch = "aarch64",
+                    target_feature = "neon"
+                ))]
+                Kernel::NeonSha3 => unsafe { aarch64::compress_neon_sha3(midstate, blocks, out) },
             }
         }
-        // The kernel writes all eight state words; keep the documented zero
+        midstate.compress_portable(tail_blocks, tail_out);
+        // The kernels write all eight state words; keep the documented zero
         // bytes past the digest length.
-        for digest in out {
+        for digest in out.iter_mut().chain(tail_out.iter_mut()) {
             digest[self.hash_len..].fill(0);
         }
     }
@@ -356,6 +458,7 @@ mod tests {
 
     #[test]
     fn kernels_match_blake2b_simd() {
+        // An odd count leaves a portable tail after every lane width.
         let blocks: Vec<u32> = (0..67u32)
             .map(|i| i.wrapping_mul(0x9e37_79b9))
             .chain([0, 1, u32::MAX, u32::MAX - 1])
@@ -363,8 +466,7 @@ mod tests {
         let prefix: Vec<u8> = (0..HEADER_BYTES + NONCE_BYTES)
             .map(|i| (i * 31 + 7) as u8)
             .collect();
-        // Zcash mainnet and regtest, plus other valid parameters accepted by
-        // this crate.
+        // Zcash mainnet and regtest, plus other valid parameters.
         for (n, k) in [(200, 9), (48, 5), (96, 5), (144, 5), (96, 3)] {
             let p = Params::new(n, k).unwrap();
             // Only the combined prefix length is fixed.
@@ -389,6 +491,8 @@ mod tests {
     /// Compares every kernel with `blake2b_simd` on every block index a
     /// Zcash solution can reach: indices have `collision_bit_length + 1`
     /// bits, and each block covers `indices_per_hash_output` of them.
+    ///
+    /// Run with `cargo test --release -p equihash -- --ignored`.
     #[test]
     #[ignore = "exhaustive; about 2^20 hashes per kernel"]
     fn kernels_match_blake2b_simd_on_every_reachable_block() {
@@ -416,6 +520,20 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_kernels() {
+        let p = Params::new(200, 9).unwrap();
+        let (input, nonce) = ([0; HEADER_BYTES], [0; NONCE_BYTES]);
+        for kernel in Kernel::ALL {
+            let supported = Kernel::supported().any(|s| s == *kernel);
+            assert_eq!(
+                LeafHasher::with_kernel(&p, &input, &nonce, *kernel).is_some(),
+                supported,
+                "{kernel:?}",
+            );
         }
     }
 

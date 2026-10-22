@@ -23,6 +23,9 @@ solver = ["dep:libc", "std"]
 ## Solver optimisations using `unsafe` Rust.
 unsafe-solver = ["solver"]
 
+## Verifier optimisations using `unsafe` Rust.
+unsafe-verifier = []
+
 [dependencies]
 corez.workspace = true
 blake2b_simd.workspace = true
