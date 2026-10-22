@@ -17,6 +17,9 @@ mod tree;
 #[cfg(all(test, feature = "std"))]
 mod compatibility;
 
+#[cfg(all(test, feature = "std"))]
+mod properties;
+
 #[cfg(test)]
 #[derive(Clone)]
 struct Node {
