@@ -23,11 +23,11 @@ user-login = "schell"
 user-name = "Schell Carl Scivally"
 
 [[publisher.equihash]]
-version = "0.2.2"
-when = "2025-03-05"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.3.0"
+when = "2026-04-24"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.f4jumble]]
 version = "0.1.1"
