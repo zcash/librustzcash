@@ -1343,10 +1343,11 @@ pub enum TxDigests<A> {
     /// [ZIP 143]: https://zips.z.cash/zip-0143
     /// [ZIP 243]: https://zips.z.cash/zip-0243
     Zip143(Zip143Digests<A>),
-    /// The digests that make up a [ZIP 244] transaction ID, for transactions of version 5
-    /// and later.
+    /// The digests that make up a [ZIP 244] transaction ID for v5 transactions, or
+    /// (despite the `Zip244` name) a [ZIP 229] transaction ID for v6 transactions.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244
+    /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
     Zip244(Zip244Digests<A>),
 }
 
@@ -1367,9 +1368,10 @@ pub struct Zip143Digests<A> {
     pub(crate) sapling_outputs: Option<A>,
 }
 
-/// The digests that make up a [ZIP 244] transaction ID.
+/// The digests that make up a [ZIP 244] or [ZIP 229] transaction ID.
 ///
 /// [ZIP 244]: https://zips.z.cash/zip-0244
+/// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
 #[derive(Clone, Debug)]
 pub struct Zip244Digests<A> {
     pub(crate) header_digest: A,
