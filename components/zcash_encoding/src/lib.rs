@@ -22,6 +22,9 @@ use nonempty::NonEmpty;
 #[cfg(feature = "test-dependencies")]
 pub mod testing;
 
+#[cfg(test)]
+mod byte_vector_tests;
+
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 
@@ -169,6 +172,34 @@ impl Vector {
         F: Fn(&mut R) -> io::Result<E>,
     {
         Self::read_collected(reader, func)
+    }
+
+    /// Reads a [`CompactSize`]-prefixed vector of bytes in bulk.
+    ///
+    /// This uses the same encoding as [`Vector::read`] with a one-byte decoder, but avoids
+    /// calling the decoder for every byte. Allocation grows with the bytes read, rather than
+    /// preallocating the length declared in the input.
+    ///
+    /// Returns an error if the length is non-canonical, exceeds [`MAX_COMPACT_SIZE`], or cannot
+    /// fit in a `usize`, or if the reader fails. A truncated prefix or payload returns
+    /// [`io::ErrorKind::UnexpectedEof`]. Interrupted reads are retried.
+    pub fn read_bytes<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
+        let count: usize = CompactSize::read_t(&mut reader)?;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 4096];
+        while bytes.len() < count {
+            let limit = buffer.len().min(count - bytes.len());
+            match reader.read(&mut buffer[..limit]) {
+                Ok(0) => {
+                    // Preserve read_exact's EOF diagnostic in both std and no_std builds.
+                    return (&[][..]).read_exact(&mut [0]).map(|()| bytes);
+                }
+                Ok(n) => bytes.extend_from_slice(&buffer[..n]),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(bytes)
     }
 
     /// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding

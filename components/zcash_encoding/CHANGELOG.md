@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_encoding::Vector::read_bytes`, which reads CompactSize-prefixed byte
+  vectors in bulk without preallocating the length declared in the input.
+
 ### Changed
 - MSRV is now 1.89
 
