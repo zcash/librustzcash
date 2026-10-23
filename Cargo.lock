@@ -3425,7 +3425,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.10.0-pre.2"
+version = "0.10.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7451,7 +7451,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.14.0-pre.2"
+version = "0.14.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7465,7 +7465,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.25.0-pre.2"
+version = "0.25.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7541,7 +7541,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.23.0-pre.2"
+version = "0.23.0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7625,7 +7625,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.17.0-pre.2"
+version = "0.17.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7677,7 +7677,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.2.0-pre.2"
+version = "0.2.0"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -7714,7 +7714,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.31.0-pre.2"
+version = "0.31.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
@@ -7749,7 +7749,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.31.0-pre.2"
+version = "0.31.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7773,7 +7773,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.11.0-pre.1"
+version = "0.11.0"
 dependencies = [
  "corez",
  "document-features",
@@ -7813,7 +7813,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.11.0-pre.2"
+version = "0.11.0"
 dependencies = [
  "bip32",
  "bs58",
@@ -7956,7 +7956,7 @@ dependencies = [
 
 [[package]]
 name = "zip321"
-version = "0.10.0-pre.2"
+version = "0.10.0"
 dependencies = [
  "base64",
  "nom",

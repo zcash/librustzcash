@@ -10,55 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-21
+
 ### Added
 - `WalletDb` implements
   `zcash_client_backend::data_api::InputSource::get_change_receivers`, from the
   items of the account's unified incoming viewing key.
-
-### Changed
-- Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
-- MSRV is now 1.89
-
-## [0.23.0-pre.2] - 2026-10-13
-
-### Changed
-- Migrated to `pczt 0.10.0-pre.2`, `zcash_address 0.14.0-pre.2`,
-  `zcash_client_backend 0.25.0-pre.2`, `zcash_keys 0.17.0-pre.2`,
-  `zcash_pool_migration 0.2.0-pre.2`, `zcash_primitives 0.31.0-pre.2`,
-  `zcash_protocol 0.11.0-pre.1`, and `zcash_transparent 0.11.0-pre.2`.
-- `WalletRead::list_addresses` now also returns the transparent receiver that
-  the wallet tracks at the index of an exposed unified address that omits it,
-  as an `Address::Transparent` entry with that diversifier index.
-
-### Fixed
-- Unified addresses that the wallet generates to fill its transparent gap limit
-  are stored with their transparent receiver, so `WalletRead::list_addresses`
-  returns that receiver. A migration restores the transparent receiver to such
-  addresses that `zcash_client_sqlite 0.23.0-pre.1` stored without it, if the
-  wallet has not exposed them.
-
-## [0.23.0-pre.1] - 2026-10-06
-
-### Added
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::set_account_name`.
 - `zcash_client_sqlite::error::SqliteClientError::UnifiedEncoding`
-
-### Changed
-- Migrated to `pczt 0.10.0-pre.1`, `zcash_address 0.14.0-pre.1`,
-  `zcash_client_backend 0.25.0-pre.1`, `zcash_keys 0.17.0-pre.1`,
-  `zcash_pool_migration 0.2.0-pre.1`, `zcash_primitives 0.31.0-pre.1`, and
-  `zcash_transparent 0.11.0-pre.1`.
-- Unified addresses and viewing keys written to the wallet database are encoded
-  at ZIP 316 Revision 0 when Revision 0 can represent them, and at Revision 2
-  otherwise. Previously they were always encoded at Revision 2. Rows written
-  earlier are not re-encoded.
-
-### Fixed
-- The `full_account_ids` migration no longer rejects a wallet whose stored UFVK
-  is encoded at a different ZIP 316 revision from the one the migration derives.
-
-## [0.23.0-pre.0] - 2026-10-02
-
-### Added
 - `WalletDb` implements the storage-trait methods newly added to
   `zcash_client_backend`: `WalletWrite::queue_rescan` and, behind
   `transparent-inputs`, `WalletRead::{get_unspent_transparent_outpoints,
@@ -68,14 +28,15 @@ workspace.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`
 
 ### Changed
-- Migrated to `bip32 0.6`, `group 0.14`, `incrementalmerkletree 0.9`,
-  `jubjub 0.11`, `orchard 0.16`, `pczt 0.10.0-pre.0`, `rand_core 0.10`,
-  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
-  `zcash_address 0.14.0-pre.0`, `zcash_client_backend 0.25.0-pre.0`,
-  `zcash_keys 0.17.0-pre.0`, `zcash_pool_migration 0.2.0-pre.0`,
-  `zcash_primitives 0.31.0-pre.0`, `zcash_proofs 0.31.0-pre.0`,
-  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`,
-  `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+- Migrated to `bip0039 0.14`, `bip32 0.6`, `group 0.14`,
+  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`, `pczt 0.10.0`,
+  `rand_core 0.10`, `sapling-crypto 0.9`, `schemerz 0.3`,
+  `schemerz-rusqlite 0.371`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_address 0.14.0`, `zcash_client_backend 0.25.0`, `zcash_keys 0.17.0`,
+  `zcash_pool_migration 0.2.0`, `zcash_primitives 0.31.0`,
+  `zcash_proofs 0.31.0`, `zcash_protocol 0.11.0`, `zcash_script 0.6`,
+  `zcash_transparent 0.11.0`, and `zip32 0.3`.
+- MSRV is now 1.89
 - `SqliteClientError` has a new variant `DivergedCheckpoints { pool, height }`.
   When a pool's note commitment tree has checkpoints above and below the
   truncation height but none at it, truncating or rewinding the wallet now
@@ -100,8 +61,31 @@ workspace.
 - `zewif::ZewifImportReport::transactions_without_wallet_relevance` no longer
   counts transactions deferred to the post-import rescan for lack of a chain
   tip; these are counted by `transactions_deferred_no_chain_tip`.
+- Unified addresses and viewing keys written to the wallet database now support
+  ZIP 316 Revision 2. They are encoded at Revision 0 when Revision 0 can
+  represent them, and at Revision 2 otherwise. Rows written earlier are not
+  re-encoded.
+- `WalletRead::list_addresses` now also returns the transparent receiver that
+  the wallet tracks at the index of an exposed unified address that omits it,
+  as an `Address::Transparent` entry with that diversifier index.
+- `WalletDb::check_witnesses` now requires `P: consensus::Parameters`.
+- A transaction whose expiry height the wallet does not know is now assumed to
+  expire after the default expiry delta for the mempool height at which the wallet
+  first observed it (120 blocks from NU7 activation onward), instead of after 40
+  blocks. This determines when the wallet stops counting such a transaction's
+  spends, and how long it keeps requesting the transaction's status. Without the
+  `spend-index` feature, the block range that the wallet requests when it searches
+  for a spend of a non-ephemeral transparent output likewise uses the default
+  expiry delta for the range's start height.
+- `WalletWrite::put_received_transparent_utxo` now records an unmined output as
+  first observed at the mempool height (the block after the chain tip), instead
+  of at the chain tip.
+- From NU7 activation, the wallet retains anchor checkpoints on the scaled ZIP 318
+  anchor grid (every 432 blocks rather than every 144).
 
 ### Fixed
+- The `full_account_ids` migration no longer rejects a wallet whose stored UFVK
+  is encoded at a different ZIP 316 revision from the one the migration derives.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
   accounts_new.zcashd_legacy_address_index`.

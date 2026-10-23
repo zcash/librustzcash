@@ -3,11 +3,11 @@ pub mod builder;
 pub mod components;
 pub mod fees;
 pub mod sighash;
-pub mod sighash_v4;
-pub mod sighash_v5;
-pub mod sighash_v6;
+mod sighash_v4;
+mod sighash_v5;
+mod sighash_v6;
 #[cfg(zcash_unstable = "nu8")]
-pub mod sighash_v7;
+mod sighash_v7;
 
 pub mod txid;
 pub mod zip248;
@@ -908,7 +908,7 @@ impl<A: Authorization> TransactionData<A> {
             .map_err(E::from)
     }
 
-    /// Computes this transaction's digest using the provided digest strategy.
+    /// Computes this transaction's digests using the provided digest strategy.
     ///
     /// V6 and later transactions include the Ironwood bundle digest as a separate
     /// Orchard-shaped digest with Ironwood personalization. Earlier transaction
@@ -939,7 +939,7 @@ impl<A: Authorization> TransactionData<A> {
     /// [ZIP 229]: https://zips.z.cash/zip-0229
     /// [ZIP 244]: https://zips.z.cash/zip-0244
     /// [ZIP 248]: https://zips.z.cash/zip-0248
-    pub fn txid_digests(&self) -> TxDigests<blake2b_simd::Hash> {
+    pub fn txid_digests(&self) -> Zip244Digests<blake2b_simd::Hash> {
         match self.version {
             #[cfg(zcash_unstable = "nu8")]
             TxVersion::V7 => self.digest_v7(),
@@ -959,7 +959,7 @@ impl<A: Authorization> TransactionData<A> {
     /// opaque `vBundleData` bytes at parse time, and are folded into the tree
     /// alongside the known-protocol digests.
     #[cfg(zcash_unstable = "nu8")]
-    pub fn digest_v7(&self) -> TxDigests<blake2b_simd::Hash> {
+    pub fn digest_v7(&self) -> Zip244Digests<blake2b_simd::Hash> {
         use txid::{
             TxIdDigester, hash_v7_coinbase_effects, hash_v7_header, hash_v7_ironwood_effects,
             hash_v7_orchard_effects, hash_v7_sapling_effects, hash_v7_value_pool_deltas,
@@ -967,17 +967,14 @@ impl<A: Authorization> TransactionData<A> {
 
         let digester = TxIdDigester;
 
-        // Unknown-bundle digests (flat hashes of opaque vBundleData bytes).
+        // Unknown-bundle effect digests (flat hashes of opaque vBundleData bytes).
+        // Their authorizing-data digests are folded in by `Transaction::auth_commitment`.
         let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
-        let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         for (id, ub) in self.bundles.unknown_bundles() {
             unknown_effect_digests.push((*id, ub.effect_digest));
-            if let Some(digest) = ub.auth_digest {
-                unknown_auth_digests.push((*id, digest));
-            }
         }
 
-        TxDigests {
+        Zip244Digests {
             // Leaf 1: header fields (no auth data involved).
             header_digest: hash_v7_header(
                 self.version,
@@ -1005,7 +1002,6 @@ impl<A: Authorization> TransactionData<A> {
             value_pool_deltas_digest: Some(hash_v7_value_pool_deltas(&self.value_pool_deltas)),
             // Unknown-bundle digests are folded in alongside the known leaves.
             unknown_effect_digests,
-            unknown_auth_digests,
         }
     }
 
@@ -1194,28 +1190,37 @@ impl Transaction {
     }
 
     fn from_data_v5(data: TransactionData<Authorized>) -> Self {
+        assert_eq!(data.version, TxVersion::V5);
+
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
             &data.digest(TxIdDigester),
-        );
+        )
+        .expect("is v5 tx");
 
         Transaction { txid, data }
     }
 
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
+        assert_eq!(data.version, TxVersion::V6);
+
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
             &data.digest(TxIdDigester),
-        );
+        )
+        .expect("is v6 tx");
 
         Transaction { txid, data }
     }
 
     #[cfg(zcash_unstable = "nu8")]
     fn from_data_v7(data: TransactionData<Authorized>) -> Self {
-        let txid = to_txid(data.version, data.consensus_branch_id, &data.digest_v7());
+        assert_eq!(data.version, TxVersion::V7);
+
+        let txid =
+            to_txid(data.version, data.consensus_branch_id, &data.digest_v7()).expect("is v7 tx");
 
         Transaction { txid, data }
     }
@@ -2259,6 +2264,13 @@ impl Transaction {
     }
 }
 
+/// Digests of the prevouts, sequence numbers, and outputs of a transparent bundle.
+///
+/// The personalization of each digest is that of the digest scheme that contains it:
+/// [ZIP 143] in [`Zip143Digests`], and [ZIP 244] in [`Zip244Digests`].
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Debug)]
 pub struct TransparentDigests<A> {
     pub prevouts_digest: A,
@@ -2266,32 +2278,104 @@ pub struct TransparentDigests<A> {
     pub outputs_digest: A,
 }
 
+/// Digests of the effecting data of a transaction, computed with the digest scheme that the
+/// transaction's version uses for its signature hashes.
 #[derive(Clone, Debug)]
-pub struct TxDigests<A> {
-    pub header_digest: A,
-    pub transparent_digests: Option<TransparentDigests<A>>,
-    pub sapling_digest: Option<A>,
-    pub orchard_digest: Option<A>,
+pub enum TxDigests<A> {
+    /// The digests that [ZIP 143] and [ZIP 243] signature hashes commit to, for
+    /// transactions of version 4 and earlier.
+    ///
+    /// [ZIP 143]: https://zips.z.cash/zip-0143
+    /// [ZIP 243]: https://zips.z.cash/zip-0243
+    Zip143(Zip143Digests<A>),
+    /// The digests that make up a [ZIP 244] transaction ID for v5 transactions, or
+    /// (despite the `Zip244` name) a [ZIP 229] transaction ID for v6 transactions or a
+    /// [ZIP 248] transaction ID for v7 transactions.
+    ///
+    /// [ZIP 244]: https://zips.z.cash/zip-0244
+    /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
+    /// [ZIP 248]: https://zips.z.cash/zip-0248
+    Zip244(Zip244Digests<A>),
+}
+
+/// The digests of a transaction that [ZIP 143] and [ZIP 243] signature hashes commit to.
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+#[derive(Clone, Debug)]
+pub struct Zip143Digests<A> {
+    /// The digests of the transparent inputs and outputs. A transaction without a
+    /// transparent bundle has the digests of empty input and output lists.
+    pub(crate) transparent: TransparentDigests<A>,
+    /// The digest of the JoinSplits, or `None` if the transaction has none.
+    pub(crate) joinsplits: Option<A>,
+    /// The digest of the Sapling spends, or `None` if the transaction has none.
+    pub(crate) sapling_spends: Option<A>,
+    /// The digest of the Sapling outputs, or `None` if the transaction has none.
+    pub(crate) sapling_outputs: Option<A>,
+}
+
+/// The digests that make up a [ZIP 244] or [ZIP 229] transaction ID, or (with the v7
+/// fields populated) a [ZIP 248] transaction ID.
+///
+/// [ZIP 244]: https://zips.z.cash/zip-0244
+/// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
+/// [ZIP 248]: https://zips.z.cash/zip-0248
+#[derive(Clone, Debug)]
+pub struct Zip244Digests<A> {
+    pub(crate) header_digest: A,
+    pub(crate) transparent_digests: Option<TransparentDigests<A>>,
+    pub(crate) sapling_digest: Option<A>,
+    pub(crate) orchard_digest: Option<A>,
+    /// Digest of the Ironwood bundle's effecting data. Present from v6
+    /// (ZIP 229) onward; under v7 it is carried as a ZIP 248 bundle digest.
+    pub(crate) ironwood_digest: Option<A>,
     /// v7 (ZIP 248): digest of the coinbase bundle's effecting data. Present
     /// only for coinbase transactions.
     #[cfg(zcash_unstable = "nu8")]
-    pub coinbase_digest: Option<A>,
-    /// Digest of the Ironwood bundle's effecting data. Present from v6
-    /// (ZIP 229) onward; under v7 it is carried as a ZIP 248 bundle digest.
-    pub ironwood_digest: Option<A>,
+    pub(crate) coinbase_digest: Option<A>,
     /// v7 (ZIP 248): digest of the value pool deltas map.
     #[cfg(zcash_unstable = "nu8")]
-    pub value_pool_deltas_digest: Option<A>,
+    pub(crate) value_pool_deltas_digest: Option<A>,
     /// v7 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
     #[cfg(zcash_unstable = "nu8")]
-    pub unknown_effect_digests: Vec<((u64, u64), A)>,
-    /// v7 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
-    /// in `(bundleType, bundleVariant)` order. These are folded into
-    /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
-    #[cfg(zcash_unstable = "nu8")]
-    pub unknown_auth_digests: Vec<((u64, u64), A)>,
+    pub(crate) unknown_effect_digests: Vec<((u64, u64), A)>,
+}
+
+impl<A> Zip244Digests<A> {
+    /// Returns the digest of the transaction header.
+    pub fn header_digest(&self) -> &A {
+        &self.header_digest
+    }
+
+    /// Returns the digests of the transparent bundle, or `None` if the transaction has no
+    /// transparent bundle.
+    pub fn transparent_digests(&self) -> Option<&TransparentDigests<A>> {
+        self.transparent_digests.as_ref()
+    }
+
+    /// Returns the digest of the Sapling bundle, or `None` if the transaction has no
+    /// Sapling bundle.
+    pub fn sapling_digest(&self) -> Option<&A> {
+        self.sapling_digest.as_ref()
+    }
+
+    /// Returns the digest of the Orchard bundle, or `None` if the transaction has no
+    /// Orchard bundle.
+    pub fn orchard_digest(&self) -> Option<&A> {
+        self.orchard_digest.as_ref()
+    }
+
+    /// Returns the digest of the Ironwood bundle of a version 6 transaction, or `None` if
+    /// the transaction has no Ironwood bundle.
+    ///
+    /// When a version 6 transaction ID is derived from these digests, `None` is combined as
+    /// the empty Ironwood bundle digest using the Ironwood bundle personalization.
+    pub fn ironwood_digest(&self) -> Option<&A> {
+        self.ironwood_digest.as_ref()
+    }
 }
 
 pub trait TransactionDigest<A: Authorization> {

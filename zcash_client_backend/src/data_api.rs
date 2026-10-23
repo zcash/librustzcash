@@ -1906,9 +1906,10 @@ pub trait InputSource {
     ) -> Result<bool, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
-    /// possible. Only spendable notes corresponding to the specified shielded protocol will
-    /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
-    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    /// possible. Only spendable notes from the pools in `sources` will be included, and a
+    /// note in `exclude` is never returned. Locked outputs are selected according to
+    /// `lock_filter` (see [`LockFilter`]; a [`LockFilter::Policy`] carrying the default
+    /// `Exclude` selects none).
     #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
@@ -1922,9 +1923,9 @@ pub trait InputSource {
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the OLDEST single spendable note whose value alone is at least `value`, drawn
-    /// from the first pool in `sources` (in the given preference order) that holds one. The
-    /// returned collection contains at most one note; it is empty when no single eligible note
-    /// covers the value.
+    /// from the first pool in `sources` (in the given preference order) that holds one. A note
+    /// in `exclude` is never returned. The returned collection contains at most one note; it is
+    /// empty when no single eligible note covers the value.
     ///
     /// This is the selection primitive behind
     /// [`NoteSelection::PreferSingle`](crate::data_api::wallet::input_selection::NoteSelection):
@@ -2343,16 +2344,23 @@ pub trait WalletRead {
         anchor_retention::AnchorRetentionInterval::ZIP_318
     }
 
-    /// Returns the ZIP 318 pool-migration parameters in force for this wallet: the specified
-    /// values, with the anchor bucket grid taken from [`Self::anchor_retention_interval`].
+    /// Returns the ZIP 318 pool-migration parameters in force for this wallet on the network that
+    /// `params` describe: the specified values, with the anchor bucket grid taken from
+    /// [`Self::anchor_retention_interval`].
     ///
     /// Every decision that depends on the grid must consult this rather than the network defaults,
     /// so that a wallet retaining a non-standard interval is treated consistently: bucketing an
     /// anchor and judging the resulting transaction a canonical crossing are the same question
     /// asked twice, and they must be asked of the same grid. Overriding
     /// [`Self::anchor_retention_interval`] is sufficient; this composes it.
-    fn pool_migration_params(&self) -> anchor_retention::PoolMigrationParams {
-        anchor_retention::PoolMigrationParams::new(self.anchor_retention_interval())
+    fn pool_migration_params<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> anchor_retention::PoolMigrationParams {
+        anchor_retention::PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::for_network(params),
+            self.anchor_retention_interval(),
+        )
     }
 
     /// Returns the block hash for the block at the given height, if the
@@ -3865,6 +3873,22 @@ pub trait WalletWrite:
     fn delete_account(
         &mut self,
         account: <Self as WalletRead>::AccountId,
+    ) -> Result<(), <Self as WalletRead>::Error>;
+
+    /// Sets the human-readable name of the specified account, replacing any existing name.
+    ///
+    /// Only the account's name is changed; its keys, birthday, and all other wallet state are
+    /// left unchanged. The new name is subsequently returned by [`Account::name`].
+    ///
+    /// Account names carry no uniqueness guarantee: the wallet does not reject a name that is
+    /// already used by another account. Applications that require distinct names must enforce
+    /// that themselves.
+    ///
+    /// Returns an error if the specified account is not known to the wallet.
+    fn set_account_name(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        name: &str,
     ) -> Result<(), <Self as WalletRead>::Error>;
 
     /// Imports the given transparent address into the account as a watch-only address, without

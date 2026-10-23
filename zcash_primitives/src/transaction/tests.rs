@@ -3,9 +3,10 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Transaction, TransactionData, TransactionDigest, TxDigests, TxIn, TxVersion,
-        sighash::SignableInput,
-        sighash_v4::v4_signature_hash,
+        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxIn,
+        TxVersion, Zip244Digests,
+        sighash::{PrecomputedSighashData, SignableInput},
+        sighash_v4::{v4_signature_hash, zip143_digests},
         sighash_v5::v5_signature_hash,
         sighash_v6::v6_signature_hash,
         testing::arb_tx,
@@ -18,7 +19,7 @@ use {
     },
     alloc::vec::Vec,
     blake2b_simd::{Hash as Blake2bHash, Params},
-    core::ops::Deref,
+    core::{cell::Cell, ops::Deref},
     ff::PrimeField,
     zcash_protocol::{
         consensus::BranchId,
@@ -70,7 +71,7 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
         hex::decode(HEADER_DIGEST).unwrap()
     );
     assert_eq!(
-        v6_signature_hash(&data, &SignableInput::Shielded, &digests).as_bytes(),
+        v6_signature_hash(&data, &SignableInput::Shielded, &digests, None).as_bytes(),
         expected_digest,
     );
 
@@ -815,13 +816,13 @@ fn v6_tx_data_with_ironwood_bundle(
 #[cfg(test)]
 fn v5_shielded_sighash(tx_data: &TransactionData<TestUnauthorized>) -> Blake2bHash {
     let txid_parts = tx_data.digest(TxIdDigester);
-    v5_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts)
+    v5_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts, None)
 }
 
 #[cfg(test)]
 fn v6_shielded_sighash(tx_data: &TransactionData<TestUnauthorized>) -> Blake2bHash {
     let txid_parts = tx_data.digest(TxIdDigester);
-    v6_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts)
+    v6_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts, None)
 }
 
 #[test]
@@ -1196,8 +1197,15 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input, &zip143_digests(tx.deref())).as_ref(),
             tv.sighash
+        );
+
+        let precomputed =
+            PrecomputedSighashData::new(with_test_transparent_auth(tx.into_data(), vec![], vec![]));
+        assert_eq!(
+            precomputed.signature_hash(&signable_input).as_ref(),
+            &tv.sighash
         );
     }
 }
@@ -1222,8 +1230,15 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input, &zip143_digests(tx.deref())).as_ref(),
             tv.sighash
+        );
+
+        let precomputed =
+            PrecomputedSighashData::new(with_test_transparent_auth(tx.into_data(), vec![], vec![]));
+        assert_eq!(
+            precomputed.signature_hash(&signable_input).as_ref(),
+            &tv.sighash
         );
     }
 }
@@ -1233,6 +1248,50 @@ fn zip_0243() {
 struct TestTransparentAuth {
     input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
+    /// The number of calls to `input_amounts` and `input_scriptpubkeys`.
+    reads: Cell<usize>,
+}
+
+#[cfg(test)]
+impl TestTransparentAuth {
+    fn new(input_amounts: Vec<Zatoshis>, input_scriptpubkeys: Vec<Script>) -> Self {
+        TestTransparentAuth {
+            input_amounts,
+            input_scriptpubkeys,
+            reads: Cell::new(0),
+        }
+    }
+}
+
+/// Returns `txdata` with a transparent authorization that provides `input_amounts` and
+/// `input_scriptpubkeys` to the signature hash.
+#[cfg(test)]
+fn with_test_transparent_auth(
+    txdata: TransactionData<Authorized>,
+    input_amounts: Vec<Zatoshis>,
+    input_scriptpubkeys: Vec<Script>,
+) -> TransactionData<TestUnauthorized> {
+    txdata.map_bundles(
+        |b| {
+            b.map(|b| transparent::Bundle {
+                vin: b
+                    .vin
+                    .iter()
+                    .map(|vin| {
+                        TxIn::from_parts(
+                            vin.prevout().clone(),
+                            vin.script_sig().clone(),
+                            vin.sequence(),
+                        )
+                    })
+                    .collect(),
+                vout: b.vout,
+                authorization: TestTransparentAuth::new(input_amounts, input_scriptpubkeys),
+            })
+        },
+        |b| b,
+        |b| b,
+    )
 }
 
 #[cfg(test)]
@@ -1243,10 +1302,12 @@ impl transparent::Authorization for TestTransparentAuth {
 #[cfg(test)]
 impl TransparentAuthorizingContext for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
+        self.reads.set(self.reads.get() + 1);
         self.input_amounts.clone()
     }
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.reads.set(self.reads.get() + 1);
         self.input_scriptpubkeys.clone()
     }
 }
@@ -1265,7 +1326,10 @@ impl Authorization for TestUnauthorized {
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
-    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
+    ) -> (
+        TransactionData<TestUnauthorized>,
+        Zip244Digests<Blake2bHash>,
+    ) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
@@ -1302,10 +1366,7 @@ fn zip_0244() {
                 })
                 .collect(),
             vout: b.vout.clone(),
-            authorization: TestTransparentAuth {
-                input_amounts,
-                input_scriptpubkeys,
-            },
+            authorization: TestTransparentAuth::new(input_amounts, input_scriptpubkeys),
         });
 
         #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
@@ -1336,6 +1397,19 @@ fn zip_0244() {
 
     for tv in self::data::zip_0244::make_test_vectors() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
+        let precomputed = PrecomputedSighashData::new(txdata);
+        let txdata = precomputed.tx();
+
+        // Computes the signature hash both from the precomputed digests and with the input
+        // digests computed on demand, and checks that the results agree.
+        let check_sighash = |signable_input: &SignableInput<'_>| {
+            let sighash = v5_signature_hash(txdata, signable_input, &txid_parts, None);
+            assert_eq!(
+                precomputed.signature_hash(signable_input).as_ref(),
+                sighash.as_bytes()
+            );
+            sighash
+        };
 
         if let Some(index) = tv.transparent_input {
             // nIn is a u32, but to actually use it we need a usize.
@@ -1358,20 +1432,18 @@ fn zip_0244() {
             };
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts).as_ref(),
+                check_sighash(&signable_input(SighashType::ALL)).as_ref(),
                 &tv.sighash_all.unwrap()
             );
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts)
-                    .as_ref(),
+                check_sighash(&signable_input(SighashType::NONE)).as_ref(),
                 &tv.sighash_none.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SighashType::SINGLE), &txid_parts)
-                        .as_ref(),
+                    check_sighash(&signable_input(SighashType::SINGLE)).as_ref(),
                     &tv.sighash_single.unwrap()
                 );
             } else {
@@ -1379,33 +1451,18 @@ fn zip_0244() {
             }
 
             assert_eq!(
-                v5_signature_hash(
-                    &txdata,
-                    &signable_input(SighashType::ALL_ANYONECANPAY),
-                    &txid_parts,
-                )
-                .as_ref(),
+                check_sighash(&signable_input(SighashType::ALL_ANYONECANPAY)).as_ref(),
                 &tv.sighash_all_anyone.unwrap()
             );
 
             assert_eq!(
-                v5_signature_hash(
-                    &txdata,
-                    &signable_input(SighashType::NONE_ANYONECANPAY),
-                    &txid_parts,
-                )
-                .as_ref(),
+                check_sighash(&signable_input(SighashType::NONE_ANYONECANPAY)).as_ref(),
                 &tv.sighash_none_anyone.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(
-                        &txdata,
-                        &signable_input(SighashType::SINGLE_ANYONECANPAY),
-                        &txid_parts,
-                    )
-                    .as_ref(),
+                    check_sighash(&signable_input(SighashType::SINGLE_ANYONECANPAY)).as_ref(),
                     &tv.sighash_single_anyone.unwrap()
                 );
             } else {
@@ -1414,9 +1471,45 @@ fn zip_0244() {
         };
 
         assert_eq!(
-            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            check_sighash(&SignableInput::Shielded).as_ref(),
             tv.sighash_shielded
         );
+
+        // Computing the signature hashes of every input under every hash type reads the
+        // input amounts and `scriptPubKey`s only once.
+        let precomputed = PrecomputedSighashData::new(to_test_txdata(&tv).0);
+        if let Some(bundle) = precomputed
+            .tx()
+            .transparent_bundle()
+            .filter(|b| !b.is_coinbase() && !b.vin.is_empty())
+        {
+            for index in 0..bundle.vin.len() {
+                for hash_type in [
+                    SighashType::ALL,
+                    SighashType::NONE,
+                    SighashType::SINGLE,
+                    SighashType::ALL_ANYONECANPAY,
+                    SighashType::NONE_ANYONECANPAY,
+                    SighashType::SINGLE_ANYONECANPAY,
+                ] {
+                    let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
+                    let signable_input = SignableInput::Transparent(
+                        ::transparent::sighash::SignableInput::from_parts(
+                            bundle,
+                            hash_type,
+                            index,
+                            script_pubkey,
+                            script_pubkey,
+                            bundle.authorization.input_amounts[index],
+                        )
+                        .unwrap(),
+                    );
+                    precomputed.signature_hash(&signable_input);
+                }
+            }
+            // One call each to `input_amounts` and `input_scriptpubkeys`.
+            assert_eq!(bundle.authorization.reads.get(), 2);
+        }
     }
 }
 
@@ -1493,10 +1586,12 @@ fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     );
 
     let txid_parts = tx.digest_v7();
-    let sighash = v7_signature_hash(&tx, &SignableInput::Shielded, &txid_parts);
+    let sighash = v7_signature_hash(&tx, &SignableInput::Shielded, &txid_parts, None);
     assert_eq!(
         sighash.as_bytes(),
-        super::txid::to_txid(tx.version(), tx.consensus_branch_id(), &txid_parts).as_ref(),
+        super::txid::to_txid(tx.version(), tx.consensus_branch_id(), &txid_parts)
+            .unwrap()
+            .as_ref(),
     );
 }
 

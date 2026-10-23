@@ -819,7 +819,8 @@ impl MigrationState {
     }
 
     /// Shifts the scheduled height of every transaction that has not yet been broadcast forward
-    /// by `delta` blocks, preserving the schedule's inter-broadcast gaps.
+    /// by the time that elapses from `from` to `to` on a chain with the given `spacing`,
+    /// preserving the schedule's inter-broadcast gaps in time.
     ///
     /// This is the RE-SPREAD half of ZIP 318's missed-schedule policy — at most one overdue
     /// transfer is released immediately; the rest are re-spread — applied by
@@ -827,8 +828,8 @@ impl MigrationState {
     /// surface lags the served target by more than
     /// the schedule-scaled tolerance
     /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)). Shifting
-    /// every pending transaction by the same delta moves the whole remaining schedule forward in
-    /// block-time without redrawing it, so the gaps between broadcasts — the observable the drawn
+    /// every pending transaction by the same duration moves the whole remaining schedule forward in
+    /// time without redrawing it, so the gaps between broadcasts — the observable the drawn
     /// exponential delays exist to shape — survive the wallet's absence unchanged, instead of the
     /// missed steps piling up and broadcasting as a cluster.
     ///
@@ -845,8 +846,8 @@ impl MigrationState {
     /// or [`Signed`](MigrationTxState::Signed)) also gets its anchor boundary REDRAWN against the
     /// shifted schedule ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)):
     /// the stored boundary was drawn to be in-distribution relative to the ORIGINAL broadcast
-    /// height, so keeping it would broadcast an anchor `delta` blocks older than any honest draw —
-    /// and every deferred transfer of this wallet older by the SAME `delta`, a linkable
+    /// height, so keeping it would broadcast an anchor older by the shift than any honest draw —
+    /// and every deferred transfer of this wallet older by the SAME shift, a linkable
     /// fingerprint. The redraw is sound exactly as `prove_transfer`'s proving-time redraw is:
     /// ZIP 374 defers the anchor and witnesses to proving, so nothing in the stored artifact pins
     /// the old boundary. A [`Proved`](MigrationTxState::Proved) transfer's proof DOES pin its
@@ -854,17 +855,23 @@ impl MigrationState {
     /// preparation carries no drawn boundary at all. In the rare case where no candidate exists at
     /// or above the prior boundary (see [`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)),
     /// the prior — still provable — boundary is kept.
-    pub(crate) fn shift_schedule<R: Rng + CryptoRng>(&mut self, delta: u32, rng: &mut R) {
-        let interval = self.anchor_bucket_interval;
+    pub(crate) fn shift_schedule<R: Rng + CryptoRng>(
+        &mut self,
+        spacing: &crate::scheduling::BlockSpacing,
+        from: BlockHeight,
+        to: BlockHeight,
+        rng: &mut R,
+    ) {
+        let grid = crate::scheduling::AnchorGrid::new(self.anchor_bucket_interval, *spacing);
         for tx in &mut self.transactions {
             match tx.state {
                 MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => continue,
                 MigrationTxState::AwaitingSignature | MigrationTxState::Signed => {
-                    tx.scheduled_height = tx.scheduled_height + delta;
+                    tx.scheduled_height = spacing.shift(tx.scheduled_height, from, to);
                     if matches!(tx.kind, MigrationTxKind::Transfer { .. })
                         && let Some(prior) = tx.anchor_boundary
                         && let Some(fresh) = crate::scheduling::redraw_anchor_boundary(
-                            interval,
+                            grid,
                             prior,
                             tx.scheduled_height,
                             rng,
@@ -874,7 +881,7 @@ impl MigrationState {
                     }
                 }
                 MigrationTxState::Proved => {
-                    tx.scheduled_height = tx.scheduled_height + delta;
+                    tx.scheduled_height = spacing.shift(tx.scheduled_height, from, to);
                 }
             }
         }
@@ -2339,7 +2346,12 @@ mod tests {
             s.transactions[i].anchor_boundary = Some(BlockHeight::from_u32(144));
         }
 
-        s.shift_schedule(100_000, &mut ChaCha8Rng::seed_from_u64(7));
+        s.shift_schedule(
+            &crate::scheduling::BlockSpacing::UNIFORM,
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(100_000),
+            &mut ChaCha8Rng::seed_from_u64(7),
+        );
 
         let scheduled: Vec<u32> = s
             .transactions

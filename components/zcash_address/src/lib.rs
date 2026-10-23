@@ -337,6 +337,11 @@ impl ZcashAddress {
         }
     }
 
+    /// Returns whether this address is a Sprout address.
+    pub fn is_sprout(&self) -> bool {
+        matches!(self.kind, AddressKind::Sprout(_))
+    }
+
     /// Returns whether or not this address contains or corresponds to the given unified address
     /// receiver.
     pub fn matches_receiver(&self, receiver: &Receiver) -> bool {

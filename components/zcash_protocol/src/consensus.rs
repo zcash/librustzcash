@@ -5,6 +5,7 @@ use core::convert::TryFrom;
 use core::fmt;
 use core::num::TryFromIntError;
 use core::ops::{Add, Bound, RangeBounds, Sub};
+use core::time::Duration;
 
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
@@ -26,10 +27,27 @@ memuse::impl_no_dynamic_usage!(BlockHeight);
 pub const H0: BlockHeight = BlockHeight(0);
 
 /// The target time between blocks, in seconds (the post-Blossom target spacing).
+#[deprecated(
+    since = "0.11.0",
+    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
+)]
 pub const SECONDS_PER_BLOCK: u32 = 75;
 
 /// The approximate number of blocks produced per hour at [`SECONDS_PER_BLOCK`].
+#[deprecated(
+    since = "0.11.0",
+    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
+)]
+#[allow(deprecated)]
 pub const BLOCKS_PER_HOUR: u32 = 3600 / SECONDS_PER_BLOCK;
+
+/// The factor by which NU7 divides the target block spacing, from 75 seconds to 25 seconds
+/// ([ZIP 218]'s `NU7PoWTargetSpacingRatio`).
+///
+/// A duration that spans `n` blocks before NU7 activation spans `n` times this ratio after it.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const NU7_POW_TARGET_SPACING_RATIO: u32 = 3;
 
 impl BlockHeight {
     pub const fn from_u32(v: u32) -> BlockHeight {
@@ -546,7 +564,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_146_400)),
             NetworkUpgrade::Nu6_2 => Some(BlockHeight(3_364_600)),
             NetworkUpgrade::Nu6_3 => Some(BlockHeight(3_428_143)),
-            NetworkUpgrade::Nu7 => None,
+            NetworkUpgrade::Nu7 => Some(BlockHeight(3_543_405)),
             #[cfg(zcash_unstable = "nu8")]
             NetworkUpgrade::Nu8 => None,
             #[cfg(zcash_unstable = "nutachyon")]
@@ -663,9 +681,9 @@ pub enum NetworkUpgrade {
     Nu6_2,
     /// The Ironwood / NU6.3 network upgrade.
     Nu6_3,
-    /// The [Nu7 (proposed)] network upgrade.
+    /// The [Nu7] network upgrade.
     ///
-    /// [Nu7 (proposed)]: https://z.cash/upgrade/nu7/
+    /// [Nu7]: https://z.cash/upgrade/nu7/
     Nu7,
     /// The NU8 network upgrade, which deploys the ZIP 248 transaction format.
     #[cfg(zcash_unstable = "nu8")]
@@ -725,11 +743,8 @@ impl NetworkUpgrade {
     }
 }
 
-/// The network upgrades on the Zcash chain in order of activation.
-///
-/// This order corresponds to the activation heights, but because Rust enums are
-/// full-fledged algebraic data types, we need to define it manually.
-const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
+/// The network upgrades on the Zcash chain, in order of activation.
+pub const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Overwinter,
     NetworkUpgrade::Sapling,
     NetworkUpgrade::Blossom,
@@ -760,6 +775,84 @@ pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 ///
 /// [txnconsensus]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub const COINBASE_MATURITY_BLOCKS: u32 = 100;
+
+/// The target spacing between consecutive blocks before Blossom activation, as defined by
+/// [ZIP 208].
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+pub const PRE_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(150);
+
+/// The target spacing between consecutive blocks from Blossom activation until NU7 activation,
+/// as defined by [ZIP 208].
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+pub const POST_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(75);
+
+/// The target spacing between consecutive blocks from NU7 activation, as defined by [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const POST_NU7_POW_TARGET_SPACING: Duration = Duration::from_secs(25);
+
+/// Returns the target spacing between the block at `height` and its parent, as defined by
+/// [ZIP 208] and [ZIP 218].
+///
+/// This is [`PRE_BLOSSOM_POW_TARGET_SPACING`] if Blossom is not active at `height`,
+/// [`POST_BLOSSOM_POW_TARGET_SPACING`] if Blossom is active and NU7 is not, and
+/// [`POST_NU7_POW_TARGET_SPACING`] if both are active. A network on which NU7 is active and
+/// Blossom is not therefore has the pre-Blossom spacing.
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub fn pow_target_spacing<P: Parameters>(params: &P, height: BlockHeight) -> Duration {
+    if !params.is_nu_active(NetworkUpgrade::Blossom, height) {
+        PRE_BLOSSOM_POW_TARGET_SPACING
+    } else if !params.is_nu_active(NetworkUpgrade::Nu7, height) {
+        POST_BLOSSOM_POW_TARGET_SPACING
+    } else {
+        POST_NU7_POW_TARGET_SPACING
+    }
+}
+
+/// Returns the target time from the block at height `from` to the block at height `to`.
+///
+/// This is the sum of [`pow_target_spacing`] over the heights in `(from, to]`: the block at each
+/// height is targeted to follow its parent by the spacing at that height. Returns
+/// [`Duration::ZERO`] if `to <= from`.
+pub fn target_time_between<P: Parameters>(
+    params: &P,
+    from: BlockHeight,
+    to: BlockHeight,
+) -> Duration {
+    if to <= from {
+        return Duration::ZERO;
+    }
+    // The number of heights in `(from, to]` at or above `start`, or zero if `start` is `None`.
+    // `from < to`, so `from + 1` does not saturate.
+    let heights_at_or_above = |start: Option<BlockHeight>| -> u64 {
+        start.map_or(0, |start| {
+            let first = start.max(from + 1);
+            if first > to {
+                0
+            } else {
+                u64::from(to) - u64::from(first) + 1
+            }
+        })
+    };
+    // `pow_target_spacing` changes value only at Blossom activation and at the first height at
+    // which both Blossom and NU7 are active, which splits `(from, to]` into at most three runs.
+    let blossom = params.activation_height(NetworkUpgrade::Blossom);
+    let post_nu7_start = blossom
+        .zip(params.activation_height(NetworkUpgrade::Nu7))
+        .map(|(blossom_height, nu7_height)| blossom_height.max(nu7_height));
+    let all_heights = u64::from(to - from);
+    let post_blossom_or_later = heights_at_or_above(blossom);
+    let post_nu7 = heights_at_or_above(post_nu7_start);
+    Duration::from_secs(
+        (all_heights - post_blossom_or_later) * PRE_BLOSSOM_POW_TARGET_SPACING.as_secs()
+            + (post_blossom_or_later - post_nu7) * POST_BLOSSOM_POW_TARGET_SPACING.as_secs()
+            + post_nu7 * POST_NU7_POW_TARGET_SPACING.as_secs(),
+    )
+}
 
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
@@ -805,7 +898,7 @@ pub enum BranchId {
     /// The consensus rules to be deployed by [`NetworkUpgrade::Nu8`].
     ///
     /// The consensus branch identifier is a placeholder until NU8 is assigned
-    /// one, as for [`BranchId::NuTachyon`].
+    /// one, as for `NuTachyon`.
     #[cfg(zcash_unstable = "nu8")]
     Nu8,
     /// The consensus rules deployed by [`NetworkUpgrade::NuTachyon`].
@@ -1105,10 +1198,12 @@ pub mod testing {
 }
 
 #[cfg(test)]
+mod spacing_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
-        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, TEST_NETWORK,
-        UPGRADES_IN_ORDER,
+        BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER,
     };
 
     #[test]
@@ -1296,32 +1391,15 @@ mod tests {
             BranchId::Nu6_3,
         );
         assert_eq!(
-            BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Nu6_3,
-        );
-    }
-
-    #[test]
-    fn nu7_activates_on_testnet_only() {
-        /// The height at which NU7 activates on Testnet.
-        const TESTNET_NU7_ACTIVATION: BlockHeight = BlockHeight(4_465_026);
-
-        assert_eq!(MAIN_NETWORK.activation_height(NetworkUpgrade::Nu7), None);
-        assert_eq!(
-            BranchId::for_height(&MAIN_NETWORK, BlockHeight(u32::MAX)),
-            BranchId::Nu6_3,
-        );
-
-        assert_eq!(
-            TEST_NETWORK.activation_height(NetworkUpgrade::Nu7),
-            Some(TESTNET_NU7_ACTIVATION),
-        );
-        assert_eq!(
-            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION - 1),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(3_543_404)),
             BranchId::Nu6_3,
         );
         assert_eq!(
-            BranchId::for_height(&TEST_NETWORK, TESTNET_NU7_ACTIVATION),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(3_543_405)),
+            BranchId::Nu7,
+        );
+        assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(10_000_000)),
             BranchId::Nu7,
         );
     }

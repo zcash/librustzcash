@@ -1834,8 +1834,11 @@ where
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
     // The anchor grid and delay distributions come from the backend, not from this function's
-    // caller: the grid must be the one the backend retains its anchor checkpoints on.
+    // caller: the grid must be the one the backend retains its anchor checkpoints on. The block
+    // spacing comes from the network, and converts both into blocks at each height.
     let sched_params = backend.scheduling_params();
+    let spacing = scheduling::BlockSpacing::for_network(params);
+    let grid = scheduling::AnchorGrid::new(sched_params.anchor_bucket_interval(), spacing);
 
     // The canonical fees, computed once from the canonical transaction shapes and reused throughout.
     let (prep_tx_fee, transfer_fee_buffer) =
@@ -1898,6 +1901,7 @@ where
     for layer in preparation.layers() {
         let heights = scheduling::schedule_prep_broadcast_heights(
             &sched_params,
+            &spacing,
             layer_base,
             layer.len(),
             rng,
@@ -1919,7 +1923,7 @@ where
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
     let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
-        sched_params.anchor_bucket_interval(),
+        grid,
         nu63_activation,
         est_last_prep_height,
     ));
@@ -1929,7 +1933,13 @@ where
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
     // permutation and assigning the i-th drawn slot to the permuted crossing makes the
     // broadcast order of denominations independent of the balance.
-    let slots = scheduling::schedule(&sched_params, schedule_base, funding_notes.len(), rng);
+    let slots = scheduling::schedule(
+        &sched_params,
+        &spacing,
+        schedule_base,
+        funding_notes.len(),
+        rng,
+    );
     let mut schedule = slots.clone();
     for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
         .iter()
@@ -2955,7 +2965,10 @@ where
                 .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
                 .ok_or(ProveError::Nu63NotActive)?;
             match scheduling::draw_anchor_boundary(
-                committed,
+                scheduling::AnchorGrid::new(
+                    committed,
+                    scheduling::BlockSpacing::for_network(params),
+                ),
                 nu63_activation,
                 funding_height,
                 scanned_tip,
@@ -3571,10 +3584,12 @@ where
         .map(|t| t.scheduled_height)
         .max()
         .map_or(target_height, |latest| latest.max(target_height));
-    let scheduled_height = chain_base + sched_params.transfer_delay().draw(&mut *rng);
-    let expiry_height = scheduling::expiry_height(scheduled_height);
+    let spacing = scheduling::BlockSpacing::for_network(params);
+    let scheduled_height =
+        spacing.advance(chain_base, sched_params.transfer_delay().draw(&mut *rng));
+    let expiry_height = scheduling::expiry_height(&spacing, scheduled_height);
     let anchor_boundary = scheduling::draw_anchor_boundary(
-        sched_params.anchor_bucket_interval(),
+        scheduling::AnchorGrid::new(sched_params.anchor_bucket_interval(), spacing),
         nu63_activation,
         funding_creation,
         scheduled_height,
@@ -4260,7 +4275,10 @@ where
                     "preparation schedule has no entry for layer {layer} transaction {index}"
                 ))
             })?;
-            let expiry_height = crate::scheduling::expiry_height(scheduled_height);
+            let expiry_height = crate::scheduling::expiry_height(
+                &crate::scheduling::BlockSpacing::for_network(self.params),
+                scheduled_height,
+            );
             // The field accesses `self.params`/`self.fvk`/`self.account_derivation`/`self.rng`
             // are DISJOINT, so the borrow checker accepts them together here — as long as no
             // whole-`self` method call (like `resolve_prep_spends` above) is interleaved.
@@ -4416,7 +4434,10 @@ where
             .ok_or(CommitError::Nu63NotActive)?;
         // The grid to draw from is the backend's, so the boundary each transfer anchors to is one
         // whose checkpoint that backend retains.
-        let anchor_bucket_interval = self.backend.scheduling_params().anchor_bucket_interval();
+        let anchor_grid = scheduling::AnchorGrid::new(
+            self.backend.scheduling_params().anchor_bucket_interval(),
+            scheduling::BlockSpacing::for_network(self.params),
+        );
         let funding_notes = plan.funding_notes();
         for planned_tx in &planned.rows {
             let crossing = match planned_tx.kind() {
@@ -4473,7 +4494,7 @@ where
             )
             .map_err(CommitError::Build)?;
             let anchor_boundary = scheduling::draw_anchor_boundary(
-                anchor_bucket_interval,
+                anchor_grid,
                 nu63_activation,
                 est_last_prep_height,
                 scheduled_height,
@@ -5060,7 +5081,10 @@ pub(crate) mod tests {
             .unwrap_or(BlockHeight::from_u32(2_000_000))
             + EST_PREP_LAYER_MINING_BLOCKS;
         let earliest = crate::scheduling::earliest_broadcast_height(
-            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            crate::scheduling::AnchorGrid::new(
+                crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+                crate::scheduling::BlockSpacing::UNIFORM,
+            ),
             BlockHeight::from_u32(10),
             est_last_prep,
         );
@@ -5338,6 +5362,7 @@ pub(crate) mod tests {
             prep_schedule: alloc::vec![alloc::vec![height(0), height(1)], alloc::vec![height(2)]],
             schedule: crate::scheduling::schedule(
                 &crate::scheduling::SchedulingParams::ZIP_318,
+                &crate::scheduling::BlockSpacing::UNIFORM,
                 height(100),
                 2,
                 &mut rng,
@@ -5792,10 +5817,32 @@ mod commit_tests {
                     );
                     let interval =
                         crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
-                    assert!(interval.is_boundary(BlockHeight::from_u32(b)));
+                    assert!(
+                        crate::scheduling::AnchorGrid::new(
+                            interval,
+                            crate::scheduling::BlockSpacing::UNIFORM
+                        )
+                        .is_boundary(BlockHeight::from_u32(b))
+                    );
                     assert!(b > 10, "boundary above the regtest NU6.3 activation");
-                    assert!(b >= u32::from(interval.boundary_at_or_above(est_last_prep)));
-                    assert!(b < u32::from(interval.boundary_at_or_below(tx.scheduled_height)));
+                    assert!(
+                        b >= u32::from(
+                            crate::scheduling::AnchorGrid::new(
+                                interval,
+                                crate::scheduling::BlockSpacing::UNIFORM
+                            )
+                            .boundary_at_or_above(est_last_prep)
+                        )
+                    );
+                    assert!(
+                        b < u32::from(
+                            crate::scheduling::AnchorGrid::new(
+                                interval,
+                                crate::scheduling::BlockSpacing::UNIFORM
+                            )
+                            .boundary_at_or_below(tx.scheduled_height)
+                        )
+                    );
                 }
             }
         }
@@ -5995,8 +6042,20 @@ mod commit_tests {
                 .expect("the rebuilt transfer carries a boundary"),
         );
         let interval = crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
-        assert!(interval.is_boundary(BlockHeight::from_u32(boundary)));
-        assert!(boundary < u32::from(interval.boundary_at_or_below(new.scheduled_height)));
+        assert!(
+            crate::scheduling::AnchorGrid::new(interval, crate::scheduling::BlockSpacing::UNIFORM)
+                .is_boundary(BlockHeight::from_u32(boundary))
+        );
+        assert!(
+            boundary
+                < u32::from(
+                    crate::scheduling::AnchorGrid::new(
+                        interval,
+                        crate::scheduling::BlockSpacing::UNIFORM
+                    )
+                    .boundary_at_or_below(new.scheduled_height)
+                )
+        );
 
         // The rebuilt PCZT is a valid pre-signed transfer with deferred anchors and the new expiry.
         let parsed = pczt::Pczt::parse(&new.pczt).expect("the rebuilt PCZT parses");
@@ -6611,6 +6670,7 @@ mod commit_tests {
         for layer in preparation.layers() {
             let heights = crate::scheduling::schedule_prep_broadcast_heights(
                 &crate::scheduling::SchedulingParams::ZIP_318,
+                &crate::scheduling::BlockSpacing::UNIFORM,
                 layer_base,
                 layer.len(),
                 &mut rng,
@@ -6627,12 +6687,16 @@ mod commit_tests {
                 .expect("NU6.3 is active on the test network")
         };
         let schedule_base = crate::scheduling::earliest_broadcast_height(
-            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            crate::scheduling::AnchorGrid::new(
+                crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+                crate::scheduling::BlockSpacing::UNIFORM,
+            ),
             nu63_activation,
             layer_base,
         );
         let schedule = crate::scheduling::schedule(
             &crate::scheduling::SchedulingParams::ZIP_318,
+            &crate::scheduling::BlockSpacing::UNIFORM,
             schedule_base,
             funding.len(),
             &mut rng,
@@ -7488,7 +7552,11 @@ mod commit_tests {
             "the re-drawn boundary is one the wallet has scanned and can witness at"
         );
         assert!(
-            state.anchor_bucket_interval().is_boundary(proved_against),
+            crate::scheduling::AnchorGrid::new(
+                state.anchor_bucket_interval(),
+                crate::scheduling::BlockSpacing::UNIFORM
+            )
+            .is_boundary(proved_against),
             "the re-drawn boundary stays on the anchor bucket grid"
         );
         assert_eq!(

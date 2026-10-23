@@ -5,9 +5,9 @@ use corez::io::Write;
 use ::transparent::sighash::TransparentAuthorizingContext;
 
 use crate::transaction::{
-    Authorization, TransactionData, TxDigests,
+    Authorization, TransactionData, Zip244Digests,
     sighash::SignableInput,
-    sighash_v5::transparent_sig_digest,
+    sighash_v5::{TransparentInputsDigests, transparent_sig_digest},
     txid::{
         ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION, hash_v7_effects_bundles, hasher,
         tx_hash_personalization, v7_bundle_digest_entries,
@@ -25,14 +25,18 @@ use crate::transaction::{
 /// effects bundles is replaced with `transparent_sig_digest`.
 ///
 /// Sapling and Orchard sighash uses `SIGHASH_ALL` (`hash_type = 0x01`).
+///
+/// `inputs_digests` are the digests of the transparent inputs of `tx`, as computed by
+/// [`TransparentInputsDigests::for_bundle`]; see [`transparent_sig_digest`].
 #[cfg(zcash_unstable = "nu8")]
-pub fn v7_signature_hash<
+pub(crate) fn v7_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
     signable_input: &SignableInput<'_>,
-    txid_parts: &TxDigests<Blake2bHash>,
+    txid_parts: &Zip244Digests<Blake2bHash>,
+    inputs_digests: Option<&TransparentInputsDigests>,
 ) -> Blake2bHash {
     let personal = tx_hash_personalization(tx.consensus_branch_id());
 
@@ -51,6 +55,7 @@ pub fn v7_signature_hash<
     let transparent_sig = transparent_sig_digest(
         tx.transparent_bundle()
             .zip(txid_parts.transparent_digests.as_ref()),
+        inputs_digests,
         signable_input,
     );
 

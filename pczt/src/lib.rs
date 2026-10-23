@@ -52,19 +52,8 @@ use {
     },
 };
 
-#[cfg(all(
-    any(feature = "io-finalizer", feature = "signer"),
-    zcash_unstable = "nu8"
-))]
-use zcash_primitives::transaction::sighash_v7::v7_signature_hash;
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-use {
-    blake2b_simd::Hash as Blake2bHash,
-    zcash_primitives::transaction::{
-        TxDigests, sighash::SignableInput, sighash_v5::v5_signature_hash,
-        sighash_v6::v6_signature_hash,
-    },
-};
+use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput};
 
 pub mod roles;
 
@@ -758,23 +747,27 @@ fn transparent_value_balance(
     ))
 }
 
-/// Helper to produce the correct sighash for a PCZT.
+/// Computes the digests that the signature hashes of `tx_data` commit to.
+///
+/// `global` must be the global data of the PCZT that `tx_data` was extracted from.
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+pub(crate) fn precompute_sighash_data(
+    global: &Global,
+    tx_data: TransactionData<EffectsOnly>,
+) -> Result<PrecomputedSighashData<EffectsOnly>, ExtractError> {
+    PrecomputedSighashData::new_zip244(tx_data).map_err(|_| ExtractError::UnsupportedTxVersion {
+        version: global.tx_version,
+        version_group_id: global.version_group_id,
+    })
+}
+
+/// Computes the signature hash of an input to the transaction extracted from a PCZT.
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
 pub(crate) fn sighash(
-    tx_data: &TransactionData<EffectsOnly>,
+    sighash_data: &PrecomputedSighashData<EffectsOnly>,
     signable_input: &SignableInput,
-    txid_parts: &TxDigests<Blake2bHash>,
 ) -> [u8; 32] {
-    match tx_data.version() {
-        TxVersion::V5 => v5_signature_hash(tx_data, signable_input, txid_parts),
-        TxVersion::V6 => v6_signature_hash(tx_data, signable_input, txid_parts),
-        #[cfg(zcash_unstable = "nu8")]
-        TxVersion::V7 => v7_signature_hash(tx_data, signable_input, txid_parts),
-        _ => unreachable!("PCZT only supports V5 and later transaction data"),
-    }
-    .as_ref()
-    .try_into()
-    .expect("correct length")
+    *sighash_data.signature_hash(signable_input).as_ref()
 }
 
 /// Errors that can occur while parsing PCZT bundles and extracting transaction data.
@@ -907,8 +900,7 @@ impl core::error::Error for ParseError {}
 mod extraction_tests {
     use zcash_primitives::transaction::{
         TxVersion,
-        sighash::SignableInput,
-        sighash_v6::v6_signature_hash,
+        sighash::{PrecomputedSighashData, SignableInput},
         txid::{TxIdDigester, to_txid},
     };
     use zcash_protocol::consensus::BranchId;
@@ -934,12 +926,17 @@ mod extraction_tests {
         let expected = hex::decode(EXPECTED_DIGEST).unwrap();
         assert_eq!(
             to_txid(data.version(), data.consensus_branch_id(), &digests)
+                .expect("Creator::new returns a compatible version")
                 .as_ref()
                 .as_slice(),
             expected
         );
         assert_eq!(
-            v6_signature_hash(&data, &SignableInput::Shielded, &digests).as_bytes(),
+            PrecomputedSighashData::new_zip244(data)
+                .unwrap()
+                .signature_hash(&SignableInput::Shielded)
+                .as_ref()
+                .as_slice(),
             expected
         );
     }

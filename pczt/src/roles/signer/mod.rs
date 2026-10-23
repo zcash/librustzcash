@@ -57,12 +57,11 @@
 
 use alloc::vec::Vec;
 
-use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
 use rand_core::{CryptoRng, Rng};
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
-use zcash_primitives::transaction::{TransactionData, TxDigests, sighash::SignableInput};
+use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput};
 
 use crate::{
     ExtractError, ParsedPczt, Pczt,
@@ -70,7 +69,7 @@ use crate::{
         FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE, Global,
     },
-    sighash,
+    precompute_sighash_data, sighash,
 };
 
 pub use crate::EffectsOnly;
@@ -163,8 +162,7 @@ pub struct Signer {
     ironwood: crate::orchard::Parsed,
     empty_ironwood: Option<crate::orchard::Bundle>,
     /// Cached across multiple signatures.
-    tx_data: TransactionData<EffectsOnly>,
-    txid_parts: TxDigests<Blake2bHash>,
+    sighash_data: PrecomputedSighashData<EffectsOnly>,
     shielded_sighash: [u8; 32],
     transparent_sighash_policy: SighashPolicy,
 }
@@ -197,8 +195,8 @@ impl Signer {
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
             |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
-        let txid_parts = tx_data.txid_digests();
-        let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
+        let sighash_data = precompute_sighash_data(&global, tx_data)?;
+        let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
 
         Ok(Self {
             global,
@@ -207,8 +205,7 @@ impl Signer {
             orchard,
             ironwood,
             empty_ironwood,
-            tx_data,
-            txid_parts,
+            sighash_data,
             shielded_sighash,
             transparent_sighash_policy: SighashPolicy::ALL_ONLY,
         })
@@ -255,9 +252,8 @@ impl Signer {
                 index,
                 |signable_input| {
                     sighash(
-                        &self.tx_data,
+                        &self.sighash_data,
                         &SignableInput::Transparent(signable_input),
-                        &self.txid_parts,
                     )
                 },
                 self.transparent_sighash_policy,
@@ -276,10 +272,10 @@ impl Signer {
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts| {
+        self.generate_or_append_transparent_signature(index, |input, sighash_data| {
             input.sign_with_sighash_policy(
                 index,
-                |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
+                |input| sighash(sighash_data, &SignableInput::Transparent(input)),
                 sk,
                 sighash_policy,
             )
@@ -297,10 +293,10 @@ impl Signer {
         signature: secp256k1::ecdsa::Signature,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts| {
+        self.generate_or_append_transparent_signature(index, |input, sighash_data| {
             input.append_signature_with_sighash_policy(
                 index,
-                |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
+                |input| sighash(sighash_data, &SignableInput::Transparent(input)),
                 signature,
                 sighash_policy,
             )
@@ -315,8 +311,7 @@ impl Signer {
     where
         F: FnOnce(
             &mut transparent::pczt::Input,
-            &TransactionData<EffectsOnly>,
-            &TxDigests<Blake2bHash>,
+            &PrecomputedSighashData<EffectsOnly>,
         ) -> Result<(), transparent::pczt::SignerError>,
     {
         let input = self
@@ -331,7 +326,7 @@ impl Signer {
         // out the transparent bundle and calls those methods directly.
 
         // Generate or apply the signature.
-        f(input, &self.tx_data, &self.txid_parts).map_err(Error::TransparentSign)?;
+        f(input, &self.sighash_data).map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:
         // - If the Signer added a signature that does not use `SIGHASH_ANYONECANPAY`, the
@@ -601,8 +596,7 @@ impl Signer {
             orchard,
             ironwood,
             empty_ironwood,
-            tx_data: _,
-            txid_parts: _,
+            sighash_data: _,
             shielded_sighash: _,
             transparent_sighash_policy: _,
         } = self;

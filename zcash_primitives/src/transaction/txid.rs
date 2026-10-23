@@ -18,7 +18,8 @@ use zcash_protocol::{
 };
 
 use super::{
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+    Authorization, Authorized, TransactionDigest, TransparentDigests, TxId, TxVersion,
+    Zip244Digests,
 };
 
 /// TxId tree root personalization
@@ -807,7 +808,13 @@ where
 /// This expects and relies upon the existence of canonical encodings for
 /// each effecting component of a transaction.
 ///
-/// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
+/// This implements transaction ID digests for v5 transactions ([ZIP 244]) and for
+/// v6 transactions ([ZIP 229]). It cannot be used to compute the transaction ID for
+/// v4 or earlier transactions; those used `SHA-256(SHA-256(tx_encoding))` and are
+/// malleable.
+///
+/// [ZIP 244]: https://zips.z.cash/zip-0244#txid-digest
+/// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
 pub struct TxIdDigester;
 
 impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
@@ -817,7 +824,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type OrchardDigest = Option<Blake2bHash>;
     type IronwoodDigest = Option<Blake2bHash>;
 
-    type Digest = TxDigests<Blake2bHash>;
+    type Digest = Zip244Digests<Blake2bHash>;
 
     fn digest_header(
         &self,
@@ -877,7 +884,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         orchard_digest: Self::OrchardDigest,
         ironwood_digest: Self::IronwoodDigest,
     ) -> Self::Digest {
-        TxDigests {
+        Zip244Digests {
             header_digest,
             transparent_digests,
             sapling_digest,
@@ -892,8 +899,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             value_pool_deltas_digest: None,
             #[cfg(zcash_unstable = "nu8")]
             unknown_effect_digests: alloc::vec::Vec::new(),
-            #[cfg(zcash_unstable = "nu8")]
-            unknown_auth_digests: alloc::vec::Vec::new(),
         }
     }
 }
@@ -980,28 +985,21 @@ pub(crate) fn to_hash_v6(
 
 /// Combines transaction component digests into a transaction ID.
 ///
+/// Returns `None` if `txversion` is incompatible with `digests`.
+///
 /// V6 and later transactions include the Ironwood bundle digest as a separate
 /// Orchard-shaped digest using Ironwood personalization. If any shielded bundle digest is
 /// absent, this substitutes the protocol-defined empty bundle digest for that pool.
 pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
-    digests: &TxDigests<Blake2bHash>,
-) -> TxId {
+    digests: &Zip244Digests<Blake2bHash>,
+) -> Option<TxId> {
     let txid_digest = match txversion {
-        #[cfg(zcash_unstable = "nu8")]
-        TxVersion::V7 => to_hash_v7(consensus_branch_id, digests),
-        // v6 (ZIP 229) commits to the Ironwood bundle as a fourth
-        // shielded digest alongside transparent, Sapling and Orchard.
-        _ if txversion.has_ironwood() => to_hash_v6(
-            consensus_branch_id,
-            digests.header_digest,
-            hash_transparent_txid_data(digests.transparent_digests.as_ref()),
-            digests.sapling_digest,
-            digests.orchard_digest,
-            digests.ironwood_digest,
-        ),
-        _ => to_hash(
+        // These versions cannot produce a txid just from digests, because they use
+        // SHA-256d over the entire tx encoding which is unavailable here.
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => return None,
+        TxVersion::V5 => to_hash(
             txversion,
             consensus_branch_id,
             digests.header_digest,
@@ -1009,9 +1007,23 @@ pub fn to_txid(
             digests.sapling_digest,
             digests.orchard_digest,
         ),
+        // v6 (ZIP 229) commits to the Ironwood bundle as a fourth
+        // shielded digest alongside transparent, Sapling and Orchard.
+        TxVersion::V6 => to_hash_v6(
+            consensus_branch_id,
+            digests.header_digest,
+            hash_transparent_txid_data(digests.transparent_digests.as_ref()),
+            digests.sapling_digest,
+            digests.orchard_digest,
+            digests.ironwood_digest,
+        ),
+        #[cfg(zcash_unstable = "nu8")]
+        TxVersion::V7 => to_hash_v7(consensus_branch_id, digests),
     };
 
-    TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
+    Some(TxId::from_bytes(
+        <[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap(),
+    ))
 }
 
 /// Implements [ZIP 248 §txid_digest](https://zips.z.cash/zip-0248#txid-digest).
@@ -1031,7 +1043,7 @@ pub fn to_txid(
 /// Personalization is `"ZcashTxHash_" || LE32(consensus_branch_id)`, the
 /// same scheme as ZIP 244 so that txids are fork-specific.
 #[cfg(zcash_unstable = "nu8")]
-fn to_hash_v7(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -> Blake2bHash {
+fn to_hash_v7(consensus_branch_id: BranchId, digests: &Zip244Digests<Blake2bHash>) -> Blake2bHash {
     let personal = tx_hash_personalization(consensus_branch_id);
 
     // `digest_v7` always populates this, so `None` means the caller built the
