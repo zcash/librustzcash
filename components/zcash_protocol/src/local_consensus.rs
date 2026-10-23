@@ -32,6 +32,8 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 ///         nu6_2: Some(BlockHeight::from_u32(1)),
 ///         nu6_3: Some(BlockHeight::from_u32(1)),
 ///         nu7: Some(BlockHeight::from_u32(1)),
+///         #[cfg(zcash_unstable = "nu8")]
+///         nu8: Some(BlockHeight::from_u32(1)),
 ///         #[cfg(zcash_unstable = "nutachyon")]
 ///         nu_tachyon: Some(BlockHeight::from_u32(1)),
 ///     };
@@ -51,6 +53,11 @@ pub struct LocalNetwork {
     pub nu6_3: Option<BlockHeight>,
     /// The NU7 activation height for this network, or `None` if NU7 never activates.
     pub nu7: Option<BlockHeight>,
+    /// The NU8 activation height for this network, or `None` if NU8 never activates.
+    #[cfg(zcash_unstable = "nu8")]
+    pub nu8: Option<BlockHeight>,
+    /// The NuTachyon activation height for this network, or `None` if NuTachyon
+    /// never activates.
     #[cfg(zcash_unstable = "nutachyon")]
     pub nu_tachyon: Option<BlockHeight>,
 }
@@ -74,6 +81,8 @@ impl Parameters for LocalNetwork {
             NetworkUpgrade::Nu6_2 => self.nu6_2,
             NetworkUpgrade::Nu6_3 => self.nu6_3,
             NetworkUpgrade::Nu7 => self.nu7,
+            #[cfg(zcash_unstable = "nu8")]
+            NetworkUpgrade::Nu8 => self.nu8,
             #[cfg(zcash_unstable = "nutachyon")]
             NetworkUpgrade::NuTachyon => self.nu_tachyon,
         }
@@ -101,6 +110,8 @@ mod tests {
         let expected_nu6_2 = BlockHeight::from_u32(9);
         let expected_nu6_3 = BlockHeight::from_u32(10);
         let expected_nu7 = BlockHeight::from_u32(11);
+        #[cfg(zcash_unstable = "nu8")]
+        let expected_nu8 = BlockHeight::from_u32(12);
         #[cfg(zcash_unstable = "nutachyon")]
         let expected_nu_tachyon = BlockHeight::from_u32(12);
 
@@ -116,6 +127,8 @@ mod tests {
             nu6_2: Some(expected_nu6_2),
             nu6_3: Some(expected_nu6_3),
             nu7: Some(expected_nu7),
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: Some(expected_nu8),
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: Some(expected_nu_tachyon),
         };
@@ -152,6 +165,8 @@ mod tests {
         let expected_nu6_2 = BlockHeight::from_u32(9);
         let expected_nu6_3 = BlockHeight::from_u32(10);
         let expected_nu7 = BlockHeight::from_u32(11);
+        #[cfg(zcash_unstable = "nu8")]
+        let expected_nu8 = BlockHeight::from_u32(12);
         #[cfg(zcash_unstable = "nutachyon")]
         let expected_nu_tachyon = BlockHeight::from_u32(12);
 
@@ -167,6 +182,8 @@ mod tests {
             nu6_2: Some(expected_nu6_2),
             nu6_3: Some(expected_nu6_3),
             nu7: Some(expected_nu7),
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: Some(expected_nu8),
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: Some(expected_nu_tachyon),
         };
@@ -235,6 +252,8 @@ mod tests {
         let expected_nu6_2 = BlockHeight::from_u32(9);
         let expected_nu6_3 = BlockHeight::from_u32(10);
         let expected_nu7 = BlockHeight::from_u32(11);
+        #[cfg(zcash_unstable = "nu8")]
+        let expected_nu8 = BlockHeight::from_u32(12);
         #[cfg(zcash_unstable = "nutachyon")]
         let expected_nu_tachyon = BlockHeight::from_u32(12);
 
@@ -250,6 +269,8 @@ mod tests {
             nu6_2: Some(expected_nu6_2),
             nu6_3: Some(expected_nu6_3),
             nu7: Some(expected_nu7),
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: Some(expected_nu8),
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: Some(expected_nu_tachyon),
         };
