@@ -306,7 +306,7 @@ pub mod testing {
     use alloc::string::String;
     use corez::io::{self, Read, Write};
     use incrementalmerkletree::frontier::testing::TestNode;
-    use zcash_encoding::Vector;
+    use zcash_encoding::{CompactSize, Vector};
 
     use super::HashSer;
 
@@ -329,8 +329,9 @@ pub mod testing {
             })
         }
 
-        fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-            Vector::write(writer, self.as_bytes(), |w, b| w.write_all(&[*b]))
+        fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+            CompactSize::write(&mut writer, self.len())?;
+            writer.write_all(self.as_bytes())
         }
     }
 }
