@@ -5,6 +5,9 @@
 use blake2b_simd::{Hash, State};
 use corez::io::{self, Read, Write};
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) trait ReadBytesExt {
     fn read_u8(self) -> io::Result<u8>;
     fn read_u32_le(self) -> io::Result<u32>;

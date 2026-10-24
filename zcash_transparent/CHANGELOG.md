@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Reduced per-byte writer overhead in `address::Script::write`, without
+  changing the encoding or length limit
+  ([#3194](https://github.com/zcash/librustzcash/issues/3194)).
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
