@@ -33,7 +33,7 @@ use {
         codegen::{Body, Bytes, StdError},
     },
     tracing::{debug, info},
-    zcash_primitives::merkle_tree::HashSer,
+    zcash_primitives::{block::BlockHash, merkle_tree::HashSer},
     zcash_protocol::consensus::{BlockHeight, Parameters},
 };
 
@@ -108,7 +108,12 @@ where
 {
     // 3) Download chain tip metadata from lightwalletd
     // 4) Notify the wallet of the updated chain tip.
-    update_chain_tip(client, db_data).await?;
+    if let Some(rewound) = update_chain_tip(client, db_data).await? {
+        // The server's best chain left our scanned history below the tip. Drop the cached
+        // blocks of the abandoned branch and start over from the rewound height.
+        db_cache.truncate(rewound).await.map_err(Error::Cache)?;
+        return Ok(true);
+    }
 
     // Refresh UTXOs for the accounts in the wallet. We do this before we perform
     // any shielded scanning, to ensure that we discover any UTXOs between the old
@@ -298,11 +303,42 @@ where
     Ok(())
 }
 
+/// How far below a conflicting chain tip to rewind, so that the rescan starts on a block the
+/// two branches are likely to share.
+#[cfg(feature = "sync")]
+const REORG_REWIND_DEPTH: u32 = 10;
+
+/// Decides whether the server's chain tip shows a reorg that `update_chain_tip` cannot see.
+///
+/// A tip above what the wallet has scanned produces a new scan range, and the wallet finds
+/// any reorg while scanning it. A tip at or below `max_scanned` produces nothing: it is
+/// either a server that is behind, or a reorg onto a branch that is not (yet) longer than
+/// the one the wallet scanned. Only the block hash at the tip tells them apart. Returns the
+/// height to rewind to when the hashes differ.
+#[cfg(feature = "sync")]
+fn reorg_rewind_height(
+    tip_height: BlockHeight,
+    tip_hash: &BlockHash,
+    max_scanned: Option<BlockHeight>,
+    our_hash_at_tip: Option<BlockHash>,
+) -> Option<BlockHeight> {
+    match (max_scanned, our_hash_at_tip) {
+        (Some(max_scanned), Some(ours)) if tip_height <= max_scanned && &ours != tip_hash => {
+            Some(tip_height.saturating_sub(REORG_REWIND_DEPTH))
+        }
+        _ => None,
+    }
+}
+
+/// Updates the wallet's view of the chain tip.
+///
+/// Returns the height the wallet was rewound to, if the server's tip is on a different
+/// branch at a height the wallet has already scanned. See [`reorg_rewind_height`].
 #[cfg(feature = "sync")]
 async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
-) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
+) -> Result<Option<BlockHeight>, Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
     ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
@@ -311,20 +347,40 @@ where
     DbT: WalletWrite,
     <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
 {
-    let tip_height: BlockHeight = client
+    let latest = client
         .get_latest_block(service::ChainSpec::default())
         .await?
-        .get_ref()
+        .into_inner();
+    let tip_height: BlockHeight = latest
         .height
         .try_into()
         .map_err(|_| Error::MisbehavingServer)?;
-
     info!("Latest block height is {}", tip_height);
+
+    let max_scanned = db_data
+        .block_max_scanned()
+        .map_err(Error::Wallet)?
+        .map(|meta| meta.block_height());
+    if max_scanned.is_some_and(|max_scanned| tip_height <= max_scanned) {
+        let tip_hash = BlockHash::try_from_slice(&latest.hash).ok_or(Error::MisbehavingServer)?;
+        let ours = db_data.get_block_hash(tip_height).map_err(Error::Wallet)?;
+        if let Some(rewind_height) = reorg_rewind_height(tip_height, &tip_hash, max_scanned, ours) {
+            info!(
+                "Chain tip {} is on a different branch than our scanned history, rewinding to {}",
+                tip_height, rewind_height,
+            );
+            let rewound = db_data
+                .truncate_to_height(rewind_height)
+                .map_err(Error::Wallet)?;
+            return Ok(Some(rewound));
+        }
+    }
+
     db_data
         .update_chain_tip(tip_height)
         .map_err(Error::Wallet)?;
 
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(feature = "sync")]
@@ -657,7 +713,10 @@ mod tests {
         proto::service::compact_tx_streamer_client::CompactTxStreamerClient,
     };
 
-    use super::update_subtree_roots;
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::consensus::BlockHeight;
+
+    use super::{reorg_rewind_height, update_subtree_roots};
 
     #[derive(Clone)]
     struct CountingGrpcService(Arc<AtomicUsize>);
@@ -695,5 +754,55 @@ mod tests {
         });
 
         assert_eq!(request_count.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn reorg_onto_a_shorter_branch_rewinds() {
+        let h = BlockHeight::from_u32;
+        let ours = BlockHash([1; 32]);
+        let theirs = BlockHash([2; 32]);
+
+        // The server's tip is below what we scanned and its block differs from ours: the best
+        // chain moved to a branch that is not yet as long as the one we scanned.
+        assert_eq!(
+            reorg_rewind_height(h(1_000), &theirs, Some(h(1_003)), Some(ours)),
+            Some(h(990))
+        );
+        // Same height, different block: a reorg of equal length.
+        assert_eq!(
+            reorg_rewind_height(h(1_003), &theirs, Some(h(1_003)), Some(ours)),
+            Some(h(993))
+        );
+        // Near genesis the rewind height saturates instead of underflowing.
+        assert_eq!(
+            reorg_rewind_height(h(4), &theirs, Some(h(6)), Some(ours)),
+            Some(h(0))
+        );
+    }
+
+    #[test]
+    fn no_rewind_without_a_conflicting_block() {
+        let h = BlockHeight::from_u32;
+        let ours = BlockHash([1; 32]);
+
+        // A server that is behind us on the same chain.
+        assert_eq!(
+            reorg_rewind_height(h(1_000), &ours, Some(h(1_003)), Some(ours)),
+            None
+        );
+        // A tip above what we scanned: the new scan range will find any reorg.
+        assert_eq!(
+            reorg_rewind_height(h(1_004), &BlockHash([2; 32]), Some(h(1_003)), Some(ours)),
+            None
+        );
+        // Nothing scanned yet, or no block stored at that height.
+        assert_eq!(
+            reorg_rewind_height(h(1_000), &BlockHash([2; 32]), None, None),
+            None
+        );
+        assert_eq!(
+            reorg_rewind_height(h(1_000), &BlockHash([2; 32]), Some(h(1_003)), None),
+            None
+        );
     }
 }
