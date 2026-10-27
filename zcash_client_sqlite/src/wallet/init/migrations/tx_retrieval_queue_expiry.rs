@@ -4,7 +4,6 @@ use rusqlite::{Transaction, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
 use crate::wallet::{chain_tip_height, init::WalletMigrationError};
 
@@ -14,6 +13,10 @@ use super::tx_retrieval_queue;
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x9ffe82d4_3bf5_459a_9a21_7affd9e88e95);
 
 pub(super) const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+
+/// The default transaction expiry delta, in blocks, that the wallet used when this migration was
+/// written. It is pinned so that the migration's effect does not change with later defaults.
+const PRE_NU7_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 pub(super) struct Migration;
 
@@ -56,7 +59,7 @@ impl RusqliteMigration for Migration {
              SET request_expiry = :manual_expiry
              WHERE request_expiry IS NULL",
             named_params! {
-                ":manual_expiry": chain_tip.map(|h| u32::from(h) + DEFAULT_TX_EXPIRY_DELTA)
+                ":manual_expiry": chain_tip.map(|h| u32::from(h) + PRE_NU7_DEFAULT_TX_EXPIRY_DELTA)
             },
         )?;
         Ok(())

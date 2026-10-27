@@ -10,15 +10,15 @@ workspace.
 
 ## [Unreleased]
 
-## [0.10.0-pre.1] - 2026-10-06
+## [0.10.0] - 2026-10-21
 
 ### Changed
-- Migrated to `zcash_address 0.14.0-pre.1`.
-
-## [0.10.0-pre.0] - 2026-10-02
-
-### Changed
-- Migrated to `zcash_address 0.14.0-pre.0` and `zcash_protocol 0.11.0-pre.0`.
+- MSRV is now 1.89
+- Migrated to `zcash_address 0.14.0` and `zcash_protocol 0.11.0`.
+- Sprout recipients are now rejected when parsing a payment request or constructing
+  a `Payment`, as required by ZIP 321. Parsing returns the new
+  `Zip321Error::SproutRecipient` variant and `Payment::new` returns the new
+  `PaymentError::SproutAddress` variant.
 
 ## [0.9.0] - 2026-08-18
 

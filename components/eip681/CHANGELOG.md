@@ -19,6 +19,9 @@ workspace.
 - `error::Error::AmbiguousEncoding`
 - `testing::arb_u256` (behind the `test-dependencies` feature)
 
+### Changed
+- MSRV is now 1.89
+
 ### Removed
 - `TransactionRequest::from_native_request_parts` and
   `TransactionRequest::from_erc20_request_parts`. Use `NativeRequest::from_parts`

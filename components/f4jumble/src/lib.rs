@@ -364,7 +364,6 @@ mod std_tests {
     use blake2b_simd::blake2b;
     use proptest::collection::vec;
     use proptest::prelude::*;
-    use std::format;
     use std::vec::Vec;
 
     use super::{f4jumble, f4jumble_inv, test_vectors, test_vectors_long, VALID_LENGTH};

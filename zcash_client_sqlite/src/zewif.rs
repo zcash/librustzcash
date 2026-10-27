@@ -82,9 +82,7 @@ use zcash_keys::{
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     PoolType, ShieldedPool,
-    consensus::{
-        self, BlockHeight, BranchId, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
-    },
+    consensus::{self, BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
 };
 use zip32::fingerprint::SeedFingerprint;
 
@@ -1507,9 +1505,9 @@ where
             }
             ::zewif::AccountViewingKey::SaplingExtFvk(efvk) => {
                 let decoded = zcash_keys::encoding::decode_extended_full_viewing_key(
-                    params
-                        .network_type()
-                        .hrp_sapling_extended_full_viewing_key(),
+                    zcash_keys::constants::hrp_sapling_extended_full_viewing_key(
+                        params.network_type(),
+                    ),
                     efvk.encoding(),
                 )
                 .map_err(|_| ZewifImportError::SaplingFvkDecoding {

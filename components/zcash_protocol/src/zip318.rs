@@ -15,7 +15,7 @@
 
 use core::num::NonZeroU32;
 
-use crate::consensus::BlockHeight;
+use crate::consensus::{BlockHeight, NU7_POW_TARGET_SPACING_RATIO, NetworkUpgrade, Parameters};
 use crate::value::{COIN, Zatoshis};
 
 /// The base of the denomination scale: every denomination is a multiple of a power of this radix.
@@ -179,30 +179,248 @@ pub fn is_canonical_denomination(value: Zatoshis) -> bool {
 }
 
 /// The canonical rolling EXPIRY height for a transaction targeting `target_height` ([ZIP 318]'s
-/// EXPIRY MUST): the most recent multiple of [`EXPIRY_MODULUS`] at or below `target_height`, plus
-/// [`EXPIRY_WINDOW`] (`2 * EXPIRY_MODULUS`).
+/// EXPIRY MUST): the most recent multiple of the expiry modulus at or below `target_height`, plus
+/// twice the modulus.
+///
+/// The modulus is [`EXPIRY_MODULUS`] reference blocks, converted to blocks by `spacing` at
+/// `target_height`: 34,560 blocks before NU7 activation and 103,680 blocks from activation, both
+/// about 30 days.
 ///
 /// This is a pure function of the height, so it reveals nothing per-wallet: every transaction in the
 /// same modulus period shares one expiry, whereas an ordinary per-transaction expiry would single a
-/// pool crossing out immediately. It guarantees between one and two [`EXPIRY_MODULUS`] periods
-/// (about one to two months) of remaining validity — the result is always strictly greater than
-/// `target_height` and at most [`EXPIRY_WINDOW`] above it. Saturates at `u32::MAX`.
+/// pool crossing out immediately. The result is always strictly greater than `target_height`, and
+/// leaves between one and two moduli of remaining validity. Saturates at `u32::MAX`.
 ///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
-pub fn expiry_height(target_height: BlockHeight) -> BlockHeight {
-    let h = u32::from(target_height);
-    // `BlockHeight`'s delta addition saturates at `u32::MAX`.
-    BlockHeight::from_u32(h - (h % EXPIRY_MODULUS)) + EXPIRY_WINDOW
+pub fn expiry_height(spacing: &BlockSpacing, target_height: BlockHeight) -> BlockHeight {
+    rolling_expiry(spacing, EXPIRY_MODULUS, EXPIRY_WINDOW, target_height)
 }
 
-/// The interval, in blocks, between the durable anchor checkpoints a wallet retains, and equally the
-/// grid a [ZIP 318] pool-crossing transfer anchors to.
+/// The rolling expiry for `reference`, with `modulus` and `window` given in reference blocks and
+/// scaled by `spacing` at `reference`. Saturates at `u32::MAX`.
+fn rolling_expiry(
+    spacing: &BlockSpacing,
+    modulus: u32,
+    window: u32,
+    reference: BlockHeight,
+) -> BlockHeight {
+    let ratio = u64::from(spacing.blocks_per_reference_block(reference));
+    let h = u64::from(u32::from(reference));
+    let modulus = u64::from(modulus) * ratio;
+    let expiry = h - (h % modulus) + u64::from(window) * ratio;
+    BlockHeight::from_u32(u32::try_from(expiry).unwrap_or(u32::MAX))
+}
+
+/// The block spacing of a chain, for converting [ZIP 318] durations into block heights.
 ///
-/// A height `h` is a BOUNDARY of this interval exactly when `h` is a multiple of it (see
-/// [`Self::is_boundary`]). Those are the heights whose checkpoints a wallet keeps alive past
-/// ordinary pruning, and the only tree states a pool crossing may be proved against. A crossing is
-/// proved long after its boundary has passed, so the grid a wallet retains and the grid a crossing
-/// anchors to must be the same — which is why this is one type rather than one per crate.
+/// ZIP 318 states each duration as a number of REFERENCE BLOCKS: blocks at the 75-second target
+/// spacing. From NU7 activation the target spacing is 25 seconds, so the same duration spans
+/// [`NU7_POW_TARGET_SPACING_RATIO`] times as many blocks. A duration that starts before activation
+/// and ends after it keeps its exact length: its part before activation counts one block per
+/// reference block, and its part after activation counts the ratio.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockSpacing {
+    nu7_activation: Option<BlockHeight>,
+}
+
+impl BlockSpacing {
+    /// The spacing of a chain on which NU7 does not activate: one block per reference block at
+    /// every height.
+    pub const UNIFORM: Self = Self {
+        nu7_activation: None,
+    };
+
+    /// The spacing of the chain that `params` describe.
+    pub fn for_network<P: Parameters>(params: &P) -> Self {
+        Self {
+            nu7_activation: params.activation_height(NetworkUpgrade::Nu7),
+        }
+    }
+
+    /// The spacing of a chain on which NU7 activates at `nu7_activation`.
+    pub const fn with_nu7_activation(nu7_activation: BlockHeight) -> Self {
+        Self {
+            nu7_activation: Some(nu7_activation),
+        }
+    }
+
+    /// The NU7 activation height of this chain, if NU7 activates on it.
+    pub fn nu7_activation(&self) -> Option<BlockHeight> {
+        self.nu7_activation
+    }
+
+    /// The number of blocks that one reference block spans at `height`: 1 before NU7 activation,
+    /// and [`NU7_POW_TARGET_SPACING_RATIO`] from activation.
+    pub fn blocks_per_reference_block(&self, height: BlockHeight) -> u32 {
+        match self.nu7_activation {
+            Some(activation) if height >= activation => NU7_POW_TARGET_SPACING_RATIO,
+            _ => 1,
+        }
+    }
+
+    /// Returns the height that is `reference_blocks` reference blocks after `from`. Saturates at
+    /// `u32::MAX`.
+    pub fn advance(&self, from: BlockHeight, reference_blocks: u32) -> BlockHeight {
+        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
+        self.height_at(self.time_of(from) + u64::from(reference_blocks) * ratio)
+    }
+
+    /// Returns the height that is as long after `height` as `to` is after `from`, or `height` when
+    /// `to` is not after `from`. Saturates at `u32::MAX`.
+    pub fn shift(&self, height: BlockHeight, from: BlockHeight, to: BlockHeight) -> BlockHeight {
+        let elapsed = self.time_of(to).saturating_sub(self.time_of(from));
+        self.height_at(self.time_of(height) + elapsed)
+    }
+
+    /// Returns whether `to` is more than `reference_blocks` reference blocks after `from`.
+    pub fn exceeds(&self, from: BlockHeight, to: BlockHeight, reference_blocks: u32) -> bool {
+        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
+        self.time_of(to).saturating_sub(self.time_of(from)) > u64::from(reference_blocks) * ratio
+    }
+
+    /// The NU7 activation height as a `u64`, or one past `u32::MAX` when NU7 does not activate,
+    /// so that every height is below it.
+    fn activation(&self) -> u64 {
+        self.nu7_activation
+            .map_or(u64::from(u32::MAX) + 1, |h| u64::from(u32::from(h)))
+    }
+
+    /// The time at which `height` is reached, in units of the post-NU7 target spacing, measured
+    /// from the genesis block. Each block before activation adds the spacing ratio, and each block
+    /// from activation adds one.
+    fn time_of(&self, height: BlockHeight) -> u64 {
+        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
+        let activation = self.activation();
+        let h = u64::from(u32::from(height));
+        if h <= activation {
+            h * ratio
+        } else {
+            activation * ratio + (h - activation)
+        }
+    }
+
+    /// The least height reached at or after `time`. Saturates at `u32::MAX`.
+    fn height_at(&self, time: u64) -> BlockHeight {
+        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
+        let activation = self.activation();
+        let h = if time <= activation * ratio {
+            time.div_ceil(ratio)
+        } else {
+            activation + (time - activation * ratio)
+        };
+        BlockHeight::from_u32(u32::try_from(h).unwrap_or(u32::MAX))
+    }
+}
+
+/// The boundary heights of an [`AnchorBucketInterval`] on a chain with a given [`BlockSpacing`].
+///
+/// The interval is a number of reference blocks. Before NU7 activation a height is a boundary when
+/// it is a multiple of the interval. From activation it is a boundary when it is a multiple of the
+/// interval times [`NU7_POW_TARGET_SPACING_RATIO`], which keeps the boundaries the same time apart.
+/// Every boundary from activation is also a multiple of the interval, so a wallet that retains the
+/// checkpoint at every multiple of the interval retains every boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnchorGrid {
+    interval: AnchorBucketInterval,
+    spacing: BlockSpacing,
+}
+
+impl AnchorGrid {
+    /// The grid of `interval` on a chain with the given `spacing`.
+    pub const fn new(interval: AnchorBucketInterval, spacing: BlockSpacing) -> Self {
+        Self { interval, spacing }
+    }
+
+    /// The interval, in reference blocks, between successive boundaries.
+    pub fn interval(&self) -> AnchorBucketInterval {
+        self.interval
+    }
+
+    /// The block spacing of the chain this grid lies on.
+    pub fn spacing(&self) -> BlockSpacing {
+        self.spacing
+    }
+
+    /// The distance in blocks between boundaries at heights from `height` onward, while the
+    /// spacing does not change.
+    fn step_at(&self, height: u64) -> u64 {
+        let ratio = if height >= self.spacing.activation() {
+            NU7_POW_TARGET_SPACING_RATIO
+        } else {
+            1
+        };
+        u64::from(self.interval.block_count().get()) * u64::from(ratio)
+    }
+
+    /// Returns whether `height` is a boundary of this grid, i.e. whether the checkpoint at
+    /// `height` is retained as a durable anchor.
+    pub fn is_boundary(&self, height: BlockHeight) -> bool {
+        let h = u64::from(u32::from(height));
+        h.is_multiple_of(self.step_at(h))
+    }
+
+    /// Returns the greatest boundary height that does not exceed `height`.
+    pub fn boundary_at_or_below(&self, height: BlockHeight) -> BlockHeight {
+        let h = u64::from(u32::from(height));
+        let activation = self.spacing.activation();
+        let below = if h >= activation {
+            let candidate = h - h % self.step_at(h);
+            if candidate >= activation {
+                candidate
+            } else {
+                // No boundary lies in `[activation, h]`. Activation is positive here, because 0
+                // is a boundary of every step, so the greatest boundary below activation exists.
+                let last_before = activation - 1;
+                last_before - last_before % self.step_at(last_before)
+            }
+        } else {
+            h - h % self.step_at(h)
+        };
+        BlockHeight::from_u32(u32::try_from(below).expect("at most `height`"))
+    }
+
+    /// Returns the least boundary height that is not below `height`. Saturates at `u32::MAX`.
+    pub fn boundary_at_or_above(&self, height: BlockHeight) -> BlockHeight {
+        let h = u64::from(u32::from(height));
+        let activation = self.spacing.activation();
+        let round_up = |h: u64, step: u64| h.div_ceil(step) * step;
+        let above = if h >= activation {
+            round_up(h, self.step_at(h))
+        } else {
+            let candidate = round_up(h, self.step_at(h));
+            if candidate < activation {
+                candidate
+            } else {
+                round_up(activation, self.step_at(activation))
+            }
+        };
+        BlockHeight::from_u32(u32::try_from(above).unwrap_or(u32::MAX))
+    }
+
+    /// Returns the greatest boundary height strictly below `height`, or `None` if `height` is 0.
+    pub fn boundary_before(&self, height: BlockHeight) -> Option<BlockHeight> {
+        let h = u32::from(height);
+        h.checked_sub(1)
+            .map(|below| self.boundary_at_or_below(BlockHeight::from_u32(below)))
+    }
+
+    /// Returns the least boundary height strictly above `height`. Saturates at `u32::MAX`.
+    pub fn boundary_after(&self, height: BlockHeight) -> BlockHeight {
+        self.boundary_at_or_above(BlockHeight::from_u32(u32::from(height).saturating_add(1)))
+    }
+}
+
+/// The interval, in reference blocks, between the durable anchor checkpoints a wallet retains, and
+/// equally the grid a [ZIP 318] pool-crossing transfer anchors to.
+///
+/// The boundaries of the interval on a particular chain are given by an [`AnchorGrid`], which
+/// converts the interval to blocks at each height. Those are the heights whose checkpoints a wallet
+/// keeps alive past ordinary pruning, and the only tree states a pool crossing may be proved
+/// against. A crossing is proved long after its boundary has passed, so the grid a wallet retains
+/// and the grid a crossing anchors to must be the same — which is why this is one type rather than
+/// one per crate.
 ///
 /// The interval is a modulus, so it is necessarily non-zero.
 ///
@@ -211,8 +429,8 @@ pub fn expiry_height(target_height: BlockHeight) -> BlockHeight {
 pub struct AnchorBucketInterval(NonZeroU32);
 
 impl AnchorBucketInterval {
-    /// The interval specified by [ZIP 318]: 144 blocks, about three hours (8 per day) at the Zcash
-    /// ~75-second target block spacing.
+    /// The interval specified by [ZIP 318]: 144 reference blocks, about three hours (8 per day).
+    /// That is 144 blocks before NU7 activation and 432 blocks from activation.
     ///
     /// [ZIP 318]: https://zips.z.cash/zip-0318
     pub const ZIP_318: Self = Self(NonZeroU32::new(144).expect("144 is nonzero"));
@@ -235,34 +453,9 @@ impl AnchorBucketInterval {
         Self(blocks)
     }
 
-    /// Returns the interval as a number of blocks.
+    /// Returns the interval as a number of reference blocks.
     pub fn block_count(&self) -> NonZeroU32 {
         self.0
-    }
-
-    /// Returns whether `height` is a boundary of this interval, i.e. whether a checkpoint at
-    /// `height` is retained as a durable anchor.
-    pub fn is_boundary(&self, height: BlockHeight) -> bool {
-        u32::from(height) % self.0 == 0
-    }
-
-    /// Returns the greatest boundary height that does not exceed `height`, i.e. `height` rounded
-    /// DOWN to a multiple of this interval.
-    pub fn boundary_at_or_below(&self, height: BlockHeight) -> BlockHeight {
-        let h = u32::from(height);
-        BlockHeight::from_u32(h - (h % self.0))
-    }
-
-    /// Returns the least boundary height that is not below `height`, i.e. `height` rounded UP to a
-    /// multiple of this interval. Saturates at [`u32::MAX`].
-    pub fn boundary_at_or_above(&self, height: BlockHeight) -> BlockHeight {
-        let h = u32::from(height);
-        let r = h % self.0;
-        BlockHeight::from_u32(if r == 0 {
-            h
-        } else {
-            h.saturating_add(self.0.get() - r)
-        })
     }
 }
 
@@ -274,8 +467,9 @@ impl Default for AnchorBucketInterval {
 
 /// The [ZIP 318] pool-migration parameters in force for a given network.
 ///
-/// Unlike [`NetworkConstants`], this trait is **unsealed** and every method carries a default body
-/// returning the ZIP 318 value. That is deliberate. `NetworkConstants` is blanket-implemented for
+/// Unlike [`NetworkConstants`], this trait is **unsealed**, and every method other than
+/// [`block_spacing`](Self::block_spacing) carries a default body returning the ZIP 318 value. That is
+/// deliberate. `NetworkConstants` is blanket-implemented for
 /// every `P: Parameters`, which makes per-network override impossible; ZIP 318 needs the opposite,
 /// because a test network must be able to shorten the anchor bucket grid so that a migration
 /// completes in a workable time. An implementor overrides only the accessors it cares about and
@@ -297,10 +491,20 @@ impl Default for AnchorBucketInterval {
 /// [`NetworkType`]: crate::consensus::NetworkType
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 pub trait PoolMigrationConstants {
-    /// The grid that durable anchor checkpoints are retained on, and that pool-crossing transfers
-    /// are proved against.
+    /// The block spacing of the chain these parameters apply to, which converts their durations
+    /// from reference blocks into blocks.
+    fn block_spacing(&self) -> BlockSpacing;
+
+    /// The interval of the grid that durable anchor checkpoints are retained on, and that
+    /// pool-crossing transfers are proved against.
     fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
         AnchorBucketInterval::ZIP_318
+    }
+
+    /// The boundaries of [`anchor_bucket_interval`](Self::anchor_bucket_interval) on the chain
+    /// these parameters apply to.
+    fn anchor_grid(&self) -> AnchorGrid {
+        AnchorGrid::new(self.anchor_bucket_interval(), self.block_spacing())
     }
 
     /// The largest denomination a single pool crossing may carry.
@@ -319,12 +523,14 @@ pub trait PoolMigrationConstants {
         PREP_TX_ACTIONS
     }
 
-    /// The mean and inclusive cap, in blocks, of the transfer inter-arrival delay distribution.
+    /// The mean and inclusive cap, in reference blocks, of the transfer inter-arrival delay
+    /// distribution.
     fn transfer_delay(&self) -> (NonZeroU32, NonZeroU32) {
         (TRANSFER_DELAY_MEAN, TRANSFER_DELAY_CAP)
     }
 
-    /// The mean and inclusive cap, in blocks, of the preparation inter-arrival delay distribution.
+    /// The mean and inclusive cap, in reference blocks, of the preparation inter-arrival delay
+    /// distribution.
     fn preparation_delay(&self) -> (NonZeroU32, NonZeroU32) {
         (PREP_DELAY_MEAN, PREP_DELAY_CAP)
     }
@@ -334,7 +540,7 @@ pub trait PoolMigrationConstants {
         ANCHOR_AGE_CAP
     }
 
-    /// The modulus and window, in blocks, of the canonical rolling expiry window.
+    /// The modulus and window, in reference blocks, of the canonical rolling expiry window.
     fn expiry_window(&self) -> (u32, u32) {
         (EXPIRY_MODULUS, EXPIRY_WINDOW)
     }
@@ -351,8 +557,7 @@ pub trait PoolMigrationConstants {
     /// [`expiry_window`](Self::expiry_window).
     fn canonical_expiry(&self, reference: BlockHeight) -> BlockHeight {
         let (modulus, window) = self.expiry_window();
-        let h = u32::from(reference);
-        BlockHeight::from_u32(h - (h % modulus)) + window
+        rolling_expiry(&self.block_spacing(), modulus, window, reference)
     }
 
     /// Returns whether `expiry` is the canonical rolling expiry for a transaction targeting
@@ -711,6 +916,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
     #[test]
@@ -778,9 +985,171 @@ mod tests {
         );
     }
 
+    /// The NU7 spacing ratio, as the `u32` the expected values below are computed in.
+    const R: u32 = NU7_POW_TARGET_SPACING_RATIO;
+
+    /// The height reached by advancing `d` reference blocks from `h` when NU7 activates at `a`,
+    /// written as the three cases of the specification rather than through the time coordinate.
+    fn specified_advance(a: u32, h: u32, d: u32) -> u32 {
+        if h >= a {
+            h + R * d
+        } else if h + d <= a {
+            h + d
+        } else {
+            a + R * (h + d - a)
+        }
+    }
+
+    /// Whether `h` is a boundary of interval `i` when NU7 activates at `a`, per the specification.
+    fn specified_is_boundary(a: u32, i: u32, h: u32) -> bool {
+        if h < a {
+            h.is_multiple_of(i)
+        } else {
+            h.is_multiple_of(R * i)
+        }
+    }
+
+    #[test]
+    fn uniform_spacing_counts_one_block_per_reference_block() {
+        let s = BlockSpacing::UNIFORM;
+        for (h, d) in [(0u32, 0u32), (0, 66), (2_000_000, 576)] {
+            assert_eq!(
+                s.advance(BlockHeight::from_u32(h), d),
+                BlockHeight::from_u32(h + d)
+            );
+            assert_eq!(s.blocks_per_reference_block(BlockHeight::from_u32(h)), 1);
+        }
+    }
+
+    #[test]
+    fn advance_saturates() {
+        let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(10));
+        assert_eq!(
+            s.advance(BlockHeight::from_u32(u32::MAX - 1), 1),
+            BlockHeight::from_u32(u32::MAX)
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn advance_follows_the_piecewise_rule(
+            a in 0u32..1_000_000,
+            h in 0u32..1_000_000,
+            d in 0u32..10_000,
+        ) {
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            prop_assert_eq!(
+                u32::from(s.advance(BlockHeight::from_u32(h), d)),
+                specified_advance(a, h, d)
+            );
+        }
+
+        #[test]
+        fn successive_advances_compose(
+            a in 0u32..1_000_000,
+            h in 0u32..1_000_000,
+            d1 in 0u32..10_000,
+            d2 in 0u32..10_000,
+        ) {
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            let h = BlockHeight::from_u32(h);
+            prop_assert_eq!(s.advance(s.advance(h, d1), d2), s.advance(h, d1 + d2));
+        }
+
+        #[test]
+        fn shifting_moves_by_the_elapsed_duration(
+            a in 0u32..1_000_000,
+            from in 0u32..1_000_000,
+            h in 0u32..1_000_000,
+            d in 0u32..10_000,
+        ) {
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            let (from, h) = (BlockHeight::from_u32(from), BlockHeight::from_u32(h));
+            let to = s.advance(from, d);
+            // Shifting the start of a duration moves it to the end of the duration.
+            prop_assert_eq!(s.shift(from, from, to), to);
+            // Shifting any height by an elapsed duration of `d` reference blocks advances it by
+            // `d` reference blocks.
+            prop_assert_eq!(s.shift(h, from, to), s.advance(h, d));
+            // A duration that does not move forward leaves the height in place.
+            prop_assert_eq!(s.shift(h, to, from), h);
+        }
+
+        #[test]
+        fn exceeds_compares_against_the_advanced_height(
+            a in 0u32..1_000_000,
+            from in 0u32..1_000_000,
+            d in 0u32..10_000,
+        ) {
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            let from = BlockHeight::from_u32(from);
+            let end = s.advance(from, d);
+            prop_assert!(!s.exceeds(from, end, d));
+            prop_assert!(s.exceeds(from, end + 1, d));
+        }
+
+        #[test]
+        fn grid_boundaries_follow_the_specification(
+            a in 0u32..2_000,
+            i in 1u32..50,
+            h in 0u32..3_000,
+        ) {
+            let grid = AnchorGrid::new(
+                AnchorBucketInterval::custom(NonZeroU32::new(i).expect("nonzero")),
+                BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a)),
+            );
+            let is = |h: u32| specified_is_boundary(a, i, h);
+            prop_assert_eq!(grid.is_boundary(BlockHeight::from_u32(h)), is(h));
+            // Every boundary from activation is a multiple of the interval.
+            if h >= a && is(h) {
+                prop_assert_eq!(h % i, 0);
+            }
+
+            let below = u32::from(grid.boundary_at_or_below(BlockHeight::from_u32(h)));
+            prop_assert!(below <= h && is(below));
+            prop_assert!((below + 1..=h).all(|x| !is(x)));
+
+            let above = u32::from(grid.boundary_at_or_above(BlockHeight::from_u32(h)));
+            prop_assert!(above >= h && is(above));
+            prop_assert!((h..above).all(|x| !is(x)));
+
+            let before = grid.boundary_before(BlockHeight::from_u32(h)).map(u32::from);
+            prop_assert_eq!(before, (0..h).rev().find(|x| is(*x)));
+            let after = u32::from(grid.boundary_after(BlockHeight::from_u32(h)));
+            prop_assert_eq!(Some(after), (h + 1..).find(|x| is(*x)));
+        }
+
+        #[test]
+        fn expiry_from_nu7_uses_the_scaled_modulus(
+            a in 0u32..10_000_000,
+            offset in 0u32..10_000_000,
+        ) {
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            let h = a + offset;
+            let modulus = R * EXPIRY_MODULUS;
+            let expiry = u32::from(expiry_height(&s, BlockHeight::from_u32(h)));
+            prop_assert_eq!(expiry, h - h % modulus + 2 * modulus);
+            // Between one and two scaled moduli of validity.
+            prop_assert!(expiry - h > modulus && expiry - h <= 2 * modulus);
+            // The height-independent test still admits it.
+            prop_assert!(Zip318Params.is_canonical_expiry_value(BlockHeight::from_u32(expiry)));
+        }
+
+        #[test]
+        fn expiry_before_nu7_is_unchanged(a in 1u32..10_000_000, h in 0u32..10_000_000) {
+            prop_assume!(h < a);
+            let s = BlockSpacing::with_nu7_activation(BlockHeight::from_u32(a));
+            let h = BlockHeight::from_u32(h);
+            prop_assert_eq!(
+                expiry_height(&s, h),
+                expiry_height(&BlockSpacing::UNIFORM, h)
+            );
+        }
+    }
+
     #[test]
     fn boundaries_round_to_multiples_of_the_interval() {
-        let i = AnchorBucketInterval::ZIP_318;
+        let i = AnchorGrid::new(AnchorBucketInterval::ZIP_318, BlockSpacing::UNIFORM);
         for (height, below, above) in [
             (0u32, 0u32, 0u32),
             (1, 0, 144),
@@ -816,19 +1185,21 @@ mod tests {
         for offset in [0u32, 1, EXPIRY_MODULUS / 2, EXPIRY_MODULUS - 1] {
             let h = BlockHeight::from_u32(period_start + offset);
             assert_eq!(
-                expiry_height(h),
+                expiry_height(&BlockSpacing::UNIFORM, h),
                 expected,
                 "offset {offset} must share the expiry"
             );
             // Strictly in the future, and never more than a whole window ahead.
-            assert!(expiry_height(h) > h);
-            assert!(u32::from(expiry_height(h)) - u32::from(h) <= EXPIRY_WINDOW);
+            assert!(expiry_height(&BlockSpacing::UNIFORM, h) > h);
+            assert!(
+                u32::from(expiry_height(&BlockSpacing::UNIFORM, h)) - u32::from(h) <= EXPIRY_WINDOW
+            );
         }
 
         // The next period moves to the next shared expiry.
         let next = BlockHeight::from_u32(period_start + EXPIRY_MODULUS);
         assert_eq!(
-            expiry_height(next),
+            expiry_height(&BlockSpacing::UNIFORM, next),
             BlockHeight::from_u32(period_start + EXPIRY_MODULUS + EXPIRY_WINDOW)
         );
     }
@@ -850,7 +1221,11 @@ mod tests {
     fn defaults_are_the_zip_318_values() {
         #[derive(Clone)]
         struct Specified;
-        impl PoolMigrationConstants for Specified {}
+        impl PoolMigrationConstants for Specified {
+            fn block_spacing(&self) -> BlockSpacing {
+                BlockSpacing::UNIFORM
+            }
+        }
 
         assert_eq!(
             Specified.anchor_bucket_interval(),
@@ -880,6 +1255,10 @@ mod tests {
         struct ShortGrid;
 
         impl PoolMigrationConstants for ShortGrid {
+            fn block_spacing(&self) -> BlockSpacing {
+                BlockSpacing::UNIFORM
+            }
+
             fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
                 AnchorBucketInterval::custom(NonZeroU32::new(12).expect("12 is nonzero"))
             }
@@ -898,6 +1277,10 @@ mod tests {
         struct SmallCap;
 
         impl PoolMigrationConstants for SmallCap {
+            fn block_spacing(&self) -> BlockSpacing {
+                BlockSpacing::UNIFORM
+            }
+
             fn denomination_cap(&self) -> Zatoshis {
                 Zatoshis::const_from_u64(COIN)
             }
@@ -914,7 +1297,11 @@ mod tests {
     /// A wallet on the specified parameters.
     #[derive(Clone)]
     struct Zip318Params;
-    impl PoolMigrationConstants for Zip318Params {}
+    impl PoolMigrationConstants for Zip318Params {
+        fn block_spacing(&self) -> BlockSpacing {
+            BlockSpacing::UNIFORM
+        }
+    }
 
     /// The canonical expiry agrees with the free function on the specified parameters, and an
     /// ordinary expiry (a short fixed delta past the target) never satisfies it.
@@ -922,10 +1309,16 @@ mod tests {
     fn canonical_expiry_matches_the_specified_window() {
         for height in [0u32, 1, 144, 34_559, 34_560, 2_000_000] {
             let h = BlockHeight::from_u32(height);
-            assert_eq!(Zip318Params.canonical_expiry(h), expiry_height(h));
-            assert!(Zip318Params.is_canonical_expiry(expiry_height(h), h));
-            // The `DEFAULT_TX_EXPIRY_DELTA` of an ordinary transaction is 40 blocks.
-            assert!(!Zip318Params.is_canonical_expiry(h + 40, h));
+            assert_eq!(
+                Zip318Params.canonical_expiry(h),
+                expiry_height(&BlockSpacing::UNIFORM, h)
+            );
+            assert!(Zip318Params.is_canonical_expiry(expiry_height(&BlockSpacing::UNIFORM, h), h));
+            // An ordinary transaction's default expiry delta is 40 blocks before NU7 activation,
+            // and 120 blocks from NU7 activation onward.
+            for ordinary_expiry_delta in [40, 120] {
+                assert!(!Zip318Params.is_canonical_expiry(h + ordinary_expiry_delta, h));
+            }
         }
     }
 
@@ -936,6 +1329,10 @@ mod tests {
         #[derive(Clone)]
         struct ShortWindow;
         impl PoolMigrationConstants for ShortWindow {
+            fn block_spacing(&self) -> BlockSpacing {
+                BlockSpacing::UNIFORM
+            }
+
             fn expiry_window(&self) -> (u32, u32) {
                 (100, 200)
             }
@@ -944,7 +1341,7 @@ mod tests {
         let h = BlockHeight::from_u32(250);
         assert_eq!(ShortWindow.canonical_expiry(h), BlockHeight::from_u32(400));
         assert!(ShortWindow.is_canonical_expiry(BlockHeight::from_u32(400), h));
-        assert!(!ShortWindow.is_canonical_expiry(expiry_height(h), h));
+        assert!(!ShortWindow.is_canonical_expiry(expiry_height(&BlockSpacing::UNIFORM, h), h));
     }
 
     /// The height-independent expiry test admits every canonical expiry, and rejects the ordinary
@@ -954,7 +1351,7 @@ mod tests {
         for height in [0u32, 1, 144, 34_559, 34_560, 2_000_000] {
             let h = BlockHeight::from_u32(height);
             assert!(
-                Zip318Params.is_canonical_expiry_value(expiry_height(h)),
+                Zip318Params.is_canonical_expiry_value(expiry_height(&BlockSpacing::UNIFORM, h)),
                 "the canonical expiry for {height} must be admitted without a reference height"
             );
             assert!(
@@ -965,7 +1362,7 @@ mod tests {
 
         // Weaker than the reference-height form, and this is the gap: an expiry canonical for one
         // period is admitted while a transaction mined in another period is being judged.
-        let other_period = expiry_height(BlockHeight::from_u32(0));
+        let other_period = expiry_height(&BlockSpacing::UNIFORM, BlockHeight::from_u32(0));
         let mined_much_later = BlockHeight::from_u32(10 * EXPIRY_MODULUS);
         assert!(Zip318Params.is_canonical_expiry_value(other_period));
         assert!(!Zip318Params.is_canonical_expiry(other_period, mined_much_later));

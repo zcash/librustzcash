@@ -437,13 +437,15 @@ pub(crate) fn ensure_address<
     }
 }
 
-pub(crate) fn select_unspent_note_meta(
+pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
+        params,
         ShieldedPool::Orchard,
         wallet_birthday,
         anchor_height,
@@ -780,6 +782,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn create_proposed_transactions_uses_nu7_default_expiry() {
+        testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn create_pczt_uses_nu7_default_expiry() {
+        testing::pool::create_pczt_uses_nu7_default_expiry::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_full_block_detects_outputs() {
         testing::pool::scan_full_block_detects_outputs::<OrchardPoolTester>()
     }
@@ -818,6 +831,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn transfer_grows_across_pools_at_a_dust_shortfall() {
+        testing::pool::transfer_grows_across_pools_at_a_dust_shortfall::<
+            OrchardPoolTester,
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    fn transfer_fails_across_pools_at_a_dust_shortfall() {
+        testing::pool::transfer_fails_across_pools_at_a_dust_shortfall::<
+            OrchardPoolTester,
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
     fn send_max_fails_when_balance_is_consumed_by_fees() {
         testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<OrchardPoolTester>()
     }
@@ -831,6 +860,12 @@ pub(crate) mod tests {
     #[test]
     fn send_max_proposal_fails_when_unconfirmed_funds_present() {
         testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn insufficient_funds_counts_transparent_inputs() {
+        testing::pool::insufficient_funds_counts_transparent_inputs::<OrchardPoolTester>()
     }
 
     #[test]
@@ -921,6 +956,11 @@ pub(crate) mod tests {
     #[test]
     fn account_deletion_with_internal_transfer() {
         testing::pool::account_deletion_with_internal_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn account_rename() {
+        testing::pool::account_rename::<OrchardPoolTester>()
     }
 
     #[test]

@@ -5,7 +5,6 @@ use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zcash_protocol::consensus;
 
 use crate::wallet::init::WalletMigrationError;
@@ -45,6 +44,10 @@ pub(super) const DEPENDENCIES: &[Uuid] = &[
     spend_key_available::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
 ];
+
+/// The default transaction expiry delta, in blocks, that the wallet used when this migration was
+/// written. It is pinned so that the migration's effect does not change with later defaults.
+const PRE_NU7_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 pub(super) struct Migration<P> {
     pub(super) _params: P,
@@ -108,7 +111,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
              SET target_height = expiry_height - :default_expiry_delta
              WHERE expiry_height > :default_expiry_delta
              AND created IS NOT NULL",
-            named_params![":default_expiry_delta": DEFAULT_TX_EXPIRY_DELTA],
+            named_params![":default_expiry_delta": PRE_NU7_DEFAULT_TX_EXPIRY_DELTA],
         )?;
 
         // Populate the enhancement queues with any transparent history information that we don't
@@ -323,6 +326,9 @@ fn queue_tx_retrieval(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod released_expiry_delta_tests;
 
 #[cfg(test)]
 mod tests {

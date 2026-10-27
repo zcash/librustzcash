@@ -10,23 +10,17 @@ workspace.
 
 ## [Unreleased]
 
-## [0.25.0-pre.1] - 2026-10-06
-
-### Changed
-- Migrated to `pczt 0.10.0-pre.1`, `zcash_address 0.14.0-pre.1`,
-  `zcash_keys 0.17.0-pre.1`, `zcash_primitives 0.31.0-pre.1`,
-  `zcash_proofs 0.31.0-pre.1`, `zcash_transparent 0.11.0-pre.1`, and
-  `zip321 0.10.0-pre.1`.
-- Unified addresses that `zcash_client_backend` constructs (the recipient of
-  `data_api::wallet::propose_standard_transfer_to_address`, and the
-  `wallet::Recipient::External` address recorded for an output to a receiver
-  with no stored address) are encoded at ZIP 316 Revision 0 when Revision 0 can
-  represent them, and at Revision 2 otherwise. Previously they were always
-  encoded at Revision 2.
-
-## [0.25.0-pre.0] - 2026-10-02
+## [0.25.0] - 2026-10-21
 
 ### Added
+- `zcash_client_backend::data_api::{ChangeReceivers, TransparentChangeKind}`
+  (the latter under the `transparent-inputs` feature)
+- `zcash_client_backend::data_api::AccountMeta::change_receivers`
+- `zcash_client_backend::fees::ChangeError::UnsupportedChangePool`
+- `zcash_client_backend::data_api::testing::{FixedNotes, FixedNotesError}`
+  (under the `test-dependencies` feature)
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::{RequirementCovered, DustInputsNotGiven, ExcludedNoteSelected, UnrequestedPoolSelected}`
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetention::spacing`
 - `zeroize` feature, enabled by default, which enables `zcash_keys/zeroize`.
 - `zcash_client_backend::util` module, containing `Clock`, `SystemClock`, and
   (behind `test-dependencies`) `testing::FixedClock`.
@@ -50,15 +44,15 @@ workspace.
   `sync-decryptor`)
 
 ### Changed
-- Migrated to `bip32 0.6`, `bls12_381 0.9`, `group 0.14`,
-  `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`,
-  `pasta_curves 0.6`, `pczt 0.10.0-pre.0`, `rand 0.10`, `rand_core 0.10`,
-  `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
-  `zcash_address 0.14.0-pre.0`, `zcash_keys 0.17.0-pre.0`,
-  `zcash_note_encryption 0.5`, `zcash_primitives 0.31.0-pre.0`,
-  `zcash_proofs 0.31.0-pre.0`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, `zip32 0.3`, and
-  `zip321 0.10.0-pre.0`.
+- Migrated to `arti-client 0.43`, `bip32 0.6`, `bls12_381 0.9`,
+  `fs-mistrust 0.14`, `group 0.14`, `incrementalmerkletree 0.9`, `jubjub 0.11`,
+  `orchard 0.16`, `pasta_curves 0.6`, `pczt 0.10.0`, `rand 0.10`,
+  `rand_core 0.10`, `sapling-crypto 0.9`, `secp256k1 0.33`, `shardtree 0.8`,
+  `zcash_address 0.14.0`, `zcash_keys 0.17.0`, `zcash_note_encryption 0.5`,
+  `zcash_primitives 0.31.0`, `zcash_proofs 0.31.0`, `zcash_protocol 0.11.0`,
+  `zcash_script 0.6`, `zcash_transparent 0.11.0`, `zip32 0.3`, and
+  `zip321 0.10.0`.
+- MSRV is now 1.89
 - `zcash_client_backend::tor::http::Client::get_latest_zec_to_usd_rate` takes an
   additional `rng: &mut impl Rng` first argument.
 - `zcash_client_backend::data_api::wallet::SpendingKeys` now overwrites the
@@ -138,6 +132,74 @@ workspace.
   been scanned. `zcash_client_backend::sync` does not yet request transparent
   data from the server; a caller that fetches compact blocks itself must set
   `BlockRange.poolTypes` to receive it.
+- Unified addresses that `zcash_client_backend` constructs now support ZIP 316
+  Revision 2. They are encoded at Revision 0 when Revision 0 can represent them,
+  and at Revision 2 otherwise.
+- `zcash_client_backend::data_api::WalletRead::list_addresses` now requires an
+  implementation to also return the transparent receiver that the wallet tracks
+  at the diversifier index of an exposed unified address that omits it, as an
+  `Address::Transparent` entry with that diversifier index.
+- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+  now pays a unified address with every receiver of that address. Previously
+  it omitted the transparent receiver of an address that also had a shielded
+  receiver.
+- `zcash_client_backend::tor::Client::{create, create_with_timeouts}` now install
+  the `ring` provider as the process-level `rustls` `CryptoProvider` when the
+  application has not installed one.
+- `zcash_client_backend::data_api::InputSource` has a new required method
+  `get_change_receivers`, and `zcash_client_backend::fees::MetaSource` a new
+  required method `change_receivers`, which returns it for an `InputSource`.
+- `zcash_client_backend::data_api::AccountMeta::new` takes an additional
+  `change_receivers: ChangeReceivers` argument.
+- The `AccountMetaT` of `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy`
+  and `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy` is now
+  `ChangeReceivers` instead of `()`, fetched with `MetaSource::change_receivers`.
+- The change strategies in `zcash_client_backend::fees` size transparent
+  change as an output of the account's `TransparentChangeKind` instead of
+  always as a P2PKH output.
+- The change strategies in `zcash_client_backend::fees` place shielded change
+  in a pool in which the account can receive it. They prefer a pool that the
+  transaction already uses, then the fallback change pool, then any other pool.
+  They fail with `ChangeError::UnsupportedChangePool` when the account cannot
+  receive the change in any shielded pool, or when they propose transparent
+  change and the account has no transparent receiver.
+- The change strategies in `zcash_client_backend::fees` fail with
+  `ChangeError::UnsupportedChangePool` for an ephemeral output (the first
+  transaction of a payment to a ZIP 320 TEX address) unless the account's
+  `TransparentChangeKind` is `P2pkh`, because an ephemeral output goes to a
+  P2PKH address derived from the account's transparent key. An account whose
+  transparent change is a P2SH output cannot pay a TEX address.
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` must return a
+  `ChangeError::InsufficientFunds` whose `required` value exceeds the total
+  value of the inputs it was given, and a `ChangeError::DustInputs` that names
+  at least one of the inputs it was given and no others.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now returns `InputSelectorError::Selection` with a `GreedyInputSelectorError`
+  naming the broken contract, instead of `InsufficientFunds`, when the change
+  strategy reports a requirement its inputs already cover or dust inputs it was
+  not given, or when the data source returns a note it was asked to exclude or
+  a note from a pool it was not asked for.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}`: when no `expiry_height` is given, a transaction that
+  is not a ZIP 318 canonical crossing now expires 120 blocks after its target height
+  if NU7 is active at that height, instead of 40 blocks.
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetention::{new, union}`
+  take a `zcash_protocol::zip318::BlockSpacing` argument. From NU7 activation the
+  policy retains the boundaries of the scaled anchor grid.
+- `zcash_client_backend::data_api::anchor_retention::PoolMigrationParams::new`
+  takes a `BlockSpacing` argument.
+- `zcash_client_backend::data_api::WalletRead::pool_migration_params` takes the
+  consensus parameters of the wallet's network.
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed` takes a
+  `zcash_protocol::zip318::AnchorGrid` in place of an `AnchorBucketInterval`.
+- A ZIP 318 canonical crossing's anchor and expiry follow the scaled grid and
+  expiry modulus at heights from NU7 activation.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method
+  `set_account_name`.
+
+### Removed
+- `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
+  Use `PoolMigrationParams::new`.
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` now records the
@@ -152,6 +214,23 @@ workspace.
   holds that pool's key. Cross-pool sends, shielding transactions, and outputs
   encrypted under an internal-scope OVK now recover their recipient, value and
   memo as `zcash_client_backend::TransferType::Outgoing`.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now counts the value of the selected transparent inputs in the `available`
+  field of the `InsufficientFunds` error it returns. Previously that field
+  reported the value of the selected shielded notes alone.
+- `zcash_client_backend::data_api::defaults::address_receiver_matches_ua` now
+  matches on the transparent receiver of a unified `address` that also has a
+  shielded receiver.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  now spends notes from a later shielded pool when the change from the
+  preferred pool's notes alone would fall below the dust threshold. Previously
+  it returned `InsufficientFunds` in that case, with `available` above
+  `required`.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
+  no longer returns `InsufficientFunds` when the change strategy reports a
+  selected shielded note as dust and the notes selected without it can fund the
+  transaction. Previously it reported insufficient funds, with `available`
+  above `required`.
 
 ## [0.24.0] - 2026-08-18
 

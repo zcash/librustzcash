@@ -17,17 +17,17 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::{AccountMeta, wallet::TargetHeight};
+use crate::data_api::{AccountMeta, ChangeReceivers, wallet::TargetHeight};
 
 use super::{
     ChangeError, ChangeValue, DummyOutputCounts, DustAction, DustOutputPolicy, EphemeralBalance,
     SplitPolicy, TransactionBalance, sapling as sapling_fees,
 };
 
-#[cfg(feature = "transparent-inputs")]
-use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard::{self as orchard_fees, OutputView as _};
+#[cfg(feature = "transparent-inputs")]
+use {super::TransparentChangePolicy, crate::data_api::TransparentChangeKind};
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -158,6 +158,13 @@ where
 
 /// Decide which shielded pool change should go to if there is any.
 ///
+/// Change goes to a pool in which the account can receive it, as given by
+/// `change_receivers`. Among those pools, the pools that the transaction already uses
+/// come first, so that change does not cross into another pool when this can be
+/// avoided. The fallback pool comes next, and then any other pool. If the account cannot
+/// receive change in any shielded pool, the result is the pool that the transaction's
+/// flows indicate, and the caller rejects any change that it would place there.
+///
 /// `max_change_value` is an upper bound on the value of the change the transaction will
 /// produce: the value that would remain if it paid only the minimum (changeless) fee.
 /// After Ironwood activation it determines whether change may be returned to the Orchard
@@ -166,37 +173,52 @@ where
 pub(crate) fn select_change_pool(
     _net_flows: &NetFlows,
     _fallback_change_pool: ShieldedPool,
+    _change_receivers: &ChangeReceivers,
     _ironwood_active: bool,
     _max_change_value: Zatoshis,
 ) -> ShieldedPool {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
     {
-        let preferred = if _net_flows.orchard_in.is_positive()
-            || _net_flows.orchard_out.is_positive()
-        {
-            // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
-            ShieldedPool::Orchard
-        } else if _net_flows.ironwood_in.is_positive() || _net_flows.ironwood_out.is_positive() {
-            // Send change to Ironwood if we're spending Ironwood inputs or creating Ironwood outputs
-            // (and no Orchard flows), so that change from an Ironwood spend stays in the Ironwood pool
-            // rather than crossing the turnstile back into Orchard.
-            ShieldedPool::Ironwood
-        } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
-            // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
-            // Sapling outputs, so that we avoid pool-crossing.
-            ShieldedPool::Sapling
-        } else {
-            // The flows are transparent, so there may not be change. If there is, the caller
-            // gets to decide where to shield it.
-            _fallback_change_pool
-        };
+        // The pools with flows in this transaction, in order of preference. Orchard comes
+        // first. Ironwood comes before Sapling, so that change from an Ironwood spend stays
+        // in the Ironwood pool rather than crossing the turnstile back into Orchard.
+        let flow_pools = [
+            (
+                ShieldedPool::Orchard,
+                _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive(),
+            ),
+            (
+                ShieldedPool::Ironwood,
+                _net_flows.ironwood_in.is_positive() || _net_flows.ironwood_out.is_positive(),
+            ),
+            (
+                ShieldedPool::Sapling,
+                _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(pool, has_flows)| has_flows.then_some(pool));
+
+        // If the flows are transparent, there may not be change. If there is, the caller
+        // gets to decide where to shield it.
+        let flow_preferred = flow_pools.clone().next().unwrap_or(_fallback_change_pool);
+
+        let preferred = flow_pools
+            .chain([
+                _fallback_change_pool,
+                ShieldedPool::Orchard,
+                ShieldedPool::Sapling,
+            ])
+            .find(|pool| _change_receivers.can_receive(PoolType::Shielded(*pool)))
+            .unwrap_or(flow_preferred);
 
         // After Ironwood activation, the turnstile forbids value from entering the
         // Orchard pool: change may return to Orchard only when the transaction spends
         // Orchard notes, and only if strictly less value returns to the pool than the
         // notes remove from it. Change that cannot go to Orchard flows onward to the
-        // Ironwood pool.
+        // Ironwood pool. An account that can receive change in one of these pools can
+        // receive change in the other, as both use the account's Orchard key.
         if _ironwood_active
             && preferred == ShieldedPool::Orchard
             && (!_net_flows.orchard_in.is_positive() || _max_change_value >= _net_flows.orchard_in)
@@ -315,6 +337,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
     wallet_meta: Option<&AccountMeta>,
+    change_receivers: &ChangeReceivers,
     target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
@@ -377,6 +400,18 @@ where
         && cfg.transparent_change_policy == TransparentChangePolicy::TransparentChangeAllowed;
     #[cfg(not(feature = "transparent-inputs"))]
     let wants_transparent_change = false;
+
+    // The size of the transparent change output, which depends on the kind of address the
+    // account receives it at. An account with no transparent receiver has no size here. Any
+    // transparent change proposed for such an account is rejected below, when the change is
+    // known. An earlier rejection would hide insufficient funds and changeless transactions.
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_change_size = change_receivers
+        .transparent()
+        .filter(|_| wants_transparent_change)
+        .map(|kind| kind.output_size());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_change_size = None;
 
     let total_in = net_flows
         .total_in()
@@ -456,8 +491,7 @@ where
                 _ => false,
             }
             && constants
-                .anchor_bucket_interval()
-                .is_boundary(_anchor_height)
+                .anchor_grid().is_boundary(_anchor_height)
     };
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change: OutputManifest| {
@@ -546,6 +580,7 @@ where
     let change_pool = select_change_pool(
         &net_flows,
         cfg.fallback_change_pool,
+        change_receivers,
         cfg.params
             .is_nu_active(NetworkUpgrade::Nu6_3, target_height.into()),
         (total_in - total_out_with_min_fee).unwrap_or(Zatoshis::ZERO),
@@ -658,9 +693,9 @@ where
                         transparent_input_sizes.clone(),
                         transparent_output_sizes
                             .clone()
-                            // Count the standard size of the P2PKH change output when change is
-                            // to be returned to the transparent pool.
-                            .chain(wants_transparent_change.then_some(P2PKH_STANDARD_OUTPUT_SIZE)),
+                            // Count the change output when change is to be returned to the
+                            // transparent pool.
+                            .chain(transparent_change_size),
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
@@ -831,6 +866,14 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
+    for change_value in &change {
+        if !can_receive_change(change_receivers, change_value) {
+            return Err(ChangeError::UnsupportedChangePool(
+                change_value.output_pool(),
+            ));
+        }
+    }
+
     // Record the exact number of dummy outputs in each shielded bundle. This is transaction
     // shape, rather than a builder policy; it can therefore be serialized in a proposal and
     // reproduced by every construction path without re-running the fee model.
@@ -876,6 +919,19 @@ where
             ))
         })
         .map_err(|_| overflow())
+}
+
+/// Returns whether an account that can receive change in `change_receivers` can receive
+/// `change`. Ephemeral outputs are sent to P2PKH addresses.
+fn can_receive_change(change_receivers: &ChangeReceivers, change: &ChangeValue) -> bool {
+    #[cfg(feature = "transparent-inputs")]
+    if change.is_ephemeral() {
+        return matches!(
+            change_receivers.transparent(),
+            Some(TransparentChangeKind::P2pkh)
+        );
+    }
+    change_receivers.can_receive(change.output_pool())
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
@@ -1068,9 +1124,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
                         [output] => constants.is_canonical_denomination(output.value()),
                         _ => false,
                     }
-                    && constants
-                        .anchor_bucket_interval()
-                        .is_boundary(anchor_height);
+                    && constants.anchor_grid().is_boundary(anchor_height);
                 if canonical {
                     BundlePadding::UNPADDED
                 } else {
@@ -1169,7 +1223,24 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 #[cfg(all(test, feature = "orchard"))]
 mod tests {
     use super::{NetFlows, select_change_pool};
+    use crate::data_api::ChangeReceivers;
     use zcash_protocol::{ShieldedPool, value::Zatoshis};
+
+    /// Returns the change receivers of an account with the given shielded keys and no
+    /// transparent key.
+    fn receivers(sapling: bool, orchard: bool) -> ChangeReceivers {
+        ChangeReceivers::new(
+            sapling,
+            orchard,
+            #[cfg(feature = "transparent-inputs")]
+            None,
+        )
+    }
+
+    /// Returns the change receivers of an account with a key in each shielded pool.
+    fn all_receivers() -> ChangeReceivers {
+        receivers(true, true)
+    }
 
     fn flows(orchard_in: u64, ironwood_in: u64, sapling_in: u64) -> NetFlows {
         NetFlows {
@@ -1192,6 +1263,7 @@ mod tests {
             select_change_pool(
                 &flows(0, 10_000, 0),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(5_000)
             ),
@@ -1204,6 +1276,7 @@ mod tests {
             select_change_pool(
                 &flows(10_000, 10_000, 0),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(5_000)
             ),
@@ -1216,6 +1289,7 @@ mod tests {
             select_change_pool(
                 &flows(0, 10_000, 10_000),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(5_000)
             ),
@@ -1227,6 +1301,7 @@ mod tests {
             select_change_pool(
                 &flows(0, 0, 10_000),
                 ShieldedPool::Orchard,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(5_000)
             ),
@@ -1242,6 +1317,7 @@ mod tests {
             select_change_pool(
                 &flows(10_000, 0, 10_000),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 false,
                 Zatoshis::const_from_u64(15_000)
             ),
@@ -1254,6 +1330,7 @@ mod tests {
             select_change_pool(
                 &flows(10_000, 0, 10_000),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(9_999)
             ),
@@ -1266,6 +1343,7 @@ mod tests {
             select_change_pool(
                 &flows(10_000, 0, 10_000),
                 ShieldedPool::Sapling,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(10_000)
             ),
@@ -1287,10 +1365,89 @@ mod tests {
                     ironwood_out: Zatoshis::ZERO,
                 },
                 ShieldedPool::Orchard,
+                &all_receivers(),
                 true,
                 Zatoshis::const_from_u64(10_000)
             ),
             ShieldedPool::Ironwood
+        );
+    }
+
+    #[test]
+    fn select_change_pool_uses_a_pool_the_account_can_receive() {
+        let orchard_out = |sapling_in: u64, orchard_out: u64| NetFlows {
+            sapling_in: Zatoshis::const_from_u64(sapling_in),
+            orchard_out: Zatoshis::const_from_u64(orchard_out),
+            ..flows(0, 0, 0)
+        };
+
+        // A Sapling-only account that pays an Orchard recipient from Sapling notes gets
+        // Sapling change, not Orchard change.
+        assert_eq!(
+            select_change_pool(
+                &orchard_out(10_000, 5_000),
+                ShieldedPool::Orchard,
+                &receivers(true, false),
+                false,
+                Zatoshis::const_from_u64(4_000)
+            ),
+            ShieldedPool::Sapling
+        );
+
+        // An Orchard-only account that spends Sapling notes gets Orchard change before
+        // Ironwood activation.
+        assert_eq!(
+            select_change_pool(
+                &flows(0, 0, 10_000),
+                ShieldedPool::Sapling,
+                &receivers(false, true),
+                false,
+                Zatoshis::const_from_u64(5_000)
+            ),
+            ShieldedPool::Orchard
+        );
+
+        // After activation, that change cannot enter the Orchard pool, so it goes to the
+        // Ironwood pool, which uses the same key.
+        assert_eq!(
+            select_change_pool(
+                &flows(0, 0, 10_000),
+                ShieldedPool::Sapling,
+                &receivers(false, true),
+                true,
+                Zatoshis::const_from_u64(5_000)
+            ),
+            ShieldedPool::Ironwood
+        );
+
+        // For transparent flows, a fallback pool that the account cannot receive in is
+        // replaced by one that it can receive in.
+        let transparent_flows = NetFlows {
+            t_in: Zatoshis::const_from_u64(10_000),
+            ..flows(0, 0, 0)
+        };
+        assert_eq!(
+            select_change_pool(
+                &transparent_flows,
+                ShieldedPool::Orchard,
+                &receivers(true, false),
+                true,
+                Zatoshis::const_from_u64(5_000)
+            ),
+            ShieldedPool::Sapling
+        );
+
+        // An account that can receive in no shielded pool gets the pool that the flows
+        // indicate. The caller rejects change that would go there.
+        assert_eq!(
+            select_change_pool(
+                &orchard_out(10_000, 5_000),
+                ShieldedPool::Sapling,
+                &receivers(false, false),
+                false,
+                Zatoshis::const_from_u64(4_000)
+            ),
+            ShieldedPool::Orchard
         );
     }
 }

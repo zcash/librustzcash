@@ -60,6 +60,21 @@ pub(crate) fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>
     )
 }
 
+pub(crate) fn create_proposed_transactions_uses_nu7_default_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::create_proposed_transactions_uses_nu7_default_expiry::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn create_pczt_uses_nu7_default_expiry<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::create_pczt_uses_nu7_default_expiry::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn scan_full_block_detects_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_full_block_detects_outputs::<T>(
         TestDbFactory::default(),
@@ -89,6 +104,28 @@ pub(crate) fn send_max_spends_inputs_across_pools<
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn transfer_grows_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::transfer_grows_across_pools_at_a_dust_shortfall::<
+        P0,
+        P1,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn transfer_fails_across_pools_at_a_dust_shortfall<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::transfer_fails_across_pools_at_a_dust_shortfall::<
+        P0,
+        P1,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -144,6 +181,14 @@ pub(crate) fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTes
 
 pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_everything_proposal_fails_when_unconfirmed_funds_present::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::insufficient_funds_counts_transparent_inputs::<T>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
@@ -277,6 +322,13 @@ pub(crate) fn account_deletion<T: ShieldedPoolTester>() {
 
 pub(crate) fn account_deletion_with_internal_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::account_deletion_with_internal_transfer::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn account_rename<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::account_rename::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )

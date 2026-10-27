@@ -10,30 +10,38 @@ workspace.
 
 ## [Unreleased]
 
-## [0.31.0-pre.1] - 2026-10-06
-
-### Changed
-- Migrated to `zcash_transparent 0.11.0-pre.1`.
-
 ### Fixed
-- `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
-  for an empty slice instead of panicking.
+- The documentation of the following items in `zcash_primitives::transaction`,
+  and the `Display` output of `sighash::Zip244Error`, now say that they also
+  apply to v6 transactions, whose transaction IDs and signature digests are
+  specified by ZIP 229:
+  - `{TxDigests::Zip244, Zip244Digests}`
+  - `sighash::{PrecomputedSighashData::new_zip244, Zip244Error::NotZip244}`
+  - `txid::TxIdDigester`
 
-## [0.31.0-pre.0] - 2026-09-30
-
-This release supports the NU7 upgrade on testnet.
+## [0.31.0] - 2026-10-21
 
 ### Added
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `default_tx_expiry_delta`
+    - `OVERWINTER_DEFAULT_TX_EXPIRY_DELTA`
+    - `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`
+    - `NU7_DEFAULT_TX_EXPIRY_DELTA`
+    - `Builder::expiry_height`
+  - `sighash::{PrecomputedSighashData, Zip244Error}`
+  - `{Zip143Digests, Zip244Digests}`
 - Experimental `TxVersion::V7` and `TransactionData::from_parts_v7` support
   behind `zcash_unstable="nutachyon"`. V7 is enabled by NuTachyon and initially
   uses the V6 transaction body and digest structure.
 
 ### Changed
+- MSRV is now 1.89
 - Migrated to `bls12_381 0.9`, `ff 0.14`, `group 0.14`,
   `incrementalmerkletree 0.9`, `jubjub 0.11`, `orchard 0.16`, `rand_core 0.10`,
   `redjubjub 0.9`, `sapling-crypto 0.9`, `secp256k1 0.33`,
-  `zcash_note_encryption 0.5`, `zcash_protocol 0.11.0-pre.0`,
-  `zcash_script 0.6`, `zcash_transparent 0.11.0-pre.0`, and `zip32 0.3`.
+  `zcash_note_encryption 0.5`, `zcash_protocol 0.11.0`, `zcash_script 0.6`,
+  `zcash_transparent 0.11.0`, and `zip32 0.3`.
 - `zcash_primitives::transaction::builder::Builder::{build, build_for_pczt}`
   (and `mock_build`, behind `test-dependencies`) now require their `rng`
   argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
@@ -41,6 +49,36 @@ This release supports the NU7 upgrade on testnet.
   consensus branch ID `0x77190AD9`. `TxVersion::suggested_for_branch` returns
   `TxVersion::V6` for it, and `TxVersion::valid_in_branch` accepts `V5` and `V6`
   transactions but not `V4` transactions under it (ZIP 2003).
+- `zcash_primitives::transaction::builder::{Builder, DeferredPcztBuilder}::new` now set
+  the default expiry height of a non-coinbase transaction to its target height plus
+  `default_tx_expiry_delta` for the consensus branch in effect at that height. The
+  delta is 120 blocks from NU7 activation onward, and 20 blocks before Blossom
+  activation; it remains 40 blocks between those upgrades. To keep a different
+  expiry, set it with `with_expiry_height`.
+- `zcash_primitives::transaction::TxDigests` is now an enum with variants
+  `Zip143(Zip143Digests)` and `Zip244(Zip244Digests)`. The struct formerly
+  named `TxDigests` is now `Zip244Digests`; its fields are private, and are
+  read through its accessor methods.
+- `zcash_primitives::transaction::txid::TxIdDigester` now produces
+  `Zip244Digests`, and `txid::to_txid` takes `&Zip244Digests` and returns
+  `Option<TxId>` (`None` if `TxVersion` is incompatible).
+
+### Removed
+- `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA`. Use
+  `default_tx_expiry_delta`, or `BLOSSOM_DEFAULT_TX_EXPIRY_DELTA` for the
+  pre-NU7 value.
+- `zcash_primitives::transaction::sighash::signature_hash`. Use
+  `PrecomputedSighashData::new(tx)` and call
+  `PrecomputedSighashData::signature_hash` for each input.
+- The `zcash_primitives::transaction::{sighash_v4, sighash_v5, sighash_v6}`
+  modules, including `v4_signature_hash`, `v5_signature_hash`, and
+  `v6_signature_hash`. Use `PrecomputedSighashData` instead; for a version 5 or
+  later transaction whose Sapling proofs are not serialized, construct it with
+  `PrecomputedSighashData::new_zip244`.
+
+### Fixed
+- `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
+  for an empty slice instead of panicking.
 
 ## [0.30.1] - 2026-08-18
 

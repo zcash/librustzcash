@@ -63,11 +63,10 @@ pub fn pczt_txid(pczt: &Pczt) -> Result<TxId, TxIdError> {
         .into_effects()
         .map_err(|_| TxIdError::Effects)?;
     let digests = tx_data.digest(TxIdDigester);
-    Ok(to_txid(
-        tx_data.version(),
-        tx_data.consensus_branch_id(),
-        &digests,
-    ))
+    Ok(
+        to_txid(tx_data.version(), tx_data.consensus_branch_id(), &digests)
+            .expect("version compatibility checked by Pczt::into_effects"),
+    )
 }
 
 /// [`pczt_txid`] over stored PCZT bytes, parsing them first.

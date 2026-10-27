@@ -10,34 +10,68 @@ workspace.
 
 ## [Unreleased]
 
-## [0.11.0-pre.0] - 2026-09-30
+## [0.11.0] - 2026-10-21
 
-This release sets the NU7 activation height to 4465026 on testnet.
+This release sets the NU7 mainnet activation height to 3543405.
 
 ### Added
-- `zcash_protocol::address` module.
-- `zcash_protocol::address::Revision`
-- `zcash_protocol::consensus::NetworkConstants`:
-  - `fn hrp_unified_address_r2`
-  - `fn hrp_unified_address_r2_ti`
-  - `fn hrp_unified_fvk_r2`
-  - `fn hrp_unified_ivk_r2`
-- HRP constants for ZIP 316 Revision 2 unified encodings added to
-  `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
-  for transparent-including UAs have the `TI` suffix.
+- `zcash_protocol::consensus::UPGRADES_IN_ORDER`
+- `zcash_protocol::consensus::NU7_POW_TARGET_SPACING_RATIO`
+- `zcash_protocol::consensus::{PRE_BLOSSOM_POW_TARGET_SPACING,
+  POST_BLOSSOM_POW_TARGET_SPACING, POST_NU7_POW_TARGET_SPACING}`
+- `zcash_protocol::consensus::{pow_target_spacing, target_time_between}`
 - `zcash_protocol::consensus::{NetworkUpgrade::Nu7, BranchId::Nu7}` and
   `zcash_protocol::local_consensus::LocalNetwork::nu7` are now available
   without the `--cfg zcash_unstable="nu7"` configuration flag.
+- `zcash_protocol::zip318::{AnchorGrid, BlockSpacing}`
+- `zcash_protocol::zip318::PoolMigrationConstants::anchor_grid`
 
 ### Changed
+- MSRV is now 1.89
 - Migrated to `incrementalmerkletree 0.9` and `incrementalmerkletree-testing 0.4`
   (under the `test-dependencies` feature).
 - `BranchId::height_bounds` and `height_range` now match `for_height` for local
   schedules with skipped or out-of-order upgrades.
 - `BranchId::Nu7` now maps to and from the consensus branch ID `0x77190AD9`
   (was the placeholder `0xFFFFFFFF`).
-- `TestNetwork` now activates NU7 at height `4465026`. Mainnet has no NU7
-  activation height.
+- `TestNetwork` now activates NU7 at height `4465026`, and the mainnet
+  activation height has been set for `BranchId::Nu7`.
+- The ZIP 318 durations (the delay distributions, `AnchorBucketInterval`, and the
+  expiry modulus and window) are now numbers of reference blocks, which are
+  scaled by `NU7_POW_TARGET_SPACING_RATIO` at heights from NU7 activation.
+- `zcash_protocol::zip318::expiry_height` takes a `&BlockSpacing` argument, and
+  from NU7 activation uses an expiry modulus of `3 * EXPIRY_MODULUS` blocks.
+- `zcash_protocol::zip318::PoolMigrationConstants` has a new required method,
+  `block_spacing`. `canonical_expiry` and `is_canonical_expiry` use it.
+
+### Removed
+- `zcash_protocol::zip318::AnchorBucketInterval::{is_boundary,
+  boundary_at_or_below, boundary_at_or_above}`. Use the methods of the same
+  names on `AnchorGrid`.
+
+### Deprecated
+- `zcash_protocol::consensus::{SECONDS_PER_BLOCK, BLOCKS_PER_HOUR}`. The target
+  block spacing depends on the block height; use
+  `zcash_protocol::consensus::pow_target_spacing` or
+  `zcash_protocol::consensus::target_time_between` instead.
+- The address encoding prefix constants in
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants
+  of the same names in `zcash_address::constants::{mainnet, testnet, regtest}`:
+  - `HRP_SAPLING_PAYMENT_ADDRESS`
+  - `HRP_TEX_ADDRESS`
+  - `HRP_UNIFIED_ADDRESS`, `HRP_UNIFIED_FVK`, `HRP_UNIFIED_IVK`
+  - `B58_SPROUT_ADDRESS_PREFIX`, `B58_PUBKEY_ADDRESS_PREFIX`,
+    `B58_SCRIPT_ADDRESS_PREFIX`
+- The key encoding prefix constants in
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. Use the constants
+  of the same names in `zcash_keys::constants::{mainnet, testnet, regtest}`:
+  - `HRP_SAPLING_EXTENDED_SPENDING_KEY`, `HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY`
+  - `B58_SECRET_KEY_PREFIX`
+- All `zcash_protocol::consensus::NetworkConstants` methods except `coin_type`.
+  Use the functions of the same names in `zcash_address::constants` (for
+  address encodings) or `zcash_keys::constants` (for key encodings), which take
+  a `NetworkType`. A caller holding consensus parameters passes
+  `params.network_type()`.
 
 ## [0.10.6] - 2026-09-04
 

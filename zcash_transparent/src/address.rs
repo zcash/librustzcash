@@ -3,9 +3,6 @@
 use core::fmt;
 use corez::io::{self, Read, Write};
 
-use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
-use zcash_protocol::consensus::NetworkType;
-
 use zcash_encoding::Vector;
 use zcash_script::{
     op,
@@ -197,34 +194,6 @@ impl TransparentAddress {
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn from_pubkey_bytes(pubkey: &[u8; 33]) -> Self {
         TransparentAddress::PublicKeyHash(hash160::hash(pubkey))
-    }
-
-    /// Encodes this transparent address for the given network type.
-    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
-        match self {
-            TransparentAddress::PublicKeyHash(data) => {
-                ZcashAddress::from_transparent_p2pkh(net, *data)
-            }
-            TransparentAddress::ScriptHash(data) => ZcashAddress::from_transparent_p2sh(net, *data),
-        }
-    }
-}
-
-impl TryFromAddress for TransparentAddress {
-    type Error = ();
-
-    fn try_from_transparent_p2pkh(
-        _net: NetworkType,
-        data: [u8; 20],
-    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        Ok(TransparentAddress::PublicKeyHash(data))
-    }
-
-    fn try_from_transparent_p2sh(
-        _net: NetworkType,
-        data: [u8; 20],
-    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        Ok(TransparentAddress::ScriptHash(data))
     }
 }
 

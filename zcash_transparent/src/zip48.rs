@@ -789,19 +789,38 @@ pub enum FullViewingKeyError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
     use alloc::vec::Vec;
     use core::num::NonZeroU8;
 
     use bip32::Prefix;
-    use zcash_protocol::consensus::{MainNetwork, Network, Parameters};
+    use zcash_protocol::consensus::{MainNetwork, Network};
     use zip32::AccountId;
 
     use crate::{
+        address::TransparentAddress,
         keys::NonHardenedChildIndex,
         test_vectors::zip_0048::TEST_VECTORS,
         zip48::{AccountPrivKey, AccountPubKey, FullViewingKey},
     };
+
+    /// The length of the version prefix of a Base58Check-encoded transparent address.
+    const B58_ADDRESS_PREFIX_LEN: usize = 2;
+
+    /// Returns the P2SH address that a Base58Check-encoded test vector names.
+    ///
+    /// The string encoding of a transparent address belongs to `zcash_address`, which
+    /// tests the version prefixes. This helper checks only the script hash.
+    fn p2sh_address_from_vector(encoded: &str) -> TransparentAddress {
+        let decoded = bs58::decode(encoded)
+            .with_check(None)
+            .into_vec()
+            .expect("test vector is valid Base58Check");
+        TransparentAddress::ScriptHash(
+            decoded[B58_ADDRESS_PREFIX_LEN..]
+                .try_into()
+                .expect("test vector has a 20-byte payload"),
+        )
+    }
 
     #[test]
     fn zip_48_example() {
@@ -837,10 +856,8 @@ mod tests {
                     zip32::Scope::External,
                     NonHardenedChildIndex::const_from_index(i)
                 )
-                .0
-                .to_zcash_address(params.network_type())
-                .to_string(),
-                addr,
+                .0,
+                p2sh_address_from_vector(addr),
             );
         }
     }
@@ -922,27 +939,23 @@ mod tests {
 
             for (i, address) in tv.external_addresses {
                 assert_eq!(
-                    &fvk.derive_address(
+                    fvk.derive_address(
                         zip32::Scope::External,
                         NonHardenedChildIndex::const_from_index(*i)
                     )
-                    .0
-                    .to_zcash_address(params.network_type())
-                    .to_string(),
-                    address,
+                    .0,
+                    p2sh_address_from_vector(address),
                 )
             }
 
             for (i, address) in tv.change_addresses {
                 assert_eq!(
-                    &fvk.derive_address(
+                    fvk.derive_address(
                         zip32::Scope::Internal,
                         NonHardenedChildIndex::const_from_index(*i)
                     )
-                    .0
-                    .to_zcash_address(params.network_type())
-                    .to_string(),
-                    address,
+                    .0,
+                    p2sh_address_from_vector(address),
                 )
             }
         }

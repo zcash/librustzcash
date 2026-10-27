@@ -17,7 +17,9 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::{InputSource, anchor_retention::PoolMigrationParams, wallet::TargetHeight};
+use crate::data_api::{
+    ChangeReceivers, InputSource, anchor_retention::PoolMigrationParams, wallet::TargetHeight,
+};
 
 pub mod common;
 #[cfg(feature = "non-standard-fees")]
@@ -393,6 +395,10 @@ pub enum ChangeError<E, NoteRefT> {
         #[cfg(feature = "orchard")]
         ironwood: Vec<NoteRefT>,
     },
+    /// The change strategy would send change to a pool in which the account cannot receive
+    /// it: the account's viewing key cannot derive an address in that pool (for an ephemeral
+    /// transparent output, a P2PKH address).
+    UnsupportedChangePool(PoolType),
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
     /// The proposed bundle structure would violate bundle type construction rules.
@@ -431,6 +437,9 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                     "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.",
                     transparent.len() + sapling.len() + orchard_len,
                 )
+            }
+            ChangeError::UnsupportedChangePool(pool) => {
+                write!(f, "The account cannot receive change in the {pool} pool.")
             }
             ChangeError::StrategyError(err) => {
                 write!(f, "{err}")
@@ -662,18 +671,29 @@ pub trait MetaSource {
     type Error;
     type AccountId;
     type NoteRef;
+
+    /// Returns the outputs in which the given account can receive change.
+    fn change_receivers(&self, account: Self::AccountId) -> Result<ChangeReceivers, Self::Error>;
 }
 
 impl MetaSource for Infallible {
     type Error = Infallible;
     type AccountId = Infallible;
     type NoteRef = Infallible;
+
+    fn change_receivers(&self, account: Infallible) -> Result<ChangeReceivers, Infallible> {
+        match account {}
+    }
 }
 
 impl<I: InputSource> MetaSource for I {
     type Error = I::Error;
     type AccountId = I::AccountId;
     type NoteRef = I::NoteRef;
+
+    fn change_receivers(&self, account: I::AccountId) -> Result<ChangeReceivers, I::Error> {
+        self.get_change_receivers(account)
+    }
 }
 
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
@@ -710,13 +730,15 @@ pub trait ChangeStrategy {
     /// The fee computed as part of this operation should take into account the prospective
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
-    /// [`ChangeError::InsufficientFunds`].
+    /// [`ChangeError::InsufficientFunds`], with a `required` value that exceeds the total
+    /// value of the inputs provided.
     ///
     /// If the inputs include notes or UTXOs that are not economic to spend in the context
     /// of this input selection, a [`ChangeError::DustInputs`] error can be returned
     /// indicating inputs that should be removed from the selection (all of which will
-    /// have value less than or equal to the marginal fee). The caller should order the
-    /// inputs from most to least preferred to spend within each pool, so that the most
+    /// have value less than or equal to the marginal fee). Every input it names must be
+    /// one of the inputs provided, and it must name at least one. The caller should order
+    /// the inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
     /// - `ironwood`: the Ironwood bundle view (behind the `orchard` feature). A V6
@@ -759,8 +781,28 @@ pub(crate) mod tests {
     };
 
     use ::transparent::bundle::{OutPoint, TxOut};
+    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_primitives::transaction::fees::transparent;
-    use zcash_protocol::value::Zatoshis;
+    use zcash_protocol::{consensus::Network, value::Zatoshis};
+
+    use crate::data_api::ChangeReceivers;
+
+    /// The seed of the account of [`all_change_receivers`].
+    const ALL_RECEIVERS_SEED: [u8; 32] = [0; 32];
+
+    /// Returns the change receivers of an account that has a key in every pool.
+    pub(crate) fn all_change_receivers() -> ChangeReceivers {
+        ChangeReceivers::from_uivk(
+            &UnifiedSpendingKey::from_seed(
+                &Network::TestNetwork,
+                &ALL_RECEIVERS_SEED,
+                zip32::AccountId::ZERO,
+            )
+            .unwrap()
+            .to_unified_full_viewing_key()
+            .to_unified_incoming_viewing_key(),
+        )
+    }
 
     /// The canonical crossing fee is three ZIP 317 marginal fees: the Orchard bundle's two actions
     /// plus the single unpadded Ironwood one, which together exceed the grace allowance. Pinning it

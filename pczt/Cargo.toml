@@ -1,6 +1,6 @@
 [package]
 name = "pczt"
-version = "0.10.0-pre.1"
+version = "0.10.0"
 authors = ["Jack Grigg <jack@electriccoin.co>"]
 edition.workspace = true
 rust-version.workspace = true
@@ -64,7 +64,7 @@ proptest.workspace = true
 rand = { workspace = true, features = ["sys_rng"] }
 rand_chacha.workspace = true
 ripemd.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1.workspace = true
 sha2.workspace = true
 shardtree.workspace = true
 zcash_primitives = { workspace = true, features = [

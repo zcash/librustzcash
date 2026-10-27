@@ -74,9 +74,10 @@ fn migration_pipeline_end_to_end() {
     let tx = &prep.layers()[0][0];
     assert!(matches!(tx.inputs(), [PrepInput::Wallet { index: 0, .. }]));
     let (note, _path, _anchor) = single_note_witness(&fvk, balance, seed);
-    let prep_expiry = u32::from(crate::scheduling::expiry_height(BlockHeight::from_u32(
-        TARGET_HEIGHT,
-    )));
+    let prep_expiry = u32::from(crate::scheduling::expiry_height(
+        &crate::scheduling::BlockSpacing::UNIFORM,
+        BlockHeight::from_u32(TARGET_HEIGHT),
+    ));
     let (prep_pczt, placed) = build_prep_tx(
         &params,
         TARGET_HEIGHT,

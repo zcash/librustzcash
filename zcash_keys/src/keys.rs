@@ -1066,6 +1066,33 @@ impl UnifiedFullViewingKey {
         )
     }
 
+    /// Constructs a unified full viewing key for a transparent-only account defined by a
+    /// [ZIP 316] Revision 2 P2SH viewing key item.
+    ///
+    /// This is the one unified full viewing key that cannot be derived. Every other kind
+    /// is reached through [`UnifiedSpendingKey::to_unified_full_viewing_key`], because a
+    /// seed determines it; a P2SH account is instead defined by a set of cosigners'
+    /// keys, so it has no spending key to derive from and must be assembled.
+    ///
+    /// The resulting key has no shielded components, so it encodes with the `tu` HRP and
+    /// derives transparent-only unified addresses.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    #[cfg(feature = "transparent-inputs")]
+    pub fn from_p2sh(p2sh: P2shFullViewingKey) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            Some(TransparentFvk::P2sh(p2sh)),
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            vec![],
+            None,
+            None,
+            vec![],
+        )
+    }
+
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     #[allow(clippy::too_many_arguments)]
@@ -2356,6 +2383,8 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::proptest;
+    use secp256k1::{PublicKey, SecretKey};
+    use zcash_encoding::CompactSize;
 
     #[cfg(all(
         feature = "transparent-inputs",
@@ -2394,7 +2423,7 @@ mod tests {
         },
         assert_matches::assert_matches,
         zcash_address::unified::{self, Encoding},
-        zcash_protocol::consensus::{NetworkConstants, NetworkType, TEST_NETWORK},
+        zcash_protocol::consensus::{NetworkType, TEST_NETWORK},
     };
 
     #[cfg(feature = "orchard")]
@@ -2545,7 +2574,10 @@ mod tests {
 
                 let ufvk_r0 = ufvk_r0.unwrap();
                 assert_eq!(ufvk_compatible, ufvk_r0);
-                assert!(ufvk_r0.starts_with(MAIN_NETWORK.hrp_unified_fvk()));
+                assert!(
+                    ufvk_r0
+                        .starts_with(zcash_address::constants::hrp_unified_fvk(NetworkType::Main))
+                );
                 assert_eq!(
                     UnifiedFullViewingKey::decode(&MAIN_NETWORK, &ufvk_r0)
                         .unwrap()
@@ -2556,7 +2588,10 @@ mod tests {
 
                 let uivk_r0 = uivk_r0.unwrap();
                 assert_eq!(uivk_compatible, uivk_r0);
-                assert!(uivk_r0.starts_with(MAIN_NETWORK.hrp_unified_ivk()));
+                assert!(
+                    uivk_r0
+                        .starts_with(zcash_address::constants::hrp_unified_ivk(NetworkType::Main))
+                );
                 assert_eq!(
                     UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, &uivk_r0)
                         .unwrap()
@@ -2799,8 +2834,7 @@ mod tests {
                     panic!("UA derivation failed for account {}: {e:?}", tv.account)
                 });
             assert_eq!(
-                ua.encode_receiver_preserving_revision(&MAIN_NETWORK, Revision::R2)
-                    .as_deref(),
+                ua.encode_revision(&MAIN_NETWORK, Revision::R2).as_deref(),
                 Ok(tv.derived_ua),
                 "derived UA mismatch for account {}",
                 tv.account
@@ -3035,7 +3069,6 @@ mod tests {
             UnifiedAddressRequest,
         };
         use crate::address::UnifiedAddress;
-        use zcash_protocol::consensus::NetworkConstants;
 
         let account_pubkey = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
             .unwrap()
@@ -3081,7 +3114,9 @@ mod tests {
             .encode_revision(&MAIN_NETWORK, Revision::R2)
             .expect("every address has a Revision 2 encoding");
         assert!(
-            encoded.starts_with(MAIN_NETWORK.hrp_unified_address_r2_ti()),
+            encoded.starts_with(zcash_address::constants::hrp_unified_address_r2_ti(
+                zcash_protocol::consensus::NetworkType::Main
+            )),
             "{encoded} is not a transparent-including Revision 2 Unified Address",
         );
         assert_eq!(
@@ -3348,31 +3383,96 @@ mod tests {
         assert!(ufvk.p2sh().is_none());
     }
 
-    /// Without the `transparent-inputs` feature a P2SH viewing key item cannot be
-    /// interpreted, so it is retained as an unknown item and recorded as unconverted in
-    /// the derived incoming viewing key. Otherwise that derived key describes the account
-    /// as having no transparent receiving capability at all.
+    /// A P2SH account has no seed to derive a unified key from, so the constructor is the
+    /// only way to reach one. What it builds has to survive the encoding, or an account
+    /// registered from a cosigner set is not the account read back from the wallet.
     #[test]
-    #[cfg(not(feature = "transparent-inputs"))]
+    #[cfg(feature = "transparent-inputs")]
+    fn ufvk_from_p2sh_round_trips_and_is_transparent_only() {
+        use super::{UnifiedAddressRequest, UnifiedFullViewingKey};
+        use ::transparent::zip48::{P2shFullViewingKey, P2shKey};
+        use core::num::NonZeroU8;
+        use secp256k1::{PublicKey, SecretKey};
+
+        let key_info = [1u8, 2, 3]
+            .iter()
+            .map(|i| {
+                let sk = SecretKey::from_secret_bytes([*i; 32]).expect("valid secret key");
+                P2shKey::new([*i; 32], PublicKey::from_secret_key(&sk))
+            })
+            .collect::<Vec<_>>();
+        let item = P2shFullViewingKey::new(NonZeroU8::new(2).unwrap(), key_info)
+            .expect("valid cosigner set");
+
+        let ufvk = UnifiedFullViewingKey::from_p2sh(item.clone()).expect("constructible");
+
+        assert_eq!(ufvk.p2sh(), Some(&item));
+        assert_eq!(ufvk.p2pkh(), None);
+
+        let encoded = ufvk.encode(&MAIN_NETWORK).expect("encodes");
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).expect("decodes");
+        assert_eq!(decoded.p2sh(), Some(&item));
+
+        // A key with no shielded items yields a transparent-only unified address, which
+        // is what makes the account portable between wallets at all.
+        let (address, _) = ufvk
+            .default_address(UnifiedAddressRequest::ALLOW_ALL)
+            .expect("derives an address");
+        assert!(address.has_transparent());
+        assert!(
+            address.encode(&MAIN_NETWORK).starts_with("tu"),
+            "expected a transparent-only UA, got {}",
+            address.encode(&MAIN_NETWORK),
+        );
+    }
+
+    #[test]
     fn p2sh_item_is_unconverted_without_transparent_inputs() {
         use zcash_address::unified::{Encoding, Fvk, Revision, Ufvk, Uitem};
 
-        /// The typecode ZIP 316 assigns to a P2SH viewing key item.
-        const P2SH_TYPECODE: u32 = 0x01;
+        /// The shortest ZIP 48 P2SH FVK item.
+        ///
+        /// The shortest possible P2SH FVK item would be `sh(pk(@0/**))`), but
+        /// `P2shFullViewingKey::parse` only supports ZIP 48.
+        const TEMPLATE: &str = "sh(sortedmulti(1,@0/**))";
 
-        let payload = vec![0u8; 8];
+        let secret_key = SecretKey::from_secret_bytes([1; 32]).unwrap();
+        let public_key = PublicKey::from_secret_key(&secret_key);
+
+        let mut payload = vec![];
+        CompactSize::write(&mut payload, TEMPLATE.len()).unwrap();
+        payload.extend_from_slice(TEMPLATE.as_bytes());
+        CompactSize::write(&mut payload, 1).unwrap();
+        // A BIP 32 chain code is 32 bytes.
+        payload.extend_from_slice(&[0; 32]);
+        payload.extend_from_slice(&public_key.serialize());
+
         let ufvk =
             Ufvk::try_from_items(Revision::R2, vec![Uitem::Data(Fvk::P2sh(payload.clone()))])
                 .unwrap();
 
         let parsed = super::UnifiedFullViewingKey::parse(&ufvk).unwrap();
-        assert_eq!(parsed.unknown, vec![(P2SH_TYPECODE, payload)]);
-        assert_eq!(
-            parsed
-                .to_unified_incoming_viewing_key()
-                .unconverted_typecodes,
-            vec![P2SH_TYPECODE]
-        );
+
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(parsed.p2sh().unwrap().to_bytes(), payload);
+
+        // Without the `transparent-inputs` feature a P2SH viewing key item cannot be
+        // interpreted, so it is retained as an unknown item and recorded as unconverted in
+        // the derived incoming viewing key. Otherwise that derived key describes the account
+        // as having no transparent receiving capability at all.
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            // The typecode ZIP 316 assigns to a P2SH viewing key item.
+            const P2SH_TYPECODE: u32 = 0x01;
+
+            assert_eq!(parsed.unknown, vec![(P2SH_TYPECODE, payload)]);
+            assert_eq!(
+                parsed
+                    .to_unified_incoming_viewing_key()
+                    .unconverted_typecodes,
+                vec![P2SH_TYPECODE]
+            );
+        }
     }
 
     #[cfg(feature = "unstable")]

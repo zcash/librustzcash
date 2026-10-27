@@ -19,7 +19,9 @@ use zcash_keys::{
 };
 use zcash_primitives::{
     block::{Block, BlockHash, BlockHeaderData},
-    transaction::{Transaction, TransactionData, TxVersion, fees::zip317},
+    transaction::{
+        Transaction, TransactionData, TxVersion, builder::NU7_DEFAULT_TX_EXPIRY_DELTA, fees::zip317,
+    },
 };
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
@@ -250,6 +252,76 @@ where
             ConfirmationsPolicy::MIN
         ),
         Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
+    );
+}
+
+/// Tests that an unmined UTXO received when the chain tip is one block below NU7 activation is
+/// assumed to expire after the default expiry delta for the mempool height, which is the NU7
+/// activation height.
+pub fn put_received_unmined_utxo_uses_mempool_height_expiry_delta<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    /// The number of blocks between Sapling activation and NU7 activation on the test network.
+    const NU7_ACTIVATION_OFFSET: u32 = 10;
+
+    let sapling_activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .sapling
+        .expect("the default test network activates Sapling");
+    let nu7_activation = sapling_activation + NU7_ACTIVATION_OFFSET;
+    let mut st = TestBuilder::new()
+        .with_network(LocalNetwork {
+            nu6: Some(sapling_activation),
+            nu6_1: Some(sapling_activation),
+            nu6_2: Some(sapling_activation),
+            nu6_3: Some(sapling_activation),
+            nu7: Some(nu7_activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        })
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    st.wallet_mut()
+        .update_chain_tip(nu7_activation - 1)
+        .unwrap();
+
+    let outpoint = OutPoint::fake();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        TxOut::new(Zatoshis::const_from_u64(100000), taddr.script().into()),
+        None,
+        Some(account_id),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // The output is unexpired at every target height up to the NU7 activation height plus the
+    // NU7 default expiry delta, and expired above it.
+    let last_unexpired_height = nu7_activation + NU7_DEFAULT_TX_EXPIRY_DELTA;
+    assert_matches!(
+        st.wallet()
+            .get_transparent_output(&outpoint, Some(TargetHeight::from(last_unexpired_height))),
+        Ok(Some(_))
+    );
+    assert_matches!(
+        st.wallet().get_transparent_output(
+            &outpoint,
+            Some(TargetHeight::from(last_unexpired_height + 1))
+        ),
+        Ok(None)
     );
 }
 
@@ -3331,12 +3403,18 @@ where
         &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
     );
 
+    // The gather stops at `CAP` inputs, whose value the error reports as available; the
+    // request needs the payment plus one logical action per gathered input.
+    let expected_available = Zatoshis::const_from_u64(DUST_VALUE * (CAP as u64));
+    let expected_required =
+        (payment_amount + (zip317::MARGINAL_FEE * (CAP as u64)).unwrap()).unwrap();
     assert_matches!(
         result,
-        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        Err(crate::data_api::error::Error::InsufficientFunds { available, required })
+            if available == expected_available && required == expected_required,
         "the transparent gather should stop at the input cap rather than consuming every \
-         eligible dust UTXO, so the request should fail rather than succeed with an \
-         uncapped number of inputs",
+         eligible dust UTXO, so the request should fail with the capped inputs reported as \
+         available rather than succeed with an uncapped number of inputs",
     );
 }
 

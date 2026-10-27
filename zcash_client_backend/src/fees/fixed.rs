@@ -11,7 +11,7 @@ use zcash_protocol::{
 };
 
 use crate::data_api::anchor_retention::PoolMigrationParams;
-use crate::data_api::{InputSource, wallet::TargetHeight};
+use crate::data_api::{ChangeReceivers, InputSource, wallet::TargetHeight};
 
 use super::{
     ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, SplitPolicy,
@@ -84,7 +84,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     type FeeRule = FixedFeeRule;
     type Error = BalanceError;
     type MetaSource = I;
-    type AccountMetaT = ();
+    type AccountMetaT = ChangeReceivers;
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -92,12 +92,12 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
 
     fn fetch_wallet_meta(
         &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as InputSource>::AccountId,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as InputSource>::AccountId,
         _target_height: TargetHeight,
         _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
     ) -> Result<Self::AccountMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
-        Ok(())
+        meta_source.get_change_receivers(account)
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -112,7 +112,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        _wallet_meta: &Self::AccountMetaT,
+        wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -131,6 +131,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         single_pool_output_balance(
             cfg,
             None,
+            wallet_meta,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -153,6 +154,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
 #[cfg(test)]
 mod tests {
     use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
+    use crate::fees::tests::all_change_receivers;
     use ::transparent::bundle::TxOut;
     use zcash_primitives::transaction::fees::{
         fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE,
@@ -194,7 +196,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -210,7 +215,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -239,7 +244,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -262,7 +270,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(

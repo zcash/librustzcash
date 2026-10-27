@@ -16,7 +16,7 @@ use zcash_protocol::{
 
 use crate::{
     data_api::{
-        AccountMeta, InputSource, NoteFilter,
+        AccountMeta, ChangeReceivers, InputSource, NoteFilter,
         anchor_retention::PoolMigrationParams,
         wallet::{
             TargetHeight,
@@ -130,7 +130,7 @@ where
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
     type MetaSource = I;
-    type AccountMetaT = ();
+    type AccountMetaT = ChangeReceivers;
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -138,12 +138,12 @@ where
 
     fn fetch_wallet_meta(
         &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as MetaSource>::AccountId,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as MetaSource>::AccountId,
         _target_height: TargetHeight,
         _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
     ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
-        Ok(())
+        meta_source.change_receivers(account)
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -158,7 +158,7 @@ where
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
-        _wallet_meta: &Self::AccountMetaT,
+        wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -177,6 +177,7 @@ where
         single_pool_output_balance(
             cfg,
             None,
+            wallet_meta,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -330,6 +331,7 @@ where
         single_pool_output_balance(
             cfg,
             Some(wallet_meta),
+            wallet_meta.change_receivers(),
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -353,14 +355,19 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::fees::tests::all_change_receivers;
     // `sapling_fees` is named by both the orchard and the transparent-inputs tests.
     #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
     use crate::fees::sapling as sapling_fees;
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::fees::TransparentChangePolicy,
+        crate::{
+            data_api::TransparentChangeKind,
+            fees::{EphemeralBalance, TransparentChangePolicy},
+        },
         ::transparent::{address::TransparentAddress, bundle::OutPoint},
+        zcash_primitives::transaction::fees::zip317::MINIMUM_FEE,
     };
 
     #[cfg(feature = "orchard")]
@@ -374,7 +381,7 @@ mod tests {
 
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta,
+            AccountMeta, ChangeReceivers, PoolMeta,
             anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
             testing::MockWalletDb,
             wallet::input_selection::SaplingPayment,
@@ -387,7 +394,7 @@ mod tests {
     };
     use core::{convert::Infallible, num::NonZeroUsize};
     use zcash_protocol::{
-        ShieldedPool,
+        PoolType, ShieldedPool,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
     };
@@ -414,7 +421,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -430,7 +440,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -464,7 +474,10 @@ mod tests {
                         .unwrap()
                         .into(),
                     BlockHeight::from_u32(1),
-                    &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                    &PoolMigrationParams::new(
+                        zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                        AnchorRetentionInterval::ZIP_318,
+                    ),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
                     &(
@@ -480,7 +493,12 @@ mod tests {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    &AccountMeta::new(Some(PoolMeta::new(existing_notes, total)), None, None),
+                    &AccountMeta::new(
+                        Some(PoolMeta::new(existing_notes, total)),
+                        None,
+                        None,
+                        all_change_receivers(),
+                    ),
                 )
             };
 
@@ -519,7 +537,10 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -539,6 +560,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -565,7 +587,10 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -586,6 +611,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -606,7 +632,10 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -627,6 +656,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -652,7 +682,10 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -676,6 +709,7 @@ mod tests {
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
                     None,
+                    all_change_receivers(),
                 ),
             );
 
@@ -706,7 +740,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -724,7 +761,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -756,7 +793,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &sapling_fees::EmptyBundleView,
@@ -770,7 +810,7 @@ mod tests {
             ),
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -827,7 +867,7 @@ mod tests {
 
         // No note counts are known for the account, so the split policy proposes a single
         // change output: the assertions below are about the pool it lands in, not the split.
-        let wallet_meta = AccountMeta::new(None, None, None);
+        let wallet_meta = AccountMeta::new(None, None, None, all_change_receivers());
 
         // The Orchard bundle version whose action-count policy applies at each height. The
         // Orchard view is empty in both cases and so contributes no actions, but the version
@@ -858,7 +898,10 @@ mod tests {
             &Network::TestNetwork,
             pre_nu6_3_height,
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -885,7 +928,10 @@ mod tests {
             &Network::TestNetwork,
             post_nu6_3_height,
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -915,11 +961,18 @@ mod tests {
             ShieldedPool::Orchard,
             DustOutputPolicy::default(),
         );
-        let zip318 = PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318);
+        let zip318 = PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::UNIFORM,
+            AnchorRetentionInterval::ZIP_318,
+        );
         let interval = AnchorBucketInterval::ZIP_318;
 
         // An anchor ON the grid, as a canonical crossing requires.
-        let anchor = interval.boundary_at_or_below(BlockHeight::from_u32(2_000_000));
+        let anchor = zcash_protocol::zip318::AnchorGrid::new(
+            interval,
+            zcash_protocol::zip318::BlockSpacing::UNIFORM,
+        )
+        .boundary_at_or_below(BlockHeight::from_u32(2_000_000));
         let height = TargetHeight::from(BlockHeight::from_u32(u32::from(anchor) + 10));
 
         // One Orchard input, large enough that its change stays in Orchard rather than being
@@ -958,7 +1011,7 @@ mod tests {
                     &orchard_view,
                     &ironwood_view,
                     None,
-                    &(),
+                    &all_change_receivers(),
                 )
                 .expect("the input covers the payment and its fee")
                 .dummy_outputs()
@@ -1012,14 +1065,17 @@ mod tests {
                 &Network::TestNetwork,
                 height,
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
                 &orchard_view,
                 &orchard_fees::EmptyBundleView,
                 None,
-                &(),
+                &all_change_receivers(),
             )
             .unwrap();
 
@@ -1028,7 +1084,10 @@ mod tests {
                 &Network::TestNetwork,
                 height,
                 BlockHeight::from_u32(1),
-                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
@@ -1039,7 +1098,7 @@ mod tests {
                     &orchard_outputs[..],
                 ),
                 None,
-                &(),
+                &all_change_receivers(),
             )
             .unwrap();
 
@@ -1086,7 +1145,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[TxOut::new(
                 Zatoshis::const_from_u64(40000),
@@ -1105,7 +1167,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1134,7 +1196,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1152,7 +1217,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1181,7 +1246,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1199,7 +1267,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1234,7 +1302,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1252,7 +1323,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1285,7 +1356,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1303,7 +1377,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1334,7 +1408,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1352,7 +1429,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1383,7 +1460,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1399,7 +1479,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1435,7 +1515,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1453,7 +1536,12 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &AccountMeta::new(Some(PoolMeta::new(0, Zatoshis::ZERO)), None, None),
+            &AccountMeta::new(
+                Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                None,
+                None,
+                all_change_receivers(),
+            ),
         );
 
         assert_matches!(
@@ -1486,7 +1574,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1504,7 +1595,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1539,7 +1630,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1557,7 +1651,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1589,7 +1683,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1607,7 +1704,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1650,7 +1747,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1672,7 +1772,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         assert_matches!(
@@ -1701,7 +1801,10 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
-            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1727,7 +1830,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            &(),
+            &all_change_receivers(),
         );
 
         // We will get an error here, because the dust input isn't free to add
@@ -1735,6 +1838,371 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::DustInputs { sapling, .. }) if sapling == vec![2]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn sapling_only_account_paying_orchard_gets_sapling_change() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+
+        // The account has no Orchard key, so the change from paying an Orchard recipient
+        // goes to the Sapling pool that the transaction spends from.
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(55000),
+                }][..],
+                &[] as &[Infallible],
+            ),
+            &(
+                ::orchard::bundle::BundleVersion::orchard_v2(),
+                &[] as &[Infallible],
+                &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
+            ),
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(
+                true,
+                false,
+                #[cfg(feature = "transparent-inputs")]
+                None,
+            ),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(20000)
+        );
+    }
+
+    #[test]
+    fn shielded_change_requires_a_shielded_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        // An account with no shielded key cannot receive the change of a shielded spend.
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(55000),
+                }][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(
+                false,
+                false,
+                #[cfg(feature = "transparent-inputs")]
+                Some(TransparentChangeKind::P2pkh),
+            ),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::SAPLING
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_change_requires_a_transparent_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Transparent change is allowed, but the account has no transparent key.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(63000),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                ),
+            }],
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::TRANSPARENT
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn missing_transparent_receiver_does_not_hide_insufficient_funds() {
+        /// The value of the transparent payment.
+        const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(40000);
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Input selection starts with no inputs. A shielded-only account that pays a
+        // transparent address must learn that it needs more funds, so that shielded notes
+        // can be selected.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[] as &[TestTransparentInput],
+            &[TxOut::new(PAYMENT_VALUE, Script::default())],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::InsufficientFunds { available, required })
+                if available == Zatoshis::ZERO && required == (PAYMENT_VALUE + MINIMUM_FEE).unwrap()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn changeless_transparent_transaction_needs_no_transparent_receiver() {
+        /// The value of the transparent payment.
+        const PAYMENT_VALUE: Zatoshis = Zatoshis::const_from_u64(40000);
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // The second transaction of a ZIP 320 pair spends the ephemeral output exactly, so it
+        // has no change output. The account needs no transparent receiver for it.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[] as &[TestTransparentInput],
+            &[TxOut::new(PAYMENT_VALUE, Script::default())],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            Some(EphemeralBalance::Input(
+                (PAYMENT_VALUE + MINIMUM_FEE).unwrap(),
+            )),
+            &ChangeReceivers::new(true, true, None),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if balance.proposed_change().is_empty() && balance.fee_required() == MINIMUM_FEE
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_change_is_sized_by_its_kind() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Sixteen 32-byte P2SH payments make 512 bytes of outputs. A 32-byte P2SH change
+        // output brings this to 544 bytes, which is 16 logical actions of 34 bytes. A
+        // 34-byte P2PKH change output brings it to 546 bytes, which is 17 logical actions.
+        let payments = vec![
+            TxOut::new(
+                Zatoshis::const_from_u64(5000),
+                TransparentAddress::ScriptHash([0u8; 20]).script().into(),
+            );
+            16
+        ];
+        let balance = |kind| {
+            change_strategy.compute_balance::<_, Infallible>(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
+                &[TestTransparentInput {
+                    outpoint: OutPoint::fake(),
+                    coin: TxOut::new(
+                        Zatoshis::const_from_u64(200000),
+                        TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                    ),
+                }],
+                &payments[..],
+                &sapling_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                &ChangeReceivers::new(false, false, Some(kind)),
+            )
+        };
+
+        assert_matches!(
+            balance(TransparentChangeKind::P2sh),
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(40000))] &&
+                balance.fee_required() == Zatoshis::const_from_u64(80000)
+        );
+        assert_matches!(
+            balance(TransparentChangeKind::P2pkh),
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(35000))] &&
+                balance.fee_required() == Zatoshis::const_from_u64(85000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn ephemeral_output_requires_a_p2pkh_receiver() {
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        // The first transaction of a ZIP 320 pair sends value to an ephemeral P2PKH
+        // address of the account. An account whose transparent key is a P2SH key has no
+        // such address.
+        let balance = |kind| {
+            change_strategy.compute_balance::<_, Infallible>(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(
+                    zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                    AnchorRetentionInterval::ZIP_318,
+                ),
+                &[TestTransparentInput {
+                    outpoint: OutPoint::fake(),
+                    coin: TxOut::new(
+                        Zatoshis::const_from_u64(100000),
+                        TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+                    ),
+                }],
+                &[] as &[TxOut],
+                &sapling_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                Some(EphemeralBalance::Output(Zatoshis::const_from_u64(50000))),
+                &ChangeReceivers::new(true, false, Some(kind)),
+            )
+        };
+
+        assert_matches!(
+            balance(TransparentChangeKind::P2sh),
+            Err(ChangeError::UnsupportedChangePool(pool)) if pool == PoolType::TRANSPARENT
+        );
+        assert_matches!(
+            balance(TransparentChangeKind::P2pkh),
+            Ok(balance) if balance.proposed_change().iter().any(|c| c.is_ephemeral())
         );
     }
 }

@@ -10,17 +10,13 @@ workspace.
 
 ## [Unreleased]
 
-## [0.31.0-pre.1] - 2026-10-06
+## [0.31.0] - 2026-10-21
 
 ### Changed
-- Migrated to `zcash_primitives 0.31.0-pre.1`.
-
-## [0.31.0-pre.0] - 2026-09-30
-
-### Changed
+- MSRV is now 1.89
 - Migrated to `bellman 0.15`, `bls12_381 0.9`, `groth16 0.2`, `group 0.14`,
   `jubjub 0.11`, `rand_core 0.10`, `sapling-crypto 0.9`, and
-  `zcash_primitives 0.31.0-pre.0`.
+  `zcash_primitives 0.31.0`.
 - `zcash_proofs::sprout::create_proof` takes an additional `rng` first argument
   that implements `rand_core::{Rng, CryptoRng}`, in place of drawing randomness from
   the operating system.

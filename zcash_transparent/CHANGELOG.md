@@ -10,17 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.11.0-pre.1] - 2026-10-06
-
-### Changed
-- Migrated to `zcash_address 0.14.0-pre.1`.
-
-### Fixed
-- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
-  is not less than its end now yields no indices. It previously yielded the
-  start index.
-
-## [0.11.0-pre.0] - 2026-09-30
+## [0.11.0] - 2026-10-21
 
 ### Added
 - `zcash_transparent::keys::ShieldingOvks`
@@ -37,8 +27,10 @@ workspace.
 - `zcash_transparent::zip48::P2shViewingKeyError`
 
 ### Changed
-- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_address 0.14.0-pre.0`,
-  `zcash_protocol 0.11.0-pre.0`, `zcash_script 0.6`, and `zip32 0.3`.
+- MSRV is now 1.89
+- Migrated to `bip32 0.6`, `secp256k1 0.33`, `zcash_protocol 0.11.0`,
+  `zcash_script 0.6`, and `zip32 0.3`.
+- `zcash_transparent` no longer depends on `zcash_address`.
 - `zcash_transparent::builder::TransparentSignatureContext` no longer has
   lifetime or type parameters, and
   `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`
@@ -69,6 +61,21 @@ workspace.
   - `SpendFinalizerError` has added variants:
     - `DisallowedSighashType`
     - `MismatchedSighashType`
+
+### Removed
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`. Use
+  `zcash_keys::address::Receiver::Transparent(addr).to_zcash_address(net)`
+  instead.
+- The `zcash_address::TryFromAddress` impl for
+  `zcash_transparent::address::TransparentAddress`, which enabled
+  `ZcashAddress::convert::<TransparentAddress>()`. Use
+  `ZcashAddress::convert_if_network::<zcash_keys::address::Address>(net)` and
+  match `Address::Transparent` instead.
+
+### Fixed
+- Iterating over a `zcash_transparent::keys::NonHardenedChildRange` whose start
+  is not less than its end now yields no indices. It previously yielded the
+  start index.
 
 ## [0.10.0] - 2026-07-23
 

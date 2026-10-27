@@ -140,6 +140,7 @@ extern crate std;
 
 use alloc::string::String;
 
+pub mod constants;
 mod convert;
 mod encoding;
 mod kind;
@@ -334,6 +335,11 @@ impl ZcashAddress {
             }
             P2pkh(_) | P2sh(_) | Tex(_) => true,
         }
+    }
+
+    /// Returns whether this address is a Sprout address.
+    pub fn is_sprout(&self) -> bool {
+        matches!(self.kind, AddressKind::Sprout(_))
     }
 
     /// Returns whether or not this address contains or corresponds to the given unified address
