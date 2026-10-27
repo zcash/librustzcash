@@ -184,11 +184,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pczt]]
-version = "0.10.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.10.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.reddsa]]
 version = "0.6.1"
@@ -477,18 +477,18 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.14.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.14.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_backend]]
-version = "0.25.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.25.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_sqlite]]
 version = "0.23.0"
@@ -512,11 +512,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_keys]]
-version = "0.17.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.17.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_note_encryption]]
 version = "0.5.1"
@@ -526,32 +526,32 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.2.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.2.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_primitives]]
-version = "0.31.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.31.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_proofs]]
-version = "0.31.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.31.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_protocol]]
-version = "0.11.0-pre.1"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.11.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_script]]
 version = "0.6.0"
@@ -568,11 +568,11 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.11.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.11.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zewif]]
 version = "1.0.0-rc.3"
@@ -589,11 +589,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.10.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.10.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[audits.bytecode-alliance.wildcard-audits.bumpalo]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
@@ -832,6 +832,12 @@ criteria = "safe-to-deploy"
 delta = "0.3.27 -> 0.3.31"
 notes = 'New waker_ref module contains "FIXME: panics on Arc::clone / refcount changes could wreak havoc..." comment, but this corner case feels low risk.'
 
+[[audits.bytecode-alliance.audits.getrandom]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.1 -> 0.4.2"
+notes = "Nothing awry in this update, standard updates for some platforms and other misc things."
+
 [[audits.bytecode-alliance.audits.hashbrown]]
 who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"
@@ -1028,6 +1034,12 @@ No `unsafe` additions or anything outside of the purview of the crate in this
 change.
 """
 
+[[audits.bytecode-alliance.audits.rand]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.1"
+notes = "Minor logging-based updated fixing a recent advisory for the crate."
+
 [[audits.bytecode-alliance.audits.rustc-demangle]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -1153,6 +1165,11 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.45.1 -> 0.46.0"
 notes = "The Bytecode Alliance is the author of this crate"
+
+[[audits.bytecode-alliance.audits.zeroize]]
+who = "Pat Hickey <p.hickey@f5.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.1 -> 1.8.2"
 
 [[audits.embark-studios.audits.anyhow]]
 who = "Johan Andersson <opensource@embark-studios.com>"
@@ -2448,6 +2465,11 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 version = "0.9.0"
 
+[[audits.isrg.audits.chacha20]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+version = "0.10.0"
+
 [[audits.isrg.audits.crunchy]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -2563,6 +2585,16 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.3 -> 0.3.4"
 
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.3.4 -> 0.4.0"
+
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.1"
+
 [[audits.isrg.audits.hmac]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -2643,6 +2675,11 @@ who = "Tim Geoghegan <timg@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.9.1 -> 0.9.2"
 
+[[audits.isrg.audits.rand]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.9.2 -> 0.10.0"
+
 [[audits.isrg.audits.rand_chacha]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -2652,6 +2689,16 @@ delta = "0.3.1 -> 0.9.0"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.6.4 -> 0.9.3"
+
+[[audits.isrg.audits.rand_core]]
+who = "J.C. Jones <jc@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.9.3 -> 0.9.5"
+
+[[audits.isrg.audits.rand_core]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.9.5 -> 0.10.0"
 
 [[audits.isrg.audits.rand_distr]]
 who = "David Cook <dcook@divviup.org>"
@@ -2772,6 +2819,11 @@ delta = "1.0.40 -> 1.0.43"
 who = "Brandon Pitman <bran@bran.land>"
 criteria = "safe-to-deploy"
 delta = "1.0.40 -> 1.0.43"
+
+[[audits.isrg.audits.untrusted]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+version = "0.7.1"
 
 [[audits.mozilla.wildcard-audits.core-foundation-sys]]
 who = "Bobby Holley <bobbyholley@gmail.com>"
@@ -2972,11 +3024,26 @@ criteria = "safe-to-deploy"
 delta = "0.2.1 -> 0.2.2"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.chacha20]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.2"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.core_detect]]
 who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
 version = "1.0.0"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cpufeatures]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.3.1"
+notes = """
+No dependencies aside from libc, and no use of std. Unsafe code is minimal and necessary.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.crossbeam-channel]]
 who = "Jan-Erik Rediger <jrediger@mozilla.com>"
@@ -3192,6 +3259,12 @@ inlining and a syscall-based linux back-end, whose relevant unsafe code looks
 reasonable.
 """
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.getrandom]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.4.3"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.half]]
 who = "John M. Schanck <jschanck@mozilla.com>"
@@ -3606,6 +3679,18 @@ criteria = "safe-to-deploy"
 delta = "1.0.40 -> 1.0.45"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.rand]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.1 -> 0.10.3"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.rand_core]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.1"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.rand_distr]]
 who = "Ben Dean-Kawamura <bdk@mozilla.com>"
 criteria = "safe-to-deploy"
@@ -3695,6 +3780,13 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 notes = "The goal is to provide some constant-time correctness for cryptographic implementations. The approach is reasonable, it is known to be insufficient but this is pointed out in the documentation."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.sync_wrapper]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "1.0.2"
+notes = "Simple crate, nothing out of the ordinary."
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.tempfile]]
 who = "Mike Hommey <mh+mozilla@glandium.org>"
@@ -3848,6 +3940,20 @@ criteria = "safe-to-deploy"
 delta = "0.2.5 -> 0.2.6"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.untrusted]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.1 -> 0.9.0"
+notes = "Mostly a refactor of existing code. No use of std, no unsafe, no dependencies."
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.web-time]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "1.1.0"
+notes = "Reasonable dependencies, unsafe code denied. The only use of std is to forward std::time when used on non-wasm targets and to reuse a few std::time things that are still applicable."
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.windows-link]]
 who = "Mark Hammond <mhammond@skippinet.com.au>"
 criteria = "safe-to-deploy"
@@ -3880,6 +3986,23 @@ criteria = "safe-to-deploy"
 version = "0.7.32"
 notes = "Clean, safe macros for zerocopy."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.zeroize]]
+who = "Benjamin Beurdouche <beurdouche@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "1.8.1"
+notes = """
+This code DOES contain unsafe code required to internally call volatiles
+for deleting data. This is expected and documented behavior.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.zeroize]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.2 -> 1.9.1"
+notes = "Minor stylistic changes to unsafe blocks, many tests added/updated."
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.zcash.audits.aho-corasick]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
