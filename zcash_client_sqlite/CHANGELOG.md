@@ -84,6 +84,9 @@ workspace.
   anchor grid (every 432 blocks rather than every 144).
 
 ### Fixed
+- Importing a UFVK or UIVK that extends an existing account now requeues
+  previously scanned blocks from the supplied birthday, allowing notes newly
+  visible to that account to be found.
 - The `full_account_ids` migration no longer rejects a wallet whose stored UFVK
   is encoded at a different ZIP 316 revision from the one the migration derives.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
