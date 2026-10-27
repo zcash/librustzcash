@@ -18,6 +18,14 @@ impl Params {
             None
         }
     }
+    /// The minimally encoded solution length, or `None` on overflow.
+    pub(crate) fn solution_bytes(&self) -> Option<usize> {
+        Some(
+            self.solution_indices()?
+                .checked_mul(self.collision_bit_length() + 1)?
+                / 8,
+        )
+    }
     pub(crate) fn indices_per_hash_output(&self) -> u32 {
         512 / self.n
     }
@@ -30,7 +38,9 @@ impl Params {
     pub(crate) fn collision_byte_length(&self) -> usize {
         self.collision_bit_length().div_ceil(8)
     }
-    #[cfg(test)]
+    pub(crate) fn solution_indices(&self) -> Option<usize> {
+        1usize.checked_shl(self.k)
+    }
     pub(crate) fn hash_length(&self) -> usize {
         ((self.k as usize) + 1) * self.collision_byte_length()
     }

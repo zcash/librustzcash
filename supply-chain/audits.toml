@@ -1936,13 +1936,13 @@ end = "2027-04-17"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2020-06-26"
-end = "2025-04-22"
+end = "2027-10-27"
 
 [[trusted.equihash]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2025-02-21"
-end = "2027-04-24"
+end = "2027-10-22"
 
 [[trusted.f4jumble]]
 criteria = "safe-to-deploy"
