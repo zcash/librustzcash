@@ -70,8 +70,6 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
-[policy.zcash_script]
-
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
