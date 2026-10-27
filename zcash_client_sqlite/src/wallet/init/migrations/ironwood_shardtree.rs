@@ -321,6 +321,8 @@ mod tests {
                 nu6_2: None,
                 nu6_3: Some(activation),
                 nu7: None,
+                #[cfg(zcash_unstable = "nu8")]
+                nu8: None,
                 #[cfg(zcash_unstable = "nutachyon")]
                 nu_tachyon: None,
             },

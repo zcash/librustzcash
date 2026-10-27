@@ -33,9 +33,14 @@ use zcash_protocol::PoolType;
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 #[cfg(all(
     any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
-    zcash_unstable = "nutachyon"
+    zcash_unstable = "nu8"
 ))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+use zcash_protocol::value::{ZatBalance, Zatoshis};
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
@@ -43,6 +48,7 @@ use {
     zcash_protocol::{
         consensus::{BranchId, OrchardProtocolRevision},
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
+        value::BalanceError,
     },
 };
 
@@ -150,7 +156,7 @@ pub mod v1 {
             // The v1 encoding cannot represent V6 or V7 transactions.
             if match pczt.global.tx_version {
                 zcash_protocol::constants::V6_TX_VERSION => true,
-                #[cfg(zcash_unstable = "nutachyon")]
+                #[cfg(zcash_unstable = "nu8")]
                 zcash_protocol::constants::V7_TX_VERSION => true,
                 _ => false,
             } {
@@ -478,7 +484,7 @@ impl Pczt {
         // v1 encoding, avoiding the speculative clone below.
         let requires_v2 = match self.global.tx_version {
             zcash_protocol::constants::V6_TX_VERSION => true,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             zcash_protocol::constants::V7_TX_VERSION => true,
             _ => false,
         };
@@ -562,7 +568,7 @@ impl Pczt {
         let version = match (global.tx_version, global.version_group_id) {
             (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
             (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             (V7_TX_VERSION, V7_VERSION_GROUP_ID) => Ok(TxVersion::V7),
             (version, version_group_id) => Err(ExtractError::UnsupportedTxVersion {
                 version,
@@ -584,7 +590,7 @@ impl Pczt {
                     return Err(ExtractError::UnsupportedConsensusBranchId.into());
                 }
             }
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             TxVersion::V7 => {
                 if orchard_protocol_revision < OrchardProtocolRevision::V3 {
                     return Err(ExtractError::UnsupportedConsensusBranchId.into());
@@ -592,6 +598,10 @@ impl Pczt {
             }
         }
 
+        // The parsed bundle does not expose its input values, so take the
+        // transparent pool's delta from the PCZT's own bundle first.
+        #[cfg(zcash_unstable = "nu8")]
+        let transparent_delta = transparent_value_balance(&transparent)?;
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
@@ -628,16 +638,22 @@ impl Pczt {
                 orchard_bundle,
                 ironwood_bundle,
             ),
-            #[cfg(zcash_unstable = "nutachyon")]
-            TxVersion::V7 => TransactionData::from_parts_v7(
+            // ZIP 248 requires the value pool deltas to sum to zero. The
+            // transparent pool's delta is only knowable here, from the input
+            // values the PCZT records; an authorized transparent bundle does
+            // not carry them.
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => TransactionData::from_parts_v7_balanced(
                 consensus_branch_id,
                 lock_time,
                 global.expiry_height.into(),
+                transparent_delta,
                 transparent_bundle,
                 sapling_bundle,
                 orchard_bundle,
                 ironwood_bundle,
-            ),
+            )
+            .map_err(ExtractError::TransparentValueBalance)?,
             _ => TransactionData::from_parts(
                 version,
                 consensus_branch_id,
@@ -705,6 +721,32 @@ impl Authorization for EffectsOnly {
     type OrchardAuth = ::orchard::bundle::EffectsOnly;
 }
 
+/// The net value the PCZT's transparent inputs and outputs move through the
+/// transparent pool, as a ZIP 248 value pool delta.
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+fn transparent_value_balance(
+    bundle: &crate::transparent::Bundle,
+) -> Result<ZatBalance, ExtractError> {
+    fn total(mut values: impl Iterator<Item = u64>) -> Result<ZatBalance, ExtractError> {
+        values.try_fold(ZatBalance::zero(), |acc, value| {
+            let value = Zatoshis::from_u64(value)
+                .map_err(ExtractError::TransparentValueBalance)
+                .map(ZatBalance::from)?;
+            (acc + value).ok_or(ExtractError::TransparentValueBalance(
+                BalanceError::Overflow,
+            ))
+        })
+    }
+    let inputs = total(bundle.inputs().iter().map(|input| input.value))?;
+    let outputs = total(bundle.outputs().iter().map(|output| output.value))?;
+    (inputs - outputs).ok_or(ExtractError::TransparentValueBalance(
+        BalanceError::Underflow,
+    ))
+}
+
 /// Computes the digests that the signature hashes of `tx_data` commit to.
 ///
 /// `global` must be the global data of the PCZT that `tx_data` was extracted from.
@@ -735,6 +777,9 @@ pub(crate) fn sighash(
 pub enum ExtractError {
     /// The PCZT's transparent inputs have incompatible lock time requirements.
     IncompatibleLockTimes,
+    /// The value that the PCZT's transparent inputs and outputs move through the
+    /// transparent pool is not representable.
+    TransparentValueBalance(BalanceError),
     /// An error occurred extracting the Ironwood protocol bundle from the Ironwood PCZT bundle.
     IronwoodExtract(::orchard::pczt::TxExtractorError),
     /// The PCZT carries Ironwood bundle data, but its transaction version does not
@@ -771,6 +816,9 @@ impl core::fmt::Display for ExtractError {
         match self {
             ExtractError::IncompatibleLockTimes => {
                 write!(f, "the transparent inputs have incompatible lock times")
+            }
+            ExtractError::TransparentValueBalance(e) => {
+                write!(f, "the transparent value balance is not representable: {e}")
             }
             ExtractError::IronwoodExtract(e) => {
                 write!(f, "could not extract the Ironwood bundle: {e}")
@@ -932,10 +980,10 @@ mod extraction_tests {
     }
 
     #[test]
-    #[cfg(zcash_unstable = "nutachyon")]
-    fn nu_tachyon_pczt_extracts_as_v7() {
+    #[cfg(zcash_unstable = "nu8")]
+    fn nu8_pczt_extracts_as_v7() {
         let pczt = Creator::new(
-            BranchId::NuTachyon.into(),
+            BranchId::Nu8.into(),
             10_000_000,
             133,
             Some([0; 32]),
@@ -947,7 +995,7 @@ mod extraction_tests {
 
         let tx_data = pczt.into_effects().unwrap();
         assert_eq!(tx_data.version(), TxVersion::V7);
-        assert_eq!(tx_data.consensus_branch_id(), BranchId::NuTachyon);
+        assert_eq!(tx_data.consensus_branch_id(), BranchId::Nu8);
     }
 }
 
