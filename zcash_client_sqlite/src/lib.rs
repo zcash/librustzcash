@@ -57,10 +57,11 @@ use zcash_client_backend::{
     TransferType,
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
+        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -773,10 +774,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// rescanned in order to correct missing witness data.
     ///
     /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
-    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError>
+    where
+        P: consensus::Parameters,
+    {
         self.transactionally(|wdb| {
             if let Some(anchor_height) = chain_tip_height(wdb.conn.0)? {
-                wallet::commitment_tree::check_witnesses(wdb.conn.0, anchor_height)
+                wallet::commitment_tree::check_witnesses(wdb.conn.0, &wdb.params, anchor_height)
             } else {
                 Ok(vec![])
             }
@@ -1111,6 +1115,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             Some(target_height),
         )
@@ -1184,6 +1189,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         )
     }
 
+    fn get_change_receivers(
+        &self,
+        account: Self::AccountId,
+    ) -> Result<ChangeReceivers, Self::Error> {
+        wallet::get_change_receivers(self.conn.borrow(), &self.params, account)
+    }
+
     /// Returns metadata for the spendable notes in the wallet.
     fn get_account_metadata(
         &self,
@@ -1195,6 +1207,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Sapling,
             target_height,
             account_id,
@@ -1206,6 +1219,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Orchard,
             target_height,
             account_id,
@@ -1219,6 +1233,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let ironwood_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
+            &self.params,
             ShieldedPool::Ironwood,
             target_height,
             account_id,
@@ -1233,6 +1248,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             sapling_pool_meta,
             orchard_pool_meta,
             ironwood_pool_meta,
+            self.get_change_receivers(account_id)?,
         ))
     }
 }
@@ -1588,7 +1604,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
         if let Some(_chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
-            let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
+            let iter =
+                wallet::transaction_data_requests(self.conn.borrow(), &self.params)?.into_iter();
 
             #[cfg(feature = "transparent-inputs")]
             let iter = iter.chain(wallet::transparent::transaction_data_requests(
@@ -1745,6 +1762,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     > {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             target_height,
         )
@@ -1907,6 +1925,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account_uuid: <Self as WalletRead>::AccountId,
     ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.delete_account(account_uuid))
+    }
+
+    fn set_account_name(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+        name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.set_account_name(account_uuid, name))
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2301,6 +2327,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         wallet::delete_account(self.conn.0, account_uuid)
     }
 
+    fn set_account_name(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+        name: &str,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::set_account_name(self.conn.0, account_uuid, name)
+    }
+
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_address(
         &mut self,
@@ -2438,6 +2472,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                 )?;
                 Ok::<_, SqliteClientError>(AnchorRetention::union(
                     from_height,
+                    zcash_protocol::zip318::BlockSpacing::for_network(&self.params),
                     core::iter::once(self.anchor_retention_interval).chain(committed),
                 ))
             })
@@ -2534,7 +2569,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         // would have to be revisited if `PoolMigrationParams` ever gained a second overridable
         // value.
         #[cfg(feature = "orchard")]
-        let zip318 = self.pool_migration_params();
+        let zip318 = self.pool_migration_params(&self.params);
         #[cfg(feature = "orchard")]
         let chain_tip = chain_tip_height(self.conn.0)?;
 
@@ -2834,6 +2869,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
+            &self.params,
             outpoint,
             target_height,
         )
@@ -4150,6 +4186,224 @@ mod tests {
         );
     }
 
+    /// The name given to an account by the `set_account_name` tests.
+    const RENAMED_ACCOUNT_NAME: &str = "Renamed account";
+
+    #[test]
+    fn set_account_name_updates_account_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_replaces_null_name() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        st.wallet_mut()
+            .conn_mut()
+            .execute("UPDATE accounts SET name = NULL", [])
+            .unwrap();
+        assert_eq!(
+            st.wallet().get_account(account_id).unwrap().unwrap().name(),
+            None
+        );
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(account.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_rejects_unknown_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let result = st
+            .wallet_mut()
+            .set_account_name(AccountUuid(Uuid::nil()), RENAMED_ACCOUNT_NAME);
+
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+    }
+
+    #[test]
+    fn set_account_name_preserves_keys_and_birthday() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st.test_account().unwrap().id();
+        let network = *st.network();
+        let before = st.wallet().get_account(account_id).unwrap().unwrap();
+
+        st.wallet_mut()
+            .set_account_name(account_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let after = st.wallet().get_account(account_id).unwrap().unwrap();
+        assert_eq!(
+            after.ufvk().map(|ufvk| ufvk.encode(&network)),
+            before.ufvk().map(|ufvk| ufvk.encode(&network))
+        );
+        assert_eq!(
+            after.uivk().encode(&network),
+            before.uivk().encode(&network)
+        );
+        assert_eq!(after.birthday_height(), before.birthday_height());
+        assert_eq!(after.source(), before.source());
+    }
+
+    /// The length in bytes of the seeds from which the `set_account_name` tests derive
+    /// their accounts.
+    const SET_ACCOUNT_NAME_SEED_LEN: usize = 32;
+
+    /// The fill byte of the seed for the first of two accounts in a `set_account_name` test.
+    const FIRST_ACCOUNT_SEED_BYTE: u8 = 0;
+
+    /// The fill byte of the seed for the second of two accounts in a `set_account_name`
+    /// test; differs from [`FIRST_ACCOUNT_SEED_BYTE`] so the accounts do not collide.
+    const SECOND_ACCOUNT_SEED_BYTE: u8 = 1;
+
+    /// The initial name of the first of two accounts in a `set_account_name` test.
+    const FIRST_ACCOUNT_NAME: &str = "first";
+
+    /// The initial name of the second of two accounts in a `set_account_name` test.
+    const SECOND_ACCOUNT_NAME: &str = "second";
+
+    /// An account name made of non-ASCII characters, including one outside the Basic
+    /// Multilingual Plane.
+    const UNICODE_ACCOUNT_NAME: &str = "Ünïcødé 🔐";
+
+    /// The empty account name.
+    const EMPTY_ACCOUNT_NAME: &str = "";
+
+    #[test]
+    fn set_account_name_only_renames_the_given_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let second_seed = Secret::new(vec![SECOND_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let (first_id, _) = st
+            .wallet_mut()
+            .create_account(FIRST_ACCOUNT_NAME, &first_seed, &birthday, None)
+            .unwrap();
+        let (second_id, _) = st
+            .wallet_mut()
+            .create_account(SECOND_ACCOUNT_NAME, &second_seed, &birthday, None)
+            .unwrap();
+
+        st.wallet_mut()
+            .set_account_name(first_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let first = st.wallet().get_account(first_id).unwrap().unwrap();
+        let second = st.wallet().get_account(second_id).unwrap().unwrap();
+        assert_eq!(first.name(), Some(RENAMED_ACCOUNT_NAME));
+        assert_eq!(second.name(), Some(SECOND_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_allows_duplicate_names() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let second_seed = Secret::new(vec![SECOND_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let (first_id, _) = st
+            .wallet_mut()
+            .create_account(FIRST_ACCOUNT_NAME, &first_seed, &birthday, None)
+            .unwrap();
+        let (second_id, _) = st
+            .wallet_mut()
+            .create_account(SECOND_ACCOUNT_NAME, &second_seed, &birthday, None)
+            .unwrap();
+
+        st.wallet_mut()
+            .set_account_name(first_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+        st.wallet_mut()
+            .set_account_name(second_id, RENAMED_ACCOUNT_NAME)
+            .unwrap();
+
+        let first = st.wallet().get_account(first_id).unwrap().unwrap();
+        let second = st.wallet().get_account(second_id).unwrap().unwrap();
+        assert_eq!(first.name(), Some(RENAMED_ACCOUNT_NAME));
+        assert_eq!(second.name(), Some(RENAMED_ACCOUNT_NAME));
+    }
+
+    #[test]
+    fn set_account_name_renames_an_imported_view_only_account_to_any_text() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
+        let usk = UnifiedSpendingKey::from_seed(
+            st.network(),
+            seed.expose_secret(),
+            zip32::AccountId::ZERO,
+        )
+        .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                FIRST_ACCOUNT_NAME,
+                &ufvk,
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap();
+        let account_id = account.id();
+        assert_matches!(
+            account.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::ViewOnly,
+                ..
+            }
+        );
+
+        // The final step renames the account to the name it already has, which must
+        // still succeed rather than report the account as unknown.
+        for name in [UNICODE_ACCOUNT_NAME, EMPTY_ACCOUNT_NAME, EMPTY_ACCOUNT_NAME] {
+            st.wallet_mut().set_account_name(account_id, name).unwrap();
+
+            let renamed = st.wallet().get_account(account_id).unwrap().unwrap();
+            assert_eq!(renamed.name(), Some(name));
+            assert_eq!(renamed.source(), account.source());
+        }
+    }
+
     #[test]
     fn get_subtree_root_round_trips_put_subtree_roots() {
         let mut st = TestBuilder::new()
@@ -4669,7 +4923,7 @@ mod tests {
     pub(crate) fn import_transparent_only_account_ufvk() {
         use crate::wallet::encoding::KeyScope;
         use ::transparent::keys::AccountPrivKey;
-        use zcash_protocol::consensus::{NetworkConstants, Parameters};
+        use zcash_protocol::consensus::Parameters;
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
@@ -4740,9 +4994,11 @@ mod tests {
         assert!(!ua.has_orchard());
 
         // It round-trips through the `tu` encoding.
-        let encoded = ua.encode_receiver_preserving(&network);
+        let encoded = ua.encode(&network);
         assert!(
-            encoded.starts_with(network.network_type().hrp_unified_address_r2_ti()),
+            encoded.starts_with(zcash_address::constants::hrp_unified_address_r2_ti(
+                network.network_type()
+            )),
             "{encoded} is not a transparent-including Revision 2 Unified Address",
         );
         assert_eq!(
@@ -4765,7 +5021,8 @@ mod tests {
 
         // Every external-scope address row is stored in the transparent-including Revision 2
         // encoding, not as a bare transparent address.
-        let expected_hrp = network.network_type().hrp_unified_address_r2_ti();
+        let expected_hrp =
+            zcash_address::constants::hrp_unified_address_r2_ti(network.network_type());
         let stored_addresses = st
             .wallet()
             .conn()
@@ -4912,56 +5169,6 @@ mod tests {
             Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
         );
 
-        let scanned_height = u32::from(birthday.height()) + 20;
-        st.wallet_mut()
-            .conn_mut()
-            .execute("DELETE FROM scan_queue", [])
-            .unwrap();
-        st.wallet_mut()
-            .conn_mut()
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![
-                    u32::from(birthday.height()),
-                    scanned_height + 1,
-                    crate::wallet::scanning::priority_code(
-                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
-                    ),
-                ],
-            )
-            .unwrap();
-
-        // If requeuing fails after the account row has been upgraded, the whole
-        // import must roll back; otherwise a retry would see a duplicate UFVK
-        // and could never schedule the missing rescan.
-        st.wallet_mut()
-            .conn_mut()
-            .execute_batch(
-                "CREATE TEMP TRIGGER fail_upgrade_rescan BEFORE INSERT ON main.scan_queue
-                 BEGIN SELECT RAISE(ABORT, 'injected rescan failure'); END;",
-            )
-            .unwrap();
-        assert!(
-            st.wallet_mut()
-                .import_account_ufvk(
-                    "",
-                    &ufvk,
-                    &birthday,
-                    AccountPurpose::Spending { derivation: None },
-                    None,
-                )
-                .is_err()
-        );
-        let after_failed_upgrade = st.wallet().get_account(ivk_account.id()).unwrap().unwrap();
-        assert!(after_failed_upgrade.ufvk().is_none());
-        assert!(after_failed_upgrade.uivk().subsumes(&ivk_account.uivk()));
-        assert!(ivk_account.uivk().subsumes(&after_failed_upgrade.uivk()));
-        st.wallet_mut()
-            .conn_mut()
-            .execute_batch("DROP TRIGGER fail_upgrade_rescan")
-            .unwrap();
-
         // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
         let ufvk_upgraded = st
             .wallet_mut()
@@ -4977,22 +5184,6 @@ mod tests {
         assert_eq!(ufvk_upgraded.id(), ivk_account.id());
         assert!(ufvk_upgraded.ufvk().is_some());
         assert!(ufvk_upgraded.ufvk().unwrap().is_equivalent_to(&ufvk));
-        let rescan_priority: i64 = st
-            .wallet()
-            .conn()
-            .query_row(
-                "SELECT priority FROM scan_queue
-                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
-                [scanned_height],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            rescan_priority,
-            crate::wallet::scanning::priority_code(
-                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
-            )
-        );
 
         // (c) IVK import over an account that now has a UFVK should fail.
         assert_matches!(
@@ -5069,29 +5260,6 @@ mod tests {
             })
             .unwrap();
 
-        // Model a wallet that has already scanned beyond this account's birthday
-        // using only its Sapling IVK. Adding Orchard capability must requeue these
-        // blocks so any earlier Orchard notes can be discovered.
-        let scanned_height = u32::from(birthday.height()) + 20;
-        st.wallet_mut()
-            .conn_mut()
-            .execute("DELETE FROM scan_queue", [])
-            .unwrap();
-        st.wallet_mut()
-            .conn_mut()
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![
-                    u32::from(birthday.height()),
-                    scanned_height + 1,
-                    crate::wallet::scanning::priority_code(
-                        &zcash_client_backend::data_api::scanning::ScanPriority::Scanned
-                    ),
-                ],
-            )
-            .unwrap();
-
         // Import the full UIVK (sapling + orchard) — should upgrade.
         let upgraded = st
             .wallet_mut()
@@ -5118,22 +5286,6 @@ mod tests {
         // The upgraded UIVK strictly extends the original.
         assert!(upgraded.uivk().subsumes(&ivk_account.uivk()));
         assert!(!ivk_account.uivk().subsumes(&upgraded.uivk()));
-        let rescan_priority: i64 = st
-            .wallet()
-            .conn()
-            .query_row(
-                "SELECT priority FROM scan_queue
-                 WHERE block_range_start <= ?1 AND block_range_end > ?1",
-                [scanned_height],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            rescan_priority,
-            crate::wallet::scanning::priority_code(
-                &zcash_client_backend::data_api::scanning::ScanPriority::Historic
-            )
-        );
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -5309,15 +5461,13 @@ mod tests {
 
         let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
         let address = Address::Unified(Box::new(ua));
-        let mut stored = address.encode_receiver_preserving(state.network());
+        let mut stored = address.encode(state.network());
 
         for revision in [
-            zcash_protocol::address::Revision::R2,
-            zcash_protocol::address::Revision::R0,
+            zcash_address::unified::Revision::R2,
+            zcash_address::unified::Revision::R0,
         ] {
-            let encoded = address
-                .encode_receiver_preserving_revision(state.network(), revision)
-                .unwrap();
+            let encoded = address.encode_revision(state.network(), revision).unwrap();
             state
                 .wallet_mut()
                 .conn_mut()
