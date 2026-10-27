@@ -10,6 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb` implements `WalletWrite::import_account_uivk`, persisting an
+  incoming-viewing-key-only account. Re-importing a UIVK that adds items to an existing
+  incoming-viewing-key-only account upgrades that account; importing a UIVK over an
+  account that already has a UFVK is rejected.
+- `WalletDb` implements
+  `WalletRead::get_ivk_only_unified_incoming_viewing_keys`. `scan_cached_blocks` and
+  `decrypt_and_store_transaction` use it, so notes sent to an imported account's external
+  addresses are detected. Spends of those notes are not.
+
+### Changed
+- With the `orchard` feature, storing a transaction the wallet built also trial-decrypts
+  incoming-viewing-key-only accounts when classifying the transaction for ZIP 318.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

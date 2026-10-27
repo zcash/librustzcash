@@ -10,7 +10,7 @@ use crate::{
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::{
-    WalletWrite,
+    Account, AccountPurpose, WalletRead, WalletWrite,
     anchor_retention::AnchorRetentionInterval,
     chain::{ChainState, error::Error},
     testing::{
@@ -19,10 +19,12 @@ use zcash_client_backend::data_api::{
         sapling::SaplingPoolTester,
     },
 };
+use zcash_keys::keys::UnifiedSpendingKey;
 
 #[cfg(feature = "transparent-inputs")]
 use rusqlite::named_params;
 use zcash_protocol::{
+    ShieldedPool,
     consensus::{NetworkUpgrade, Parameters},
     value::Zatoshis,
 };
@@ -30,7 +32,6 @@ use zcash_protocol::{
 use {
     crate::ORCHARD_TABLES_PREFIX,
     zcash_client_backend::data_api::testing::orchard::OrchardPoolTester,
-    zcash_protocol::ShieldedPool,
 };
 
 pub(crate) trait ShieldedPoolPersistence {
@@ -881,6 +882,105 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+/// The received-note table for `pool`. Written out here so the assertion does not go through
+/// the same mapping the scanner uses.
+fn received_notes_table(pool: ShieldedPool) -> &'static str {
+    match pool {
+        ShieldedPool::Sapling => "sapling_received_notes",
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => "orchard_received_notes",
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => "ironwood_received_notes",
+        #[cfg(not(feature = "orchard"))]
+        other => panic!("pool {other:?} is unsupported without the `orchard` feature"),
+    }
+}
+
+/// An account imported by UIVK detects an external receive and records it without a nullifier.
+/// A later spend of that note, including the change it creates, is invisible to the account.
+pub(crate) fn scan_cached_blocks_finds_notes_for_ivk_only_account<T: ShieldedPoolTester>() {
+    let mut st =
+        TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+            .build::<T>();
+
+    let seed_account = st.test_account().unwrap().clone();
+    let usk = UnifiedSpendingKey::from_seed(st.network(), &[0x42; 32], zip32::AccountId::ZERO)
+        .expect("seed produces a spending key");
+    let uivk = usk
+        .to_unified_full_viewing_key()
+        .to_unified_incoming_viewing_key();
+    let fvk = T::sk_to_fvk(T::usk_to_sk(&usk));
+
+    let account = st
+        .wallet_mut()
+        .import_account_uivk("view-only", &uivk, seed_account.birthday(), Some("test"))
+        .expect("UIVK import succeeds");
+    assert!(account.ufvk().is_none());
+    assert_eq!(account.purpose(), AccountPurpose::ViewOnly);
+    assert_eq!(
+        st.wallet()
+            .get_account(account.id())
+            .unwrap()
+            .expect("the account was persisted")
+            .uivk()
+            .encode(st.network())
+            .unwrap(),
+        uivk.encode(st.network()).unwrap()
+    );
+    assert!(
+        st.wallet()
+            .get_ivk_only_unified_incoming_viewing_keys()
+            .unwrap()
+            .contains_key(&account.id())
+    );
+    assert!(
+        !st.wallet()
+            .get_unified_full_viewing_keys()
+            .unwrap()
+            .contains_key(&account.id())
+    );
+
+    let value = Zatoshis::const_from_u64(50_000);
+    let (received_height, _, nf) =
+        st.generate_next_block(&fvk, AddressType::DefaultExternal, value);
+    let summary = st.scan_cached_blocks(received_height, 1);
+    assert_eq!(summary.scanned_range().start, received_height);
+    assert_eq!(summary.scanned_range().end, received_height + 1);
+    assert_eq!(T::received_note_count(&summary), 1);
+    assert_eq!(st.get_total_balance(account.id()), value);
+    assert_eq!(st.get_total_balance(seed_account.id()), Zatoshis::ZERO);
+
+    let notes_without_nullifier: i64 = st
+        .wallet()
+        .conn()
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM {table} rn
+                 JOIN accounts a ON a.id = rn.account_id
+                 WHERE a.uuid = ?1 AND rn.nf IS NULL",
+                table = received_notes_table(T::SHIELDED_PROTOCOL),
+            ),
+            rusqlite::params![account.id().expose_uuid()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(notes_without_nullifier, 1);
+
+    // The spending block reveals the note's nullifier and returns change to the internal
+    // address. Neither is visible to an incoming viewing key.
+    let recipient = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let spent_value = Zatoshis::const_from_u64(20_000);
+    let (spent_height, _) = st.generate_next_block_spending(
+        &fvk,
+        (nf, value),
+        T::fvk_default_address(&recipient),
+        spent_value,
+    );
+    let spend_summary = st.scan_cached_blocks(spent_height, 1);
+    assert_eq!(T::received_note_count(&spend_summary), 0);
+    assert_eq!(st.get_total_balance(account.id()), value);
 }
 
 // TODO: This test can probably be entirely removed, as the following test duplicates it entirely.

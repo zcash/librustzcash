@@ -55,7 +55,9 @@ use ::sapling::{
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -3615,6 +3617,16 @@ impl WalletWrite for MockWalletDb {
         _unified_key: &UnifiedFullViewingKey,
         _birthday: &AccountBirthday,
         _purpose: AccountPurpose,
+        _key_source: Option<&str>,
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    fn import_account_uivk(
+        &mut self,
+        _account_name: &str,
+        _unified_key: &UnifiedIncomingViewingKey,
+        _birthday: &AccountBirthday,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         todo!()
