@@ -70,8 +70,6 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
-[policy.zcash_script]
-
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
@@ -512,14 +510,6 @@ criteria = "safe-to-run"
 
 [[exemptions.event-listener]]
 version = "5.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-iterator]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-streaming-iterator]]
-version = "0.1.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.ff]]
@@ -1294,10 +1284,6 @@ criteria = "safe-to-deploy"
 version = "2.0.100"
 criteria = "safe-to-deploy"
 
-[[exemptions.sync_wrapper]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.sysinfo]]
 version = "0.36.1"
 criteria = "safe-to-deploy"
@@ -1350,10 +1336,6 @@ criteria = "safe-to-deploy"
 version = "0.6.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.toml_datetime]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.toml_edit]]
 version = "0.19.15"
 criteria = "safe-to-deploy"
@@ -1363,10 +1345,6 @@ version = "0.22.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_parser]]
-version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.toml_writer]]
 version = "1.0.4"
 criteria = "safe-to-deploy"
 
@@ -1560,10 +1538,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.uncased]]
 version = "0.9.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.untrusted]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.unty]]
