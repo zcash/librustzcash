@@ -1,7 +1,7 @@
 [package]
 name = "equihash"
 description = "The Equihash Proof-of-Work function"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Jack Grigg <jack@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
@@ -17,8 +17,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["std"]
 std = ["document-features"]
 
-## Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
-solver = ["dep:cc", "std"]
+## Tromp solver support, implemented in Rust.
+solver = ["dep:libc", "std"]
+
+## Solver optimisations using `unsafe` Rust.
+unsafe-solver = ["solver"]
+
+## Verifier optimisations using `unsafe` Rust.
+unsafe-verifier = []
 
 [dependencies]
 corez.workspace = true
@@ -29,14 +35,26 @@ blake2b_simd.workspace = true
 # - Documentation
 document-features = { workspace = true, optional = true }
 
-[build-dependencies]
-cc = { version = "1", optional = true }
+[target.'cfg(target_os = "linux")'.dependencies]
+# Huge pages are an optional hint for the solver's anonymous mappings.
+libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
+criterion.workspace = true
 hex = "0.4"
+rand = { workspace = true, features = ["std", "std_rng"] }
 
 [lib]
 bench = false
+
+[[bench]]
+name = "solver"
+harness = false
+required-features = ["solver"]
+
+[[bench]]
+name = "verify"
+harness = false
 
 [lints]
 workspace = true

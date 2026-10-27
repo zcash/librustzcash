@@ -10,6 +10,26 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.89
 
+## [0.3.1] - 2026-10-22
+
+### Added
+- `unsafe-solver` feature flag, which improves the performance of
+  `equihash::tromp::solve_200_9` on x86-64 and Linux using `unsafe` Rust
+  to access platform-specific intrinsics.
+- `unsafe-verifier` feature flag, which improves the performance of
+  `equihash::is_valid_solution` on x86-64 (AVX2) and AArch64 (NEON, with
+  optional SHA3 acceleration) using `unsafe` Rust to access CPU intrinsics.
+
+### Fixed
+- `equihash::is_valid_solution` now returns an error for parameters whose
+  required solution size overflows the platform's size limits, instead of
+  panicking or using an incorrect solution size.
+
+### Changed
+- Improved the performance of `equihash::is_valid_solution`.
+- Improved the performance of `equihash::tromp::solve_200_9`. It also no longer
+  requires a C/C++ compiler.
+
 ## [0.3.0] - 2026-04-23
 
 ### Changed
