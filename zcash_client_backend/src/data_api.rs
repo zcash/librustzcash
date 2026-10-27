@@ -2447,10 +2447,10 @@ pub trait WalletRead {
     ) -> Result<HashMap<Self::AccountId, UnifiedIncomingViewingKey>, Self::Error> {
         let mut keys = HashMap::new();
         for account_id in self.get_account_ids()? {
-            if let Some(account) = self.get_account(account_id)? {
-                if account.ufvk().is_none() {
-                    keys.insert(account_id, account.uivk());
-                }
+            if let Some(account) = self.get_account(account_id)?
+                && account.ufvk().is_none()
+            {
+                keys.insert(account_id, account.uivk());
             }
         }
         Ok(keys)
