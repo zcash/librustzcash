@@ -22,7 +22,7 @@ use {
     core::{cell::Cell, ops::Deref},
     ff::PrimeField,
     zcash_protocol::{
-        consensus::BranchId,
+        consensus::{BlockHeight, BranchId},
         value::{ZatBalance, Zatoshis},
     },
     zcash_script::script,
@@ -33,6 +33,39 @@ use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
+
+/// A `TransactionData` built with `Some(empty transparent bundle)` serializes identically
+/// to one built with `None`, and parsing produces `None`. The ZIP 244 txid digest must
+/// therefore treat the empty bundle as absent as well, otherwise
+/// `tx.txid() != Transaction::read(serialized(tx)).txid()`.
+/// Reproduces <https://github.com/zcash/librustzcash/issues/3137>.
+#[test]
+fn empty_transparent_bundle_digests_as_absent() {
+    let empty_bundle = transparent::Bundle {
+        vin: vec![],
+        vout: vec![],
+        authorization: transparent::Authorized,
+    };
+    let tx = TransactionData::<Authorized>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu5,
+        0,
+        BlockHeight::from_u32(0),
+        Some(empty_bundle),
+        None,
+        None,
+        None,
+    )
+    .freeze()
+    .unwrap();
+
+    let mut bytes = vec![];
+    tx.write(&mut bytes).unwrap();
+    let parsed = Transaction::read(&bytes[..], BranchId::Nu5).unwrap();
+
+    assert!(parsed.transparent_bundle().is_none());
+    assert_eq!(tx.txid(), parsed.txid());
+}
 
 /// An empty NU7 v6 codec fixture, not a spendable transaction. The header follows ZIP 229;
 /// the six zero counts encode transparent inputs/outputs, Sapling spends/outputs,
