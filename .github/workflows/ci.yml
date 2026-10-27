@@ -270,10 +270,8 @@ jobs:
         with:
           persist-credentials: false
           path: crates
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@stable
         id: toolchain
-        with:
-          toolchain: stable
       # This maintenance branch only releases `equihash`. The rest of the workspace
       # depends on versions of `orchard` (and of its dependencies) that have since
       # been yanked, so the workspace as a whole can no longer be resolved without
