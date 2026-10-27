@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_backend::sync::run` now detects a chain reorganization onto a branch that
+  is not yet longer than the wallet's scanned history, by comparing the block hash at the
+  chain tip reported by the server with the wallet's. Previously no new scan range
+  appeared, so the wallet kept its view of the abandoned branch, reporting confirmations
+  for transactions no longer in the best chain, until the new branch outgrew the old one.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added
