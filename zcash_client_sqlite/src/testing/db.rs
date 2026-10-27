@@ -35,7 +35,9 @@ use zcash_client_backend::{
 };
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
 };
 use zcash_primitives::{
     block::BlockHash,
