@@ -34,16 +34,8 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
-[policy.incrementalmerkletree]
-
-[policy.incrementalmerkletree-testing]
-
-[policy.orchard]
-
 [policy.pczt]
 audit-as-crates-io = true
-
-[policy.shardtree]
 
 [policy.zcash]
 audit-as-crates-io = true
@@ -78,12 +70,8 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
-[policy.zcash_script]
-
 [policy.zcash_transparent]
 audit-as-crates-io = true
-
-[policy.zewif]
 
 [policy.zip321]
 audit-as-crates-io = true
