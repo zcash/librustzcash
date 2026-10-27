@@ -528,6 +528,17 @@ mod tests {
     }
 
     #[test]
+    fn scan_cached_blocks_finds_notes_for_ivk_only_account_sapling() {
+        testing::pool::scan_cached_blocks_finds_notes_for_ivk_only_account::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_cached_blocks_finds_notes_for_ivk_only_account_orchard() {
+        testing::pool::scan_cached_blocks_finds_notes_for_ivk_only_account::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_cached_blocks_finds_change_notes_sapling() {
         testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>()
     }

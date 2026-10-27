@@ -598,6 +598,11 @@ impl ChainState {
 /// Scans at most `limit` blocks from the provided block source in order to find transactions
 /// received by the accounts tracked in the provided wallet database.
 ///
+/// Accounts that have a unified full viewing key are scanned in both the external and internal
+/// scopes, and spends of their notes are detected. Accounts that have only a unified incoming
+/// viewing key are scanned for external-scope receives. Spends and change notes of those accounts
+/// are not detected.
+///
 /// This function will return after scanning at most `limit` new blocks, to enable the caller to
 /// update their UI with scanning progress.
 ///
@@ -634,11 +639,17 @@ where
 {
     assert_eq!(from_height, from_state.block_height + 1);
 
-    // Fetch the UnifiedFullViewingKeys we are tracking
+    // Full viewing keys cover both scopes and nullifiers. Incoming-viewing-key-only accounts
+    // are scanned for external receives. Apply the full viewing keys last so that an account
+    // present in both sets keeps its nullifier-deriving key.
+    let account_uivks = data_db
+        .get_ivk_only_unified_incoming_viewing_keys()
+        .map_err(Error::Wallet)?;
     let account_ufvks = data_db
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
-    let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
+    let mut scanning_keys = ScanningKeys::from_account_uivks(account_uivks);
+    scanning_keys.extend(ScanningKeys::from_account_ufvks(account_ufvks));
     let mut runners = BatchRunners::<_, (), (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, <DbT as WalletRead>::Error>(

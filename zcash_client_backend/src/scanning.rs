@@ -16,7 +16,7 @@ use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{SaplingIvk, note_encryption::SaplingDomain};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
-use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
@@ -163,6 +163,26 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
 {
     fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
         sapling::note_encryption::PreparedIncomingViewingKey::new(&self.ivk)
+    }
+
+    fn nf(&self, note: &sapling::Note, position: Position) -> Option<sapling::Nullifier> {
+        self.nk.as_ref().map(|key| note.nf(key, position.into()))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
+    }
+}
+
+impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
+    for ScanningKey<sapling::zip32::IncomingViewingKey, sapling::NullifierDerivingKey, AccountId>
+{
+    fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
+        self.ivk.prepare()
     }
 
     fn nf(&self, note: &sapling::Note, position: Position) -> Option<sapling::Nullifier> {
@@ -443,6 +463,100 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+        }
+    }
+
+    /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedIncomingViewingKey`]s, along with
+    /// the account identifiers corresponding to those UIVKs.
+    ///
+    /// Only the external-scope incoming viewing keys are used. A UIVK has no internal-scope key
+    /// and no nullifier-deriving key, so change notes and spends of detected notes are not
+    /// observed.
+    pub fn from_account_uivks(
+        uivks: impl IntoIterator<Item = (AccountId, UnifiedIncomingViewingKey)>,
+    ) -> Self {
+        #![allow(clippy::type_complexity)]
+
+        let mut sapling: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut orchard: HashMap<
+            (AccountId, Scope),
+            Box<
+                dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+                    + Send
+                    + Sync,
+            >,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut ironwood: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+        > = HashMap::new();
+
+        for (account_id, uivk) in uivks {
+            if let Some(ivk) = uivk.sapling().as_ref() {
+                sapling.insert(
+                    (account_id, Scope::External),
+                    Box::new(ScanningKey {
+                        ivk: ivk.clone(),
+                        nk: Option::<sapling::NullifierDerivingKey>::None,
+                        account_id,
+                        key_scope: Some(Scope::External),
+                    }),
+                );
+            }
+
+            #[cfg(feature = "orchard")]
+            if let Some(ivk) = uivk.orchard().as_ref() {
+                orchard.insert(
+                    (account_id, Scope::External),
+                    Box::new(ScanningKey {
+                        ivk: ivk.clone(),
+                        nk: Option::<orchard::keys::FullViewingKey>::None,
+                        account_id,
+                        key_scope: Some(Scope::External),
+                    }),
+                );
+
+                // Ironwood outputs are decrypted with the same Orchard viewing keys, but are
+                // tracked as a separate pool.
+                ironwood.insert(
+                    (account_id, Scope::External),
+                    Box::new(ScanningKey {
+                        ivk: ivk.clone(),
+                        nk: Option::<orchard::keys::FullViewingKey>::None,
+                        account_id,
+                        key_scope: Some(Scope::External),
+                    }),
+                );
+            }
+        }
+
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+        }
+    }
+}
+
+impl<AccountId, IvkTag: Eq + Hash> ScanningKeys<AccountId, IvkTag> {
+    /// Adds the scanning keys from `other` to `self`.
+    ///
+    /// A key in `other` whose tag is already present replaces the existing entry. When combining
+    /// [`Self::from_account_ufvks`] with [`Self::from_account_uivks`], apply the full viewing keys
+    /// last so that an account present in both sets keeps the nullifier-deriving key.
+    pub fn extend(&mut self, other: Self) {
+        self.sapling.extend(other.sapling);
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard.extend(other.orchard);
+            self.ironwood.extend(other.ironwood);
         }
     }
 }

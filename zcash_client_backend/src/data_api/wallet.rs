@@ -53,7 +53,7 @@ use crate::{
         error::{AddressExpiryError, Error},
         wallet::input_selection::propose_send_max,
     },
-    decrypt_transaction,
+    decrypt_transaction_with_ivks,
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
@@ -247,6 +247,10 @@ impl<AccountId: Copy> PcztRecipient<AccountId> {
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
+///
+/// Accounts that have only a unified incoming viewing key contribute their external-scope
+/// receives. Spends, change, and outputs those accounts funded are not recovered from the
+/// transaction.
 pub fn decrypt_and_store_transaction<ParamsT, DbT>(
     params: &ParamsT,
     data: &mut DbT,
@@ -257,15 +261,17 @@ where
     ParamsT: consensus::Parameters,
     DbT: WalletWrite,
 {
-    // Fetch the UnifiedFullViewingKeys we are tracking
+    // Full viewing keys, plus incoming viewing keys for accounts that have no full viewing key.
     let ufvks = data.get_unified_full_viewing_keys()?;
+    let uivks = data.get_ivk_only_unified_incoming_viewing_keys()?;
 
-    data.store_decrypted_tx(decrypt_transaction(
+    data.store_decrypted_tx(decrypt_transaction_with_ivks(
         params,
         mined_height.map_or_else(|| data.get_tx_height(tx.txid()), |h| Ok(Some(h)))?,
         data.chain_height()?,
         tx,
         &ufvks,
+        &uivks,
     ))?;
 
     Ok(())

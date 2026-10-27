@@ -10,6 +10,26 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::WalletWrite::import_account_uivk`, which imports an
+  account from a `UnifiedIncomingViewingKey`. The account is view-only: scanning and
+  `decrypt_transaction_with_ivks` detect notes sent to its external addresses, and do not
+  detect spends, change, or outputs the account funded.
+- `zcash_client_backend::data_api::WalletRead::get_ivk_only_unified_incoming_viewing_keys`,
+  with a default implementation. It returns the incoming viewing keys of accounts that
+  have no unified full viewing key.
+- `zcash_client_backend::scanning::ScanningKeys::from_account_uivks` and
+  `ScanningKeys::extend`.
+- `zcash_client_backend::decrypt_transaction_with_ivks`, which trial-decrypts with both
+  unified full viewing keys and unified incoming viewing keys.
+- `scan_cached_blocks` and `decrypt_and_store_transaction` now include
+  incoming-viewing-key-only accounts. `decrypt_transaction` is unchanged and still
+  trial-decrypts unified full viewing keys only.
+
+### Changed
+- `WalletWrite` has a new required method, `import_account_uivk`. Implementors of the
+  trait must provide it.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

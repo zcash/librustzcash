@@ -1829,6 +1829,31 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     Ok(res)
 }
 
+/// Returns the [`UnifiedIncomingViewingKey`]s for accounts that have no unified full viewing key.
+pub(crate) fn get_ivk_only_unified_incoming_viewing_keys<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+) -> Result<HashMap<AccountUuid, UnifiedIncomingViewingKey>, SqliteClientError> {
+    let mut stmt_fetch_accounts =
+        conn.prepare("SELECT uuid, uivk FROM accounts WHERE ufvk IS NULL")?;
+
+    let rows = stmt_fetch_accounts.query_map([], |row| {
+        let uivk_str: String = row.get(1)?;
+        let uivk = UnifiedIncomingViewingKey::decode(params, &uivk_str)
+            .map_err(|e| SqliteClientError::CorruptedData(e.to_string()));
+        Ok(Some((AccountUuid(row.get(0)?), uivk)))
+    })?;
+
+    let mut res: HashMap<AccountUuid, UnifiedIncomingViewingKey> = HashMap::new();
+    for row in rows {
+        if let Some((account_id, uivk)) = row? {
+            res.insert(account_id, uivk?);
+        }
+    }
+
+    Ok(res)
+}
+
 fn parse_account_row<P: consensus::Parameters>(
     row: &rusqlite::Row<'_>,
     params: &P,
