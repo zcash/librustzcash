@@ -16,7 +16,7 @@ use alloc::{
 };
 use std::{collections::BTreeSet, env, process::Command};
 
-use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     leaf_hash::{Kernel, LeafHasher},
@@ -236,13 +236,13 @@ fn random_proof_mutations_match_upstream() {
             let mut solution = vector.solution.clone();
             let mut mutated = indices.clone();
             let (a, b) = (
-                rng.gen_range(0..indices.len()),
-                rng.gen_range(0..indices.len()),
+                rng.random_range(0..indices.len()),
+                rng.random_range(0..indices.len()),
             );
-            match rng.gen_range(0..7) {
+            match rng.random_range(0..7) {
                 0 => mutated.swap(a, b),
                 1 => mutated[b] = mutated[a],
-                2 => mutated[a] = rng.gen_range(0..1u32 << vector.index_bits()),
+                2 => mutated[a] = rng.random_range(0..1u32 << vector.index_bits()),
                 3 => mutated[a] = (1u32 << vector.index_bits()) - 1,
                 4 => rng.fill_bytes(&mut solution),
                 5 => rng.fill_bytes(&mut input),

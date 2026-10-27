@@ -42,7 +42,7 @@ libc = { version = "0.2", optional = true }
 [dev-dependencies]
 criterion.workspace = true
 hex = "0.4"
-rand = { workspace = true, features = ["std", "std_rng"] }
+rand = { workspace = true, features = ["thread_rng", "std", "std_rng"] }
 
 [lib]
 bench = false

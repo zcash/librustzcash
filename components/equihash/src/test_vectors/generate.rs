@@ -8,7 +8,7 @@
 use alloc::{string::ToString, vec::Vec};
 use std::{eprintln, println};
 
-use rand::{RngCore, SeedableRng, rngs::StdRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{minimal, params, verify};
 
