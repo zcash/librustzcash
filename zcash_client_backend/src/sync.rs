@@ -184,7 +184,9 @@ where
         (0..).scan(r, |acc, _| {
             if acc.is_empty() {
                 None
-            } else if let Some((cur, next)) = acc.split_at(acc.block_range().start + batch_size) {
+            } else if let Some((cur, next)) =
+                acc.split_at(next_batch_boundary(acc.block_range().start, batch_size))
+            {
                 *acc = next;
                 Some(cur)
             } else {
@@ -296,6 +298,21 @@ where
     }
 
     Ok(())
+}
+
+/// The first height after `start` that is a multiple of `batch_size`.
+///
+/// Splitting scan ranges at absolute multiples, rather than at `start + batch_size`, makes the
+/// tree-state request for every batch after the first one a request that any wallet crossing
+/// that height also makes. Relative boundaries are offsets from where the wallet's previous
+/// sync stopped, so each `GetTreeState` request would reveal that height to the server.
+#[cfg(feature = "sync")]
+fn next_batch_boundary(start: BlockHeight, batch_size: u32) -> BlockHeight {
+    if batch_size == 0 {
+        // Keeps the previous behaviour (`start + 0`) rather than dividing by zero.
+        return start;
+    }
+    BlockHeight::from_u32((u32::from(start) / batch_size + 1) * batch_size)
 }
 
 #[cfg(feature = "sync")]
@@ -657,7 +674,9 @@ mod tests {
         proto::service::compact_tx_streamer_client::CompactTxStreamerClient,
     };
 
-    use super::update_subtree_roots;
+    use zcash_protocol::consensus::BlockHeight;
+
+    use super::{next_batch_boundary, update_subtree_roots};
 
     #[derive(Clone)]
     struct CountingGrpcService(Arc<AtomicUsize>);
@@ -695,5 +714,16 @@ mod tests {
         });
 
         assert_eq!(request_count.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn batch_boundaries_are_absolute() {
+        let h = BlockHeight::from_u32;
+        // A sync that last stopped at 1_334 starts at 1_335: its first batch ends at the next
+        // multiple, so later batches start where every other wallet's batches start.
+        assert_eq!(next_batch_boundary(h(1_335), 1_000), h(2_000));
+        assert_eq!(next_batch_boundary(h(2_000), 1_000), h(3_000));
+        assert_eq!(next_batch_boundary(h(2_999), 1_000), h(3_000));
+        assert_eq!(next_batch_boundary(h(7), 0), h(7));
     }
 }

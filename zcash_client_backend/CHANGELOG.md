@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::sync::run` splits scan ranges into batches at absolute multiples
+  of `batch_size`. Batch boundaries were offsets from the height where the previous sync
+  stopped, so each per-batch `GetTreeState` request revealed that height to the server,
+  linking one sync session to the next.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added
