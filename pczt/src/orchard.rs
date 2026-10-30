@@ -702,7 +702,6 @@ pub mod v1 {
     use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
     use serde::{Deserialize, Serialize};
-    use serde_with::serde_as;
 
     use crate::common::Zip32Derivation;
 
@@ -729,19 +728,18 @@ pub mod v1 {
     }
 
     /// Information about the spend part of an Orchard action.
-    #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Spend {
         nullifier: [u8; 32],
         rk: [u8; 32],
-        #[serde_as(as = "Option<[_; 64]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 64]>>")]
         spend_auth_sig: Option<[u8; 64]>,
-        #[serde_as(as = "Option<[_; 43]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
         recipient: Option<[u8; 43]>,
         value: Option<u64>,
         rho: Option<[u8; 32]>,
         rseed: Option<[u8; 32]>,
-        #[serde_as(as = "Option<[_; 96]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 96]>>")]
         fvk: Option<[u8; 96]>,
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
@@ -751,14 +749,13 @@ pub mod v1 {
     }
 
     /// Information about the output part of an Orchard action.
-    #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Output {
         cmx: [u8; 32],
         ephemeral_key: [u8; 32],
         enc_ciphertext: Vec<u8>,
         out_ciphertext: Vec<u8>,
-        #[serde_as(as = "Option<[_; 43]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
         recipient: Option<[u8; 43]>,
         value: Option<u64>,
         rseed: Option<[u8; 32]>,
@@ -941,7 +938,6 @@ pub(crate) mod v2 {
 
     use getset::Getters;
     use serde::{Deserialize, Serialize};
-    use serde_with::serde_as;
 
     use super::NoteVersion;
 
@@ -992,21 +988,20 @@ pub(crate) mod v2 {
     }
 
     /// Information about the spend part of an Orchard action.
-    #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Spend {
-        #[serde_as(as = "Option<[_; 32]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 32]>>")]
         nullifier: Option<[u8; 32]>,
-        #[serde_as(as = "Option<[_; 32]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 32]>>")]
         rk: Option<[u8; 32]>,
-        #[serde_as(as = "Option<[_; 64]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 64]>>")]
         spend_auth_sig: Option<[u8; 64]>,
-        #[serde_as(as = "Option<[_; 43]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
         recipient: Option<[u8; 43]>,
         value: Option<u64>,
         rho: Option<[u8; 32]>,
         rseed: Option<[u8; 32]>,
-        #[serde_as(as = "Option<[_; 96]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 96]>>")]
         fvk: Option<[u8; 96]>,
         witness: Option<(u32, [[u8; 32]; 32])>,
         alpha: Option<[u8; 32]>,
@@ -1016,14 +1011,13 @@ pub(crate) mod v2 {
     }
 
     /// Information about the output part of an Orchard action.
-    #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Output {
         cmx: Option<[u8; 32]>,
         ephemeral_key: [u8; 32],
         enc_ciphertext: super::EncCiphertext,
         out_ciphertext: Vec<u8>,
-        #[serde_as(as = "Option<[_; 43]>")]
+        #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
         recipient: Option<[u8; 43]>,
         value: Option<u64>,
         rseed: Option<[u8; 32]>,

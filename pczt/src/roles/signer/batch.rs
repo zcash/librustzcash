@@ -190,7 +190,6 @@ fn serialize_versioned<T: Serialize>(magic: &[u8; 4], value: &T) -> Vec<u8> {
 
 mod v1 {
     use super::*;
-    use serde_with::serde_as;
 
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignRequest<P> {
@@ -208,12 +207,11 @@ mod v1 {
         Ironwood,
     }
 
-    #[serde_as]
     #[derive(Deserialize, Serialize)]
     pub(super) struct SpendAuthSignature {
         pub(super) value_pool: ValuePool,
         pub(super) action_index: u32,
-        #[serde_as(as = "[_; 64]")]
+        #[serde(with = "serde_with::As::<[serde_with::Same; 64]>")]
         pub(super) signature: [u8; 64],
     }
 
@@ -332,7 +330,7 @@ mod v1 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_with::serde_as;
+
     use zcash_protocol::consensus::BranchId;
 
     use crate::roles::creator::Creator;
@@ -508,12 +506,11 @@ mod tests {
             signatures: Vec<Vec<RawSpendAuthSignature>>,
         }
 
-        #[serde_as]
         #[derive(Serialize)]
         struct RawSpendAuthSignature {
             value_pool: u8,
             action_index: u32,
-            #[serde_as(as = "[_; 64]")]
+            #[serde(with = "serde_with::As::<[serde_with::Same; 64]>")]
             signature: [u8; 64],
         }
 

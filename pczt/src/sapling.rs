@@ -7,7 +7,6 @@ use core::cmp::Ordering;
 
 use getset::Getters;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 
 use crate::{
     common::{Global, SecretKeyBytes, Zip32Derivation},
@@ -60,7 +59,6 @@ pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
 pub(crate) const DEFAULT_ANCHOR: [u8; 32] = [0; 32];
 
 /// Information about a Sapling spend within a transaction.
-#[serde_as]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Spend {
     //
@@ -79,13 +77,16 @@ pub struct Spend {
     /// The Spend proof.
     ///
     /// This is set by the Prover.
-    #[serde_as(as = "Option<[_; GROTH_PROOF_SIZE]>")]
+    #[serde(
+        default,
+        with = "serde_with::As::<Option<[serde_with::Same; GROTH_PROOF_SIZE]>>"
+    )]
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
 
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
-    #[serde_as(as = "Option<[_; 64]>")]
+    #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 64]>>")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
     /// The [raw encoding] of the Sapling payment address that received the note being spent.
@@ -94,7 +95,7 @@ pub struct Spend {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
-    #[serde_as(as = "Option<[_; 43]>")]
+    #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the input being spent.
@@ -174,7 +175,6 @@ pub struct Spend {
 }
 
 /// Information about a Sapling output within a transaction.
-#[serde_as]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Output {
     //
@@ -208,7 +208,10 @@ pub struct Output {
     /// The Output proof.
     ///
     /// This is set by the Prover.
-    #[serde_as(as = "Option<[_; GROTH_PROOF_SIZE]>")]
+    #[serde(
+        default,
+        with = "serde_with::As::<Option<[serde_with::Same; GROTH_PROOF_SIZE]>>"
+    )]
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
 
     /// The [raw encoding] of the Sapling payment address that will receive the output.
@@ -217,7 +220,7 @@ pub struct Output {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
-    #[serde_as(as = "Option<[_; 43]>")]
+    #[serde(default, with = "serde_with::As::<Option<[serde_with::Same; 43]>>")]
     #[getset(get = "pub")]
     pub(crate) recipient: Option<[u8; 43]>,
 
@@ -820,6 +823,58 @@ impl Parsed {
             anchor: self.wire_anchor,
             ..Bundle::serialize_from(self.bundle)
         }
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::{Output, Spend};
+
+    /// Opaque bytes for the required 32-byte Sapling wire fields.
+    const EMPTY_FIELD_ENCODING: [u8; 32] = [0; 32];
+
+    #[test]
+    fn spend_adapter_fields_can_be_omitted_or_populated() {
+        let mut spend: Spend = serde_json::from_value(serde_json::json!({
+            "cv": EMPTY_FIELD_ENCODING,
+            "nullifier": EMPTY_FIELD_ENCODING,
+            "rk": EMPTY_FIELD_ENCODING,
+            "proprietary": {},
+        }))
+        .unwrap();
+        assert_eq!(spend.zkproof, None);
+        assert_eq!(spend.spend_auth_sig, None);
+        assert_eq!(spend.recipient, None);
+
+        spend.zkproof = Some(core::array::from_fn(|_| 1));
+        spend.spend_auth_sig = Some(core::array::from_fn(|_| 2));
+        spend.recipient = Some(core::array::from_fn(|_| 3));
+        let bytes = postcard::to_allocvec(&spend).unwrap();
+        assert_eq!(postcard::from_bytes::<Spend>(&bytes).unwrap(), spend);
+        let value = serde_json::to_value(&spend).unwrap();
+        assert_eq!(serde_json::from_value::<Spend>(value).unwrap(), spend);
+    }
+
+    #[test]
+    fn output_adapter_fields_can_be_omitted_or_populated() {
+        let mut output: Output = serde_json::from_value(serde_json::json!({
+            "cv": EMPTY_FIELD_ENCODING,
+            "cmu": EMPTY_FIELD_ENCODING,
+            "ephemeral_key": EMPTY_FIELD_ENCODING,
+            "enc_ciphertext": [],
+            "out_ciphertext": [],
+            "proprietary": {},
+        }))
+        .unwrap();
+        assert_eq!(output.zkproof, None);
+        assert_eq!(output.recipient, None);
+
+        output.zkproof = Some(core::array::from_fn(|_| 1));
+        output.recipient = Some(core::array::from_fn(|_| 2));
+        let bytes = postcard::to_allocvec(&output).unwrap();
+        assert_eq!(postcard::from_bytes::<Output>(&bytes).unwrap(), output);
+        let value = serde_json::to_value(&output).unwrap();
+        assert_eq!(serde_json::from_value::<Output>(value).unwrap(), output);
     }
 }
 
