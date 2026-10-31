@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Transparent scripts are read in bulk instead of one byte at a time.
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
