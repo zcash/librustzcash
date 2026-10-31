@@ -737,7 +737,9 @@ jobs:
           elif [[ -n "$FEATURES" ]]; then
             feature_flags+=(--features "$FEATURES")
           fi
-          cargo check --workspace "${feature_flags[@]}"
+          cargo check --workspace \
+            --features zcash_client_backend/regenerate-protobuf \
+            "${feature_flags[@]}"
       - name: run cargo-fmt to handle the case that regeneration sometimes produces unformatted output
         run: cargo fmt
       - name: Verify working directory is clean

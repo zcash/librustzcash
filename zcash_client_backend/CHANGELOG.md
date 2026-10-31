@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- The `regenerate-protobuf` feature for regenerating checked-in Protobuf bindings.
+
+### Changed
+- Building from a source checkout uses the checked-in Protobuf bindings by
+  default. Enable `regenerate-protobuf` when changing `.proto` files.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

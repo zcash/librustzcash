@@ -1,20 +1,17 @@
-#[cfg(not(windows))]
-use std::env;
-#[cfg(not(windows))]
-use std::fs;
 use std::io;
-#[cfg(not(windows))]
-use std::path::{Path, PathBuf};
+#[cfg(all(feature = "regenerate-protobuf", not(windows)))]
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
-// The proto machinery below is only ever exercised on non-Windows targets (see the note in
-// `main`), so gate it on `not(windows)` to avoid dead-code and unused-import warnings on Windows.
-#[cfg(not(windows))]
+#[cfg(all(feature = "regenerate-protobuf", not(windows)))]
 const COMPACT_FORMATS_PROTO: &str = "proto/compact_formats.proto";
 
-#[cfg(not(windows))]
+#[cfg(all(feature = "regenerate-protobuf", not(windows)))]
 const PROPOSAL_PROTO: &str = "proto/proposal.proto";
 
-#[cfg(not(windows))]
+#[cfg(all(feature = "regenerate-protobuf", not(windows)))]
 const SERVICE_PROTO: &str = "proto/service.proto";
 
 fn main() -> io::Result<()> {
@@ -27,7 +24,7 @@ fn main() -> io::Result<()> {
     //   which don't resolve by default in Windows clones of the git repository. This can
     //   be worked around with `git config core.symlinks true` but that's additional
     //   hassle, and it's easier to just make any protobuf updates on *nix dev machines.
-    #[cfg(not(windows))]
+    #[cfg(all(feature = "regenerate-protobuf", not(windows)))]
     if Path::new(COMPACT_FORMATS_PROTO).exists()
         && env::var_os("PROTOC")
             .map(PathBuf::from)
@@ -40,7 +37,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(feature = "regenerate-protobuf", not(windows)))]
 fn build() -> io::Result<()> {
     let out: PathBuf = env::var_os("OUT_DIR")
         .expect("Cannot find OUT_DIR environment variable")

@@ -5,9 +5,16 @@ clients.
 
 ## Building
 
-Note that in order to (re)build the GRPC interface, you will need `protoc` on
-your `$PATH`. This is not required unless you make changes to any of the files
-in `./proto/`.
+Ordinary builds use the checked-in Protobuf bindings. After changing files in
+`./proto/`, regenerate the bindings from a non-Windows source checkout with:
+
+```sh
+cargo check -p zcash_client_backend --features regenerate-protobuf
+```
+
+This requires `protoc` on your `$PATH` or specified by `PROTOC`. Use the same
+version as the Protobuf consistency CI job. The `.proto` files are not included
+in published crates, which always use the checked-in bindings.
 
 ## License
 
