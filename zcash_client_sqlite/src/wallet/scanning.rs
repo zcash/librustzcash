@@ -113,7 +113,11 @@ pub(crate) fn prunable_window_fully_scanned(
     // `+ 1` we'd match a range whose `end` is exactly `pruning_floor + 1` — that range
     // covers only `pruning_floor`, which is *not* in the region.
     let window_lower_inclusive = u32::from(pruning_floor(chain_tip)) + 1;
-    let upper_end = u32::from(std::cmp::min(policy_anchor, chain_tip)) + 1;
+    let upper_end = u32::from(std::cmp::min(policy_anchor, chain_tip))
+        .checked_add(1)
+        .ok_or_else(|| {
+            SqliteClientError::CorruptedData("chain tip height overflows u32".to_owned())
+        })?;
     let scanned_code = priority_code(&ScanPriority::Scanned);
     conn.query_row(
         "SELECT NOT EXISTS(
@@ -200,7 +204,9 @@ pub(crate) fn mark_anchor_priority_window(
     let window_start = std::cmp::max(pruning_floor_u32 + 1, birthday_u32);
     // `chain_tip_exclusive` is the half-open upper bound of the scan range — i.e.
     // `chain_tip + 1`, so the chain tip itself is included in the window.
-    let chain_tip_exclusive = chain_tip_u32 + 1;
+    let chain_tip_exclusive = chain_tip_u32.checked_add(1).ok_or_else(|| {
+        SqliteClientError::CorruptedData("chain tip height overflows u32".to_owned())
+    })?;
     if window_start >= chain_tip_exclusive {
         return Ok(());
     }
