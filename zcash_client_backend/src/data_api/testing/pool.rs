@@ -4768,11 +4768,11 @@ where
     assert_eq!(tx_summary.sent_note_count(), 0);
     assert!(tx_summary.is_shielding());
 
-    // Verify that a transaction enhancement request for the transaction containing the spent
-    // outpoint does not yet exist.
+    // The transaction containing the spent outpoint was queued for enhancement when the UTXO
+    // was stored, because the wallet holds none of its data.
     let requests = st.wallet().transaction_data_requests().unwrap();
     assert!(
-        !requests.iter().any(|req| req
+        requests.iter().any(|req| req
             == &TransactionDataRequest::Enhancement(TxId::from_bytes(*spent_outpoint.hash())))
     );
 
