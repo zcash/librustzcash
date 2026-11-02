@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_transparent::sighash::SighashPolicy::permits` now returns `false` for a
+  `SighashType` from `SighashType::from_raw` whose byte is not a ZIP 244 sighash
+  type, instead of panicking (in debug builds) or reading the bit of a defined
+  type (in release builds). `SighashPolicy::permitting` ignores such a type.
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
