@@ -72,7 +72,7 @@ impl AnchorRequirement {
     pub(crate) fn for_pre_authorization(tx_version: u32) -> Self {
         match tx_version {
             zcash_protocol::constants::V6_TX_VERSION => AnchorRequirement::NotRequired,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             zcash_protocol::constants::V7_TX_VERSION => AnchorRequirement::NotRequired,
             _ => AnchorRequirement::Required,
         }

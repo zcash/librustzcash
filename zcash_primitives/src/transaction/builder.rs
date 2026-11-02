@@ -16,6 +16,8 @@ use zcash_protocol::{
 };
 use zcash_script::opcode::PushValue;
 
+#[cfg(feature = "circuits")]
+use crate::transaction::zip248;
 use crate::transaction::{
     Transaction, TxVersion,
     components::orchard::bundle_version_for_branch,
@@ -87,6 +89,8 @@ pub fn default_tx_expiry_delta(consensus_branch_id: BranchId) -> u32 {
         | BranchId::Nu6_2
         | BranchId::Nu6_3 => BLOSSOM_DEFAULT_TX_EXPIRY_DELTA,
         BranchId::Nu7 => NU7_DEFAULT_TX_EXPIRY_DELTA,
+        #[cfg(zcash_unstable = "nu8")]
+        BranchId::Nu8 => NU7_DEFAULT_TX_EXPIRY_DELTA,
         #[cfg(zcash_unstable = "nutachyon")]
         BranchId::NuTachyon => NU7_DEFAULT_TX_EXPIRY_DELTA,
     }
@@ -967,8 +971,8 @@ impl<P, U> Builder<P, U> {
             let ironwood_branch = match self.consensus_branch_id {
                 BranchId::Nu6_3 => true,
                 BranchId::Nu7 => true,
-                #[cfg(zcash_unstable = "nutachyon")]
-                BranchId::NuTachyon => true,
+                #[cfg(zcash_unstable = "nu8")]
+                BranchId::Nu8 => true,
                 _ => false,
             };
             let ironwood_available = version.has_ironwood() && ironwood_branch;
@@ -1567,6 +1571,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             };
         }
 
+        // Captured before the builder is consumed: ZIP 248 requires the
+        // transparent pool's delta alongside the shielded ones, and it is not
+        // recoverable from the authorized bundle (which records no input
+        // values).
+        let transparent_value_balance = self.transparent_builder.value_balance()?;
         let transparent_bundle = build_transparent(self.transparent_builder)?;
 
         let (sapling_bundle, sapling_meta) = match self
@@ -1627,28 +1636,59 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             None => (None, orchard::builder::BundleMetadata::empty()),
         };
 
-        let unauthed_tx: TransactionData<A> = TransactionData {
-            version: self.tx_version,
-            consensus_branch_id: self.consensus_branch_id,
-            lock_time: 0,
-            expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle,
-            // We don't support constructing Sprout bundles.
-            //
-            // # Consensus
-            //
-            // > A coinbase transaction MUST NOT have any JoinSplit descriptions.
-            //
-            // > A coinbase transaction MUST NOT have any Spend descriptions.
-            //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
-        };
+        // Build value pool deltas from bundle value_balances + fee + zip233.
+        //
+        // [ZIP 248 §Cross-bundle and chain-context rules] requires the deltas
+        // for each asset to sum to zero, so every pool that moves value needs
+        // an entry, the transparent pool included.
+        let mut vp_deltas = zip248::ValuePoolDeltas::empty();
+        vp_deltas.set_transparent(transparent_value_balance);
+        if let Some(ref sb) = sapling_bundle {
+            vp_deltas.set_sapling(*sb.value_balance());
+        }
+        if let Some(ref ob) = orchard_bundle {
+            vp_deltas.set_orchard(*ob.value_balance());
+        }
+        if let Some(ref ib) = ironwood_bundle {
+            vp_deltas.set_ironwood(*ib.value_balance());
+        }
+        if let Some(fee) = fee {
+            vp_deltas.set_fee(fee);
+        }
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
+        vp_deltas.set_zip233(self.zip233_amount);
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        // We don't support constructing Sprout bundles.
+        //
+        // # Consensus
+        //
+        // > A coinbase transaction MUST NOT have any JoinSplit descriptions.
+        //
+        // > A coinbase transaction MUST NOT have any Spend descriptions.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
+        if let Some(b) = ironwood_bundle {
+            bundles.insert_ironwood(b);
+        }
+
+        let unauthed_tx: TransactionData<A> = TransactionData::from_parts_with_bundles(
+            self.tx_version,
+            self.consensus_branch_id,
+            0,
+            self.expiry_height,
+            vp_deltas,
+            bundles,
+        );
 
         //
         // Signatures -- everything but the signatures must already have been added.
@@ -1657,8 +1697,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
         let transparent_bundle = sighash_data
             .tx()
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| authorize_transparent(b, &sighash_data))
             .transpose()
             .map_err(Error::TransparentBuild)?;
@@ -1667,14 +1706,15 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // V4 transactions are deprecated this should just be the txid, but
         // for now we need to continue to compute it here.
         let shielded_sig_commitment = sighash_data.signature_hash(&SignableInput::Shielded);
-        let unauthed_tx = sighash_data.into_tx();
+        let mut unauthed_tx = sighash_data.into_tx();
 
         let sapling_asks = sapling_extsks
             .iter()
             .map(|extsk| extsk.expsk().ask().clone())
             .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
-            .sapling_bundle
+            .bundles
+            .take_sapling()
             .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
             .map_err(Error::SaplingBuild)?;
@@ -1685,7 +1725,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // an Orchard or Ironwood bundle is actually present.
         let orchard_circuit_version = {
             let build_proving_key =
-                unauthed_tx.orchard_bundle.is_some() || unauthed_tx.ironwood_bundle.is_some();
+                unauthed_tx.orchard_bundle().is_some() || unauthed_tx.ironwood_bundle().is_some();
             build_proving_key.then(|| {
                 bundle_version_for_branch(
                     unauthed_tx.consensus_branch_id,
@@ -1712,7 +1752,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_proving_key_storage.as_ref();
 
         let orchard_bundle = unauthed_tx
-            .orchard_bundle
+            .bundles
+            .take_orchard()
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
@@ -1727,7 +1768,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map_err(Error::OrchardBuild)?;
 
         let ironwood_bundle = unauthed_tx
-            .ironwood_bundle
+            .bundles
+            .take_ironwood()
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
@@ -1746,19 +1788,32 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .transpose()
             .map_err(Error::IronwoodBuild)?;
 
-        let authorized_tx = TransactionData {
-            version: unauthed_tx.version,
-            consensus_branch_id: unauthed_tx.consensus_branch_id,
-            lock_time: unauthed_tx.lock_time,
-            expiry_height: unauthed_tx.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: unauthed_tx.zip233_amount,
-            transparent_bundle,
-            sprout_bundle: unauthed_tx.sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
-        };
+        // Reassemble the authorized bundles, preserving the value pool deltas
+        // computed for the unauthorized transaction (they commit to the fee and
+        // the shielded value balances, which authorization does not change).
+        let mut authorized_bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            authorized_bundles.insert_transparent(b);
+        }
+        // We don't support constructing Sprout bundles.
+        if let Some(b) = sapling_bundle {
+            authorized_bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            authorized_bundles.insert_orchard(b);
+        }
+        if let Some(b) = ironwood_bundle {
+            authorized_bundles.insert_ironwood(b);
+        }
+
+        let authorized_tx = TransactionData::from_parts_with_bundles(
+            unauthed_tx.version(),
+            unauthed_tx.consensus_branch_id(),
+            unauthed_tx.lock_time(),
+            unauthed_tx.expiry_height(),
+            unauthed_tx.value_pool_deltas().clone(),
+            authorized_bundles,
+        );
 
         // The unwrap() here is safe because the txid hashing
         // of freeze() should be infalliable.
@@ -2042,6 +2097,8 @@ mod tests {
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
             nu7: None,
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
@@ -2061,6 +2118,8 @@ mod tests {
             nu6_2: Some(BlockHeight::from_u32(9)),
             nu6_3: Some(BlockHeight::from_u32(10)),
             nu7: Some(BlockHeight::from_u32(11)),
+            #[cfg(zcash_unstable = "nu8")]
+            nu8: None,
             #[cfg(zcash_unstable = "nutachyon")]
             nu_tachyon: None,
         }
@@ -2677,6 +2736,164 @@ mod tests {
     /// A padded Orchard bundle and an unpadded Ironwood bundle can be combined in
     /// one transaction: one real Orchard spend pads to 2 actions while the single
     /// Ironwood output stays at 1.
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu8"))]
+    fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+        zcash_protocol::local_consensus::LocalNetwork {
+            nu8: Some(BlockHeight::from_u32(11)),
+            ..nu6_3_test_network()
+        }
+    }
+
+    /// [ZIP 248 §Cross-bundle and chain-context rules] requires the value pool
+    /// deltas for each asset to sum to zero. A transaction that moves value
+    /// through the transparent pool therefore needs a transparent delta, which
+    /// only the builder can supply: the authorized bundle records no input
+    /// values.
+    ///
+    /// [ZIP 248 §Cross-bundle and chain-context rules]: https://zips.z.cash/zip-0248
+    #[test]
+    #[cfg(all(
+        feature = "circuits",
+        feature = "transparent-inputs",
+        zcash_unstable = "nu8"
+    ))]
+    fn v7_build_balances_the_transparent_value_pool() {
+        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
+        let sk = tsk
+            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+            .unwrap();
+        let mut transparent_signing_set = TransparentSigningSet::new();
+        let pubkey = transparent_signing_set.add_key(sk);
+        let prev_coin = TxOut::new(
+            Zatoshis::const_from_u64(100_000),
+            tsk.to_account_pubkey()
+                .derive_external_ivk()
+                .unwrap()
+                .derive_address(NonHardenedChildIndex::ZERO)
+                .unwrap()
+                .script()
+                .into(),
+        );
+
+        let mut builder = Builder::new(
+            nu8_test_network(),
+            BlockHeight::from_u32(11),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
+        );
+        builder
+            .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
+            .unwrap();
+        builder
+            .add_transparent_output(
+                &TransparentAddress::PublicKeyHash([0; 20]),
+                Zatoshis::const_from_u64(90_000),
+            )
+            .unwrap();
+
+        let result = builder
+            .mock_build(&transparent_signing_set, &[], &[], UnwrapErr(SysRng))
+            .unwrap();
+        let data = result.transaction().clone().into_data();
+        assert_eq!(data.version(), TxVersion::V7);
+        assert_eq!(
+            data.value_pool_deltas().transparent_value(),
+            Some(ZatBalance::from_i64(10_000).unwrap()),
+        );
+        data.check_v7_consensus_rules()
+            .expect("the value pool deltas of a built v7 transaction must balance");
+    }
+
+    /// A v7 transaction built without transparent inputs signs every shielded
+    /// input over its txid, per [ZIP 248 § Signature Digest], so each binding
+    /// and spend authorization signature must verify against the txid.
+    ///
+    /// [ZIP 248 § Signature Digest]: https://zips.z.cash/zip-0248
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu8"))]
+    fn v7_build_signs_shielded_bundles_over_the_zip248_txid() {
+        let spend_sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
+        let spend_fvk = orchard::keys::FullViewingKey::from(&spend_sk);
+        let recipient = spend_fvk.address_at(0u32, orchard::keys::Scope::External);
+        let rho = orchard::note::Rho::from_bytes(&[1; 32]).unwrap();
+        let rseed = (0u8..=255)
+            .find_map(|b| orchard::note::RandomSeed::from_bytes([b; 32], &rho).into_option())
+            .expect("at least one test rseed is valid");
+        let note = orchard::Note::from_parts(
+            recipient,
+            orchard::value::NoteValue::from_raw(100_000),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        )
+        .unwrap();
+        let zero = orchard::tree::MerkleHashOrchard::from_bytes(&[0; 32]).unwrap();
+        let merkle_path = orchard::tree::MerklePath::from_parts(0, [zero; 32]);
+        let orchard_anchor = merkle_path.root(note.commitment().into());
+
+        let mut builder = Builder::new(
+            nu8_test_network(),
+            BlockHeight::from_u32(11),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: Some(orchard_anchor),
+                ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
+        );
+        builder
+            .add_orchard_spend::<Infallible>(spend_fvk, note, merkle_path)
+            .unwrap();
+        builder
+            .add_ironwood_output::<Infallible>(
+                None,
+                recipient,
+                Zatoshis::const_from_u64(80_000),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+
+        let result = builder
+            .mock_build(
+                &TransparentSigningSet::new(),
+                &[],
+                &[orchard::keys::SpendAuthorizingKey::from(&spend_sk)],
+                UnwrapErr(SysRng),
+            )
+            .unwrap();
+        let tx = result.transaction();
+        assert_eq!(tx.version(), TxVersion::V7);
+        assert!(tx.transparent_bundle().is_none());
+        // The Orchard spend funds the Ironwood output and the fee, so the fee is
+        // only correct if the Ironwood value balance is counted.
+        assert_eq!(
+            tx.fee_paid(|_| Ok::<_, BalanceError>(None)).unwrap(),
+            Some(Zatoshis::const_from_u64(20_000)),
+        );
+
+        let txid = tx.txid();
+        let sighash: &[u8] = txid.as_ref();
+        for bundle in [tx.orchard_bundle(), tx.ironwood_bundle()] {
+            let bundle = bundle.expect("both Orchard-protocol bundles are present");
+            bundle
+                .binding_validating_key()
+                .verify(sighash, bundle.authorization().binding_signature())
+                .expect("binding signature verifies over the v7 txid");
+            for action in bundle.actions() {
+                action
+                    .rk()
+                    .verify(sighash, action.authorization())
+                    .expect("spend authorization signature verifies over the v7 txid");
+            }
+        }
+    }
+
     #[test]
     #[cfg(feature = "circuits")]
     fn per_pool_bundle_types_build_two_plus_one_pczt() {
@@ -2845,7 +3062,7 @@ mod tests {
             .mock_build(&transparent_signing_set, &[], &[], UnwrapErr(SysRng))
             .unwrap();
         // No binding signature, because only t input and outputs
-        assert!(res.transaction().sapling_bundle.is_none());
+        assert!(res.transaction().sapling_bundle().is_none());
     }
 
     #[test]

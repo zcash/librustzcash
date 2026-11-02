@@ -140,12 +140,10 @@ pub(crate) fn zip143_digests<
     tx: &TransactionData<A>,
 ) -> Zip143Digests<Blake2bHash> {
     let vin = tx
-        .transparent_bundle
-        .as_ref()
+        .transparent_bundle()
         .map_or(&[][..], |b| b.vin.as_slice());
     let vout = tx
-        .transparent_bundle
-        .as_ref()
+        .transparent_bundle()
         .map_or(&[][..], |b| b.vout.as_slice());
 
     Zip143Digests {
@@ -155,18 +153,15 @@ pub(crate) fn zip143_digests<
             outputs_digest: outputs_hash(vout),
         },
         joinsplits: tx
-            .sprout_bundle
-            .as_ref()
+            .sprout_bundle()
             .filter(|b| !b.joinsplits.is_empty())
             .map(|b| joinsplits_hash(tx.consensus_branch_id, &b.joinsplits, &b.joinsplit_pubkey)),
         sapling_spends: tx
-            .sapling_bundle
-            .as_ref()
+            .sapling_bundle()
             .filter(|b| !b.shielded_spends().is_empty())
             .map(|b| sapling_spends_hash(b.shielded_spends())),
         sapling_outputs: tx
-            .sapling_bundle
-            .as_ref()
+            .sapling_bundle()
             .filter(|b| !b.shielded_outputs().is_empty())
             .map(|b| sapling_outputs_hash(b.shielded_outputs())),
     }
@@ -217,7 +212,7 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
         {
             h.update(digests.transparent.outputs_digest.as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match (tx.transparent_bundle.as_ref(), signable_input) {
+            match (tx.transparent_bundle(), signable_input) {
                 (Some(b), SignableInput::Transparent(input)) if input.index() < &b.vout.len() => {
                     h.update(single_output_hash(&b.vout[*input.index()]).as_bytes())
                 }
@@ -258,7 +253,7 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
         match signable_input {
             SignableInput::Shielded => (),
             SignableInput::Transparent(input) => {
-                if let Some(bundle) = tx.transparent_bundle.as_ref() {
+                if let Some(bundle) = tx.transparent_bundle() {
                     let mut data = vec![];
                     bundle.vin[*input.index()]
                         .prevout()

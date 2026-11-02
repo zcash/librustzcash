@@ -10,6 +10,41 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::zip248`, the [ZIP 248] extensible transaction
+  format: `BundleType`, `BundleVariant`, `BundleId`, `BundleMap`, `TypedBundle`,
+  `CoinbaseBundle`, `UnknownBundle`, `ValuePoolDeltas`, `ValuePoolDeltaKey`,
+  `ValuePoolDeltaEntry`, `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`,
+  `MAX_COINBASE_DATA_LEN`, `opaque_effects_personalization`,
+  `read_bundle_data_framing` and `write_bundle_data_framing`.
+- `zcash_primitives::transaction::TransactionData::{from_parts_with_bundles,
+  bundles, value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
+- `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
+- `zcash_primitives::transaction::zip248::WireKeyError`
+- `zcash_primitives::transaction::TransactionData::{digest_v7,
+  check_v7_consensus_rules}`, `zcash_primitives::transaction::V7ConsensusError`
+  and `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`
+  (all require `zcash_unstable="nu8"`)
+- `zcash_primitives::transaction::components::orchard::{read_v7_bundle,
+  write_v7_effects, write_v7_auth}` (require `zcash_unstable="nu8"`)
+
+### Changed
+- `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
+  the V6 body and digest structure, and is gated on `zcash_unstable="nu8"`
+  rather than `zcash_unstable="nutachyon"`: the format is deployed by its own
+  network upgrade, NU8, rather than by NuTachyon. V6 (ZIP 229) is unchanged;
+  the Ironwood bundle is now an entry in the ZIP 248 bundle map, still reached
+  through `TransactionData::ironwood_bundle`.
+- `zcash_primitives::transaction::zip248::{BundleMap, ValuePoolDeltas}`'s
+  `insert_unknown` methods now return `Result<(), WireKeyError>`, rejecting a
+  raw `(bundleType, bundleVariant)` pair that has no `compactSize` encoding.
+  Such a pair could not be serialized, and previously panicked when the v7
+  digests were computed.
+- `zcash_primitives::transaction::TransactionData` stores its bundles as a
+  `zip248::BundleMap` and its value balances as `zip248::ValuePoolDeltas`. The
+  `from_parts*` constructors and the per-protocol bundle accessors are
+  unchanged; `bundles` and `value_pool_deltas` expose the new representation.
+
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also
@@ -18,6 +53,8 @@ workspace.
   - `{TxDigests::Zip244, Zip244Digests}`
   - `sighash::{PrecomputedSighashData::new_zip244, Zip244Error::NotZip244}`
   - `txid::TxIdDigester`
+
+[ZIP 248]: https://zips.z.cash/zip-0248
 
 ## [0.31.0] - 2026-10-21
 

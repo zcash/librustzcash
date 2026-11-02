@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `pczt::ExtractError::TransparentValueBalance`
+
+### Changed
+- Creating and extracting V7 PCZTs now requires `zcash_unstable="nu8"` rather
+  than `zcash_unstable="nutachyon"`: `pczt::roles::creator::Creator::new`
+  creates a V7 PCZT for the NU8 consensus branch, and `pczt::Pczt::into_effects`
+  and `pczt::roles::tx_extractor::TransactionExtractor::extract` extract it as a
+  [ZIP 248] transaction rather than one with the V6 transaction body.
+- Extracting a V7 transaction from a PCZT now records the transparent pool's
+  value balance and the fee as [ZIP 248] value pool deltas, so the result
+  balances and has the same transaction identifier as the same transaction
+  built directly. Requires `zcash_unstable="nu8"`.
+
+[ZIP 248]: https://zips.z.cash/zip-0248
+
 ## [0.10.0] - 2026-10-21
 
 ### Added
