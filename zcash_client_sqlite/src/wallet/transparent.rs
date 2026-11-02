@@ -2157,6 +2157,14 @@ pub(crate) fn update_observed_unspent_height_for_outpoint(
 }
 
 /// Adds the given received UTXO to the datastore.
+/// Stores a transparent output that a query of the UTXO set returned as unspent.
+///
+/// A UTXO query returns the output alone, not the transaction that created it, and it is
+/// not evidence of the output's later spend. So this also queues the creating transaction
+/// for enhancement, where the wallet does not already hold its data, and queues the output
+/// for spend detection. Without the first, the wallet cannot see whether the transaction
+/// spent the wallet's own outputs. Without the second, a spend of the output after the last
+/// query that returned it goes unnoticed.
 pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -2164,7 +2172,24 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     output: &WalletTransparentOutput<AccountUuid>,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-    put_transparent_output(conn, params, gap_limits, output, observed_height, true)
+    let stored = put_transparent_output(conn, params, gap_limits, output, observed_height, true)?;
+
+    super::queue_tx_retrieval(conn, std::iter::once(*output.outpoint().txid()), None)?;
+
+    let tx_ref = conn.query_row(
+        "SELECT transaction_id FROM transparent_received_outputs WHERE id = :utxo_id",
+        named_params! { ":utxo_id": stored.3.0 },
+        |row| row.get(0).map(TxRef),
+    )?;
+    queue_transparent_spend_detection(
+        conn,
+        params,
+        *output.recipient_address(),
+        tx_ref,
+        output.outpoint().n(),
+    )?;
+
+    Ok(stored)
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -3153,6 +3178,70 @@ mod tests {
             )
             .unwrap();
         assert_eq!(mined_height, Some(u32::from(mined_at)));
+    }
+
+    /// An output that a UTXO query returns has its creating transaction queued for
+    /// enhancement, and is itself queued for spend detection. Once the chain moves past the
+    /// last height at which a query saw the output unspent, the wallet asks for its spend.
+    #[test]
+    fn put_received_transparent_utxo_queues_enhancement_and_spend_detection() {
+        use zcash_client_backend::data_api::TransactionDataRequest;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().height();
+        let taddr = *st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap()
+            .transparent()
+            .unwrap();
+
+        let mined_at = birthday + 100;
+        st.wallet_mut().update_chain_tip(mined_at + 10).unwrap();
+
+        let outpoint = OutPoint::fake();
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into()),
+            Some(mined_at),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+
+        let requests = st.wallet().transaction_data_requests().unwrap();
+        assert!(requests.contains(&TransactionDataRequest::Enhancement(*outpoint.txid())));
+
+        // While the chain tip is the height at which the query saw the output unspent,
+        // there is nothing to ask about its spend.
+        let asks_for_spend = |requests: &[TransactionDataRequest]| {
+            requests.iter().any(|request| match request {
+                #[cfg(feature = "spend-index")]
+                TransactionDataRequest::GetSpendingTx(spent) => *spent == outpoint,
+                TransactionDataRequest::TransactionsInvolvingAddress(involving) => {
+                    involving.address() == taddr
+                }
+                _ => false,
+            })
+        };
+        assert!(!asks_for_spend(&requests));
+
+        st.wallet_mut().update_chain_tip(mined_at + 20).unwrap();
+        let requests = st.wallet().transaction_data_requests().unwrap();
+        assert!(asks_for_spend(&requests));
     }
 
     /// `v_tx_outputs.to_address` must report the transparent receiver at which a transparent

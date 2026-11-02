@@ -19,6 +19,11 @@ workspace.
 - Migrated to `bip0039 0.14`, `schemerz 0.3`, `schemerz-rusqlite 0.371`.
 - MSRV is now 1.89
 
+### Fixed
+- `WalletWrite::put_received_transparent_utxo` now queues the transaction that
+  created the output for enhancement, where the wallet does not hold its data,
+  and queues the output for spend detection.
+
 ## [0.23.0-pre.2] - 2026-10-13
 
 ### Changed
