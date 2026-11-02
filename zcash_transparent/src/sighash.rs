@@ -290,4 +290,16 @@ mod tests {
     fn default_is_all_only() {
         assert_eq!(SighashPolicy::default(), SighashPolicy::ALL_ONLY);
     }
+
+    #[test]
+    fn undefined_types_are_never_permitted() {
+        for byte in 0..=u8::MAX {
+            if SighashType::parse(byte).is_none() {
+                assert!(
+                    !SighashPolicy::ANY.permits(SighashType::from_raw(byte)),
+                    "{byte:#04x} is not a ZIP 244 sighash type",
+                );
+            }
+        }
+    }
 }
