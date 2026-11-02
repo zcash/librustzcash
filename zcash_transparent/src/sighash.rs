@@ -103,11 +103,21 @@ impl SighashPolicy {
         .permitting(SighashType::SINGLE_ANYONECANPAY);
 
     /// Returns the bit representing `hash_type` within the policy.
+    ///
+    /// A `SighashType` from [`SighashType::from_raw`] may hold a byte that is not a
+    /// [ZIP 244] sighash type; such a type has no bit, so no policy permits it.
+    ///
+    /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
     const fn bit(hash_type: SighashType) -> u8 {
-        // `SighashType` is correct by construction, so the masked value is always one of
-        // `SIGHASH_ALL`, `SIGHASH_NONE`, or `SIGHASH_SINGLE`, i.e. 1, 2, or 3;
-        // `SIGHASH_ANYONECANPAY` shifts it into the upper half of the mask.
-        1 << ((hash_type.0 & !SIGHASH_ANYONECANPAY) - 1 + (hash_type.0 >> 7) * 3)
+        match hash_type {
+            SighashType::ALL => 1 << 0,
+            SighashType::NONE => 1 << 1,
+            SighashType::SINGLE => 1 << 2,
+            SighashType::ALL_ANYONECANPAY => 1 << 3,
+            SighashType::NONE_ANYONECANPAY => 1 << 4,
+            SighashType::SINGLE_ANYONECANPAY => 1 << 5,
+            _ => 0,
+        }
     }
 
     /// Returns a policy permitting everything this policy permits, and `hash_type`.
@@ -289,5 +299,17 @@ mod tests {
     #[test]
     fn default_is_all_only() {
         assert_eq!(SighashPolicy::default(), SighashPolicy::ALL_ONLY);
+    }
+
+    #[test]
+    fn undefined_types_are_never_permitted() {
+        for byte in 0..=u8::MAX {
+            if SighashType::parse(byte).is_none() {
+                assert!(
+                    !SighashPolicy::ANY.permits(SighashType::from_raw(byte)),
+                    "{byte:#04x} is not a ZIP 244 sighash type",
+                );
+            }
+        }
     }
 }
