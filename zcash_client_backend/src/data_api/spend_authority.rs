@@ -246,9 +246,9 @@ mod tests {
     fn pubkeys_imported_as_follow_recorded_custody() {
         use super::{SpendingKeyCustody, StandalonePubkeys};
 
-        let pubkey = secp256k1::SecretKey::from_slice(&[1; 32])
+        let pubkey = secp256k1::SecretKey::from_secret_bytes([1; 32])
             .unwrap()
-            .public_key(&secp256k1::Secp256k1::signing_only());
+            .public_key();
         let held = StandalonePubkeys::ImportedAs(SpendingKeyCustody::Held);
 
         assert!(held.authorizes(&pubkey, SpendingKeyCustody::Held));

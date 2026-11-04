@@ -14,7 +14,10 @@ use crate::wallet::{
     init::WalletMigrationError,
 };
 
-use super::{ivk_item_cache, standalone_address, v_address_uses_ironwood};
+use super::{
+    ivk_item_cache, restore_ua_transparent_receivers, standalone_address, v_address_uses_ironwood,
+    witness_settled_height,
+};
 
 /// The migration that replaces the `has_spend_key` column of the `accounts` table with the
 /// spending key custody of each standalone public key.
@@ -25,6 +28,8 @@ pub(super) const DEPENDENCIES: &[Uuid] = &[
     ivk_item_cache::MIGRATION_ID,
     standalone_address::MIGRATION_ID,
     v_address_uses_ironwood::MIGRATION_ID,
+    restore_ua_transparent_receivers::MIGRATION_ID,
+    witness_settled_height::MIGRATION_ID,
 ];
 
 pub(super) struct Migration;
@@ -221,8 +226,8 @@ mod tests {
                      RETURNING id",
                     named_params![
                         ":uuid": uuid::Uuid::from_u128(u128::from(pubkey_byte)).as_bytes().to_vec(),
-                        ":ufvk": ufvk.encode(&network),
-                        ":uivk": ufvk.to_unified_incoming_viewing_key().encode(&network),
+                        ":ufvk": ufvk.encode(&network).unwrap(),
+                        ":uivk": ufvk.to_unified_incoming_viewing_key().encode(&network).unwrap(),
                         ":has_spend_key": has_spend_key,
                     ],
                     |row| row.get(0),

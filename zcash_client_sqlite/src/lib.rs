@@ -4565,19 +4565,13 @@ mod tests {
         let ufvk = usk.to_unified_full_viewing_key();
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                FIRST_ACCOUNT_NAME,
-                &ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk(FIRST_ACCOUNT_NAME, &ufvk, &birthday, None, None)
             .unwrap();
         let account_id = account.id();
         assert_matches!(
             account.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::ViewOnly,
+                derivation: None,
                 ..
             }
         );
@@ -5087,13 +5081,7 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &ufvk, &birthday, None, None)
             .unwrap();
 
         let value = Zatoshis::const_from_u64(60000);
@@ -5156,13 +5144,7 @@ mod tests {
         let seed_derived_ufvk = seed_derived_usk.to_unified_full_viewing_key();
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &seed_derived_ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &seed_derived_ufvk, &birthday, None, None)
             .unwrap();
 
         let value = Zatoshis::const_from_u64(60000);

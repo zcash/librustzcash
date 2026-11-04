@@ -3206,10 +3206,10 @@ pub(crate) mod tests {
             .execute(
                 "INSERT INTO accounts (id, uuid, account_kind,
                  hd_seed_fingerprint, hd_account_index,
-                 ufvk, uivk, has_spend_key, birthday_height)
+                 ufvk, uivk, birthday_height)
                  VALUES (1, X'0000000000000000000000000000AAAA', 0,
                  X'00000000000000000000000000000000000000000000000000000000000000AB',
-                 0, :ufvk, :uivk, 1, :birthday_height)",
+                 0, :ufvk, :uivk, :birthday_height)",
                 named_params![
                     ":ufvk": ufvk_str,
                     ":uivk": uivk_str,
