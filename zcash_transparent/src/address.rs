@@ -3,7 +3,7 @@
 use core::fmt;
 use corez::io::{self, Read, Write};
 
-use zcash_encoding::{CompactSize, Vector};
+use zcash_encoding::Vector;
 use zcash_script::{
     op,
     script::{self, Evaluable},
@@ -12,9 +12,6 @@ use zcash_script::{
 
 #[cfg(feature = "transparent-inputs")]
 use crate::util::hash160;
-
-#[cfg(test)]
-mod serialization_tests;
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
 #[derive(Clone)]
@@ -70,8 +67,7 @@ impl Script {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        CompactSize::write(&mut writer, self.0.0.len())?;
-        writer.write_all(&self.0.0)
+        Vector::write_bytes(&mut writer, &self.0.0)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).

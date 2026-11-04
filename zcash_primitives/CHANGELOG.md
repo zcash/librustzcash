@@ -11,15 +11,13 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- `zcash_primitives::block::BlockHeader::read`, and
-  `zcash_primitives::transaction::Transaction::read` for Orchard and Ironwood
-  bundles, now read the Equihash solution and the proof bytes in bulk, rather
-  than making one call to the underlying reader per byte.
+- `zcash_primitives::block::BlockHeader::{read, write}`, and
+  `zcash_primitives::transaction::Transaction::{read, write}` for Orchard and
+  Ironwood bundles, now read and write the Equihash solution and the proof bytes
+  in bulk, rather than making one call to the underlying reader or writer per
+  byte.
 
 ### Fixed
-- Reduced per-byte writer overhead when serializing Orchard and Ironwood
-  proofs, without changing their encoding or length limits
-  ([#3194](https://github.com/zcash/librustzcash/issues/3194)).
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also
   apply to v6 transactions, whose transaction IDs and signature digests are
