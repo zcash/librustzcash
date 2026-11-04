@@ -180,10 +180,8 @@ use {
 };
 #[cfg(feature = "transparent-key-import")]
 use {
-    ::transparent::address::TransparentAddress,
     encoding::{SPENDING_KEY_CUSTODY_WATCH_ONLY, spending_key_custody_code},
     zcash_client_backend::data_api::spend_authority::SpendingKeyCustody,
-    zcash_script::{descriptor::sh, script::Evaluable},
 };
 
 pub mod commitment_tree;

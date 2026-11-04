@@ -2897,6 +2897,16 @@ mod greedy_selection_tests {
         let request = TransactionRequest::new(vec![Payment::without_memo(recipient, payment)])
             .expect("a single payment is a valid request");
 
+        let spend_authority = SpendAuthority::new(std::collections::HashMap::from([(
+            ACCOUNT,
+            crate::data_api::spend_authority::AccountSpendAuthority::for_pools(BTreeSet::from([
+                PoolType::TRANSPARENT,
+                PoolType::SAPLING,
+                PoolType::ORCHARD,
+                PoolType::IRONWOOD,
+            ])),
+        )]));
+
         GreedyInputSelector::new()
             .propose_transaction(
                 &params,
@@ -2913,6 +2923,7 @@ mod greedy_selection_tests {
                 change_strategy,
                 spend_policy,
                 None,
+                &spend_authority,
             )
             .map(|proposal| {
                 proposal

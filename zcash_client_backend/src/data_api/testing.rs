@@ -45,6 +45,8 @@ use {
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
+#[cfg(feature = "transparent-key-import")]
+use super::spend_authority::SpendingKeyCustody;
 use ::sapling::{
     Rseed,
     note_encryption::{SaplingDomain, sapling_note_encryption},
@@ -92,8 +94,6 @@ use {
     zcash_note_encryption::ShieldedOutput,
     zcash_protocol::consensus::NetworkConstants,
 };
-#[cfg(feature = "transparent-key-import")]
-use {super::spend_authority::SpendingKeyCustody, zcash_script::script};
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountSource, AddressInfo,
@@ -4293,6 +4293,7 @@ impl InputSource for FixedNotes {
         _confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         _lock_filter: LockFilter<'_>,
+        _spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         let selections = self.selections.get() + 1;
         if self.selection_limit.is_some_and(|limit| selections > limit) {

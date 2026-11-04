@@ -3217,11 +3217,9 @@ mod tests {
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
-        transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{
             AccountBirthday, chain::ChainState, spend_authority::SpendingKeyCustody,
         },
-        zcash_keys::{address::Address, encoding::AddressCodec},
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
 

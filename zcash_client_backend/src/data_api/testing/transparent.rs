@@ -1565,7 +1565,9 @@ where
         .unwrap();
 
     // Scan some chain data with no notes for the wallet, so that it has a summary.
-    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
     let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1574,10 +1576,9 @@ where
     }
     st.scan_cached_blocks(start_height, 10);
 
-    let secp = Secp256k1::new();
-    let standalone_pubkey = SecretKey::from_slice(&[2u8; 32])
+    let standalone_pubkey = SecretKey::from_secret_bytes([2u8; 32])
         .expect("valid secret key")
-        .public_key(&secp);
+        .public_key();
     let p2pkh_addr = TransparentAddress::from_pubkey(&standalone_pubkey);
     st.wallet_mut()
         .import_standalone_transparent_pubkey(
@@ -1651,10 +1652,7 @@ where
 
     let held_keys = AccountSpendAuthority::new(
         BTreeSet::new(),
-        StandalonePubkeys::Only(BTreeSet::from([
-            standalone_pubkey,
-            member_key.public_key(&secp),
-        ])),
+        StandalonePubkeys::Only(BTreeSet::from([standalone_pubkey, member_key.public_key()])),
         BTreeSet::new(),
     );
     assert_eq!(
@@ -1765,11 +1763,10 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secp = Secp256k1::new();
     let pubkey_of = |secret_byte: u8| {
-        SecretKey::from_slice(&[secret_byte; 32])
+        SecretKey::from_secret_bytes([secret_byte; 32])
             .expect("valid secret key")
-            .public_key(&secp)
+            .public_key()
     };
     let watch_only_pubkey = pubkey_of(2);
     let held_pubkey = pubkey_of(3);
@@ -2954,13 +2951,19 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority(),
             )
             .as_deref(),
         Ok(&[])
     );
     assert_matches!(
         st.wallet()
-            .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN),
+            .get_transparent_balances(
+                account_id,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &st.full_spend_authority(),
+            ),
         Ok(balances) if balances.get(&taddr).map(|(_, b)| b.total()) == Some(Zatoshis::ZERO)
             || balances.is_empty()
     );

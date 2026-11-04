@@ -1453,13 +1453,12 @@ impl SpendingKeys {
 
         #[cfg(feature = "transparent-key-import")]
         let authority = {
-            let secp = secp256k1::Secp256k1::signing_only();
             let mut pubkeys = BTreeSet::new();
             let mut scripts = BTreeSet::new();
             for (address, keys) in &self.standalone_transparent_keys {
                 match address {
                     TransparentAddress::PublicKeyHash(_) => {
-                        pubkeys.extend(keys.iter().map(|sk| sk.public_key(&secp)));
+                        pubkeys.extend(keys.iter().map(|sk| sk.public_key()));
                     }
                     TransparentAddress::ScriptHash(_) => {
                         scripts.insert(*address);

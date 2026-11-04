@@ -2716,7 +2716,7 @@ mod tests {
     /// A compressed-key WIF encoding under the testnet/regtest prefix.
     fn test_wif(secret_key: &secp256k1::SecretKey) -> String {
         let mut wif_payload = vec![0xEF];
-        wif_payload.extend_from_slice(&secret_key.secret_bytes());
+        wif_payload.extend_from_slice(&secret_key.to_secret_bytes());
         wif_payload.push(0x01);
         bs58::encode(wif_payload).with_check().into_string()
     }
@@ -2724,7 +2724,7 @@ mod tests {
     /// A UFVK account with no corresponding spending material in the document.
     fn view_only_account(ts: &TestSeed) -> ::zewif::Account {
         let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
         ));
         account.set_name("viewing");
         account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
@@ -2771,11 +2771,10 @@ mod tests {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
-        let secp = secp256k1::Secp256k1::new();
         // A public key recorded without its spending key, as zcashd's
         // `importpubkey` produces.
-        let watched_key = secp256k1::SecretKey::from_slice(&[0x43; 32]).unwrap();
-        let watched_pubkey = watched_key.public_key(&secp);
+        let watched_key = secp256k1::SecretKey::from_secret_bytes([0x43; 32]).unwrap();
+        let watched_pubkey = watched_key.public_key();
         let pubkey_addr = TransparentAddress::from_pubkey(&watched_pubkey).encode(&TEST_NETWORK);
         // A bare address watched with no key material at all, as zcashd's
         // `importaddress` produces.
@@ -2876,7 +2875,7 @@ mod tests {
 
         let mut store = ::zewif::SecretStore::new();
         store.add_unified_key(::zewif::UnifiedKeyEntry::new(
-            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK).unwrap()),
             ::zewif::UnifiedSpendingKey::new("usk1testspendingkey"),
         ));
 
@@ -2912,13 +2911,12 @@ mod tests {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
-        let secp = secp256k1::Secp256k1::new();
         let member_keys: Vec<secp256k1::SecretKey> = [[0x44; 32], [0x45; 32]]
             .iter()
-            .map(|bytes| secp256k1::SecretKey::from_slice(bytes).unwrap())
+            .map(|bytes| secp256k1::SecretKey::from_secret_bytes(*bytes).unwrap())
             .collect();
         let member_pubkeys: Vec<secp256k1::PublicKey> =
-            member_keys.iter().map(|sk| sk.public_key(&secp)).collect();
+            member_keys.iter().map(|sk| sk.public_key()).collect();
         let (script_bytes, p2sh_addr) = multisig_script(2, &member_pubkeys);
 
         let mut store = ::zewif::SecretStore::new();
@@ -2968,12 +2966,11 @@ mod tests {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
-        let secp = secp256k1::Secp256k1::new();
-        let held_key = secp256k1::SecretKey::from_slice(&[0x44; 32]).unwrap();
-        let held_pubkey = held_key.public_key(&secp);
-        let missing_pubkey = secp256k1::SecretKey::from_slice(&[0x45; 32])
+        let held_key = secp256k1::SecretKey::from_secret_bytes([0x44; 32]).unwrap();
+        let held_pubkey = held_key.public_key();
+        let missing_pubkey = secp256k1::SecretKey::from_secret_bytes([0x45; 32])
             .unwrap()
-            .public_key(&secp);
+            .public_key();
         let (script_bytes, p2sh_addr) = multisig_script(2, &[held_pubkey, missing_pubkey]);
 
         let mut store = ::zewif::SecretStore::new();
@@ -3027,13 +3024,12 @@ mod tests {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
-        let secp = secp256k1::Secp256k1::new();
         let member_pubkeys: Vec<secp256k1::PublicKey> = [[0x44; 32], [0x45; 32]]
             .iter()
             .map(|bytes| {
-                secp256k1::SecretKey::from_slice(bytes)
+                secp256k1::SecretKey::from_secret_bytes(*bytes)
                     .unwrap()
-                    .public_key(&secp)
+                    .public_key()
             })
             .collect();
         let (script_bytes, p2sh_addr) = multisig_script(2, &member_pubkeys);
@@ -3066,13 +3062,12 @@ mod tests {
     fn watch_only_record_held_by_another_account_fails_the_import() {
         let (_file, mut wdb) = test_wallet_db();
 
-        let secp = secp256k1::Secp256k1::new();
         let member_pubkeys: Vec<secp256k1::PublicKey> = [[0x44; 32], [0x45; 32]]
             .iter()
             .map(|bytes| {
-                secp256k1::SecretKey::from_slice(bytes)
+                secp256k1::SecretKey::from_secret_bytes(*bytes)
                     .unwrap()
-                    .public_key(&secp)
+                    .public_key()
             })
             .collect();
         let (script_bytes, p2sh_addr) = multisig_script(2, &member_pubkeys);
@@ -3119,9 +3114,8 @@ mod tests {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
-        let secp = secp256k1::Secp256k1::new();
-        let secret_key = secp256k1::SecretKey::from_slice(&[0x46; 32]).unwrap();
-        let uncompressed = secret_key.public_key(&secp).serialize_uncompressed();
+        let secret_key = secp256k1::SecretKey::from_secret_bytes([0x46; 32]).unwrap();
+        let uncompressed = secret_key.public_key().serialize_uncompressed();
         let recorded_pubkey =
             || ::zewif::transparent::TransparentPubKey::from_bytes(uncompressed.to_vec()).unwrap();
 
