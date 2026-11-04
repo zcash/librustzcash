@@ -180,11 +180,11 @@ impl Vector {
         Self::read_collected(reader, func)
     }
 
-    /// Reads a [`CompactSize`]-prefixed vector of bytes in bulk.
+    /// Reads a byte vector encoded as a [`CompactSize`] length followed by that many bytes.
     ///
-    /// This uses the same encoding as [`Vector::read`] with a one-byte decoder, but avoids
-    /// calling the decoder for every byte. Allocation grows with the bytes read, rather than
-    /// preallocating the length declared in the input.
+    /// The allocation exceeds the number of bytes actually read by at most a small fixed
+    /// amount, so a large declared length followed by a short input does not cause a large
+    /// allocation.
     ///
     /// Returns an error if the length is non-canonical, exceeds [`MAX_COMPACT_SIZE`], or cannot
     /// fit in a `usize`, or if the reader fails. A truncated prefix or payload returns

@@ -11,7 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- Transparent scripts are read in bulk instead of one byte at a time.
+- `zcash_transparent::address::Script::read` now reads the script bytes in bulk,
+  rather than making one call to the underlying reader per byte.
 
 ## [0.11.0] - 2026-10-21
 
