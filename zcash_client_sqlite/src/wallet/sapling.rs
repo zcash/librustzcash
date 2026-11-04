@@ -704,6 +704,22 @@ pub(crate) mod tests {
         testing::pool::empty_boundary_blocks_are_checkpointed_and_retained::<SaplingPoolTester>()
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_forward() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<SaplingPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::Forward,
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_tip_first() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<SaplingPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::TipFirst,
+        )
+    }
+
     #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
