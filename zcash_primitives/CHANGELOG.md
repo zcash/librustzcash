@@ -11,10 +11,11 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- `zcash_primitives::block::BlockHeader::read`, and
-  `zcash_primitives::transaction::Transaction::read` for Orchard and Ironwood
-  bundles, now read the Equihash solution and the proof bytes in bulk, rather
-  than making one call to the underlying reader per byte.
+- `zcash_primitives::block::BlockHeader::{read, write}`, and
+  `zcash_primitives::transaction::Transaction::{read, write}` for Orchard and
+  Ironwood bundles, now read and write the Equihash solution and the proof bytes
+  in bulk, rather than making one call to the underlying reader or writer per
+  byte.
 
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,

@@ -262,6 +262,16 @@ impl Vector {
         items.try_for_each(|e| func(&mut writer, e))
     }
 
+    /// Writes a byte vector as a [`CompactSize`] length followed by the bytes.
+    ///
+    /// Returns an error without writing anything if the length exceeds
+    /// [`MAX_COMPACT_SIZE`]. Returns the writer's error if the writer fails; the bytes
+    /// written before the failure are unspecified.
+    pub fn write_bytes<W: Write>(mut writer: W, bytes: &[u8]) -> io::Result<()> {
+        CompactSize::write(&mut writer, bytes.len())?;
+        writer.write_all(bytes)
+    }
+
     /// Returns the serialized size of a vector of `u8` as written by `[Vector::write]`.
     pub fn serialized_size_of_u8_vec(vec: &[u8]) -> usize {
         let length = vec.len();

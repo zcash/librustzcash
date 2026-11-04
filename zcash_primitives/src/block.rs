@@ -170,7 +170,7 @@ impl BlockHeader {
         writer.write_u32_le(self.time)?;
         writer.write_u32_le(self.bits)?;
         writer.write_all(&self.nonce)?;
-        Vector::write(&mut writer, &self.solution, |w, b| w.write_u8(*b))?;
+        Vector::write_bytes(&mut writer, &self.solution)?;
 
         Ok(())
     }
