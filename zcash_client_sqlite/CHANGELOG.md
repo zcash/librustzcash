@@ -13,8 +13,8 @@ workspace.
 ### Added
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
 - `zewif::ZewifImportReport::watch_only_receivers_imported` and
-  `zewif::ZewifImportReport::watch_only_conflicts` (with the supporting types
-  `zewif::WatchOnlyConflict` and `zewif::WatchOnlyForm`), reporting how the
+  `zewif::ZewifImportReport::skipped_watch_only` (with the supporting types
+  `zewif::SkippedWatchOnly` and `zewif::WatchOnlyForm`), reporting how the
   watch-only transparent records in a document were handled.
 
 ### Changed
@@ -71,6 +71,18 @@ workspace.
   `min_confirmations` blocks or more therefore reports no spendable shielded
   balance, and proposals fail with `ScanRequired`, until it has scanned to
   that depth.
+- `zewif::import_wallet` keeps each imported account's spend authority pure.
+  Watch-only transparent records — bare addresses, public keys whose spending
+  keys are absent from the document's secret store, and redeem scripts for which
+  not every member public key has a verified spending key — are imported as
+  standalone receivers of accounts imported as view-only; they were previously
+  dropped. A watch-only record carried by an account imported with spend
+  authority is skipped and reported in `ZewifImportReport::skipped_watch_only`,
+  since registering it would mix spend authority within the account. Public keys
+  are recorded with `SpendingKeyCustody::WatchOnly`, and the public keys of
+  spending keys in the document's secret store with `SpendingKeyCustody::Held`.
+  A record that another account in the wallet already holds fails the import
+  with `StandaloneImportConflict`.
 - `zewif::import_wallet` records the ZIP 32 derivation of every account
   imported from a viewing key whose derivation the document records.
   Previously it recorded the derivation only for accounts that it judged
@@ -81,16 +93,6 @@ workspace.
 - The `AccountBalance` values that `WalletDb` reports now carry the value
   received at each standalone P2SH address in
   `AccountBalance::script_balances`, not in the unshielded balances.
-- `zewif::import_wallet` imports the watch-only transparent records of a
-  document — bare addresses, public keys whose spending keys are absent from
-  the document's secret store, and the addresses of redeem scripts the wallet
-  cannot represent — as standalone receivers of the accounts that carry them.
-  They were previously dropped. A record that another account in the wallet
-  already holds is reported in `ZewifImportReport::watch_only_conflicts`.
-  Public keys are recorded with `SpendingKeyCustody::WatchOnly`, and the
-  public keys of spending keys in the document's secret store with
-  `SpendingKeyCustody::Held`.
-
 ### Fixed
 - `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
   `WalletWrite::set_transaction_status`, and

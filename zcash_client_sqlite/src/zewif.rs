@@ -13,24 +13,29 @@
 //! 1. Verifies that every wallet in the document was recorded for the network the
 //!    database's [`Parameters`] describe.
 //! 2. Delivers every entry of the document's secret store to the [`SecretSink`],
-//!    recording which seeds are available for HD derivation.
+//!    recording which seeds are available for HD derivation and which spending
+//!    keys were delivered.
 //! 3. Imports each account: seed-derived accounts whose seed material is present are
 //!    imported via HD derivation (preserving the recorded ZIP 32 account index);
 //!    all others are imported from their viewing keys. Account birthdays are
 //!    constructed from the tree-state frontiers carried by the document where
 //!    present.
-//! 4. Registers standalone transparent records: each transparent spending key in
-//!    the secret store whose pay-to-public-key-hash address appears under an
-//!    imported account is registered with that account (its secret half having
-//!    already been delivered to the sink), and P2SH redeem scripts recorded on
-//!    imported accounts' addresses are registered where the wallet can represent
-//!    them. Watch-only records — bare addresses, public keys whose spending keys
-//!    are absent from the secret store, and the addresses of redeem scripts the
-//!    wallet cannot represent — are imported as standalone receivers of the
-//!    accounts that carry them. A public key is recorded with
+//! 4. Registers standalone transparent records, keeping each account's spend
+//!    authority pure. Each transparent spending key in the secret store whose
+//!    pay-to-public-key-hash address appears under an imported account is
+//!    registered with that account (its secret half having already been
+//!    delivered to the sink), and a P2SH redeem script recorded on an account
+//!    imported with spend authority is registered only when every member public
+//!    key has a verified spending key in the document's secret store. Watch-only
+//!    records — bare addresses, public keys whose spending keys are absent from
+//!    the secret store, and partially-owned or unrepresentable redeem scripts —
+//!    are imported as standalone receivers only of accounts imported as
+//!    view-only. A watch-only record carried by an account imported with spend
+//!    authority is skipped and reported, since registering it would mix spend
+//!    authority within that account. A public key is recorded with
 //!    [`SpendingKeyCustody::Held`] when its spending key was delivered to the
-//!    sink, and with [`SpendingKeyCustody::WatchOnly`] otherwise. Whether any of
-//!    these records is spendable is stated per query by the caller's spend
+//!    sink, and with [`SpendingKeyCustody::WatchOnly`] otherwise; whether any of
+//!    these records is spendable is then stated per query by the caller's spend
 //!    authority.
 //! 5. Marks the transparent addresses recorded in the document as exposed, so
 //!    that address-based recovery includes them.
@@ -529,22 +534,25 @@ pub enum WatchOnlyForm {
     /// A public key recorded for an address whose spending key is absent from
     /// the document's secret store.
     Pubkey,
-    /// A P2SH redeem script.
+    /// A P2SH redeem script for which the document's secret store does not hold
+    /// a verified spending key for every member public key.
     RedeemScript,
 }
 
-/// A watch-only transparent record that was not imported because another
-/// account in the wallet already holds it as a standalone receiver. The wallet
-/// keeps the receiver with that account; the record remains recoverable from
-/// the retained document.
+/// A watch-only transparent record that was not imported because the account
+/// that carries it was imported with spend authority.
+///
+/// An account is a single root of spend authority: either the application can
+/// sign for everything the account can detect, or for nothing (the account is
+/// view-only). Registering a watch-only record with a spending account would
+/// mix spend authority within the account, so such records are excluded from
+/// the import; they remain recoverable from the retained document.
 #[derive(Debug, Clone)]
-pub struct WatchOnlyConflict {
+pub struct SkippedWatchOnly {
     /// The transparent address of the watch-only record.
     pub address: String,
     /// The form in which the record appears in the document.
     pub form: WatchOnlyForm,
-    /// The account that holds the receiver.
-    pub held_by: AccountUuid,
 }
 
 /// A summary of the effects of a ZeWIF document import.
@@ -567,12 +575,12 @@ pub struct ZewifImportReport {
     pub redeem_scripts_not_representable: usize,
     /// The number of watch-only transparent records (bare addresses, public
     /// keys without spending keys, and the addresses of redeem scripts the
-    /// wallet cannot represent) imported as standalone receivers of the
-    /// accounts that carry them.
+    /// wallet cannot represent) imported as standalone receivers of accounts
+    /// imported as view-only.
     pub watch_only_receivers_imported: usize,
-    /// Watch-only transparent records that were not imported because another
-    /// account in the wallet already holds them.
-    pub watch_only_conflicts: Vec<WatchOnlyConflict>,
+    /// Watch-only transparent records that were not imported because the
+    /// account that carries them was imported with spend authority.
+    pub skipped_watch_only: Vec<SkippedWatchOnly>,
     /// The number of transparent addresses marked as exposed.
     pub addresses_marked_exposed: usize,
     /// The number of transparent addresses recorded in the document that the
@@ -613,12 +621,20 @@ struct AvailableSecrets {
     /// ZIP 32 seed fingerprint, so that textually-differing but equivalent
     /// fingerprint encodings resolve to the same seed.
     seeds: HashMap<[u8; 32], SecretVec<u8>>,
+    /// The canonical encodings of Sapling extended full viewing keys whose
+    /// spending keys were delivered to the sink.
+    sapling_fvks: Vec<String>,
+    /// The canonical encodings of unified full viewing keys whose spending keys
+    /// were delivered to the sink.
+    unified_fvks: Vec<String>,
 }
 
 impl AvailableSecrets {
     fn empty() -> Self {
         AvailableSecrets {
             seeds: HashMap::new(),
+            sapling_fvks: vec![],
+            unified_fvks: vec![],
         }
     }
 }
@@ -965,6 +981,9 @@ where
         for entry in store.sapling_keys() {
             sink.store_sapling_key(entry)
                 .map_err(ZewifImportError::Sink)?;
+            available
+                .sapling_fvks
+                .push(entry.fvk().encoding().to_owned());
         }
         for entry in store.sprout_keys() {
             sink.store_sprout_key(entry)
@@ -973,6 +992,9 @@ where
         for entry in store.unified_keys() {
             sink.store_unified_key(entry)
                 .map_err(ZewifImportError::Sink)?;
+            available
+                .unified_fvks
+                .push(entry.fvk().encoding().to_owned());
         }
     }
 
@@ -1067,6 +1089,11 @@ struct TransparentAddressRecords {
     owners: HashMap<TransparentAddress, RecordedTransparentAddress>,
     /// The P2SH redeem scripts recorded on imported accounts' addresses.
     redeem_scripts: Vec<RecordedRedeemScript>,
+    /// Whether each imported account was imported with spend authority, i.e.
+    /// the document delivered spending material for it (or declared it
+    /// spending). Standalone transparent records may be registered only where
+    /// the application's ability to sign for them matches the account.
+    spending_accounts: HashMap<AccountUuid, bool>,
 }
 
 /// How a transparent address is recorded under an imported account.
@@ -1142,20 +1169,27 @@ fn decode_wif(expected_prefix: u8, wif: &str) -> Option<secp256k1::SecretKey> {
 }
 
 /// Registers the document's standalone transparent records with the accounts
-/// that carry them.
+/// that carry them, keeping each account's spend authority pure.
 ///
 /// Each transparent spending key in the secret store is verified against its
 /// recorded public key and registered with the account that records its
 /// pay-to-public-key-hash address; its secret half has already been delivered
-/// to the sink. Redeem scripts are registered where the wallet can represent
-/// them. Watch-only records — bare addresses, public keys whose spending keys
-/// are absent from the secret store, and the addresses of redeem scripts that
-/// the wallet cannot represent — are imported as standalone receivers of the
-/// account that carries them. A watch-only record that another account in the
-/// wallet already holds as a standalone receiver is reported instead.
+/// to the sink.
 ///
-/// Returns the addresses of the records reported this way, so that exposure
-/// marking does not separately report them.
+/// Every other standalone transparent record is watch-only material: a bare
+/// address, a public key whose spending key is absent from the secret store, or
+/// a P2SH redeem script for which not every member public key has a verified
+/// spending key. An account is a single root of spend authority, so a watch-only
+/// record is imported only into an account imported as view-only; registering
+/// it with an account imported with spend authority would mix spend authority
+/// within that account, so such records are skipped and reported instead, and
+/// remain recoverable from the retained document.
+///
+/// A record that another account in the wallet already holds as a standalone
+/// receiver fails the import with [`SqliteClientError::StandaloneImportConflict`].
+///
+/// Returns the addresses of the records skipped because their account has spend
+/// authority, so that exposure marking does not separately report them.
 fn register_transparent_keys<DbT, P, S>(
     wdb: &mut DbT,
     params: &P,
@@ -1173,6 +1207,22 @@ where
         NetworkType::Test | NetworkType::Regtest => 0xEF,
     };
 
+    // Whether the account was imported with spend authority, so that a
+    // standalone record's disposition follows its account.
+    let holds_spend_authority = |account: &AccountUuid| -> bool {
+        taddrs
+            .spending_accounts
+            .get(account)
+            .copied()
+            .unwrap_or(false)
+    };
+
+    // The serialized public keys whose spending keys the secret store was
+    // verified to hold, which decide whether a multisig script recorded on a
+    // spending account is fully owned. Serialized bytes rather than parsed
+    // keys, because they are compared against multisig member pushes, which are
+    // not guaranteed to be valid curve points.
+    let mut verified_pubkeys: HashSet<[u8; secp256k1::constants::PUBLIC_KEY_SIZE]> = HashSet::new();
     // The p2pkh addresses derived by the keys registered from the secret store.
     let mut owned_addresses: HashSet<TransparentAddress> = HashSet::new();
 
@@ -1201,6 +1251,8 @@ where
             });
         }
 
+        verified_pubkeys.insert(pubkey.serialize());
+
         match taddrs.owners.get(&taddr) {
             Some(rec) => {
                 wdb.import_standalone_transparent_pubkey(
@@ -1224,6 +1276,38 @@ where
     let mut excluded: HashSet<TransparentAddress> = HashSet::new();
 
     for rec in &taddrs.redeem_scripts {
+        let spending = holds_spend_authority(&rec.account);
+        let parsed = Redeem::parse(&rec.script).ok();
+
+        // A script recorded on an account imported with spend authority is
+        // registered only when the application can sign for it: a multisig for
+        // which every member public key has a verified spending key. Anything
+        // else is watch-only material, which would mix spend authority within
+        // the account.
+        if spending {
+            let fully_owned = parsed.as_ref().is_some_and(|redeem| {
+                match zcash_script::solver::standard(redeem) {
+                    Some(zcash_script::solver::ScriptKind::MultiSig { pubkeys, .. }) => {
+                        pubkeys.iter().all(|pk| {
+                            <[u8; secp256k1::constants::PUBLIC_KEY_SIZE]>::try_from(pk.as_slice())
+                                .is_ok_and(|member| verified_pubkeys.contains(&member))
+                        })
+                    }
+                    _ => false,
+                }
+            });
+            if !fully_owned {
+                report.skipped_watch_only.push(SkippedWatchOnly {
+                    address: rec.address.encode(params),
+                    form: WatchOnlyForm::RedeemScript,
+                });
+                if let Some(taddr) = rec.address.recognized() {
+                    excluded.insert(taddr);
+                }
+                continue;
+            }
+        }
+
         // A script recorded under an address the wallet does not recognize is
         // indexed nowhere else, so it is counted as unrecognized here (the
         // script itself may still be registrable, carrying its own address).
@@ -1231,26 +1315,12 @@ where
             report.addresses_not_recognized += 1;
         }
 
-        let registered = match Redeem::parse(&rec.script).ok() {
+        let registered = match parsed {
             Some(redeem) => {
                 match wdb.import_standalone_transparent_script(rec.account, redeem) {
                     Ok(()) => {
                         report.redeem_scripts_registered += 1;
                         true
-                    }
-                    // Another account already holds the script. Its address is
-                    // held by the same account, so no address-only import
-                    // follows.
-                    Err(SqliteClientError::StandaloneImportConflict(holder)) => {
-                        report.watch_only_conflicts.push(WatchOnlyConflict {
-                            address: rec.address.encode(params),
-                            form: WatchOnlyForm::RedeemScript,
-                            held_by: AccountUuid::from_uuid(holder),
-                        });
-                        if let Some(taddr) = rec.address.recognized() {
-                            excluded.insert(taddr);
-                        }
-                        continue;
                     }
                     // The wallet can only represent a subset of redeem scripts
                     // (e.g. multisig within the P2SH size limit); scripts it
@@ -1267,27 +1337,24 @@ where
                 false
             }
         };
-        // Where the script itself cannot be represented, its address can still
-        // be watched via an address-only import.
-        if !registered && let Some(taddr) = rec.address.recognized() {
-            let outcome = watch_only_import_outcome(
-                wdb.import_standalone_transparent_address(rec.account, taddr),
-            )?;
-            record_watch_only_import(
-                report,
-                &mut excluded,
-                params,
-                taddr,
-                WatchOnlyForm::RedeemScript,
-                outcome,
-            );
+        // A view-only account carries no signing claim, so even where the
+        // script itself cannot be represented, its address can still be watched
+        // via an address-only import.
+        if !registered
+            && !spending
+            && let Some(taddr) = rec.address.recognized()
+        {
+            wdb.import_standalone_transparent_address(rec.account, taddr)
+                .map_err(ZewifImportError::Wallet)?;
+            report.watch_only_receivers_imported += 1;
         }
     }
 
     // The recorded addresses not covered above, and not receivers the wallet
     // already recognizes, are watch-only records: addresses the document
     // watched without holding any corresponding spending key. Import them as
-    // standalone receivers of the accounts that carry them.
+    // standalone receivers of view-only accounts; exclude them from accounts
+    // with spend authority.
     let accounts: HashSet<AccountUuid> = taddrs.owners.values().map(|rec| rec.account).collect();
     let mut known: HashSet<TransparentAddress> = HashSet::new();
     for account_uuid in &accounts {
@@ -1315,76 +1382,33 @@ where
         } else {
             WatchOnlyForm::Address
         };
+        if holds_spend_authority(&rec.account) {
+            report.skipped_watch_only.push(SkippedWatchOnly {
+                address: taddr.encode(params),
+                form,
+            });
+            excluded.insert(*taddr);
+            continue;
+        }
         // A recorded public key is used only when it derives the recorded
         // address; the address is otherwise imported alone, since it is the
         // address that the document watched.
         let pubkey = rec
             .pubkey
             .filter(|pk| TransparentAddress::from_pubkey(pk) == *taddr);
-        let outcome = watch_only_import_outcome(match pubkey {
+        match pubkey {
             Some(pk) => wdb.import_standalone_transparent_pubkey(
                 rec.account,
                 pk,
                 SpendingKeyCustody::WatchOnly,
             ),
             None => wdb.import_standalone_transparent_address(rec.account, *taddr),
-        })?;
-        record_watch_only_import(report, &mut excluded, params, *taddr, form, outcome);
+        }
+        .map_err(ZewifImportError::Wallet)?;
+        report.watch_only_receivers_imported += 1;
     }
 
     Ok(excluded)
-}
-
-/// The outcome of importing a watch-only record as a standalone receiver.
-enum WatchOnlyImport {
-    /// The record is a receiver of the account.
-    Imported,
-    /// Another account already holds the record as a standalone receiver.
-    HeldByOtherAccount(AccountUuid),
-}
-
-/// Classifies the result of a standalone import of watch-only material.
-///
-/// A conflict with another account's standalone import is an outcome, not an
-/// error. The standalone import methods detect a conflict before they write,
-/// so no partial write remains in the enclosing transaction.
-fn watch_only_import_outcome<T, S>(
-    result: Result<T, SqliteClientError>,
-) -> Result<WatchOnlyImport, ZewifImportError<S>>
-where
-    S: std::error::Error,
-{
-    match result {
-        Ok(_) => Ok(WatchOnlyImport::Imported),
-        Err(SqliteClientError::StandaloneImportConflict(holder)) => Ok(
-            WatchOnlyImport::HeldByOtherAccount(AccountUuid::from_uuid(holder)),
-        ),
-        Err(e) => Err(ZewifImportError::Wallet(e)),
-    }
-}
-
-/// Records the outcome of a watch-only import in the report. A record that
-/// another account holds is added to `excluded`, because it is not a receiver
-/// of any imported account.
-fn record_watch_only_import<P: consensus::Parameters>(
-    report: &mut ZewifImportReport,
-    excluded: &mut HashSet<TransparentAddress>,
-    params: &P,
-    taddr: TransparentAddress,
-    form: WatchOnlyForm,
-    outcome: WatchOnlyImport,
-) {
-    match outcome {
-        WatchOnlyImport::Imported => report.watch_only_receivers_imported += 1,
-        WatchOnlyImport::HeldByOtherAccount(held_by) => {
-            report.watch_only_conflicts.push(WatchOnlyConflict {
-                address: taddr.encode(params),
-                form,
-                held_by,
-            });
-            excluded.insert(taddr);
-        }
-    }
 }
 
 /// Returns the transparent receivers of the given accounts that the wallet
@@ -1808,6 +1832,27 @@ where
         .get_account(account_uuid)
         .map_err(ZewifImportError::Wallet)?
         .and_then(|account| account.ufvk().cloned());
+
+    // Whether the account was imported with spend authority: the document
+    // declared it spending, or it delivered spending material (a seed, or a
+    // unified or Sapling spending key) from which the application can derive
+    // one. Standalone transparent records may be registered only where the
+    // application's ability to sign for them matches the account.
+    let spending = match account.purpose() {
+        Some(::zewif::AccountPurpose::Spending) => true,
+        Some(::zewif::AccountPurpose::ViewOnly) => false,
+        None if hd_derivation.is_some() => true,
+        None => match account.viewing_key() {
+            ::zewif::AccountViewingKey::Ufvk(ufvk) => {
+                available.unified_fvks.iter().any(|s| s == ufvk.encoding())
+            }
+            ::zewif::AccountViewingKey::SaplingExtFvk(efvk) => {
+                available.sapling_fvks.iter().any(|s| s == efvk.encoding())
+            }
+            _ => false,
+        },
+    };
+    taddrs.spending_accounts.insert(account_uuid, spending);
 
     // Record the account's transparent addresses for standalone record
     // registration and exposure marking, decoding each address once. An
@@ -2719,10 +2764,10 @@ mod tests {
     }
 
     /// Watch-only transparent records — a bare address and a public key
-    /// without a spending key — carried by an account imported from its
-    /// viewing key are imported as standalone receivers of that account.
+    /// without a spending key — carried by an account imported as view-only
+    /// are imported as standalone receivers of that account.
     #[test]
-    fn watch_only_records_on_viewing_key_account_are_imported() {
+    fn watch_only_records_on_view_only_account_are_imported() {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
@@ -2762,7 +2807,7 @@ mod tests {
 
         assert_eq!(report.imported_accounts.len(), 1);
         assert_eq!(report.watch_only_receivers_imported, 2);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert!(report.skipped_watch_only.is_empty());
         assert_eq!(report.addresses_not_recognized, 0);
 
         let receivers = wdb
@@ -2779,10 +2824,11 @@ mod tests {
         );
     }
 
-    /// Watch-only transparent records carried by an account whose seed the
-    /// document holds are imported as standalone receivers of that account.
+    /// Watch-only transparent records carried by an account imported with spend
+    /// authority are not imported — registering them would mix spend authority
+    /// within the account — and are reported instead.
     #[test]
-    fn watch_only_records_on_seed_derived_account_are_imported() {
+    fn watch_only_records_on_spending_account_are_skipped() {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
@@ -2806,14 +2852,56 @@ mod tests {
         let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
 
         assert_eq!(report.imported_accounts.len(), 1);
-        assert_eq!(report.watch_only_receivers_imported, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert_eq!(report.watch_only_receivers_imported, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(report.skipped_watch_only[0].address, bare_addr);
+        assert_eq!(report.skipped_watch_only[0].form, WatchOnlyForm::Address);
+        // The skipped record is reported once; exposure marking does not
+        // additionally count it as unrecognized.
         assert_eq!(report.addresses_not_recognized, 0);
 
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
             .unwrap();
-        assert!(receivers.contains_key(&bare_taddr));
+        assert!(!receivers.contains_key(&bare_taddr));
+    }
+
+    /// A viewing-key account whose spending key the document delivered is
+    /// imported with spend authority, so watch-only records it carries are
+    /// skipped.
+    #[test]
+    fn watch_only_records_on_account_with_delivered_key_are_skipped() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_unified_key(::zewif::UnifiedKeyEntry::new(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedSpendingKey::new("usk1testspendingkey"),
+        ));
+
+        let bare_taddr = TransparentAddress::PublicKeyHash([0x77; 20]);
+        let bare_addr = bare_taddr.encode(&TEST_NETWORK);
+        let mut account = view_only_account(&ts);
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(::zewif::transparent::Address::new(bare_addr)),
+        ));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.watch_only_receivers_imported, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(
+            report.skipped_watch_only[0].address,
+            bare_taddr.encode(&TEST_NETWORK)
+        );
+        assert_eq!(report.skipped_watch_only[0].form, WatchOnlyForm::Address);
     }
 
     /// A multisig redeem script is registered, and its member keys are
@@ -2860,7 +2948,7 @@ mod tests {
         assert_eq!(report.imported_accounts.len(), 1);
         assert_eq!(report.transparent_keys_registered, 2);
         assert_eq!(report.redeem_scripts_registered, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert!(report.skipped_watch_only.is_empty());
 
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
@@ -2870,11 +2958,13 @@ mod tests {
         );
     }
 
-    /// A multisig redeem script is registered even when the document's secret
-    /// store lacks spending keys for some of its member public keys: whether
-    /// the script is spendable is stated per query by the caller.
+    /// A multisig redeem script recorded on an account imported with spend
+    /// authority is watch-only material when any member public key lacks a
+    /// verified spending key in the document's secret store; it is skipped and
+    /// reported rather than registered, so that the account's spend authority
+    /// stays pure.
     #[test]
-    fn multisig_with_missing_member_keys_is_registered() {
+    fn multisig_with_missing_member_keys_is_skipped_for_spending_account() {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
@@ -2910,15 +3000,23 @@ mod tests {
         let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
 
         assert_eq!(report.imported_accounts.len(), 1);
+        // The held member key is still registered under its own address...
         assert_eq!(report.transparent_keys_registered, 1);
-        assert_eq!(report.redeem_scripts_registered, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        // ...but the partially-owned script is not.
+        assert_eq!(report.redeem_scripts_registered, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(report.skipped_watch_only[0].address, p2sh_addr);
+        assert_eq!(
+            report.skipped_watch_only[0].form,
+            WatchOnlyForm::RedeemScript
+        );
 
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
             .unwrap();
         assert!(
-            receivers.contains_key(&TransparentAddress::decode(&TEST_NETWORK, &p2sh_addr).unwrap())
+            !receivers
+                .contains_key(&TransparentAddress::decode(&TEST_NETWORK, &p2sh_addr).unwrap())
         );
     }
 
@@ -2951,7 +3049,7 @@ mod tests {
 
         assert_eq!(report.imported_accounts.len(), 1);
         assert_eq!(report.redeem_scripts_registered, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert!(report.skipped_watch_only.is_empty());
 
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
@@ -2961,10 +3059,11 @@ mod tests {
         );
     }
 
-    /// Watch-only records that another account in the wallet already holds as
-    /// standalone receivers are reported, and do not fail the import.
+    /// A standalone record that another wallet account already holds fails the
+    /// import with `StandaloneImportConflict`, rather than being attached to a
+    /// second account.
     #[test]
-    fn watch_only_records_held_by_another_account_are_skipped() {
+    fn watch_only_record_held_by_another_account_fails_the_import() {
         let (_file, mut wdb) = test_wallet_db();
 
         let secp = secp256k1::Secp256k1::new();
@@ -2997,37 +3096,26 @@ mod tests {
         let first = import_wallet(&mut wdb, &first_doc, &mut DiscardSecrets).unwrap();
         assert_eq!(first.watch_only_receivers_imported, 1);
         assert_eq!(first.redeem_scripts_registered, 1);
-        let holder = first.imported_accounts[0].account_uuid;
 
         let (mut second_doc, mut second_wallet) = document(::zewif::Network::Testnet);
         second_wallet.add_account(watching_account(&test_seed(1), "second"));
         second_doc.add_wallet(second_wallet);
-        let second = import_wallet(&mut wdb, &second_doc, &mut DiscardSecrets).unwrap();
+        let second = import_wallet(&mut wdb, &second_doc, &mut DiscardSecrets);
 
-        assert_eq!(second.imported_accounts.len(), 1);
-        assert_eq!(second.watch_only_receivers_imported, 0);
-        assert_eq!(second.redeem_scripts_registered, 0);
-        let mut conflicts: Vec<(String, WatchOnlyForm, AccountUuid)> = second
-            .watch_only_conflicts
-            .iter()
-            .map(|c| (c.address.clone(), c.form, c.held_by))
-            .collect();
-        conflicts.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut expected = vec![
-            (bare_addr.clone(), WatchOnlyForm::Address, holder),
-            (p2sh_addr.clone(), WatchOnlyForm::RedeemScript, holder),
-        ];
-        expected.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(conflicts, expected);
-        // Each conflict is reported once.
-        assert_eq!(second.addresses_not_recognized, 0);
+        assert!(matches!(
+            second,
+            Err(ZewifImportError::Wallet(
+                SqliteClientError::StandaloneImportConflict(_)
+            ))
+        ));
     }
 
     /// A spending key with an uncompressed public key is reported as a skipped
-    /// transparent key, and the address the document records for it is still
-    /// watched.
+    /// transparent key; the address the document records for it is watch-only
+    /// material, and is skipped because the account was imported with spend
+    /// authority.
     #[test]
-    fn uncompressed_key_is_skipped_and_its_address_watched() {
+    fn uncompressed_key_is_skipped_and_its_address_is_watch_only() {
         let (_file, mut wdb) = test_wallet_db();
         let ts = test_seed(0);
 
@@ -3069,8 +3157,13 @@ mod tests {
             report.skipped_transparent_keys[0].reason,
             TransparentKeySkipReason::UncompressedPubKey
         );
-        assert_eq!(report.watch_only_receivers_imported, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert_eq!(report.watch_only_receivers_imported, 0);
+        assert_eq!(report.skipped_watch_only.len(), 1);
+        assert_eq!(
+            report.skipped_watch_only[0].address,
+            TransparentAddress::PublicKeyHash([0x66; 20]).encode(&TEST_NETWORK)
+        );
+        assert_eq!(report.skipped_watch_only[0].form, WatchOnlyForm::Pubkey);
         assert_eq!(report.addresses_not_recognized, 0);
     }
 
@@ -3127,7 +3220,7 @@ mod tests {
 
         assert_eq!(report.imported_accounts.len(), 1);
         assert_eq!(report.watch_only_receivers_imported, 1);
-        assert!(report.watch_only_conflicts.is_empty());
+        assert!(report.skipped_watch_only.is_empty());
         assert_eq!(report.addresses_not_recognized, 0);
 
         let receivers = wdb
