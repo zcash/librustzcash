@@ -372,14 +372,14 @@ mod tests {
         builder
             .add_transparent_p2pkh_input(
                 transparent_signing_set.add_key(
-                    usk0.transparent()
+                    usk0.transparent().unwrap()
                         .derive_external_secret_key(NonHardenedChildIndex::ZERO)
                         .unwrap(),
                 ),
                 transparent::OutPoint::fake(),
                 transparent::TxOut::new(
                     Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
-                    usk0.transparent()
+                    usk0.transparent().unwrap()
                         .to_account_pubkey()
                         .derive_external_ivk()
                         .unwrap()

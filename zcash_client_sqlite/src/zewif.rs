@@ -2669,6 +2669,7 @@ mod tests {
         // The account's internal (change) transparent address.
         let change_addr = usk
             .transparent()
+            .unwrap()
             .to_account_pubkey()
             .derive_internal_ivk()
             .unwrap()

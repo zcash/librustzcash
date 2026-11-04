@@ -54,6 +54,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
 
     fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
         usk.orchard()
+            .expect("test accounts derive their keys from a seed")
     }
 
     fn sk(seed: &[u8]) -> Self::Sk {
