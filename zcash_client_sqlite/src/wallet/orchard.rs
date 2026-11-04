@@ -2319,8 +2319,8 @@ pub(crate) mod tests {
             // recipient. The transaction thus has no wallet-owned outputs: its only connection to
             // the wallet is the Ironwood spend.
             let usk = account.usk();
-            let spend_fvk = FullViewingKey::from(usk.orchard());
-            let orchard_sak = SpendAuthorizingKey::from(usk.orchard());
+            let spend_fvk = FullViewingKey::from(usk.orchard().unwrap());
+            let orchard_sak = SpendAuthorizingKey::from(usk.orchard().unwrap());
 
             let external_sk = OrchardPoolTester::sk(&[0xf5; 32]);
             let external_recipient =

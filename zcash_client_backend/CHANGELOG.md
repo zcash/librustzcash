@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` and
+  `shield_transparent_funds` accept a `SpendingKeys` whose `UnifiedSpendingKey`
+  holds keys for only some protocols. They return
+  `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
+  pool for which the spending key holds no key.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

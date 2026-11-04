@@ -50,6 +50,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
 
     fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
         usk.sapling()
+            .expect("test accounts derive their keys from a seed")
     }
 
     fn sk(seed: &[u8]) -> Self::Sk {

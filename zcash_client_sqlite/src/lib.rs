@@ -4121,11 +4121,16 @@ mod tests {
     use uuid::Uuid;
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
-    use zcash_client_backend::data_api::{
-        Account, AccountBirthday, AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT,
-        WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
-        chain::{ChainState, CommitmentTreeRoot},
-        testing::{TestBuilder, TestState},
+    use zcash_client_backend::{
+        data_api::{
+            Account, AccountBirthday, AccountPurpose, AccountSource, MaxSpendMode,
+            SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
+            chain::{ChainState, CommitmentTreeRoot},
+            testing::{AddressType, TestBuilder, TestState},
+            wallet::ConfirmationsPolicy,
+        },
+        fees::StandardFeeRule,
+        wallet::OvkPolicy,
     };
     use zcash_keys::{
         address::{Address, UnifiedAddress},
@@ -4135,13 +4140,18 @@ mod tests {
         },
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{consensus, local_consensus::LocalNetwork};
+    use zcash_protocol::{consensus, local_consensus::LocalNetwork, value::Zatoshis};
     use zip32::DiversifierIndex;
+    #[cfg(feature = "orchard")]
+    use {zcash_client_backend::data_api::error::Error, zcash_protocol::PoolType};
 
     use crate::{
         AccountUuid,
         error::SqliteClientError,
-        testing::db::{TestDb, TestDbFactory},
+        testing::{
+            BlockCache,
+            db::{TestDb, TestDbFactory},
+        },
         util::Clock as _,
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
@@ -4149,10 +4159,8 @@ mod tests {
     use incrementalmerkletree::Hashable as _;
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::FsBlockCache,
-        zcash_client_backend::data_api::testing::AddressType,
-        zcash_keys::keys::sapling,
-        zcash_protocol::{consensus::NetworkConstants, value::Zatoshis},
+        crate::testing::FsBlockCache, zcash_keys::keys::sapling,
+        zcash_protocol::consensus::NetworkConstants,
     };
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     use {
@@ -4161,7 +4169,7 @@ mod tests {
     };
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests},
+        crate::{GapLimits, wallet::transparent::transaction_data_requests},
         rusqlite::named_params,
         std::collections::BTreeSet,
         zcash_client_backend::data_api::TransactionDataRequest,
@@ -4866,6 +4874,163 @@ mod tests {
             ufvk,
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == first_account.id()),
+        );
+    }
+
+    /// A spending key that holds only a Sapling key spends from the account that its viewing
+    /// key was imported as.
+    #[test]
+    fn sapling_only_spending_key_spends_from_imported_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed_derived_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[0u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let usk = UnifiedSpendingKey::from_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            seed_derived_usk.sapling().cloned(),
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+
+        let value = Zatoshis::const_from_u64(60000);
+        let (height, _, _) =
+            st.generate_next_block(ufvk.sapling().unwrap(), AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(height, 1);
+
+        let recipient_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let recipient = Address::Sapling(Box::new(
+            recipient_usk
+                .sapling()
+                .unwrap()
+                .to_diversifiable_full_viewing_key()
+                .default_address()
+                .1,
+        ))
+        .to_zcash_address(st.network());
+
+        let proposal = st
+            .propose_send_max_transfer(
+                account.id(),
+                &StandardFeeRule::Zip317,
+                recipient,
+                None,
+                MaxSpendMode::Everything,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let txids = st
+            .create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+                &usk,
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+        assert_eq!(txids.len(), 1);
+    }
+
+    /// A spending key that holds only a Sapling key cannot spend an Orchard note, even though
+    /// its viewing key identifies an account that holds that note.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn sapling_only_spending_key_cannot_spend_orchard_notes() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed_derived_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[0u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let seed_derived_ufvk = seed_derived_usk.to_unified_full_viewing_key();
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &seed_derived_ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+
+        let value = Zatoshis::const_from_u64(60000);
+        let (height, _, _) = st.generate_next_block(
+            seed_derived_ufvk.orchard().unwrap(),
+            AddressType::DefaultExternal,
+            value,
+        );
+        st.scan_cached_blocks(height, 1);
+
+        let recipient_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let recipient = Address::Sapling(Box::new(
+            recipient_usk
+                .sapling()
+                .unwrap()
+                .to_diversifiable_full_viewing_key()
+                .default_address()
+                .1,
+        ))
+        .to_zcash_address(st.network());
+
+        let proposal = st
+            .propose_send_max_transfer(
+                account.id(),
+                &StandardFeeRule::Zip317,
+                recipient,
+                None,
+                MaxSpendMode::Everything,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let sapling_only_usk = UnifiedSpendingKey::from_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            seed_derived_usk.sapling().cloned(),
+            None,
+        )
+        .unwrap();
+
+        assert_matches!(
+            st.create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+                &sapling_only_usk,
+                OvkPolicy::Sender,
+                &proposal,
+            ),
+            Err(Error::KeyNotAvailable(PoolType::ORCHARD))
         );
     }
 

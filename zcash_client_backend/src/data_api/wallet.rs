@@ -1367,7 +1367,7 @@ struct StepResult<AccountId> {
 
 /// A set of spending keys for an account, for use in execution of transaction proposals.
 ///
-/// This consists of a [`UnifiedSpendingKey`], plus (if the `transparent-key-import` feature is
+/// This consists of a [`UnifiedSpendingKey`], which may hold keys for only some protocols, plus (if the `transparent-key-import` feature is
 /// enabled) a set of standalone transparent spending keys corresponding to inputs being spent in a
 /// transaction under construction.
 ///
@@ -1423,6 +1423,10 @@ impl Drop for SpendingKeys {
 /// an error occurs in transaction construction, proving, or signing.
 ///
 /// `rng` supplies the randomness used to construct, prove, and sign each transaction.
+///
+/// The account is the one that the viewing key of `spending_keys`'s [`UnifiedSpendingKey`]
+/// identifies. That key may hold keys for only some protocols. If the proposal spends from, or
+/// sends change to, a pool for which it holds no key, this returns [`Error::KeyNotAvailable`].
 ///
 /// When evaluating multi-step proposals, only transparent outputs of any given step may be spent
 /// in later steps; attempting to spend a shielded note (including change) output by an earlier
@@ -2702,6 +2706,7 @@ where
                     spending_keys
                         .usk
                         .transparent()
+                        .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
                         .derive_secret_key(*scope, *address_index)
                         .expect("spending key derivation should not fail"),
                 );
@@ -2725,37 +2730,50 @@ where
             }
         }
     }
-    let sapling_extsks = &[
-        spending_keys.usk.sapling().clone(),
-        spending_keys
-            .usk
-            .sapling()
-            .derive_internal()
-            .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?,
-    ];
+    let sapling_extsks = match spending_keys.usk.sapling() {
+        Some(extsk) => vec![
+            extsk.clone(),
+            extsk
+                .derive_internal()
+                .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?,
+        ],
+        None => vec![],
+    };
     #[cfg(feature = "orchard")]
-    let orchard_saks = &[spending_keys.usk.orchard().into()];
+    let orchard_saks: Vec<orchard::keys::SpendAuthorizingKey> = spending_keys
+        .usk
+        .orchard()
+        .map(|sk| sk.into())
+        .into_iter()
+        .collect();
     #[cfg(not(feature = "orchard"))]
-    let orchard_saks = &[];
+    let orchard_saks = vec![];
     let build_result = build_state.builder.build(
         &transparent_signing_set,
-        sapling_extsks,
-        orchard_saks,
+        &sapling_extsks,
+        &orchard_saks,
         rng,
         spend_prover,
         output_prover,
         fee_rule,
     )?;
 
+    // The builder adds wallet-internal outputs only to pools for which the spending key holds
+    // a key, so the IVK for each such output is present.
     #[cfg(feature = "orchard")]
-    let orchard_fvk: orchard::keys::FullViewingKey = spending_keys.usk.orchard().into();
+    let orchard_fvk: Option<orchard::keys::FullViewingKey> =
+        spending_keys.usk.orchard().map(|sk| sk.into());
     #[cfg(feature = "orchard")]
-    let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
+    let orchard_internal_ivk = orchard_fvk
+        .as_ref()
+        .map(|fvk| fvk.to_ivk(orchard::keys::Scope::Internal));
     // Same-address Orchard change (post-NU6.3, when spending Orchard notes) is returned to a spent
     // note's own address, which may be external-scoped; try the external IVK as well so such change
     // outputs remain decryptable for recording.
     #[cfg(feature = "orchard")]
-    let orchard_external_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_external_ivk = orchard_fvk
+        .as_ref()
+        .map(|fvk| fvk.to_ivk(orchard::keys::Scope::External));
     #[cfg(feature = "orchard")]
     let orchard_outputs = build_state.orchard_output_meta.into_iter().enumerate().map(
         |(i, (recipient, value, memo))| {
@@ -2768,12 +2786,15 @@ where
                 build_result
                     .transaction()
                     .orchard_bundle()
-                    .and_then(|bundle| {
+                    .zip(
+                        orchard_internal_ivk
+                            .as_ref()
+                            .zip(orchard_external_ivk.as_ref()),
+                    )
+                    .and_then(|(bundle, (internal_ivk, external_ivk))| {
                         bundle
-                            .decrypt_output_with_key(output_index, &orchard_internal_ivk)
-                            .or_else(|| {
-                                bundle.decrypt_output_with_key(output_index, &orchard_external_ivk)
-                            })
+                            .decrypt_output_with_key(output_index, internal_ivk)
+                            .or_else(|| bundle.decrypt_output_with_key(output_index, external_ivk))
                             .map(|(note, _, _)| Note::Orchard {
                                 note,
                                 pool: orchard::ValuePool::Orchard,
@@ -2807,9 +2828,10 @@ where
                 build_result
                     .transaction()
                     .ironwood_bundle()
-                    .and_then(|bundle| {
+                    .zip(orchard_internal_ivk.as_ref())
+                    .and_then(|(bundle, internal_ivk)| {
                         bundle
-                            .decrypt_output_with_key(raw_output_index, &orchard_internal_ivk)
+                            .decrypt_output_with_key(raw_output_index, internal_ivk)
                             .map(|(note, _, _)| Note::Orchard { note, pool: orchard::ValuePool::Ironwood })
                     })
                     .expect(
@@ -2830,12 +2852,13 @@ where
             )
         });
 
-    let sapling_dfvk = spending_keys
-        .usk
-        .sapling()
-        .to_diversifiable_full_viewing_key();
-    let sapling_internal_ivk =
-        PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
+    let sapling_internal_ivk = spending_keys.usk.sapling().map(|extsk| {
+        PreparedIncomingViewingKey::new(
+            &extsk
+                .to_diversifiable_full_viewing_key()
+                .to_ivk(Scope::Internal),
+        )
+    });
     let sapling_outputs = build_state.sapling_output_meta.into_iter().enumerate().map(
         |(i, (recipient, value, memo))| {
             let output_index = build_result
@@ -2847,9 +2870,10 @@ where
                 build_result
                     .transaction()
                     .sapling_bundle()
-                    .and_then(|bundle| {
+                    .zip(sapling_internal_ivk.as_ref())
+                    .and_then(|(bundle, internal_ivk)| {
                         try_sapling_note_decryption(
-                            &sapling_internal_ivk,
+                            internal_ivk,
                             &bundle.shielded_outputs()[output_index],
                             zip212_enforcement(params, min_target_height.into()),
                         )

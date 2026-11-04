@@ -1030,7 +1030,7 @@ mod tests {
     fn the_adapter_serves_the_viewing_key_it_was_built_with() {
         let wallet = MockWalletDb::new(Network::TestNetwork);
         let usk = account_usk(3);
-        let expected = FullViewingKey::from(usk.orchard());
+        let expected = FullViewingKey::from(usk.orchard().unwrap());
 
         let adapter = WalletMigration::new(&wallet, 0, usk.to_unified_full_viewing_key(), NoStore);
 

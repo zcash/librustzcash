@@ -780,7 +780,7 @@ impl Run {
             let mut adapter = adapter;
             // The adapter holds viewing authority only; the spending key is the commit's own
             // argument, live for that call (and checked against the account's viewing key there).
-            let sk = self.usk.orchard();
+            let sk = self.usk.orchard().unwrap();
             let (state, _) = engine::commit_preparation_with_funding(
                 &self.network,
                 tip,
@@ -1591,7 +1591,7 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     );
 
     let plan = engine::plan_migration(&network, &adapter, &mut rng).expect("plans the migration");
-    let sk = usk.orchard();
+    let sk = usk.orchard().unwrap();
     let (state, _) = engine::commit_preparation_with_funding(
         &network,
         tip,
@@ -2325,7 +2325,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
         );
         let plan = engine::plan_migration(&run.network, &adapter, &mut rng)
             .expect("plans the fresh balance");
-        let sk = run.usk.orchard();
+        let sk = run.usk.orchard().unwrap();
         assert!(
             matches!(
                 engine::commit_preparation_with_funding(
@@ -2367,7 +2367,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     );
     let plan =
         engine::plan_migration(&run.network, &adapter, &mut rng).expect("plans the fresh balance");
-    let sk = run.usk.orchard();
+    let sk = run.usk.orchard().unwrap();
     let (replanned, _) = engine::commit_preparation_with_funding(
         &run.network,
         tip,
