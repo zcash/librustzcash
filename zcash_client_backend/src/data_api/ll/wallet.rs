@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, hash::Hash, ops::Range};
+use std::{collections::BTreeMap, hash::Hash, ops::Range, sync::Arc};
 #[cfg(feature = "orchard")]
 use {
     crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint, std::collections::BTreeSet,
@@ -1587,11 +1587,25 @@ pub fn build_subtrees<H, const SHARD_HEIGHT: u8>(
 where
     H: Clone + PartialEq + Hashable + Send + Sync,
 {
-    commitments
+    let first_chunk_len = (chunk_size - (u64::from(start_position) % chunk_size as u64) as usize)
+        .min(commitments.len());
+    let (first, rest) = commitments.split_at_mut(first_chunk_len);
+
+    // Align full chunks to tree positions so their roots can be computed independently.
+    first
         .par_chunks_mut(chunk_size)
-        .enumerate()
-        .filter_map(|(i, chunk)| {
-            let start = start_position + (i * chunk_size) as u64;
+        .map(|chunk| (start_position, chunk))
+        .chain(
+            rest.par_chunks_mut(chunk_size)
+                .enumerate()
+                .map(|(i, chunk)| {
+                    (
+                        start_position + (first_chunk_len + i * chunk_size) as u64,
+                        chunk,
+                    )
+                }),
+        )
+        .filter_map(|(start, chunk)| {
             let end = start + chunk.len() as u64;
 
             shardtree::LocatedTree::from_iter(
@@ -1599,8 +1613,24 @@ where
                 SHARD_HEIGHT.into(),
                 chunk.iter_mut().map(|n| n.take().expect("always Some")),
             )
+            .map(|res| (start..end, res))
         })
-        .map(|res| (res.subtree, res.checkpoints))
+        .map(|(range, res)| {
+            let subtree = res.subtree;
+            let root_addr = subtree.root_addr();
+            // Cache complete roots on the Rayon workers, before serial insertion.
+            let subtree = if root_addr.position_range_start() == range.start
+                && root_addr.position_range_end() == range.end
+            {
+                let root = subtree
+                    .root_hash(range.end)
+                    .expect("A complete subtree has a computable root");
+                subtree.reannotate_root(Some(Arc::new(root)))
+            } else {
+                subtree
+            };
+            (subtree, res.checkpoints)
+        })
         .collect()
 }
 
@@ -1877,6 +1907,9 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod subtree_tests;
 
 #[cfg(test)]
 mod tests {
