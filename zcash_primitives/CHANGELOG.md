@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_primitives::block::BlockHeader::read`, and
+  `zcash_primitives::transaction::Transaction::read` for Orchard and Ironwood
+  bundles, now read the Equihash solution and the proof bytes in bulk, rather
+  than making one call to the underlying reader per byte.
+
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also
