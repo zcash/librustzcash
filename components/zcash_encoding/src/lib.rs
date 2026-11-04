@@ -28,6 +28,12 @@ mod byte_vector_tests;
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 
+/// The largest number of bytes that [`Vector::read_bytes`] requests from its reader at once.
+///
+/// This bounds the memory allocated ahead of the bytes actually read, because the
+/// declared length of a vector comes from untrusted input.
+const BYTE_VECTOR_READ_CHUNK_LEN: usize = 4096;
+
 /// Namespace for functions for compact encoding of integers.
 ///
 /// This codec requires integers to be in the range `0x0..=0x02000000`, for compatibility
@@ -185,19 +191,12 @@ impl Vector {
     /// [`io::ErrorKind::UnexpectedEof`]. Interrupted reads are retried.
     pub fn read_bytes<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
         let count: usize = CompactSize::read_t(&mut reader)?;
-        let mut bytes = Vec::new();
-        let mut buffer = [0; 4096];
+        let mut bytes = Vec::with_capacity(count.min(BYTE_VECTOR_READ_CHUNK_LEN));
         while bytes.len() < count {
-            let limit = buffer.len().min(count - bytes.len());
-            match reader.read(&mut buffer[..limit]) {
-                Ok(0) => {
-                    // Preserve read_exact's EOF diagnostic in both std and no_std builds.
-                    return (&[][..]).read_exact(&mut [0]).map(|()| bytes);
-                }
-                Ok(n) => bytes.extend_from_slice(&buffer[..n]),
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
-            }
+            let filled = bytes.len();
+            let chunk_len = (count - filled).min(BYTE_VECTOR_READ_CHUNK_LEN);
+            bytes.resize(filled + chunk_len, 0);
+            reader.read_exact(&mut bytes[filled..])?;
         }
         Ok(bytes)
     }

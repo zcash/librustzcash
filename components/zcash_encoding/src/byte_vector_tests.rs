@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use corez::io::{self, Read};
 
-use crate::{CompactSize, MAX_COMPACT_SIZE, Vector};
+use crate::{BYTE_VECTOR_READ_CHUNK_LEN, CompactSize, MAX_COMPACT_SIZE, Vector};
 
 fn read_per_byte<R: Read>(reader: R) -> io::Result<Vec<u8>> {
     Vector::read(reader, |r| {
@@ -21,11 +21,14 @@ fn encoded_bytes(len: usize) -> Vec<u8> {
 fn assert_equivalent(encoded: &[u8]) {
     let mut old_reader = encoded;
     let mut new_reader = encoded;
-    assert_eq!(
-        read_per_byte(&mut old_reader).map_err(|e| (e.kind(), e.to_string())),
-        Vector::read_bytes(&mut new_reader).map_err(|e| (e.kind(), e.to_string())),
-    );
-    assert_eq!(old_reader, new_reader);
+    let old_result = read_per_byte(&mut old_reader).map_err(|e| (e.kind(), e.to_string()));
+    let new_result = Vector::read_bytes(&mut new_reader).map_err(|e| (e.kind(), e.to_string()));
+    // `Read::read_exact` does not specify how much input it consumes when it fails.
+    // Thus compare the remaining input only after a successful read.
+    if old_result.is_ok() {
+        assert_eq!(old_reader, new_reader);
+    }
+    assert_eq!(old_result, new_result);
 }
 
 #[test]
@@ -36,9 +39,9 @@ fn byte_vectors_match_at_boundaries() {
         252,
         253,
         254,
-        4095,
-        4096,
-        4097,
+        BYTE_VECTOR_READ_CHUNK_LEN - 1,
+        BYTE_VECTOR_READ_CHUNK_LEN,
+        BYTE_VECTOR_READ_CHUNK_LEN + 1,
         65535,
         65536,
         usize::try_from(MAX_COMPACT_SIZE).unwrap(),
@@ -51,7 +54,7 @@ fn byte_vectors_match_at_boundaries() {
 
 #[test]
 fn truncated_byte_vectors_match() {
-    for len in [0, 1, 252, 253, 4097, 65535, 65536] {
+    for len in [0, 1, 252, 253, BYTE_VECTOR_READ_CHUNK_LEN + 1, 65535, 65536] {
         let encoded = encoded_bytes(len);
         let prefix_len = CompactSize::serialized_size(len);
         // Every prefix byte, and every payload position for small vectors.
@@ -63,7 +66,11 @@ fn truncated_byte_vectors_match() {
             );
         }
         // Both sides of a bulk-read boundary, and the last payload byte.
-        for end in [prefix_len + 4095, prefix_len + 4096, encoded.len() - 1] {
+        for end in [
+            prefix_len + BYTE_VECTOR_READ_CHUNK_LEN - 1,
+            prefix_len + BYTE_VECTOR_READ_CHUNK_LEN,
+            encoded.len() - 1,
+        ] {
             if end < encoded.len() {
                 assert_equivalent(&encoded[..end]);
             }
@@ -129,7 +136,7 @@ impl Read for ShortReads<'_> {
 
 #[test]
 fn short_interrupted_and_failed_reads_match() {
-    let mut encoded = encoded_bytes(8193);
+    let mut encoded = encoded_bytes(2 * BYTE_VECTOR_READ_CHUNK_LEN + 1);
     let payload_end = encoded.len();
     encoded.extend_from_slice(&[0x12, 0x34]);
     for final_error in [
@@ -143,7 +150,7 @@ fn short_interrupted_and_failed_reads_match() {
             1,
             2,
             3,
-            4098,
+            BYTE_VECTOR_READ_CHUNK_LEN + 2,
             payload_end - 1,
             payload_end,
             encoded.len(),
@@ -173,11 +180,11 @@ fn byte_vectors_are_read_in_bulk() {
     impl Read for CountingReader<'_> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             self.calls += 1;
-            assert!(buf.len() <= 4096);
+            assert!(buf.len() <= BYTE_VECTOR_READ_CHUNK_LEN);
             self.bytes.read(buf)
         }
     }
-    let encoded = encoded_bytes(8193);
+    let encoded = encoded_bytes(2 * BYTE_VECTOR_READ_CHUNK_LEN + 1);
     let mut reader = CountingReader {
         bytes: &encoded,
         calls: 0,
