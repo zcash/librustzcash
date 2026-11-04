@@ -179,6 +179,10 @@ workspace.
   application holds each public key's spending key. Pass
   `SpendingKeyCustody::Held` for a public key imported together with its
   spending key.
+- `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_*`
+  now document the import contract: importing standalone transparent material
+  into an account asserts that the application can sign for it, and watch-only
+  material belongs in a view-only account.
 - `zcash_client_backend::data_api::Balance::total` now includes the
   watch-only value.
 - Input selection now takes the caller's spend authority as a

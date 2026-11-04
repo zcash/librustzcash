@@ -3773,12 +3773,21 @@ impl<E: std::error::Error + 'static> std::error::Error for PutBlocksError<E> {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
-/// The wallet does not record which spending keys the application holds. An account may carry
-/// key material that the application can sign for alongside key material that it cannot, such as
-/// transparent keys imported with `WalletWrite::import_standalone_transparent_pubkey` or
-/// `WalletWrite::import_standalone_transparent_script` (available with the
-/// `transparent-key-import` feature). Operations that select inputs or report spendable value take
-/// a [`SpendAuthority`] that states what the application's key store holds.
+/// The wallet does not record which spending keys the application holds. Operations that select
+/// inputs or report spendable value take a [`SpendAuthority`] that states what the application's
+/// key store holds; value that it does not authorize is reported as watch-only.
+///
+/// Importing standalone transparent material into an account with the
+/// `import_standalone_transparent_*` methods (available with the `transparent-key-import`
+/// feature) asserts that the application's ability to sign for that material matches the
+/// account's spend authority. Watch-only material — a transparent public key whose spending key
+/// the application does not hold, a redeem script for which it cannot produce the required
+/// signatures, or a bare address with no key material — belongs in a view-only account, rather
+/// than one the application spends from. The import methods do not verify the assertion: the
+/// caller states its spend authority per query, and the value it does not authorize is reported
+/// as watch-only. An importer recovering a wallet from a backup upholds the assertion on the
+/// caller's behalf by segregating the backup's watch-only material into accounts imported as
+/// view-only.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3995,7 +4004,8 @@ pub trait WalletWrite:
     /// The imported address will contribute to the balance of the account, but the wallet holds
     /// neither the public key (P2PKH) nor the redeem script (P2SH) from which the address was
     /// derived, so funds received by it cannot be spent: no [`SpendAuthority`] authorizes its
-    /// outputs. Subsequently importing the corresponding key material with
+    /// outputs. An address-only import is watch-only material, which belongs in a view-only
+    /// account. Subsequently importing the corresponding key material with
     /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
     /// upgrades the address in place, after which the spending limitations of those methods
     /// apply instead.
@@ -4021,8 +4031,10 @@ pub trait WalletWrite:
     /// pubkey, and spending them requires the associated spending key to be provided explicitly
     /// when calling [`create_proposed_transactions`].
     ///
-    /// `custody` states whether the application holds the pubkey's spending key. The wallet
-    /// records it for evaluation of [`StandalonePubkeys::ImportedAs`]:
+    /// `custody` states whether the application holds the pubkey's spending key. A pubkey whose
+    /// spending key the application does not hold is watch-only material, which belongs in a
+    /// view-only account. The wallet records `custody` for evaluation of
+    /// [`StandalonePubkeys::ImportedAs`]:
     /// - A pubkey that is new to the account is recorded with `custody`.
     /// - A pubkey that the account records as [`SpendingKeyCustody::WatchOnly`] is recorded as
     ///   [`SpendingKeyCustody::Held`] when `custody` is [`SpendingKeyCustody::Held`].
@@ -4074,6 +4086,10 @@ pub trait WalletWrite:
     /// address, and spending them requires the associated spending keys to be provided
     /// explicitly when calling [`create_proposed_transactions`], or signatures to be added to a
     /// PCZT.
+    ///
+    /// Importing a redeem script into an account asserts that the application can produce the
+    /// signatures the script requires, alone or as one party to a multi-party signing; a script
+    /// for which it cannot is watch-only material, which belongs in a view-only account.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     ///
