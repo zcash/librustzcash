@@ -91,9 +91,10 @@ fn bench_byte_vector_writes(c: &mut Criterion) {
     let mut group = c.benchmark_group("byte-vector-write");
     for (name, len) in BENCHMARK_LENGTHS {
         let bytes: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+        let encoded_len = Vector::serialized_size_of_u8_vec(&bytes);
         // Reuse one output buffer so that the measurement excludes its allocation.
-        let mut output = Vec::with_capacity(Vector::serialized_size_of_u8_vec(&bytes));
-        group.throughput(Throughput::Bytes(output.capacity() as u64));
+        let mut output = Vec::with_capacity(encoded_len);
+        group.throughput(Throughput::Bytes(encoded_len as u64));
         group.bench_with_input(BenchmarkId::new("per-byte", name), &bytes, |b, bytes| {
             b.iter(|| {
                 output.clear();
