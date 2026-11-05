@@ -12,6 +12,9 @@ workspace.
 
 ### Added
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
+- `zcash_client_sqlite::WalletDb::anchor_retention`: the anchor-retention policy
+  the wallet's `put_blocks` applies, for a store that maintains the wallet's
+  note commitment trees by other means.
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
