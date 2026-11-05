@@ -7,24 +7,39 @@ name: Benchmarks
 # request runs can restore the baseline and compare against it with
 # `cargo bench -- --baseline main`. Run this workflow manually to benchmark
 # every package without waiting for a push.
+#
+# On pull requests with the `run-benchmarks` label, benchmarks the packages
+# that the pull request affects, compares them with the baseline for the
+# `main` commit that the pull request merges into, and reports large changes
+# in the job summary.
 
 permissions: {}
 
 on:
   push:
     branches: main
+  pull_request:
+    # Adding the label starts a comparison, and later pushes repeat it.
+    types: [labeled, synchronize]
   workflow_dispatch:
 
 concurrency:
-  group: benchmarks-${{ github.ref }}
-  cancel-in-progress: false
+  # Adding any other label also triggers the workflow. Give those runs their
+  # own group, so that they do not cancel a comparison in progress.
+  group: >-
+    benchmarks-${{ github.ref }}${{
+    github.event.action == 'labeled' && github.event.label.name != 'run-benchmarks'
+    && format('-{0}', github.run_id) || ''
+    }}
+  # A newer push to a pull request makes the older comparison irrelevant.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   baseline:
     name: Save benchmark baseline
     runs-on: ubuntu-latest
     # Caches written from other refs are not visible to pull requests.
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read # Read the repository contents for checkout.
       pull-requests: write # Comment on the merged pull request when a benchmark regresses.
@@ -137,3 +152,94 @@ jobs:
         run: |
           echo "::error::A benchmark regressed by more than the reporting threshold. See the job summary."
           exit 1
+
+  compare:
+    name: Compare with benchmark baseline
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request'
+      && contains(github.event.pull_request.labels.*.name, 'run-benchmarks')
+      && (github.event.action != 'labeled' || github.event.label.name == 'run-benchmarks')
+    permissions:
+      contents: read # Read the repository contents for checkout.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Fetch the parents of the merge commit as well.
+          fetch-depth: 2
+      # The checkout is the pull request merged into the tip of `main`, so the
+      # first parent of the merge commit is the `main` commit to compare with,
+      # and the difference between them is the pull request's change.
+      - name: Select benchmarks
+        id: select
+        run: |
+          echo "main-commit=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+          packages="$RUNNER_TEMP/benchmark-packages"
+          python3 .github/helpers/affected-benchmark-packages.py \
+            --base HEAD^1 --head HEAD > "$packages"
+          echo "Selected packages:"
+          cat "$packages"
+          if [ -s "$packages" ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Benchmark comparison
+
+          This pull request does not affect any benchmarked package.
+          EOF
+          fi
+      # Prefer the baseline for the `main` commit, and fall back to the newest
+      # baseline from `main`.
+      - name: Restore baseline
+        id: restore-baseline
+        if: steps.select.outputs.any == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/criterion
+          key: criterion-baseline-main-${{ steps.select.outputs.main-commit }}
+          restore-keys: criterion-baseline-main-
+      - name: Report missing baseline
+        if: steps.select.outputs.any == 'true' && steps.restore-baseline.outputs.cache-matched-key == ''
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Benchmark comparison
+
+          No baseline from `main` is cached, so the benchmarks were not compared.
+          Run the Benchmarks workflow on `main` to create one.
+          EOF
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.restore-baseline.outputs.cache-matched-key != ''
+        with:
+          shared-key: benchmarks
+          # Only `main` writes the build cache, so pull requests share its
+          # entry instead of each filling the cache quota.
+          save-if: false
+      # Criterion also stores the latest results in `new` and `change`
+      # directories. Remove the restored copies so that the report lists only
+      # the benchmarks that this run measures.
+      - name: Keep only the baseline results
+        if: steps.restore-baseline.outputs.cache-matched-key != ''
+        run: find target/criterion -type d \( -name new -o -name change \) -prune -exec rm -rf {} +
+      # `--baseline-lenient` compares the benchmarks that the baseline holds,
+      # and runs benchmarks that are new in this pull request without failing.
+      - name: Run benchmarks
+        if: steps.restore-baseline.outputs.cache-matched-key != ''
+        run: |
+          package_args=()
+          while read -r package; do
+            package_args+=(-p "$package")
+          done < "$RUNNER_TEMP/benchmark-packages"
+          cargo bench "${package_args[@]}" --bench '*' -- --baseline-lenient main
+      - name: Report changes
+        if: steps.restore-baseline.outputs.cache-matched-key != ''
+        env:
+          MATCHED_KEY: ${{ steps.restore-baseline.outputs.cache-matched-key }}
+          MAIN_COMMIT: ${{ steps.select.outputs.main-commit }}
+        run: >-
+          python3 .github/helpers/report-benchmark-changes.py target/criterion
+          --baseline-commit "${MATCHED_KEY#criterion-baseline-main-}"
+          --expected-baseline-commit "$MAIN_COMMIT"
+          --repository-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          >> "$GITHUB_STEP_SUMMARY"
