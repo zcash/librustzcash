@@ -207,11 +207,11 @@ struct CompactInitialOutput<'a> {
 fn flush_compact_initial(table: &mut [u32], pending: &[CompactInitialOutput<'_>]) {
     for output in pending {
         table[output.attribute] = output.index;
-        let source = output.source.chunks_exact(4);
-        debug_assert!(source.remainder().is_empty());
+        let (source, remainder) = output.source.as_chunks::<4>();
+        debug_assert!(remainder.is_empty());
         let destination = &mut table[output.hash..output.hash + INITIAL_WORDS];
         for (destination, source) in destination.iter_mut().zip(source) {
-            *destination = u32::from_ne_bytes(source.try_into().unwrap());
+            *destination = u32::from_ne_bytes(*source);
         }
     }
 }
@@ -496,12 +496,12 @@ impl Solver {
                 index: 0,
             }; HASH_BATCH];
             let mut buffered = 0;
-            let digests = hashes[..count * HASH_OUTPUT].chunks_exact(HASH_OUTPUT);
-            debug_assert!(digests.remainder().is_empty());
-            for (offset, digest) in digests.enumerate() {
-                let parts = digest.chunks_exact(HASH_BYTES);
-                debug_assert!(parts.remainder().is_empty());
-                for (part, source) in parts.enumerate() {
+            let (digests, remainder) = hashes[..count * HASH_OUTPUT].as_chunks::<HASH_OUTPUT>();
+            debug_assert!(remainder.is_empty());
+            for (offset, digest) in digests.iter().enumerate() {
+                let (parts, remainder) = digest.as_chunks::<HASH_BYTES>();
+                debug_assert!(remainder.is_empty());
+                for (part, source) in parts.iter().enumerate() {
                     let bucket = ((source[0] as usize) << 4) | (source[1] >> 4) as usize;
                     let slot = counts[bucket] as usize;
                     counts[bucket] += 1;
@@ -565,16 +565,11 @@ impl Solver {
             let count = (*previous_count as usize).min(SLOTS);
             *previous_count = 0;
             let input = &previous[rows..rows + count * PREVIOUS];
-            let input_rows = input.chunks_exact(PREVIOUS);
-            debug_assert!(input_rows.remainder().is_empty());
-            let row_at = |index: usize| -> &[u32; PREVIOUS] {
-                input[index * PREVIOUS..(index + 1) * PREVIOUS]
-                    .try_into()
-                    .unwrap()
-            };
+            let (input_rows, remainder) = input.as_chunks::<PREVIOUS>();
+            debug_assert!(remainder.is_empty());
+            let row_at = |index: usize| -> &[u32; PREVIOUS] { &input_rows[index] };
             let mut active_count = 0;
-            for (right, right_row) in input_rows.enumerate() {
-                let right_row: &[u32; PREVIOUS] = right_row.try_into().unwrap();
+            for (right, right_row) in input_rows.iter().enumerate() {
                 let key = row_extra_hash(right_row, layout.previous_padding, odd);
                 let previous = collisions.counts[key] as usize;
                 let _ = collisions.add(right, key);
@@ -635,15 +630,10 @@ impl Solver {
             self.counts[0][bucket] = 0;
             let start = attributes(ROUNDS - 1, bucket) + SLOTS;
             let input = &self.tables[0][start..start + count * FINAL_WORDS];
-            let rows = input.chunks_exact(FINAL_WORDS);
-            debug_assert!(rows.remainder().is_empty());
+            let (rows, remainder) = input.as_chunks::<FINAL_WORDS>();
+            debug_assert!(remainder.is_empty());
             candidates.clear();
-            collect_final_candidates(
-                bucket,
-                rows.map(|row| row.try_into().unwrap()),
-                &mut groups,
-                &mut candidates,
-            );
+            collect_final_candidates(bucket, rows.iter(), &mut groups, &mut candidates);
             for &node in &candidates {
                 self.candidate(node);
             }
