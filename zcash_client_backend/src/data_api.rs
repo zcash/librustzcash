@@ -91,7 +91,7 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -104,6 +104,7 @@ use crate::{
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
+    scanning::AccountScanningKeys,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
@@ -2155,6 +2156,29 @@ pub trait InputSource {
     }
 }
 
+/// Incoming viewing keys for accounts that have no entry in `full_viewing_keys`.
+///
+/// An account whose stored viewing key is a full viewing key is omitted, even when that key
+/// is absent from `full_viewing_keys`: its external incoming viewing key is derived from the
+/// full viewing key, which also supplies the internal scope and nullifier-deriving keys.
+fn ivk_only_unified_incoming_viewing_keys<D: WalletRead + ?Sized>(
+    data: &D,
+    full_viewing_keys: &HashMap<D::AccountId, UnifiedFullViewingKey>,
+) -> Result<HashMap<D::AccountId, UnifiedIncomingViewingKey>, D::Error> {
+    let mut keys = HashMap::new();
+    for account_id in data.get_account_ids()? {
+        if full_viewing_keys.contains_key(&account_id) {
+            continue;
+        }
+        if let Some(account) = data.get_account(account_id)?
+            && account.ufvk().is_none()
+        {
+            keys.insert(account_id, account.uivk());
+        }
+    }
+    Ok(keys)
+}
+
 /// Read-only operations required for light wallet functions.
 ///
 /// This trait defines the read-only portion of the storage interface atop which
@@ -2431,29 +2455,34 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns the [`UnifiedIncomingViewingKey`] for each account that has no
-    /// [`UnifiedFullViewingKey`].
+    /// Returns the [`AccountScanningKeys`] to use when trial-decrypting blocks for this wallet,
+    /// limited to `scopes`.
     ///
-    /// Accounts returned by [`Self::get_unified_full_viewing_keys`] are omitted. Their external
-    /// incoming viewing keys are derived from those UFVKs, which also provide the internal scope
-    /// and nullifier-deriving keys an incoming viewing key lacks. Supplying both for one account
-    /// would trial-decrypt its external outputs twice and, where the two sets are merged by tag,
-    /// could discard the full viewing key.
+    /// An account with a unified full viewing key contributes each requested scope for which
+    /// that key has a shielded item, including the nullifier-deriving key for the scope. An
+    /// account that has only a unified incoming viewing key contributes its external incoming
+    /// viewing key when [`Scope::External`] is requested, and nothing otherwise: an incoming
+    /// viewing key has no internal scope and no nullifier-deriving key. Such an account is not
+    /// also represented by a key derived from a full viewing key.
     ///
-    /// The default implementation reads each account with [`Self::get_account`]. Backends may
-    /// override it with a single query.
-    fn get_ivk_only_unified_incoming_viewing_keys(
+    /// The default implementation reads [`Self::get_unified_full_viewing_keys`] and each
+    /// remaining account with [`Self::get_account`]. A backend can override this with a single
+    /// query that fetches both kinds of account.
+    ///
+    /// [`AccountScanningKeys`]: crate::scanning::AccountScanningKeys
+    /// [`Scope::External`]: Scope::External
+    fn get_scanning_keys(
         &self,
-    ) -> Result<HashMap<Self::AccountId, UnifiedIncomingViewingKey>, Self::Error> {
-        let mut keys = HashMap::new();
-        for account_id in self.get_account_ids()? {
-            if let Some(account) = self.get_account(account_id)?
-                && account.ufvk().is_none()
-            {
-                keys.insert(account_id, account.uivk());
-            }
-        }
-        Ok(keys)
+        scopes: &HashSet<Scope>,
+    ) -> Result<AccountScanningKeys<Self::AccountId>, Self::Error>
+    where
+        Self::AccountId: Send + Sync + 'static,
+    {
+        let ufvks = self.get_unified_full_viewing_keys()?;
+        let uivks = ivk_only_unified_incoming_viewing_keys(self, &ufvks)?;
+        Ok(AccountScanningKeys::from_ufvk_and_uivk_accounts(
+            ufvks, uivks, scopes,
+        ))
     }
 
     /// Returns the memo for a note.

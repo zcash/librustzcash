@@ -263,7 +263,7 @@ where
 {
     // Full viewing keys, plus incoming viewing keys for accounts that have no full viewing key.
     let ufvks = data.get_unified_full_viewing_keys()?;
-    let uivks = data.get_ivk_only_unified_incoming_viewing_keys()?;
+    let uivks = super::ivk_only_unified_incoming_viewing_keys(data, &ufvks)?;
 
     data.store_decrypted_tx(decrypt_transaction_with_ivks(
         params,

@@ -306,6 +306,14 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     >,
 }
 
+/// [`ScanningKeys`] for a wallet's accounts, tagged by account identifier and [`Scope`].
+///
+/// [`WalletRead::get_scanning_keys`] returns this set. A full viewing key and an incoming
+/// viewing key for the same account share a tag, so a scan uses one key per account and scope.
+///
+/// [`WalletRead::get_scanning_keys`]: crate::data_api::WalletRead::get_scanning_keys
+pub type AccountScanningKeys<AccountId> = ScanningKeys<AccountId, (AccountId, Scope)>;
+
 impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     /// Constructs a new set of scanning keys.
     pub fn new(
@@ -388,8 +396,22 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 {
     /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
     /// along with the account identifiers corresponding to those UFVKs.
+    ///
+    /// Both the external and internal scopes are included, each with its nullifier-deriving
+    /// key. To select scopes, or to combine these keys with incoming-viewing-key-only
+    /// accounts, use [`Self::from_ufvk_and_uivk_accounts`].
     pub fn from_account_ufvks(
         ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
+    ) -> Self {
+        Self::from_account_ufvks_for_scopes(
+            ufvks,
+            &HashSet::from([Scope::External, Scope::Internal]),
+        )
+    }
+
+    fn from_account_ufvks_for_scopes(
+        ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
+        scopes: &HashSet<Scope>,
     ) -> Self {
         #![allow(clippy::type_complexity)]
 
@@ -414,7 +436,10 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 
         for (account_id, ufvk) in ufvks {
             if let Some(dfvk) = ufvk.sapling() {
-                for scope in [Scope::External, Scope::Internal] {
+                for scope in [Scope::External, Scope::Internal]
+                    .into_iter()
+                    .filter(|scope| scopes.contains(scope))
+                {
                     sapling.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
@@ -429,7 +454,10 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 
             #[cfg(feature = "orchard")]
             if let Some(fvk) = ufvk.orchard() {
-                for scope in [Scope::External, Scope::Internal] {
+                for scope in [Scope::External, Scope::Internal]
+                    .into_iter()
+                    .filter(|scope| scopes.contains(scope))
+                {
                     orchard.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
@@ -443,7 +471,10 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 
                 // Ironwood outputs are decrypted with the same Orchard viewing keys, but are
                 // tracked as a separate pool.
-                for scope in [Scope::External, Scope::Internal] {
+                for scope in [Scope::External, Scope::Internal]
+                    .into_iter()
+                    .filter(|scope| scopes.contains(scope))
+                {
                     ironwood.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
@@ -475,6 +506,16 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
     pub fn from_account_uivks(
         uivks: impl IntoIterator<Item = (AccountId, UnifiedIncomingViewingKey)>,
     ) -> Self {
+        Self::from_account_uivks_for_scopes(
+            uivks,
+            &HashSet::from([Scope::External, Scope::Internal]),
+        )
+    }
+
+    fn from_account_uivks_for_scopes(
+        uivks: impl IntoIterator<Item = (AccountId, UnifiedIncomingViewingKey)>,
+        scopes: &HashSet<Scope>,
+    ) -> Self {
         #![allow(clippy::type_complexity)]
 
         let mut sapling: HashMap<
@@ -497,7 +538,11 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
         > = HashMap::new();
 
         for (account_id, uivk) in uivks {
-            if let Some(ivk) = uivk.sapling().as_ref() {
+            // An incoming viewing key has no internal scope. Omitting `Scope::External` from
+            // the request drops the account entirely.
+            if scopes.contains(&Scope::External)
+                && let Some(ivk) = uivk.sapling().as_ref()
+            {
                 sapling.insert(
                     (account_id, Scope::External),
                     Box::new(ScanningKey {
@@ -510,7 +555,9 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             }
 
             #[cfg(feature = "orchard")]
-            if let Some(ivk) = uivk.orchard().as_ref() {
+            if scopes.contains(&Scope::External)
+                && let Some(ivk) = uivk.orchard().as_ref()
+            {
                 orchard.insert(
                     (account_id, Scope::External),
                     Box::new(ScanningKey {
@@ -543,6 +590,27 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             ironwood,
         }
     }
+
+    /// Constructs a [`ScanningKeys`] from full viewing keys and incoming-viewing-key-only
+    /// accounts, including only the requested scopes.
+    ///
+    /// Each unified full viewing key contributes every requested scope for which it has a
+    /// shielded item, with the nullifier-deriving key for that scope. Each unified incoming
+    /// viewing key contributes its external incoming viewing key when [`Scope::External`] was
+    /// requested, and contributes nothing for [`Scope::Internal`]: an incoming viewing key has
+    /// no internal scope and no nullifier-deriving key.
+    ///
+    /// An account present in both iterators keeps the full viewing key. Those keys are applied
+    /// last, so the nullifier-deriving key is not replaced by the incoming viewing key.
+    pub fn from_ufvk_and_uivk_accounts(
+        ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
+        uivks: impl IntoIterator<Item = (AccountId, UnifiedIncomingViewingKey)>,
+        scopes: &HashSet<Scope>,
+    ) -> Self {
+        let mut keys = Self::from_account_uivks_for_scopes(uivks, scopes);
+        keys.extend(Self::from_account_ufvks_for_scopes(ufvks, scopes));
+        keys
+    }
 }
 
 impl<AccountId, IvkTag: Eq + Hash> ScanningKeys<AccountId, IvkTag> {
@@ -551,6 +619,7 @@ impl<AccountId, IvkTag: Eq + Hash> ScanningKeys<AccountId, IvkTag> {
     /// A key in `other` whose tag is already present replaces the existing entry. When combining
     /// [`Self::from_account_ufvks`] with [`Self::from_account_uivks`], apply the full viewing keys
     /// last so that an account present in both sets keeps the nullifier-deriving key.
+    /// [`Self::from_ufvk_and_uivk_accounts`] does this.
     pub fn extend(&mut self, other: Self) {
         self.sapling.extend(other.sapling);
         #[cfg(feature = "orchard")]
@@ -1495,5 +1564,134 @@ mod tests {
         spawn(move || {
             let _ = keys.sapling().get(&());
         });
+    }
+
+    /// Full viewing keys keep a nullifier-deriving key for every requested scope. Incoming
+    /// viewing keys contribute the external scope only, and only when it was requested, with
+    /// no nullifier-deriving key. A full viewing key wins when an account is in both sets.
+    #[test]
+    fn from_ufvk_and_uivk_accounts_selects_scopes_and_nullifier_keys() {
+        use incrementalmerkletree::Position;
+        use rand::{rand_core::UnwrapErr, rngs::SysRng};
+        use sapling::{util::generate_random_rseed, value::NoteValue};
+        use std::collections::HashSet;
+        use zcash_keys::keys::UnifiedSpendingKey;
+        use zcash_primitives::transaction::components::sapling::zip212_enforcement;
+        use zcash_protocol::consensus::{BlockHeight, Network};
+        use zip32::{AccountId, Scope};
+
+        use super::ScanningKeyOps;
+
+        let network = Network::TestNetwork;
+        let ufvk = UnifiedSpendingKey::from_seed(&network, &[0x11; 32], AccountId::ZERO)
+            .expect("seed produces a spending key")
+            .to_unified_full_viewing_key();
+        let other = UnifiedSpendingKey::from_seed(&network, &[0x22; 32], AccountId::ZERO)
+            .expect("seed produces a spending key")
+            .to_unified_full_viewing_key();
+        let uivk = other.to_unified_incoming_viewing_key();
+        let payment_address = ufvk
+            .sapling()
+            .expect("the full viewing key has a Sapling item")
+            .default_address()
+            .1;
+        let mut rng = UnwrapErr(SysRng);
+        let rseed = generate_random_rseed(
+            zip212_enforcement(&network, BlockHeight::from_u32(2_000_000)),
+            &mut rng,
+        );
+        let note = sapling::Note::from_parts(payment_address, NoteValue::from_raw(1), rseed);
+        let position = Position::from(0u64);
+
+        let ufvk_id = 1u32;
+        let uivk_id = 2u32;
+        let both = HashSet::from([Scope::External, Scope::Internal]);
+        let keys = ScanningKeys::from_ufvk_and_uivk_accounts(
+            [(ufvk_id, ufvk.clone())],
+            [(uivk_id, uivk.clone())],
+            &both,
+        );
+
+        for scope in [Scope::External, Scope::Internal] {
+            let key = keys
+                .sapling()
+                .get(&(ufvk_id, scope))
+                .expect("full viewing key contributes the scope");
+            assert_eq!(key.key_scope(), Some(scope));
+            assert!(key.nf(&note, position).is_some());
+        }
+        let external = keys
+            .sapling()
+            .get(&(uivk_id, Scope::External))
+            .expect("incoming viewing key contributes the external scope");
+        assert_eq!(external.key_scope(), Some(Scope::External));
+        assert!(external.nf(&note, position).is_none());
+        assert!(keys.sapling().get(&(uivk_id, Scope::Internal)).is_none());
+
+        let external_only = HashSet::from([Scope::External]);
+        let external_keys = ScanningKeys::from_ufvk_and_uivk_accounts(
+            [(ufvk_id, ufvk.clone())],
+            [(uivk_id, uivk.clone())],
+            &external_only,
+        );
+        assert!(
+            external_keys
+                .sapling()
+                .contains_key(&(ufvk_id, Scope::External))
+        );
+        assert!(
+            !external_keys
+                .sapling()
+                .contains_key(&(ufvk_id, Scope::Internal))
+        );
+        assert!(
+            external_keys
+                .sapling()
+                .contains_key(&(uivk_id, Scope::External))
+        );
+
+        let internal_only = HashSet::from([Scope::Internal]);
+        let internal_keys = ScanningKeys::from_ufvk_and_uivk_accounts(
+            [(ufvk_id, ufvk.clone())],
+            [(uivk_id, uivk)],
+            &internal_only,
+        );
+        assert!(
+            !internal_keys
+                .sapling()
+                .contains_key(&(ufvk_id, Scope::External))
+        );
+        assert!(
+            internal_keys
+                .sapling()
+                .contains_key(&(ufvk_id, Scope::Internal))
+        );
+        assert!(
+            internal_keys
+                .sapling()
+                .get(&(uivk_id, Scope::External))
+                .is_none()
+        );
+        assert!(
+            internal_keys
+                .sapling()
+                .get(&(uivk_id, Scope::Internal))
+                .is_none()
+        );
+
+        // The same account in both iterators keeps the nullifier-deriving key.
+        let overlapped = ScanningKeys::from_ufvk_and_uivk_accounts(
+            [(ufvk_id, ufvk.clone())],
+            [(ufvk_id, ufvk.to_unified_incoming_viewing_key())],
+            &both,
+        );
+        assert!(
+            overlapped
+                .sapling()
+                .get(&(ufvk_id, Scope::External))
+                .expect("the full viewing key is retained")
+                .nf(&note, position)
+                .is_some()
+        );
     }
 }

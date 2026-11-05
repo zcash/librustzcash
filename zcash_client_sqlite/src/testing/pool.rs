@@ -3,6 +3,7 @@
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
 use core::num::NonZeroU32;
+use std::collections::HashSet;
 
 use crate::{
     SAPLING_TABLES_PREFIX,
@@ -28,6 +29,7 @@ use zcash_protocol::{
     consensus::{NetworkUpgrade, Parameters},
     value::Zatoshis,
 };
+use zip32::Scope;
 #[cfg(feature = "orchard")]
 use {
     crate::ORCHARD_TABLES_PREFIX,
@@ -929,11 +931,19 @@ pub(crate) fn scan_cached_blocks_finds_notes_for_ivk_only_account<T: ShieldedPoo
             .unwrap(),
         uivk.encode(st.network()).unwrap()
     );
+    let scanning_keys = st
+        .wallet()
+        .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
+        .unwrap();
     assert!(
-        st.wallet()
-            .get_ivk_only_unified_incoming_viewing_keys()
-            .unwrap()
-            .contains_key(&account.id())
+        scanning_keys
+            .sapling()
+            .contains_key(&(account.id(), Scope::External))
+    );
+    assert!(
+        !scanning_keys
+            .sapling()
+            .contains_key(&(account.id(), Scope::Internal))
     );
     assert!(
         !st.wallet()

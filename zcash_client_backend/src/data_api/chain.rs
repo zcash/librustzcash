@@ -151,18 +151,20 @@
 //! # }
 //! ```
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::{self, BlockHeight};
+use zip32::Scope;
 
 use crate::{
     data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
-        ScanBlockError, ScanningKeys, SpendIdentifiers,
+        ScanBlockError, SpendIdentifiers,
         compact::{BatchRunners, scan_block_with_runners},
     },
 };
@@ -639,17 +641,11 @@ where
 {
     assert_eq!(from_height, from_state.block_height + 1);
 
-    // Full viewing keys cover both scopes and nullifiers. Incoming-viewing-key-only accounts
-    // are scanned for external receives. Apply the full viewing keys last so that an account
-    // present in both sets keeps its nullifier-deriving key.
-    let account_uivks = data_db
-        .get_ivk_only_unified_incoming_viewing_keys()
+    // Full viewing keys cover both scopes and carry nullifier-deriving keys. Incoming
+    // viewing keys contribute the external scope only.
+    let scanning_keys = data_db
+        .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
         .map_err(Error::Wallet)?;
-    let account_ufvks = data_db
-        .get_unified_full_viewing_keys()
-        .map_err(Error::Wallet)?;
-    let mut scanning_keys = ScanningKeys::from_account_uivks(account_uivks);
-    scanning_keys.extend(ScanningKeys::from_account_ufvks(account_ufvks));
     let mut runners = BatchRunners::<_, (), (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, <DbT as WalletRead>::Error>(

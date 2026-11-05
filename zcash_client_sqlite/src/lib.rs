@@ -73,6 +73,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     proto::compact_formats::CompactBlock,
+    scanning::AccountScanningKeys,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
@@ -92,7 +93,7 @@ use zcash_protocol::{
     memo::Memo,
     value::Zatoshis,
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use crate::{
     error::SqliteClientError,
@@ -1466,10 +1467,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
     }
 
-    fn get_ivk_only_unified_incoming_viewing_keys(
+    fn get_scanning_keys(
         &self,
-    ) -> Result<HashMap<Self::AccountId, UnifiedIncomingViewingKey>, Self::Error> {
-        wallet::get_ivk_only_unified_incoming_viewing_keys(self.conn.borrow(), &self.params)
+        scopes: &HashSet<Scope>,
+    ) -> Result<AccountScanningKeys<Self::AccountId>, Self::Error> {
+        wallet::get_scanning_keys(self.conn.borrow(), &self.params, scopes)
     }
 
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -2603,7 +2605,20 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         #[cfg(feature = "orchard")]
         let ufvks = self.get_unified_full_viewing_keys()?;
         #[cfg(feature = "orchard")]
-        let uivks = self.get_ivk_only_unified_incoming_viewing_keys()?;
+        let uivks = {
+            let mut uivks = HashMap::new();
+            for account_id in self.get_account_ids()? {
+                if ufvks.contains_key(&account_id) {
+                    continue;
+                }
+                if let Some(account) = self.get_account(account_id)?
+                    && account.ufvk().is_none()
+                {
+                    uivks.insert(account_id, account.uivk());
+                }
+            }
+            uivks
+        };
         // The wallet's OWN grid, not the specified default. Unlike the enhance path — which cannot
         // reach it through `LowLevelWalletRead` and documents that it settles for the defaults
         // because no clause it can answer consults the grid — this site has the store in hand, so
@@ -4166,6 +4181,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use secrecy::{ExposeSecret, Secret, SecretVec};
+    use std::collections::HashSet;
     use uuid::Uuid;
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
@@ -4184,7 +4200,7 @@ mod tests {
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{consensus, local_consensus::LocalNetwork};
-    use zip32::DiversifierIndex;
+    use zip32::{DiversifierIndex, Scope};
 
     use crate::{
         AccountUuid,
@@ -5188,12 +5204,20 @@ mod tests {
         );
         assert!(stored.ufvk().is_none());
 
-        let ivk_only = st
+        let scanning_keys = st
             .wallet()
-            .get_ivk_only_unified_incoming_viewing_keys()
+            .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
             .unwrap();
-        assert_eq!(ivk_only.len(), 1);
-        assert!(ivk_only.contains_key(&account.id()));
+        assert!(
+            scanning_keys
+                .sapling()
+                .contains_key(&(account.id(), Scope::External))
+        );
+        assert!(
+            !scanning_keys
+                .sapling()
+                .contains_key(&(account.id(), Scope::Internal))
+        );
         assert!(
             st.wallet()
                 .get_unified_full_viewing_keys()
@@ -5206,6 +5230,84 @@ mod tests {
                 .import_account_uivk("again", &uivk, &birthday, None),
             Err(SqliteClientError::AccountCollision(id)) if id == account.id()
         );
+    }
+
+    /// `get_scanning_keys` reads full viewing keys and incoming-viewing-key-only accounts in
+    /// one query, and keeps only the requested scopes. An incoming viewing key has no internal
+    /// scope.
+    #[test]
+    fn get_scanning_keys_selects_scopes_for_ufvk_and_uivk_accounts() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let (ufvk_id, _) = st
+            .wallet_mut()
+            .create_account("spender", &Secret::new(vec![0x11; 32]), &birthday, None)
+            .unwrap();
+        let uivk = UnifiedSpendingKey::from_seed(st.network(), &[0x22; 32], zip32::AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key()
+            .to_unified_incoming_viewing_key();
+        let uivk_id = st
+            .wallet_mut()
+            .import_account_uivk("viewer", &uivk, &birthday, None)
+            .unwrap()
+            .id();
+
+        let both = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
+            .unwrap();
+        assert!(both.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(both.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(both.sapling().contains_key(&(uivk_id, Scope::External)));
+        assert!(!both.sapling().contains_key(&(uivk_id, Scope::Internal)));
+
+        let external = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::External]))
+            .unwrap();
+        assert!(external.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(!external.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(external.sapling().contains_key(&(uivk_id, Scope::External)));
+
+        let internal = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::Internal]))
+            .unwrap();
+        assert!(!internal.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(internal.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(!internal.sapling().contains_key(&(uivk_id, Scope::External)));
+        assert!(!internal.sapling().contains_key(&(uivk_id, Scope::Internal)));
+
+        let none = st.wallet().get_scanning_keys(&HashSet::new()).unwrap();
+        assert!(none.sapling().is_empty());
+
+        #[cfg(feature = "orchard")]
+        {
+            assert!(both.orchard().contains_key(&(ufvk_id, Scope::External)));
+            assert!(both.orchard().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(both.orchard().contains_key(&(uivk_id, Scope::External)));
+            assert!(!both.orchard().contains_key(&(uivk_id, Scope::Internal)));
+            assert!(both.ironwood().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(both.ironwood().contains_key(&(uivk_id, Scope::External)));
+            assert!(!both.ironwood().contains_key(&(uivk_id, Scope::Internal)));
+            assert!(internal.orchard().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(!internal.orchard().contains_key(&(uivk_id, Scope::External)));
+            assert!(
+                internal
+                    .ironwood()
+                    .contains_key(&(ufvk_id, Scope::Internal))
+            );
+            assert!(none.orchard().is_empty());
+            assert!(none.ironwood().is_empty());
+        }
     }
 
     #[test]

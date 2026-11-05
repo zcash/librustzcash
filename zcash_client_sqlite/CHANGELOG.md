@@ -15,10 +15,10 @@ workspace.
   incoming-viewing-key-only account. Re-importing a UIVK that adds items to an existing
   incoming-viewing-key-only account upgrades that account; importing a UIVK over an
   account that already has a UFVK is rejected.
-- `WalletDb` implements
-  `WalletRead::get_ivk_only_unified_incoming_viewing_keys`. `scan_cached_blocks` and
-  `decrypt_and_store_transaction` use it, so notes sent to an imported account's external
-  addresses are detected. Spends of those notes are not.
+- `WalletDb` implements `WalletRead::get_scanning_keys` with one query that reads
+  accounts with a unified full viewing key and accounts with only a unified incoming
+  viewing key. `scan_cached_blocks` uses it, so notes sent to an imported account's
+  external addresses are detected. Spends of those notes are not.
 
 ### Changed
 - With the `orchard` feature, storing a transaction the wallet built also trial-decrypts

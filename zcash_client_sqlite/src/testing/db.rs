@@ -31,6 +31,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
     },
+    scanning::AccountScanningKeys,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
@@ -47,7 +48,7 @@ use zcash_protocol::{
     ShieldedPool, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
     value::Zatoshis,
 };
-use zip32::DiversifierIndex;
+use zip32::{DiversifierIndex, Scope};
 
 use crate::{
     AccountUuid, WalletDb, error::SqliteClientError, util::testing::FixedClock,
