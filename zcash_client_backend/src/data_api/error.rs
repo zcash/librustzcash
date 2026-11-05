@@ -71,8 +71,14 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
         required: Zatoshis,
     },
 
-    /// The wallet must first perform a scan of the blockchain before other
-    /// operations can be performed.
+    /// The wallet must scan more of the chain before it can perform the operation.
+    ///
+    /// A proposal returns this error when the wallet has no anchor for the transaction, that is,
+    /// when [`WalletRead::get_target_and_anchor_heights`] returns `None`. This occurs when the
+    /// chain tip is unknown, and while the wallet scans the blocks it missed when it was offline
+    /// for `min_confirmations` blocks or more.
+    ///
+    /// [`WalletRead::get_target_and_anchor_heights`]: crate::data_api::WalletRead::get_target_and_anchor_heights
     ScanRequired,
 
     /// An error occurred building a new transaction.

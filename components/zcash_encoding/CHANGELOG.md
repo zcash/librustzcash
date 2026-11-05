@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_encoding::Vector::{read_bytes, write_bytes}`
+
 ### Changed
 - MSRV is now 1.89
 

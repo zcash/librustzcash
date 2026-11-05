@@ -132,6 +132,8 @@ pub enum DerivationError {
     Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
     Transparent(bip32::Error),
+    /// A [`UnifiedSpendingKey`] was constructed without a key for any protocol.
+    Empty,
 }
 
 impl Display for DerivationError {
@@ -145,14 +147,7 @@ impl Display for DerivationError {
             DerivationError::Orchard(e) => write!(_f, "Orchard error: {e}"),
             #[cfg(feature = "transparent-inputs")]
             DerivationError::Transparent(e) => write!(_f, "Transparent error: {e}"),
-            #[cfg(not(any(
-                feature = "sapling",
-                feature = "orchard",
-                feature = "transparent-inputs"
-            )))]
-            other => {
-                unreachable!("Unhandled DerivationError variant {:?}", other)
-            }
+            DerivationError::Empty => write!(_f, "No key was provided for any protocol"),
         }
     }
 }
@@ -191,6 +186,12 @@ pub enum DecodingError {
     LengthMismatch(Typecode, u32),
     #[cfg(feature = "unstable")]
     InsufficientData(Typecode),
+    /// The encoding holds two items with the given typecode.
+    #[cfg(feature = "unstable")]
+    DuplicateTypecode(Typecode),
+    /// The encoding holds no key for a protocol that the enabled features support.
+    #[cfg(feature = "unstable")]
+    Empty,
     /// The key data could not be decoded from its string representation to a valid key.
     KeyDataInvalid(Typecode),
 }
@@ -216,6 +217,10 @@ impl core::fmt::Display for DecodingError {
             DecodingError::InsufficientData(t) => {
                 write!(f, "Insufficient data for typecode {t:?}")
             }
+            #[cfg(feature = "unstable")]
+            DecodingError::DuplicateTypecode(t) => write!(f, "Duplicate typecode {t:?}"),
+            #[cfg(feature = "unstable")]
+            DecodingError::Empty => write!(f, "No key for any supported protocol"),
             DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for key type {t:?}"),
         }
     }
@@ -243,34 +248,48 @@ impl Era {
     }
 }
 
-/// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
+/// A set of spending keys for a single account, holding at most one key per protocol.
+///
+/// A key derived with [`Self::from_seed`] holds a key for every protocol that the enabled
+/// features support. A key built with [`Self::from_parts`] may hold any non-empty subset.
 ///
 /// With the `zeroize` feature, the Sapling and Orchard spending keys are erased from
 /// memory when this key is dropped. The transparent spending key is not erased.
 #[derive(Clone)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: ::transparent::keys::AccountPrivKey,
+    transparent: Option<::transparent::keys::AccountPrivKey>,
     #[cfg(feature = "sapling")]
-    sapling: sapling::ExtendedSpendingKey,
+    sapling: Option<sapling::ExtendedSpendingKey>,
     #[cfg(feature = "orchard")]
-    orchard: orchard::keys::SpendingKey,
+    orchard: Option<orchard::keys::SpendingKey>,
 }
 
 impl core::fmt::Debug for UnifiedSpendingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = f.debug_struct("UnifiedSpendingKey");
         #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &"...");
+        d.field("transparent", &self.transparent.as_ref().map(|_| "..."));
         #[cfg(feature = "sapling")]
-        d.field("sapling", &"...");
+        d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
         #[cfg(feature = "orchard")]
-        d.field("orchard", &"...");
+        d.field("orchard", &self.orchard.as_ref().map(|_| "..."));
         d.finish()
     }
 }
 
 impl UnifiedSpendingKey {
+    /// Derives the spending keys for the given ZIP 32 account from a seed.
+    ///
+    /// The result holds a key for every protocol that the enabled features support.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seed` is shorter than 32 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`DerivationError`] for the first protocol whose key derivation fails.
     pub fn from_seed<P: consensus::Parameters>(
         _params: &P,
         seed: &[u8],
@@ -280,49 +299,100 @@ impl UnifiedSpendingKey {
             panic!("ZIP 32 seeds MUST be at least 32 bytes");
         }
 
-        UnifiedSpendingKey::from_checked_parts(
+        UnifiedSpendingKey::from_parts(
             #[cfg(feature = "transparent-inputs")]
-            ::transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
-                .map_err(DerivationError::Transparent)?,
+            Some(
+                ::transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
+                    .map_err(DerivationError::Transparent)?,
+            ),
             #[cfg(feature = "sapling")]
-            sapling::spending_key(seed, _params.coin_type(), _account)
-                .ok_or(DerivationError::Sapling)?,
+            Some(
+                sapling::spending_key(seed, _params.coin_type(), _account)
+                    .ok_or(DerivationError::Sapling)?,
+            ),
             #[cfg(feature = "orchard")]
-            orchard::keys::SpendingKey::from_zip32_seed(seed, _params.coin_type(), _account)
-                .map_err(DerivationError::Orchard)?,
+            Some(
+                orchard::keys::SpendingKey::from_zip32_seed(seed, _params.coin_type(), _account)
+                    .map_err(DerivationError::Orchard)?,
+            ),
         )
     }
 
-    /// Construct a USK from its constituent parts, after verifying that UIVK derivation can
-    /// succeed.
-    fn from_checked_parts(
-        #[cfg(feature = "transparent-inputs")] transparent: ::transparent::keys::AccountPrivKey,
-        #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
-        #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
+    /// Constructs a spending key from the keys it holds for each protocol.
+    ///
+    /// A seed does not necessarily back up a key built this way. Wallets that store it
+    /// must also store, or otherwise back up, each of its parts.
+    ///
+    /// # Errors
+    ///
+    /// - [`DerivationError::Empty`] if every part is `None`.
+    /// - [`DerivationError::Transparent`] if transparent address derivation fails for the
+    ///   transparent part.
+    pub fn from_parts(
+        #[cfg(feature = "transparent-inputs")] transparent: Option<
+            ::transparent::keys::AccountPrivKey,
+        >,
+        #[cfg(feature = "sapling")] sapling: Option<sapling::ExtendedSpendingKey>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::keys::SpendingKey>,
     ) -> Result<UnifiedSpendingKey, DerivationError> {
-        // Verify that FVK and IVK derivation succeed; we don't want to construct a USK
-        // that can't derive transparent addresses.
-        #[cfg(feature = "transparent-inputs")]
-        let _ = transparent.to_account_pubkey().derive_external_ivk()?;
-
-        Ok(UnifiedSpendingKey {
+        let usk = UnifiedSpendingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent,
             #[cfg(feature = "sapling")]
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-        })
+        };
+
+        if usk.is_empty() {
+            return Err(DerivationError::Empty);
+        }
+
+        // Verify that FVK and IVK derivation succeed; we don't want to construct a USK
+        // that can't derive transparent addresses.
+        #[cfg(feature = "transparent-inputs")]
+        if let Some(transparent) = usk.transparent.as_ref() {
+            let _ = transparent.to_account_pubkey().derive_external_ivk()?;
+        }
+
+        Ok(usk)
     }
 
+    /// Returns `true` if this key holds no key for any protocol.
+    fn is_empty(&self) -> bool {
+        #[cfg(feature = "transparent-inputs")]
+        if self.transparent.is_some() {
+            return false;
+        }
+        #[cfg(feature = "sapling")]
+        if self.sapling.is_some() {
+            return false;
+        }
+        #[cfg(feature = "orchard")]
+        if self.orchard.is_some() {
+            return false;
+        }
+        true
+    }
+
+    /// Returns the full viewing key for this key.
+    ///
+    /// The result holds a viewing key for exactly the protocols that this key holds a
+    /// spending key for.
     pub fn to_unified_full_viewing_key(&self) -> UnifiedFullViewingKey {
         UnifiedFullViewingKey {
             #[cfg(feature = "transparent-inputs")]
-            transparent: Some(TransparentFvk::P2pkh(self.transparent.to_account_pubkey())),
+            transparent: self
+                .transparent
+                .as_ref()
+                .map(|t| TransparentFvk::P2pkh(t.to_account_pubkey())),
             #[cfg(feature = "sapling")]
-            sapling: Some(self.sapling.to_diversifiable_full_viewing_key()),
+            sapling: self
+                .sapling
+                .as_ref()
+                .map(|s| s.to_diversifiable_full_viewing_key()),
             #[cfg(feature = "orchard")]
-            orchard: Some((&self.orchard).into()),
+            orchard: self.orchard.as_ref().map(|o| o.into()),
             unknown: vec![],
             expiry_height: None,
             expiry_time: None,
@@ -330,23 +400,25 @@ impl UnifiedSpendingKey {
         }
     }
 
-    /// Returns the transparent component of the unified key at the
-    /// BIP44 path `m/44'/<coin_type>'/<account>'`.
+    /// Returns the transparent component of this key, if it has one.
+    ///
+    /// For a key derived with [`Self::from_seed`], this is the key at the BIP 44 path
+    /// `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &::transparent::keys::AccountPrivKey {
-        &self.transparent
+    pub fn transparent(&self) -> Option<&::transparent::keys::AccountPrivKey> {
+        self.transparent.as_ref()
     }
 
-    /// Returns the Sapling extended spending key component of this unified spending key.
+    /// Returns the Sapling extended spending key component of this key, if it has one.
     #[cfg(feature = "sapling")]
-    pub fn sapling(&self) -> &sapling::ExtendedSpendingKey {
-        &self.sapling
+    pub fn sapling(&self) -> Option<&sapling::ExtendedSpendingKey> {
+        self.sapling.as_ref()
     }
 
-    /// Returns the Orchard spending key component of this unified spending key.
+    /// Returns the Orchard spending key component of this key, if it has one.
     #[cfg(feature = "orchard")]
-    pub fn orchard(&self) -> &orchard::keys::SpendingKey {
-        &self.orchard
+    pub fn orchard(&self) -> Option<&orchard::keys::SpendingKey> {
+        self.orchard.as_ref()
     }
 
     /// Returns a binary encoding of this key suitable for decoding with [`Self::from_bytes`].
@@ -358,21 +430,31 @@ impl UnifiedSpendingKey {
     /// internal validation metadata (such as checksums) as keys decoded from
     /// this form will necessarily be validated when the attempt is made to
     /// spend a note that they have authority for.
+    ///
+    /// The encoding holds an item for each protocol that this key holds a key for.
     #[cfg(feature = "unstable")]
     pub fn to_bytes(&self, era: Era) -> SecretVec<u8> {
         #[cfg(feature = "sapling")]
-        let sapling_key_bytes = Zeroizing::new(self.sapling().to_bytes());
+        let sapling_key_bytes = self.sapling().map(|k| Zeroizing::new(k.to_bytes()));
         #[cfg(feature = "transparent-inputs")]
-        let transparent_key_bytes = Zeroizing::new(self.transparent().to_bytes());
+        let transparent_key_bytes = self.transparent().map(|k| Zeroizing::new(k.to_bytes()));
 
-        let items: Vec<(Typecode, &[u8])> = vec![
+        let items: Vec<(Typecode, &[u8])> = [
             #[cfg(feature = "orchard")]
-            (Typecode::ORCHARD, &self.orchard().to_bytes()[..]),
+            self.orchard()
+                .map(|k| (Typecode::ORCHARD, &k.to_bytes()[..])),
             #[cfg(feature = "sapling")]
-            (Typecode::SAPLING, &sapling_key_bytes[..]),
+            sapling_key_bytes
+                .as_ref()
+                .map(|k| (Typecode::SAPLING, &k[..])),
             #[cfg(feature = "transparent-inputs")]
-            (Typecode::P2PKH, &transparent_key_bytes[..]),
-        ];
+            transparent_key_bytes
+                .as_ref()
+                .map(|k| (Typecode::P2PKH, &k[..])),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
 
         // Reserve the full length up front, so that growing the buffer does not leave
         // copies of the key material in freed memory.
@@ -398,7 +480,14 @@ impl UnifiedSpendingKey {
     /// Decodes a [`UnifiedSpendingKey`] value from its serialized representation.
     ///
     /// See [`Self::to_bytes`] for additional detail about the encoded form.
-    #[allow(clippy::unnecessary_unwrap)]
+    ///
+    /// # Errors
+    ///
+    /// - [`DecodingError::Empty`] if the encoding holds no key for a protocol that the
+    ///   enabled features support.
+    /// - [`DecodingError::DuplicateTypecode`] if the encoding holds two items with the
+    ///   same typecode.
+    /// - Any other [`DecodingError`] if the encoding is malformed or holds an invalid key.
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
         let mut source = corez::io::Cursor::new(encoded);
@@ -417,10 +506,16 @@ impl UnifiedSpendingKey {
         let mut sapling = None;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
-        loop {
+        let mut seen_typecodes: Vec<Typecode> = vec![];
+        while usize::try_from(source.position()).is_ok_and(|pos| pos < encoded.len()) {
             let tc = CompactSize::read_t::<_, u32>(&mut source)
                 .map_err(|_| DecodingError::ReadError("typecode"))
                 .and_then(|v| Typecode::try_from(v).map_err(|_| DecodingError::TypecodeInvalid))?;
+
+            if seen_typecodes.contains(&tc) {
+                return Err(DecodingError::DuplicateTypecode(tc));
+            }
+            seen_typecodes.push(tc);
 
             let len = CompactSize::read_t::<_, u32>(&mut source)
                 .map_err(|_| DecodingError::ReadError("key length"))?;
@@ -486,34 +581,20 @@ impl UnifiedSpendingKey {
                     return Err(DecodingError::TypecodeInvalid);
                 }
             }
-
-            #[cfg(feature = "orchard")]
-            let has_orchard = orchard.is_some();
-            #[cfg(not(feature = "orchard"))]
-            let has_orchard = true;
-
-            #[cfg(feature = "sapling")]
-            let has_sapling = sapling.is_some();
-            #[cfg(not(feature = "sapling"))]
-            let has_sapling = true;
-
-            #[cfg(feature = "transparent-inputs")]
-            let has_transparent = transparent.is_some();
-            #[cfg(not(feature = "transparent-inputs"))]
-            let has_transparent = true;
-
-            if has_orchard && has_sapling && has_transparent {
-                return UnifiedSpendingKey::from_checked_parts(
-                    #[cfg(feature = "transparent-inputs")]
-                    transparent.unwrap(),
-                    #[cfg(feature = "sapling")]
-                    sapling.unwrap(),
-                    #[cfg(feature = "orchard")]
-                    orchard.unwrap(),
-                )
-                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH));
-            }
         }
+
+        UnifiedSpendingKey::from_parts(
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        )
+        .map_err(|e| match e {
+            DerivationError::Empty => DecodingError::Empty,
+            _ => DecodingError::KeyDataInvalid(Typecode::P2PKH),
+        })
     }
 
     /// Returns the unified address corresponding to the smallest valid diversifier index,
@@ -541,6 +622,7 @@ impl UnifiedSpendingKey {
     ))]
     pub fn default_transparent_address(&self) -> (TransparentAddress, NonHardenedChildIndex) {
         self.transparent()
+            .expect("the key has a transparent component")
             .to_account_pubkey()
             .derive_external_ivk()
             .unwrap()
@@ -2378,6 +2460,33 @@ pub mod testing {
                 .prop_map(|v| v.unwrap())
         })
     }
+
+    /// Generates a [`UnifiedSpendingKey`] that holds a random non-empty subset of the
+    /// protocol keys that the enabled features support.
+    pub fn arb_partial_unified_spending_key(
+        params: Network,
+    ) -> impl Strategy<Value = UnifiedSpendingKey> {
+        (
+            arb_unified_spending_key(params),
+            prop::bool::ANY,
+            prop::bool::ANY,
+            prop::bool::ANY,
+        )
+            .prop_filter_map(
+                "the key must hold at least one component",
+                |(usk, _keep_transparent, _keep_sapling, _keep_orchard)| {
+                    UnifiedSpendingKey::from_parts(
+                        #[cfg(feature = "transparent-inputs")]
+                        usk.transparent().filter(|_| _keep_transparent).cloned(),
+                        #[cfg(feature = "sapling")]
+                        usk.sapling().filter(|_| _keep_sapling).cloned(),
+                        #[cfg(feature = "orchard")]
+                        usk.orchard().filter(|_| _keep_orchard).cloned(),
+                    )
+                    .ok()
+                },
+            )
+    }
 }
 
 #[cfg(test)]
@@ -2438,19 +2547,14 @@ mod tests {
     #[cfg(feature = "sapling")]
     use super::sapling;
 
-    // `UnifiedSpendingKey` is used both by the `unstable` serialization tests and by the
-    // derivation tests, which are enabled by a different set of features.
-    #[cfg(any(
-        feature = "unstable",
-        all(
-            feature = "transparent-inputs",
-            any(feature = "orchard", feature = "sapling")
-        )
-    ))]
-    use super::UnifiedSpendingKey;
+    use super::{DerivationError, UnifiedSpendingKey};
 
     #[cfg(feature = "unstable")]
-    use super::{Era, testing::arb_unified_spending_key};
+    use {
+        super::{DecodingError, Era, testing::arb_partial_unified_spending_key},
+        zcash_address::unified::Typecode,
+        zcash_protocol::consensus::BranchId,
+    };
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
     use subtle::ConstantTimeEq;
@@ -2954,7 +3058,7 @@ mod tests {
     proptest! {
         #[test]
         #[cfg(feature = "unstable")]
-        fn prop_usk_roundtrip(usk in arb_unified_spending_key(zcash_protocol::consensus::Network::MainNetwork)) {
+        fn prop_usk_roundtrip(usk in arb_partial_unified_spending_key(zcash_protocol::consensus::Network::MainNetwork)) {
             let encoded = usk.to_bytes(Era::Orchard);
             let encoded = encoded.expose_secret();
 
@@ -2963,15 +3067,15 @@ mod tests {
                 let len = 4;
 
                 #[cfg(feature = "orchard")]
-                let len = len + 2 + 32;
+                let len = len + usk.orchard().map_or(0, |_| 2 + 32);
 
                 #[cfg(feature = "sapling")]
-                let len = len + 2 + 169;
+                let len = len + usk.sapling().map_or(0, |_| 2 + 169);
 
                 // Transparent part is an `xprv` transparent extended key deserialized
                 // into bytes from Base58, minus the 4 prefix bytes.
                 #[cfg(feature = "transparent-inputs")]
-                let len = len + 2 + 74;
+                let len = len + usk.transparent().map_or(0, |_| 2 + 74);
 
                 #[allow(clippy::let_and_return)]
                 len
@@ -2982,14 +3086,74 @@ mod tests {
             let decoded = decoded.unwrap_or_else(|e| panic!("Error decoding USK: {:?}", e));
 
             #[cfg(feature = "orchard")]
-            assert!(bool::from(decoded.orchard().ct_eq(usk.orchard())));
+            match (decoded.orchard(), usk.orchard()) {
+                (Some(d), Some(u)) => assert!(bool::from(d.ct_eq(u))),
+                (None, None) => {}
+                _ => panic!("Orchard component presence changed in round trip"),
+            }
 
             #[cfg(feature = "sapling")]
             assert_eq!(decoded.sapling(), usk.sapling());
 
             #[cfg(feature = "transparent-inputs")]
-            assert_eq!(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
+            assert_eq!(
+                decoded.transparent().map(|k| k.to_bytes()),
+                usk.transparent().map(|k| k.to_bytes())
+            );
+
+            // The viewing key holds exactly the protocols that the spending key holds.
+            let ufvk = usk.to_unified_full_viewing_key();
+            #[cfg(feature = "orchard")]
+            assert_eq!(ufvk.orchard().is_some(), usk.orchard().is_some());
+            #[cfg(feature = "sapling")]
+            assert_eq!(ufvk.sapling().is_some(), usk.sapling().is_some());
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(ufvk.p2pkh().is_some(), usk.transparent().is_some());
         }
+    }
+
+    #[test]
+    fn usk_from_parts_rejects_empty() {
+        assert!(matches!(
+            UnifiedSpendingKey::from_parts(
+                #[cfg(feature = "transparent-inputs")]
+                None,
+                #[cfg(feature = "sapling")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+            ),
+            Err(DerivationError::Empty)
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "unstable")]
+    fn usk_from_bytes_rejects_empty_encoding() {
+        let encoded = u32::from(BranchId::Nu5).to_le_bytes();
+        assert_eq!(
+            UnifiedSpendingKey::from_bytes(Era::Orchard, &encoded).err(),
+            Some(DecodingError::Empty)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "unstable", feature = "sapling"))]
+    fn usk_from_bytes_rejects_duplicate_typecode() {
+        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
+        let sapling_key_bytes = usk.sapling().unwrap().to_bytes();
+
+        let mut encoded = u32::from(BranchId::Nu5).to_le_bytes().to_vec();
+        for _ in 0..2 {
+            CompactSize::write(&mut encoded, usize::try_from(Typecode::SAPLING).unwrap()).unwrap();
+            CompactSize::write(&mut encoded, sapling_key_bytes.len()).unwrap();
+            encoded.extend_from_slice(&sapling_key_bytes);
+        }
+
+        assert_eq!(
+            UnifiedSpendingKey::from_bytes(Era::Orchard, &encoded).err(),
+            Some(DecodingError::DuplicateTypecode(Typecode::SAPLING))
+        );
     }
 
     #[test]

@@ -58,7 +58,7 @@ use zcash_client_backend::{
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
-        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        NullifierQuery, OutputLockStore, PutBlocksError, ReceivedNotes, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
         TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
         Zip32Derivation,
@@ -66,8 +66,8 @@ use zcash_client_backend::{
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
         ll::{
-            self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
-            wallet::store_decrypted_tx,
+            self, LowLevelWalletRead, LowLevelWalletWrite, PutBlockMetaError,
+            ReceivedSaplingOutput, wallet::store_decrypted_tx,
         },
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
@@ -96,7 +96,7 @@ use zcash_protocol::{
 use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::SqliteClientError,
+    error::{PutBlocksTransactionError, SqliteClientError},
     wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
@@ -1780,8 +1780,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
-        let (target_height, _) = self
-            .get_target_and_anchor_heights(NonZeroU32::MIN)?
+        let target_height = wallet::mempool_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
         let TableConstants {
@@ -2036,8 +2035,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.put_blocks(from_state, blocks))
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
+        self.transactionally(|wdb| {
+            wdb.put_blocks(from_state, blocks)
+                .map_err(PutBlocksTransactionError::Batch)
+        })
+        .map_err(PutBlocksTransactionError::into_put_blocks_error)
     }
 
     fn put_received_transparent_utxo(
@@ -2492,7 +2495,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
-    ) -> Result<(), <Self as WalletRead>::Error> {
+    ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
         // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
         // retention grids are retained as durable anchors. The activation height is `None` (and so
         // anchor retention is inactive) on networks that do not yet have an assigned NU6.3
@@ -2518,8 +2521,11 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                     core::iter::once(self.anchor_retention_interval).chain(committed),
                 ))
             })
-            .transpose()?
+            .transpose()
+            .map_err(PutBlocksError::Wallet)?
             .flatten();
+        let chain_tip = wallet::chain_tip_height(self.conn.borrow())
+            .map_err(|e| PutBlocksError::Wallet(SqliteClientError::from(e)))?;
 
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
@@ -2527,9 +2533,13 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             self.gap_limits,
             from_state,
             blocks,
+            chain_tip,
             anchor_retention.as_ref(),
         )
-        .map_err(SqliteClientError::from)
+        .map_err(|error| match error {
+            ll::wallet::PutBlocksError::Continuity(error) => PutBlocksError::Continuity(error),
+            other => PutBlocksError::Wallet(SqliteClientError::from(other)),
+        })
     }
 
     fn put_received_transparent_utxo(
@@ -2538,6 +2548,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         #[cfg(feature = "transparent-inputs")]
         return {
+            if let Some(mined_height) = _output.mined_height() {
+                wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+            }
             let (account_id, _, key_scope, utxo_id) =
                 wallet::transparent::put_received_transparent_utxo(
                     self.conn.0,
@@ -2571,6 +2584,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         d_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let Some(mined_height) = d_tx.mined_height() {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
         store_decrypted_tx(
@@ -2759,6 +2775,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), <Self as WalletRead>::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.0, &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.0,
             &self.params,
@@ -3011,7 +3030,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         #[cfg(feature = "orchard")] orchard_action_count: u32,
         #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] ironwood_action_count: u32,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), PutBlockMetaError<Self::Error>> {
+        // A block stored at this height with a different hash means that the chain has
+        // reorganized below the scanned range. Report that before anything is overwritten.
+        if let Some(stored) = wallet::stored_block_hash(self.conn.borrow(), block_height)
+            .map_err(PutBlockMetaError::Storage)?
+            && stored != block_hash
+        {
+            return Err(PutBlockMetaError::HashMismatch { stored });
+        }
         wallet::put_block(
             self.conn.borrow(),
             block_height,
@@ -3028,6 +3055,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             #[cfg(feature = "orchard")]
             ironwood_action_count,
         )
+        .map_err(PutBlockMetaError::Storage)
     }
 
     fn put_tx_meta(
@@ -3061,6 +3089,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
+        if let data_api::TransactionStatus::Mined(mined_height) = status {
+            wallet::scanning::extend_chain_tip_to(self.conn.borrow(), &self.params, mined_height)?;
+        }
         wallet::set_transaction_status(
             self.conn.borrow(),
             &self.params,
@@ -4185,11 +4216,16 @@ mod tests {
     use uuid::Uuid;
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
-    use zcash_client_backend::data_api::{
-        Account, AccountBirthday, AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT,
-        WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
-        chain::{ChainState, CommitmentTreeRoot},
-        testing::{TestBuilder, TestState},
+    use zcash_client_backend::{
+        data_api::{
+            Account, AccountBirthday, AccountPurpose, AccountSource, MaxSpendMode,
+            SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
+            chain::{ChainState, CommitmentTreeRoot},
+            testing::{AddressType, TestBuilder, TestState},
+            wallet::ConfirmationsPolicy,
+        },
+        fees::StandardFeeRule,
+        wallet::OvkPolicy,
     };
     use zcash_keys::{
         address::{Address, UnifiedAddress},
@@ -4199,13 +4235,18 @@ mod tests {
         },
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{consensus, local_consensus::LocalNetwork};
+    use zcash_protocol::{consensus, local_consensus::LocalNetwork, value::Zatoshis};
     use zip32::{DiversifierIndex, Scope};
+    #[cfg(feature = "orchard")]
+    use {zcash_client_backend::data_api::error::Error, zcash_protocol::PoolType};
 
     use crate::{
         AccountUuid,
         error::SqliteClientError,
-        testing::db::{TestDb, TestDbFactory},
+        testing::{
+            BlockCache,
+            db::{TestDb, TestDbFactory},
+        },
         util::Clock as _,
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
@@ -4213,10 +4254,8 @@ mod tests {
     use incrementalmerkletree::Hashable as _;
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::FsBlockCache,
-        zcash_client_backend::data_api::testing::AddressType,
-        zcash_keys::keys::sapling,
-        zcash_protocol::{consensus::NetworkConstants, value::Zatoshis},
+        crate::testing::FsBlockCache, zcash_keys::keys::sapling,
+        zcash_protocol::consensus::NetworkConstants,
     };
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     use {
@@ -4225,7 +4264,7 @@ mod tests {
     };
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests},
+        crate::{GapLimits, wallet::transparent::transaction_data_requests},
         rusqlite::named_params,
         std::collections::BTreeSet,
         zcash_client_backend::data_api::TransactionDataRequest,
@@ -4930,6 +4969,163 @@ mod tests {
             ufvk,
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == first_account.id()),
+        );
+    }
+
+    /// A spending key that holds only a Sapling key spends from the account that its viewing
+    /// key was imported as.
+    #[test]
+    fn sapling_only_spending_key_spends_from_imported_account() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed_derived_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[0u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let usk = UnifiedSpendingKey::from_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            seed_derived_usk.sapling().cloned(),
+            #[cfg(feature = "orchard")]
+            None,
+        )
+        .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+
+        let value = Zatoshis::const_from_u64(60000);
+        let (height, _, _) =
+            st.generate_next_block(ufvk.sapling().unwrap(), AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(height, 1);
+
+        let recipient_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let recipient = Address::Sapling(Box::new(
+            recipient_usk
+                .sapling()
+                .unwrap()
+                .to_diversifiable_full_viewing_key()
+                .default_address()
+                .1,
+        ))
+        .to_zcash_address(st.network());
+
+        let proposal = st
+            .propose_send_max_transfer(
+                account.id(),
+                &StandardFeeRule::Zip317,
+                recipient,
+                None,
+                MaxSpendMode::Everything,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let txids = st
+            .create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+                &usk,
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+        assert_eq!(txids.len(), 1);
+    }
+
+    /// A spending key that holds only a Sapling key cannot spend an Orchard note, even though
+    /// its viewing key identifies an account that holds that note.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn sapling_only_spending_key_cannot_spend_orchard_notes() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed_derived_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[0u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let seed_derived_ufvk = seed_derived_usk.to_unified_full_viewing_key();
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &seed_derived_ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+
+        let value = Zatoshis::const_from_u64(60000);
+        let (height, _, _) = st.generate_next_block(
+            seed_derived_ufvk.orchard().unwrap(),
+            AddressType::DefaultExternal,
+            value,
+        );
+        st.scan_cached_blocks(height, 1);
+
+        let recipient_usk =
+            UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], zip32::AccountId::ZERO)
+                .unwrap();
+        let recipient = Address::Sapling(Box::new(
+            recipient_usk
+                .sapling()
+                .unwrap()
+                .to_diversifiable_full_viewing_key()
+                .default_address()
+                .1,
+        ))
+        .to_zcash_address(st.network());
+
+        let proposal = st
+            .propose_send_max_transfer(
+                account.id(),
+                &StandardFeeRule::Zip317,
+                recipient,
+                None,
+                MaxSpendMode::Everything,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let sapling_only_usk = UnifiedSpendingKey::from_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            seed_derived_usk.sapling().cloned(),
+            None,
+        )
+        .unwrap();
+
+        assert_matches!(
+            st.create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+                &sapling_only_usk,
+                OvkPolicy::Sender,
+                &proposal,
+            ),
+            Err(Error::KeyNotAvailable(PoolType::ORCHARD))
         );
     }
 

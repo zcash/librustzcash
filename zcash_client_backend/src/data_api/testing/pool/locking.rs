@@ -71,18 +71,19 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     let retry_required = (amount_retry + zip317_fee).unwrap();
     st.expect_insufficient_funds(&to, amount_retry, nothing_available, retry_required);
 
-    // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
-    // until just before the first transaction expires
-    st.mine_decoy_blocks(1u8..42, value);
+    // Mine and scan 40 blocks that don't send us funds, up to just before the first
+    // transaction expires. Every mined block is scanned: an unscanned block below the tip
+    // would itself withhold spendability.
+    st.mine_decoy_blocks(1u8..41, value);
     st.scan_cached_blocks(h1 + 1, 40);
 
     // Second proposal still fails
     st.expect_insufficient_funds(&to, amount_retry, nothing_available, retry_required);
 
-    // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
+    // Mine the block at which the first transaction expires.
     let expiring_block_seed = 42;
-    let h43 = st.mine_decoy_block(expiring_block_seed, value);
-    st.scan_cached_blocks(h43, 1);
+    let expiry_height = st.mine_decoy_block(expiring_block_seed, value);
+    st.scan_cached_blocks(expiry_height, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);

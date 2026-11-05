@@ -44,11 +44,11 @@ user-login = "schell"
 user-name = "Schell Carl Scivally"
 
 [[publisher.equihash]]
-version = "0.3.0"
-when = "2026-04-24"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.3.1"
+when = "2026-10-27"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.f4jumble]]
 version = "0.1.2"

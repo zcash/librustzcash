@@ -75,8 +75,10 @@ pub enum InputSelectorError<DbErrT, SelectorErrT, ChangeErrT, N> {
         available: Zatoshis,
         required: Zatoshis,
     },
-    /// The data source does not have enough information to choose an expiry height
-    /// for the transaction.
+    /// The data source has no target height or no anchor height for the transaction:
+    /// [`WalletRead::get_target_and_anchor_heights`] returned `None`.
+    ///
+    /// [`WalletRead::get_target_and_anchor_heights`]: crate::data_api::WalletRead::get_target_and_anchor_heights
     SyncRequired,
 }
 
