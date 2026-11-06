@@ -468,13 +468,21 @@ impl fmt::Display for SqliteClientError {
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(key_scope, bad_index) => write!(
                 f,
-                "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
-                 The address at index {bad_index} could not be safely reserved.",
-                match *key_scope {
+                "The proposal cannot be constructed until a transaction with outputs to a previously reserved {scope} address has been mined. \
+                 The address at index {bad_index} could not be safely reserved.{pczt_note}",
+                scope = match *key_scope {
                     TransparentKeyScope::EXTERNAL => "external transparent",
                     TransparentKeyScope::INTERNAL => "transparent change",
                     TransparentKeyScope::EPHEMERAL => "ephemeral transparent",
                     _ => panic!("Unsupported transparent key scope."),
+                },
+                pczt_note = if *key_scope == TransparentKeyScope::INTERNAL || *key_scope == TransparentKeyScope::EPHEMERAL {
+                    " Note: incomplete or abandoned PCZTs that reserved addresses without broadcasting \
+                     a transaction can cause this condition; if no pending transaction is expected to be \
+                     mined, the wallet may be permanently unable to send to this address type until a \
+                     previously-reserved address receives funds."
+                } else {
+                    ""
                 }
             ),
             SqliteClientError::DiversifierIndexReuse(i, _) => {
