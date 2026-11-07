@@ -631,6 +631,16 @@ artifacts of a development session, not repository history. Never commit them.
 - After writing a plan or spec, report its full absolute path, untruncated, so
   it can be copy-pasted.
 
+## Agent Skills
+
+Skills for this repository live in `.agents/skills/`, in the
+[Agent Skills](https://agentskills.io) format. Claude Code loads them through
+the `.claude/skills` link. Tools that support skills but don't load them from
+either path can read a skill's `SKILL.md` directly.
+
+- `librustzcash-release`: releasing crates, and tagging published releases,
+  including tags missing from earlier releases.
+
 ## Changelog & Commit Discipline
 
 - Update the crate's `CHANGELOG.md` for any public API change, bug fix, or

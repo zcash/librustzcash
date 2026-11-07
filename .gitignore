@@ -1,3 +1,5 @@
 target
 .plans/
-.claude
+# Local Claude Code state, except the link that shares the repository's skills.
+.claude/*
+!.claude/skills
