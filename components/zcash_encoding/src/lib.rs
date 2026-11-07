@@ -182,9 +182,8 @@ impl Vector {
 
     /// Reads a byte vector encoded as a [`CompactSize`] length followed by that many bytes.
     ///
-    /// The allocation exceeds the number of bytes actually read by at most a small fixed
-    /// amount, so a large declared length followed by a short input does not cause a large
-    /// allocation.
+    /// The allocation grows with the bytes actually read rather than the declared length, allowing
+    /// for spare capacity from amortized growth and a fixed-size read-ahead chunk.
     ///
     /// Returns an error if the length is non-canonical, exceeds [`MAX_COMPACT_SIZE`], or cannot
     /// fit in a `usize`, or if the reader fails. A truncated prefix or payload returns
