@@ -30,6 +30,9 @@ workspace.
     present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
     non-empty subset of the components. `from_bytes` now reads the entire
     input, and returns an error for trailing data or a repeated typecode.
+- `zcash_keys::address::UnifiedAddress` decoding omits a metadata item with typecode
+  `0xC0` (ZIP 316 Viewing Key Birthday Height), so the decoded address no longer
+  holds it and does not re-encode it.
 
 ## [0.17.0] - 2026-10-21
 

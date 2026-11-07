@@ -1321,6 +1321,9 @@ impl UnifiedFullViewingKey {
                 Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
                     expiry_time = Some(*t);
                 }
+                Uitem::Metadata(item @ MetadataItem::BirthdayHeight(_)) => {
+                    unknown_metadata.push((u32::from(item.typecode()), item.data()));
+                }
                 Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
                     unknown_metadata.push((*typecode, data.clone()));
                 }
@@ -1901,6 +1904,9 @@ impl UnifiedIncomingViewingKey {
                 }
                 Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
                     expiry_time = Some(*t);
+                }
+                Uitem::Metadata(item @ MetadataItem::BirthdayHeight(_)) => {
+                    unknown_metadata.push((u32::from(item.typecode()), item.data()));
                 }
                 Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
                     unknown_metadata.push((*typecode, data.clone()));
