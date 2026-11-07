@@ -73,13 +73,14 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     proto::compact_formats::CompactBlock,
+    scanning::AccountScanningKeys,
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
     address::UnifiedAddress,
     keys::{
         AddressGenerationError::*, ReceiverRequirement, UnifiedAddressRequest,
-        UnifiedFullViewingKey, UnifiedSpendingKey,
+        UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
 use zcash_primitives::{
@@ -92,7 +93,7 @@ use zcash_protocol::{
     memo::Memo,
     value::Zatoshis,
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use crate::{
     error::{PutBlocksTransactionError, SqliteClientError},
@@ -112,7 +113,7 @@ use zcash_client_backend::{
         IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT, ll::ReceivedOrchardOutput,
         zip318::classify_decrypted_tx,
     },
-    decrypt_transaction,
+    decrypt_transaction_with_ivks,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1466,6 +1467,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
     }
 
+    fn get_scanning_keys(
+        &self,
+        scopes: &HashSet<Scope>,
+    ) -> Result<AccountScanningKeys<Self::AccountId>, Self::Error> {
+        wallet::get_scanning_keys(self.conn.borrow(), &self.params, scopes)
+    }
+
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
         let sent_memo = wallet::get_sent_memo(self.conn.borrow(), note_id)?;
         if sent_memo.is_some() {
@@ -1919,6 +1927,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    fn import_account_uivk(
+        &mut self,
+        account_name: &str,
+        uivk: &UnifiedIncomingViewingKey,
+        birthday: &AccountBirthday,
+        key_source: Option<&str>,
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| {
+            wdb.import_account_uivk(account_name, uivk, birthday, key_source)
+        })
+    }
+
     fn delete_account(
         &mut self,
         account_uuid: <Self as WalletRead>::AccountId,
@@ -2323,6 +2343,28 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         )
     }
 
+    fn import_account_uivk(
+        &mut self,
+        account_name: &str,
+        uivk: &UnifiedIncomingViewingKey,
+        birthday: &AccountBirthday,
+        key_source: Option<&str>,
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
+        wallet::add_account(
+            self.conn.0,
+            &self.params,
+            account_name,
+            &AccountSource::Imported {
+                purpose: AccountPurpose::ViewOnly,
+                key_source: key_source.map(|s| s.to_owned()),
+            },
+            wallet::ViewingKey::Incoming(Box::new(uivk.to_owned())),
+            birthday,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+        )
+    }
+
     fn delete_account(
         &mut self,
         account_uuid: <Self as WalletRead>::AccountId,
@@ -2578,6 +2620,21 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         // monotonicity contract forbids.
         #[cfg(feature = "orchard")]
         let ufvks = self.get_unified_full_viewing_keys()?;
+        #[cfg(feature = "orchard")]
+        let uivks = {
+            let mut uivks = HashMap::new();
+            for account_id in self.get_account_ids()? {
+                if ufvks.contains_key(&account_id) {
+                    continue;
+                }
+                if let Some(account) = self.get_account(account_id)?
+                    && account.ufvk().is_none()
+                {
+                    uivks.insert(account_id, account.uivk());
+                }
+            }
+            uivks
+        };
         // The wallet's OWN grid, not the specified default. Unlike the enhance path — which cannot
         // reach it through `LowLevelWalletRead` and documents that it settles for the defaults
         // because no clause it can answer consults the grid — this site has the store in hand, so
@@ -2618,8 +2675,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             // passes the chain tip in the same situation.
             #[cfg(feature = "orchard")]
             {
-                let decrypted =
-                    decrypt_transaction(&self.params, None, chain_tip, sent_tx.tx(), &ufvks);
+                let decrypted = decrypt_transaction_with_ivks(
+                    &self.params,
+                    None,
+                    chain_tip,
+                    sent_tx.tx(),
+                    &ufvks,
+                    &uivks,
+                );
                 let classification = classify_decrypted_tx(
                     sent_tx.tx(),
                     decrypted.orchard_outputs(),
@@ -4149,6 +4212,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use secrecy::{ExposeSecret, Secret, SecretVec};
+    use std::collections::HashSet;
     use uuid::Uuid;
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
@@ -4172,7 +4236,7 @@ mod tests {
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{consensus, local_consensus::LocalNetwork, value::Zatoshis};
-    use zip32::DiversifierIndex;
+    use zip32::{DiversifierIndex, Scope};
     #[cfg(feature = "orchard")]
     use {zcash_client_backend::data_api::error::Error, zcash_protocol::PoolType};
 
@@ -5292,6 +5356,154 @@ mod tests {
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == seed_based.0),
         );
+    }
+
+    #[test]
+    pub(crate) fn import_account_uivk_is_view_only() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0x42u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let uivk = usk
+            .to_unified_full_viewing_key()
+            .to_unified_incoming_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_uivk("viewer", &uivk, &birthday, Some("imported-uivk"))
+            .unwrap();
+        assert!(account.ufvk().is_none());
+        assert_matches!(
+            account.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::ViewOnly,
+                key_source: Some(source),
+            } if source == "imported-uivk"
+        );
+
+        let stored = st
+            .wallet()
+            .get_account(account.id())
+            .unwrap()
+            .expect("the account was persisted");
+        assert_eq!(
+            stored.uivk().encode(st.network()).unwrap(),
+            uivk.encode(st.network()).unwrap()
+        );
+        assert!(stored.ufvk().is_none());
+
+        let scanning_keys = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
+            .unwrap();
+        assert!(
+            scanning_keys
+                .sapling()
+                .contains_key(&(account.id(), Scope::External))
+        );
+        assert!(
+            !scanning_keys
+                .sapling()
+                .contains_key(&(account.id(), Scope::Internal))
+        );
+        assert!(
+            st.wallet()
+                .get_unified_full_viewing_keys()
+                .unwrap()
+                .is_empty()
+        );
+
+        assert_matches!(
+            st.wallet_mut()
+                .import_account_uivk("again", &uivk, &birthday, None),
+            Err(SqliteClientError::AccountCollision(id)) if id == account.id()
+        );
+    }
+
+    /// `get_scanning_keys` reads full viewing keys and incoming-viewing-key-only accounts in
+    /// one query, and keeps only the requested scopes. An incoming viewing key has no internal
+    /// scope.
+    #[test]
+    fn get_scanning_keys_selects_scopes_for_ufvk_and_uivk_accounts() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let (ufvk_id, _) = st
+            .wallet_mut()
+            .create_account("spender", &Secret::new(vec![0x11; 32]), &birthday, None)
+            .unwrap();
+        let uivk = UnifiedSpendingKey::from_seed(st.network(), &[0x22; 32], zip32::AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key()
+            .to_unified_incoming_viewing_key();
+        let uivk_id = st
+            .wallet_mut()
+            .import_account_uivk("viewer", &uivk, &birthday, None)
+            .unwrap()
+            .id();
+
+        let both = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
+            .unwrap();
+        assert!(both.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(both.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(both.sapling().contains_key(&(uivk_id, Scope::External)));
+        assert!(!both.sapling().contains_key(&(uivk_id, Scope::Internal)));
+
+        let external = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::External]))
+            .unwrap();
+        assert!(external.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(!external.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(external.sapling().contains_key(&(uivk_id, Scope::External)));
+
+        let internal = st
+            .wallet()
+            .get_scanning_keys(&HashSet::from([Scope::Internal]))
+            .unwrap();
+        assert!(!internal.sapling().contains_key(&(ufvk_id, Scope::External)));
+        assert!(internal.sapling().contains_key(&(ufvk_id, Scope::Internal)));
+        assert!(!internal.sapling().contains_key(&(uivk_id, Scope::External)));
+        assert!(!internal.sapling().contains_key(&(uivk_id, Scope::Internal)));
+
+        let none = st.wallet().get_scanning_keys(&HashSet::new()).unwrap();
+        assert!(none.sapling().is_empty());
+
+        #[cfg(feature = "orchard")]
+        {
+            assert!(both.orchard().contains_key(&(ufvk_id, Scope::External)));
+            assert!(both.orchard().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(both.orchard().contains_key(&(uivk_id, Scope::External)));
+            assert!(!both.orchard().contains_key(&(uivk_id, Scope::Internal)));
+            assert!(both.ironwood().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(both.ironwood().contains_key(&(uivk_id, Scope::External)));
+            assert!(!both.ironwood().contains_key(&(uivk_id, Scope::Internal)));
+            assert!(internal.orchard().contains_key(&(ufvk_id, Scope::Internal)));
+            assert!(!internal.orchard().contains_key(&(uivk_id, Scope::External)));
+            assert!(
+                internal
+                    .ironwood()
+                    .contains_key(&(ufvk_id, Scope::Internal))
+            );
+            assert!(none.orchard().is_empty());
+            assert!(none.ironwood().is_empty());
+        }
     }
 
     #[test]

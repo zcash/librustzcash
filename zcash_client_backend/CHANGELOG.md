@@ -11,6 +11,25 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::WalletWrite::import_account_uivk`, which imports an
+  account from a `UnifiedIncomingViewingKey`. The account is view-only: scanning and
+  `decrypt_transaction_with_ivks` detect notes sent to its external addresses, and do not
+  detect spends, change, or outputs the account funded.
+- `zcash_client_backend::data_api::WalletRead::get_scanning_keys`, with a default
+  implementation. It returns an `AccountScanningKeys` for the requested ZIP 32 scopes.
+  An account with a unified full viewing key contributes each requested scope, including
+  the nullifier-deriving key. An account with only a unified incoming viewing key
+  contributes the external scope when it was requested, and no nullifier-deriving key.
+- `zcash_client_backend::scanning::AccountScanningKeys`, the `ScanningKeys` set
+  `get_scanning_keys` returns.
+- `zcash_client_backend::scanning::ScanningKeys::from_account_uivks`,
+  `ScanningKeys::from_ufvk_and_uivk_accounts`, and `ScanningKeys::extend`.
+- `zcash_client_backend::decrypt_transaction_with_ivks`, which trial-decrypts with both
+  unified full viewing keys and unified incoming viewing keys.
+- `scan_cached_blocks` and `decrypt_and_store_transaction` now include
+  incoming-viewing-key-only accounts. `scan_cached_blocks` loads those accounts
+  through `WalletRead::get_scanning_keys`. `decrypt_transaction` is unchanged and
+  still trial-decrypts unified full viewing keys only.
 - `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
 - `zcash_client_backend::data_api::PutBlocksError`
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
@@ -105,6 +124,8 @@ workspace.
   holds keys for only some protocols. They return
   `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
   pool for which the spending key holds no key.
+- `WalletWrite` has a new required method, `import_account_uivk`. Implementors of the
+  trait must provide it.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,

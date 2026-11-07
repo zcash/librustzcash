@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
-use zcash_keys::keys::{OutgoingViewingKey, UnifiedFullViewingKey};
+use zcash_keys::keys::{OutgoingViewingKey, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
     transaction::Transaction, transaction::components::sapling::zip212_enforcement,
@@ -174,6 +174,46 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     tx: &'a Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> DecryptedTransaction<'a, Transaction, AccountId> {
+    decrypt_transaction_with_ivks(
+        params,
+        mined_height,
+        chain_tip_height,
+        tx,
+        ufvks,
+        &HashMap::new(),
+    )
+}
+
+/// Scans a [`Transaction`] for any information that can be decrypted by the given
+/// [`UnifiedFullViewingKey`]s and [`UnifiedIncomingViewingKey`]s.
+///
+/// `ufvks` are trial-decrypted in every scope those keys support, including outgoing-ciphertext
+/// recovery. `uivks` are trial-decrypted for external-scope incoming notes only: an incoming
+/// viewing key has no internal-scope key, no nullifier-deriving key, and no outgoing viewing key.
+///
+/// An account should appear in at most one of the maps. An account present in both is decrypted
+/// twice, and a single output can be reported once for each map.
+///
+/// # Parameters
+/// - `params`: The network parameters corresponding to the network the transaction
+///   was created for.
+/// - `mined_height`: The height at which the transaction was mined, or `None` for
+///   unmined transactions.
+/// - `chain_tip_height`: The current chain tip height, if known. This parameter
+///   will be unused if `mined_height.is_some()`.
+/// - `tx`: The transaction to decrypt.
+/// - `ufvks`: The [`UnifiedFullViewingKey`]s to use in trial decryption, keyed
+///   by the identifiers for the wallet accounts they correspond to.
+/// - `uivks`: The [`UnifiedIncomingViewingKey`]s for incoming-viewing-key-only accounts, keyed
+///   by the identifiers for the wallet accounts they correspond to.
+pub fn decrypt_transaction_with_ivks<'a, P: consensus::Parameters, AccountId: Copy>(
+    params: &P,
+    mined_height: Option<BlockHeight>,
+    chain_tip_height: Option<BlockHeight>,
+    tx: &'a Transaction,
+    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
+    uivks: &HashMap<AccountId, UnifiedIncomingViewingKey>,
+) -> DecryptedTransaction<'a, Transaction, AccountId> {
     let zip212_enforcement = zip212_enforcement(
         params,
         // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
@@ -188,72 +228,99 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         }),
     );
     let sapling_bundle = tx.sapling_bundle();
-    let sapling_outputs = sapling_bundle
-        .iter()
-        .flat_map(|bundle| {
-            ufvks.iter().flat_map(|(account, ufvk)| {
-                let account = *account;
-                let sapling_domain = SaplingDomain::new(zip212_enforcement);
-                // An account can only receive a Sapling output if its UFVK has a Sapling item,
-                // but it can fund one from any pool, so outgoing recovery is attempted for
-                // every account.
-                let ivks = ufvk.sapling().map(|dfvk| {
-                    (
-                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External)),
-                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal)),
-                    )
-                });
-                let ovks = candidate_ovks(ufvk)
-                    .into_iter()
-                    .map(::sapling::keys::OutgoingViewingKey::from)
-                    .collect::<Vec<_>>();
+    let sapling_outputs_from_ufvks = sapling_bundle.iter().flat_map(|bundle| {
+        ufvks.iter().flat_map(|(account, ufvk)| {
+            let account = *account;
+            let sapling_domain = SaplingDomain::new(zip212_enforcement);
+            // An account can only receive a Sapling output if its UFVK has a Sapling item,
+            // but it can fund one from any pool, so outgoing recovery is attempted for
+            // every account.
+            let ivks = ufvk.sapling().map(|dfvk| {
+                (
+                    PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External)),
+                    PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal)),
+                )
+            });
+            let ovks = candidate_ovks(ufvk)
+                .into_iter()
+                .map(::sapling::keys::OutgoingViewingKey::from)
+                .collect::<Vec<_>>();
 
-                bundle
-                    .shielded_outputs()
-                    .iter()
-                    .enumerate()
-                    .flat_map(move |(index, output)| {
-                        ivks.as_ref()
-                            .and_then(|(ivk_external, ivk_internal)| {
-                                try_note_decryption(&sapling_domain, ivk_external, output)
-                                    .map(|ret| (ret, TransferType::Incoming))
-                                    .or_else(|| {
-                                        try_note_decryption(&sapling_domain, ivk_internal, output)
-                                            .map(|ret| (ret, TransferType::AccountInternal))
-                                    })
-                            })
-                            .or_else(|| {
-                                // Recovery under any candidate OVK yields `Outgoing`
-                                // unconditionally: the incoming and internal trial decryptions
-                                // above have already run and failed, so this account is not the
-                                // recipient of the output. Which candidate matched identifies
-                                // only the pool the sender spent from, not the recipient.
-                                ovks.iter()
-                                    .find_map(|ovk| {
-                                        try_output_recovery_with_ovk(
-                                            &sapling_domain,
-                                            ovk,
-                                            output,
-                                            output.cv(),
-                                            output.out_ciphertext(),
-                                        )
-                                    })
-                                    .map(|ret| (ret, TransferType::Outgoing))
-                            })
-                            .into_iter()
-                            .map(move |((note, _, memo), transfer_type)| {
-                                DecryptedOutput::new(
-                                    index,
-                                    note,
-                                    ShieldedPool::Sapling,
-                                    account,
-                                    MemoBytes::from_bytes(&memo).expect("correct length"),
-                                    transfer_type,
-                                )
-                            })
-                    })
-            })
+            bundle
+                .shielded_outputs()
+                .iter()
+                .enumerate()
+                .flat_map(move |(index, output)| {
+                    ivks.as_ref()
+                        .and_then(|(ivk_external, ivk_internal)| {
+                            try_note_decryption(&sapling_domain, ivk_external, output)
+                                .map(|ret| (ret, TransferType::Incoming))
+                                .or_else(|| {
+                                    try_note_decryption(&sapling_domain, ivk_internal, output)
+                                        .map(|ret| (ret, TransferType::AccountInternal))
+                                })
+                        })
+                        .or_else(|| {
+                            // Recovery under any candidate OVK yields `Outgoing`
+                            // unconditionally: the incoming and internal trial decryptions
+                            // above have already run and failed, so this account is not the
+                            // recipient of the output. Which candidate matched identifies
+                            // only the pool the sender spent from, not the recipient.
+                            ovks.iter()
+                                .find_map(|ovk| {
+                                    try_output_recovery_with_ovk(
+                                        &sapling_domain,
+                                        ovk,
+                                        output,
+                                        output.cv(),
+                                        output.out_ciphertext(),
+                                    )
+                                })
+                                .map(|ret| (ret, TransferType::Outgoing))
+                        })
+                        .into_iter()
+                        .map(move |((note, _, memo), transfer_type)| {
+                            DecryptedOutput::new(
+                                index,
+                                note,
+                                ShieldedPool::Sapling,
+                                account,
+                                MemoBytes::from_bytes(&memo).expect("correct length"),
+                                transfer_type,
+                            )
+                        })
+                })
         })
+    });
+    let sapling_outputs_from_uivks =
+        sapling_bundle.iter().flat_map(|bundle| {
+            uivks
+                .iter()
+                .filter_map(|(account, uivk)| {
+                    uivk.sapling().as_ref().map(|ivk| (*account, ivk.prepare()))
+                })
+                .flat_map(|(account, ivk_external)| {
+                    let sapling_domain = SaplingDomain::new(zip212_enforcement);
+                    bundle.shielded_outputs().iter().enumerate().filter_map(
+                        move |(index, output)| {
+                            try_note_decryption(&sapling_domain, &ivk_external, output).map(
+                                |(note, _, memo)| {
+                                    DecryptedOutput::new(
+                                        index,
+                                        note,
+                                        ShieldedPool::Sapling,
+                                        account,
+                                        MemoBytes::from_bytes(&memo).expect("correct length"),
+                                        TransferType::Incoming,
+                                    )
+                                },
+                            )
+                        },
+                    )
+                })
+        });
+    let sapling_outputs = sapling_outputs_from_ufvks
+        .chain(sapling_outputs_from_uivks)
         .collect();
 
     // Trial-decrypt an Orchard-family (Orchard or Ironwood) bundle. The two bundle kinds are
@@ -265,6 +332,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     #[cfg(feature = "orchard")]
     fn decrypt_orchard_protocol_bundle<V: DomainVersion, AccountId: Copy>(
         ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
+        uivks: &HashMap<AccountId, UnifiedIncomingViewingKey>,
         bundle: &orchard::bundle::Bundle<
             orchard::bundle::Authorized,
             zcash_protocol::value::ZatBalance,
@@ -272,7 +340,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         pool: orchard::ValuePool,
     ) -> impl Iterator<Item = DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>> {
         let shielded_pool = crate::wallet::shielded_pool_for_value_pool(pool);
-        ufvks.iter().flat_map(move |(account, ufvk)| {
+        let from_ufvks = ufvks.iter().flat_map(move |(account, ufvk)| {
             let account = *account;
             // An account can only receive an Orchard-family output if its UFVK has an Orchard
             // item, but it can fund one from any pool, so outgoing recovery is attempted for
@@ -333,7 +401,39 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                             )
                         })
                 })
-        })
+        });
+        let from_uivks = uivks
+            .iter()
+            .filter_map(|(account, uivk)| {
+                uivk.orchard().as_ref().map(|ivk| {
+                    (
+                        *account,
+                        orchard::keys::PreparedIncomingViewingKey::new(ivk),
+                    )
+                })
+            })
+            .flat_map(move |(account, ivk_external)| {
+                bundle
+                    .actions()
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, action)| {
+                        let domain = NoteEncryptionDomain::<V>::for_action(action);
+                        try_note_decryption(&domain, &ivk_external, action).map(
+                            |(note, _, memo)| {
+                                DecryptedOutput::new(
+                                    index,
+                                    (note, pool),
+                                    shielded_pool,
+                                    account,
+                                    MemoBytes::from_bytes(&memo).expect("correct length"),
+                                    TransferType::Incoming,
+                                )
+                            },
+                        )
+                    })
+            });
+        from_ufvks.chain(from_uivks)
     }
 
     #[cfg(feature = "orchard")]
@@ -343,6 +443,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .flat_map(|bundle| {
             decrypt_orchard_protocol_bundle::<OrchardVersion, _>(
                 ufvks,
+                uivks,
                 bundle,
                 orchard::ValuePool::Orchard,
             )
@@ -356,6 +457,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .flat_map(|bundle| {
             decrypt_orchard_protocol_bundle::<IronwoodVersion, _>(
                 ufvks,
+                uivks,
                 bundle,
                 orchard::ValuePool::Ironwood,
             )
@@ -397,7 +499,7 @@ mod tests {
     };
     use zip32::{AccountId, Scope};
 
-    use super::{SaplingDomain, TransferType, decrypt_transaction};
+    use super::{SaplingDomain, TransferType, decrypt_transaction, decrypt_transaction_with_ivks};
 
     /// A height at which ZIP 212 is fully enforced on the test network, so that the note
     /// plaintexts built here and the domain `decrypt_transaction` reconstructs agree.
@@ -566,6 +668,77 @@ mod tests {
                 "output encrypted under the {label} OVK was not recovered"
             );
         }
+    }
+
+    /// A note sent to the wallet's external Sapling address is decrypted by the account's
+    /// incoming viewing key alone, and is reported as incoming for that account.
+    #[test]
+    fn sapling_output_decrypted_with_uivk_only() {
+        let mut rng = ChaChaRng::seed_from_u64(5);
+        let ufvk = wallet_ufvk();
+        let recipient = ufvk
+            .sapling()
+            .expect("UFVK has a Sapling item")
+            .default_address()
+            .1;
+        let tx = sapling_tx_paying(recipient, foreign_ovk(), &mut rng);
+
+        // The full viewing key still sees the same incoming note.
+        assert_eq!(decrypt_sapling(&tx), vec![(TransferType::Incoming, VALUE)]);
+
+        let mut uivks = HashMap::new();
+        uivks.insert(7u32, ufvk.to_unified_incoming_viewing_key());
+        let found: Vec<_> = decrypt_transaction_with_ivks(
+            &Network::TestNetwork,
+            Some(BlockHeight::from_u32(MINED_HEIGHT)),
+            None,
+            &tx,
+            &HashMap::new(),
+            &uivks,
+        )
+        .sapling_outputs()
+        .iter()
+        .map(|output| {
+            (
+                *output.account(),
+                output.transfer_type(),
+                output.note_value(),
+            )
+        })
+        .collect();
+        assert_eq!(found, vec![(7u32, TransferType::Incoming, VALUE)]);
+    }
+
+    /// An incoming viewing key cannot recover an output the account funded. Outgoing recovery
+    /// requires an outgoing viewing key, which a UIVK does not carry.
+    #[test]
+    fn sapling_output_not_recovered_as_outgoing_with_uivk_only() {
+        let mut rng = ChaChaRng::seed_from_u64(6);
+        let ufvk = wallet_ufvk();
+        let recipient = counterparty_ufvk()
+            .sapling()
+            .expect("UFVK has a Sapling item")
+            .default_address()
+            .1;
+        let ovk = ufvk
+            .sapling()
+            .expect("UFVK has a Sapling item")
+            .to_ovk(Scope::External)
+            .into();
+        let tx = sapling_tx_paying(recipient, ovk, &mut rng);
+        assert_eq!(decrypt_sapling(&tx), vec![(TransferType::Outgoing, VALUE)]);
+
+        let mut uivks = HashMap::new();
+        uivks.insert(0u32, ufvk.to_unified_incoming_viewing_key());
+        let found = decrypt_transaction_with_ivks(
+            &Network::TestNetwork,
+            Some(BlockHeight::from_u32(MINED_HEIGHT)),
+            None,
+            &tx,
+            &HashMap::new(),
+            &uivks,
+        );
+        assert!(found.sapling_outputs().is_empty());
     }
 
     /// An outgoing ciphertext that no wallet key can open is not reported.
@@ -746,6 +919,44 @@ mod tests {
                 "action encrypted under the {label} OVK was not recovered"
             );
         }
+    }
+
+    /// An Orchard action paying the wallet's external address is decrypted by the account's
+    /// incoming viewing key alone.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_action_decrypted_with_uivk_only() {
+        let mut rng = ChaChaRng::seed_from_u64(7);
+        let ufvk = wallet_ufvk();
+        let recipient = ufvk
+            .orchard()
+            .expect("UFVK has an Orchard item")
+            .address_at(0u32, Scope::External);
+        let tx = orchard_tx_paying(recipient, foreign_ovk(), &mut rng);
+        assert_eq!(decrypt_orchard(&tx), vec![(TransferType::Incoming, VALUE)]);
+
+        let mut uivks = HashMap::new();
+        uivks.insert(7u32, ufvk.to_unified_incoming_viewing_key());
+        let found: Vec<_> = decrypt_transaction_with_ivks(
+            &Network::TestNetwork,
+            Some(BlockHeight::from_u32(MINED_HEIGHT)),
+            None,
+            &tx,
+            &HashMap::new(),
+            &uivks,
+        )
+        .orchard_outputs()
+        .iter()
+        .map(|output| {
+            let (note, _) = output.note();
+            (
+                *output.account(),
+                output.transfer_type(),
+                Zatoshis::from_u64(note.value().inner()).expect("note value is in range"),
+            )
+        })
+        .collect();
+        assert_eq!(found, vec![(7u32, TransferType::Incoming, VALUE)]);
     }
 
     /// An outgoing ciphertext that no wallet key can open is not reported.

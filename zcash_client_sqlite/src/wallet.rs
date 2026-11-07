@@ -114,6 +114,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
+    scanning::AccountScanningKeys,
     wallet::{Note, NoteId, Recipient, WalletTx},
 };
 use zcash_keys::{
@@ -135,7 +136,7 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use self::{
     common::{TableConstants, default_tx_expiry_delta_sql, table_constants},
@@ -1827,6 +1828,42 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     }
 
     Ok(res)
+}
+
+/// Returns the scanning keys for every account, including only `scopes`.
+///
+/// One query reads both unified full viewing keys and unified incoming viewing keys. An
+/// account with a full viewing key contributes each requested scope and its nullifier-deriving
+/// key. An account with only an incoming viewing key contributes the external scope when that
+/// scope was requested.
+pub(crate) fn get_scanning_keys<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    scopes: &HashSet<Scope>,
+) -> Result<AccountScanningKeys<AccountUuid>, SqliteClientError> {
+    let mut stmt = conn.prepare("SELECT uuid, ufvk, uivk FROM accounts")?;
+    let mut rows = stmt.query([])?;
+
+    let mut ufvks = Vec::new();
+    let mut uivks = Vec::new();
+    while let Some(row) = rows.next()? {
+        let account_id = AccountUuid(row.get("uuid")?);
+        let ufvk_str: Option<String> = row.get("ufvk")?;
+        if let Some(ufvk_str) = ufvk_str {
+            let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?;
+            ufvks.push((account_id, ufvk));
+        } else {
+            let uivk_str: String = row.get("uivk")?;
+            let uivk = UnifiedIncomingViewingKey::decode(params, &uivk_str)
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?;
+            uivks.push((account_id, uivk));
+        }
+    }
+
+    Ok(AccountScanningKeys::from_ufvk_and_uivk_accounts(
+        ufvks, uivks, scopes,
+    ))
 }
 
 fn parse_account_row<P: consensus::Parameters>(
