@@ -271,7 +271,8 @@ to aid with PR stacking.
   single PR.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
-  crates' `CHANGELOG.md` files to clearly document the change. See
+  crates' `CHANGELOG.md` files (or add change fragments, for crates listed in
+  `.changes/projects.toml`) to clearly document the change. See
   [Changelog Entries](#changelog-entries) for what belongs in those entries.
 - Updated or added members of the public API MUST include complete `rustdoc`
   documentation comments.
@@ -381,6 +382,15 @@ the old PR.
 Each crate maintains its own `CHANGELOG.md`. These files are how downstream
 users discover what they must do in order to upgrade, so we hold them to the
 same standard as the code.
+
+For the crates listed in [`.changes/projects.toml`](.changes/projects.toml),
+`CHANGELOG.md` is generated: a change adds a change fragment instead of editing
+the file, and the release consolidates the fragments into the release's
+section. [`.changes/README.md`](.changes/README.md) describes that workflow.
+For those crates, the rules below apply to the fragment a change adds and to
+the release section, except that a merged fragment is never edited: where this
+section says to update an existing `## [Unreleased]` entry, the release section
+consolidates the entries instead.
 
 An entry is required for any change to a crate's public API, any bug fix, and
 any change to the semantics of existing behavior — including changes that leave

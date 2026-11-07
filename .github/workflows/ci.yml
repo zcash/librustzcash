@@ -709,6 +709,31 @@ jobs:
             }}
         run: python3 .github/helpers/check-release-tags.py
 
+  changelogs:
+    name: Changelog sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test the changelog tool
+        run: python3 -m unittest discover -s scripts
+      - name: Check change fragments and generated changelogs
+        env:
+          BASE_SHA: >-
+            ${{
+              github.event.pull_request.base.sha
+              || github.event.merge_group.base_sha
+            }}
+        shell: bash
+        run: |
+          if [[ -n "${BASE_SHA}" ]]; then
+            python3 scripts/changelog.py check --base "${BASE_SHA}"
+          else
+            python3 scripts/changelog.py check
+          fi
+
   protobuf:
     name: protobuf consistency
     runs-on: ubuntu-latest
@@ -786,6 +811,7 @@ jobs:
       - build-nodefault
       - build-nostd
       - bitrot
+      - changelogs
       - clippy
       - clippy-nodefault
       - clippy-features-discover
