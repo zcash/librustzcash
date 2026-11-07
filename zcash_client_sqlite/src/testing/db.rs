@@ -27,6 +27,7 @@ use zcash_client_backend::{
         chain::{ChainState, CommitmentTreeRoot},
         error::{LockError, RewindError},
         scanning::{ScanPriority, ScanRange},
+        spend_authority::SpendAuthority,
         testing::{DataStoreFactory, Reset, TestState},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
@@ -63,6 +64,9 @@ use {
     zcash_client_backend::fees::StandardFeeRule,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
+
+#[cfg(feature = "transparent-key-import")]
+use zcash_client_backend::data_api::spend_authority::SpendingKeyCustody;
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
 const TEST_EPOCH_SECONDS_OFFSET: Duration = Duration::from_secs(1740441600);

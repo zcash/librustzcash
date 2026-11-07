@@ -35,6 +35,9 @@ use {
     crate::{
         data_api::{
             AccountBirthday,
+            spend_authority::{
+                AccountSpendAuthority, SpendAuthority, SpendingKeyCustody, StandalonePubkeys,
+            },
             wallet::{self, SpendingKeys},
         },
         wallet::TransparentAddressSource,
@@ -42,8 +45,11 @@ use {
     rand::{rand_core::UnwrapErr, rngs::SysRng},
     secp256k1::SecretKey,
     secrecy::Secret,
-    std::collections::HashMap,
-    zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+    std::collections::{BTreeSet, HashMap},
+    zcash_protocol::{
+        PoolType,
+        consensus::{NetworkUpgrade, Parameters},
+    },
     zcash_script::{descriptor::sh, pattern::check_multisig, script},
 };
 
@@ -89,7 +95,7 @@ fn check_balance<DSF>(
     // Check the wallet summary returns the expected transparent balance.
     let summary = st
         .wallet()
-        .get_wallet_summary(confirmations_policy)
+        .get_wallet_summary(confirmations_policy, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let balance = summary.account_balances().get(&account.id()).unwrap();
@@ -105,7 +111,12 @@ fn check_balance<DSF>(
     let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
     assert_eq!(
         st.wallet()
-            .get_transparent_balances(account.id(), target_height, confirmations_policy)
+            .get_transparent_balances(
+                account.id(),
+                target_height,
+                confirmations_policy,
+                &st.full_spend_authority()
+            )
             .unwrap()
             .get(taddr)
             .cloned()
@@ -120,6 +131,7 @@ fn check_balance<DSF>(
                 confirmations_policy,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority(),
             )
             .unwrap()
             .into_iter()
@@ -157,6 +169,7 @@ where
             account_id,
             TargetHeight::from(height_1 + 1),
             ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert!(bal_absent.is_empty());
@@ -187,7 +200,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_authority(),
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -223,7 +236,8 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                LockFilter::Policy(&LockedInputPolicy::Exclude)
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority()
             )
             .as_deref(),
         Ok(&[])
@@ -240,7 +254,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude))
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_authority())
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -249,7 +263,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             TargetHeight::from(height_2 + 1),
-            ConfirmationsPolicy::MIN
+            ConfirmationsPolicy::MIN, &st.full_spend_authority()
         ),
         Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
@@ -630,6 +644,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -649,6 +664,7 @@ where
                     ConfirmationsPolicy::MIN,
                     CoinbaseFilter::AllTransparentOutputs,
                     LockFilter::Policy(&LockedInputPolicy::Exclude),
+                    &st.full_spend_authority(),
                 )
                 .unwrap(),
         );
@@ -667,6 +683,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -681,6 +698,7 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority(),
             )
             .unwrap()
             .is_empty()
@@ -942,10 +960,14 @@ where
 {
     let summary = st
         .wallet()
-        .get_wallet_summary(confirmations_policy)
+        .get_wallet_summary(confirmations_policy, &st.full_spend_authority())
         .unwrap()
         .unwrap();
-    *summary.account_balances().get(&account.id()).unwrap()
+    summary
+        .account_balances()
+        .get(&account.id())
+        .unwrap()
+        .clone()
 }
 
 /// Verifies that transparent funds are reported in the correct `AccountBalance` bucket
@@ -1476,7 +1498,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(balances.get(&taddr).map(|(_, b)| b.total()), Some(value),);
 
@@ -1490,9 +1517,389 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert_eq!(utxos, vec![]);
+}
+
+/// Tests that transparent selection returns only the outputs that the spend authority
+/// authorizes: a derived receiver needs transparent authority over its account, a standalone
+/// P2PKH receiver needs its public key, and a standalone P2SH receiver needs its script to be
+/// named. Holding a key that the script refers to does not authorize it, and authority stated
+/// for another account authorizes nothing. Also tests that balances report unauthorized value
+/// as watch-only, and standalone script value by script address.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_authority_restricts_transparent_selection<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    // A second account, whose authority must not extend to the first account's outputs.
+    let other_account_birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let (other_account_id, _) = st
+        .wallet_mut()
+        .create_account(
+            "other",
+            &Secret::new(vec![42u8; 32]),
+            &other_account_birthday,
+            None,
+        )
+        .unwrap();
+
+    // Scan some chain data with no notes for the wallet, so that it has a summary.
+    let not_our_key = ExtendedSpendingKey::master(&[])
+        .expect("the derivation path yields a valid key")
+        .to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    let standalone_pubkey = SecretKey::from_secret_bytes([2u8; 32])
+        .expect("valid secret key")
+        .public_key();
+    let p2pkh_addr = TransparentAddress::from_pubkey(&standalone_pubkey);
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            standalone_pubkey,
+            SpendingKeyCustody::Held,
+        )
+        .unwrap();
+
+    let (redeem_script, member_key) = build_test_redeem_script();
+    let p2sh_addr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script)
+        .unwrap();
+
+    let derived_addr = *st
+        .wallet()
+        .get_transparent_receivers(account_id, false, false)
+        .unwrap()
+        .keys()
+        .next()
+        .expect("the account has a derived transparent receiver");
+
+    let height = st.wallet().chain_height().unwrap().unwrap();
+
+    let value = Zatoshis::const_from_u64(50_000);
+    let addresses = [derived_addr, p2pkh_addr, p2sh_addr];
+    for (txid_byte, address) in (1u8..).zip(addresses) {
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([txid_byte; 32], 0),
+            TxOut::new(value, address.script().into()),
+            Some(height),
+            Some(account_id),
+            None,
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height + 1);
+    let spendable_under = |spend_authority: &SpendAuthority<_>| -> BTreeSet<TransparentAddress> {
+        st.wallet()
+            .get_spendable_transparent_outputs_for_addresses(
+                &addresses,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                spend_authority,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|output| *output.recipient_address())
+            .collect()
+    };
+
+    assert_eq!(spendable_under(&SpendAuthority::none()), BTreeSet::new());
+
+    let for_account =
+        |account, authority| SpendAuthority::new(HashMap::from([(account, authority)]));
+    let transparent_only =
+        AccountSpendAuthority::for_pools(BTreeSet::from([PoolType::Transparent]));
+    assert_eq!(
+        spendable_under(&for_account(account_id, transparent_only)),
+        BTreeSet::from([derived_addr])
+    );
+
+    let held_keys = AccountSpendAuthority::new(
+        BTreeSet::new(),
+        StandalonePubkeys::Only(BTreeSet::from([standalone_pubkey, member_key.public_key()])),
+        BTreeSet::new(),
+    );
+    assert_eq!(
+        spendable_under(&for_account(account_id, held_keys.clone())),
+        BTreeSet::from([p2pkh_addr])
+    );
+
+    let named_script = AccountSpendAuthority::new(
+        BTreeSet::new(),
+        StandalonePubkeys::Only(BTreeSet::new()),
+        BTreeSet::from([p2sh_addr]),
+    );
+    assert_eq!(
+        spendable_under(&for_account(account_id, named_script.clone())),
+        BTreeSet::from([p2sh_addr])
+    );
+
+    // Authority stated for another account does not authorize this account's outputs.
+    let every_key_of_other_account = AccountSpendAuthority::new(
+        BTreeSet::from([PoolType::Transparent]),
+        StandalonePubkeys::All,
+        BTreeSet::from([p2sh_addr]),
+    );
+    assert_eq!(
+        spendable_under(&for_account(other_account_id, every_key_of_other_account)),
+        BTreeSet::new()
+    );
+
+    assert_eq!(
+        spendable_under(&st.full_spend_authority()),
+        BTreeSet::from(addresses)
+    );
+
+    // Balances report the value that a spend authority does not authorize as watch-only, and
+    // report standalone script value under its script address.
+    let derived_only = for_account(
+        account_id,
+        AccountSpendAuthority::for_pools(BTreeSet::from([PoolType::Transparent])),
+    );
+    let per_address = st
+        .wallet()
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &derived_only,
+        )
+        .unwrap();
+    let balance_at = |address: &TransparentAddress| per_address.get(address).unwrap().1;
+    assert_eq!(balance_at(&derived_addr).spendable_value(), value);
+    assert_eq!(balance_at(&p2pkh_addr).watch_only_value(), value);
+    assert_eq!(balance_at(&p2sh_addr).watch_only_value(), value);
+
+    let summary_balance = |spend_authority: &SpendAuthority<_>| {
+        st.wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN, spend_authority)
+            .unwrap()
+            .expect("the wallet has a summary")
+            .account_balances()
+            .get(&account_id)
+            .unwrap()
+            .clone()
+    };
+    let restricted = summary_balance(&derived_only);
+    assert_eq!(
+        restricted.unshielded_regular_balance().spendable_value(),
+        value
+    );
+    assert_eq!(
+        restricted.unshielded_regular_balance().watch_only_value(),
+        value
+    );
+    assert_eq!(
+        restricted.script_balances()[&p2sh_addr].watch_only_value(),
+        value
+    );
+
+    let full = summary_balance(&st.full_spend_authority());
+    assert_eq!(
+        full.unshielded_regular_balance().spendable_value(),
+        (value + value).unwrap()
+    );
+    assert_eq!(full.script_balances()[&p2sh_addr].spendable_value(), value);
+    assert_eq!(full.watch_only_value(), Zatoshis::ZERO);
+    // The spend authority changes how value is classified, never how much there is.
+    assert_eq!(restricted.total(), full.total());
+    assert_eq!(
+        summary_balance(&SpendAuthority::none()).total(),
+        full.total()
+    );
+}
+
+/// Tests that the wallet records the spending key custody of each standalone public key as
+/// the import methods specify, and that [`StandalonePubkeys::ImportedAs`] follows it: a
+/// watch-only public key becomes held when it is imported with its spending key held, and a held
+/// public key never becomes watch-only.
+#[cfg(feature = "transparent-key-import")]
+pub fn standalone_pubkey_custody_follows_imports<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let pubkey_of = |secret_byte: u8| {
+        SecretKey::from_secret_bytes([secret_byte; 32])
+            .expect("valid secret key")
+            .public_key()
+    };
+    let watch_only_pubkey = pubkey_of(2);
+    let held_pubkey = pubkey_of(3);
+    let address_only_pubkey = pubkey_of(4);
+    let watch_only_addr = TransparentAddress::from_pubkey(&watch_only_pubkey);
+    let held_addr = TransparentAddress::from_pubkey(&held_pubkey);
+    let address_only_addr = TransparentAddress::from_pubkey(&address_only_pubkey);
+
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            watch_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_pubkeys(account_id, &[held_pubkey], SpendingKeyCustody::Held)
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, address_only_addr)
+        .unwrap();
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    let value = Zatoshis::const_from_u64(50_000);
+    let addresses = [watch_only_addr, held_addr, address_only_addr];
+    for (txid_byte, address) in (1u8..).zip(addresses) {
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([txid_byte; 32], 0),
+            TxOut::new(value, address.script().into()),
+            Some(height),
+            Some(account_id),
+            None,
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height + 1);
+    let spendable_under = |wallet: &<DSF as DataStoreFactory>::DataStore,
+                           pubkeys: StandalonePubkeys| {
+        let authority = SpendAuthority::new(HashMap::from([(
+            account_id,
+            AccountSpendAuthority::new(BTreeSet::new(), pubkeys, BTreeSet::new()),
+        )]));
+        wallet
+            .get_spendable_transparent_outputs_for_addresses(
+                &addresses,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &authority,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|output| *output.recipient_address())
+            .collect::<BTreeSet<_>>()
+    };
+    let held = || StandalonePubkeys::ImportedAs(SpendingKeyCustody::Held);
+    let watch_only = || StandalonePubkeys::ImportedAs(SpendingKeyCustody::WatchOnly);
+
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from([held_addr])
+    );
+    assert_eq!(
+        spendable_under(st.wallet(), watch_only()),
+        BTreeSet::from([watch_only_addr])
+    );
+    assert_eq!(
+        spendable_under(st.wallet(), StandalonePubkeys::All),
+        BTreeSet::from([watch_only_addr, held_addr])
+    );
+    // A listed public key is held whatever its recorded custody.
+    assert_eq!(
+        spendable_under(
+            st.wallet(),
+            StandalonePubkeys::Only(BTreeSet::from([watch_only_pubkey]))
+        ),
+        BTreeSet::from([watch_only_addr])
+    );
+
+    // Importing a public key again never records a held spending key as watch-only.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            held_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            watch_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from([held_addr])
+    );
+
+    // An address-only import upgraded with a watch-only public key records it as watch-only.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(
+            account_id,
+            address_only_pubkey,
+            SpendingKeyCustody::WatchOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), watch_only()),
+        BTreeSet::from([watch_only_addr, address_only_addr])
+    );
+
+    // Importing a watch-only public key with its spending key held records it as held.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkeys(
+            account_id,
+            &[watch_only_pubkey, address_only_pubkey],
+            SpendingKeyCustody::Held,
+        )
+        .unwrap();
+    assert_eq!(
+        spendable_under(st.wallet(), held()),
+        BTreeSet::from(addresses)
+    );
+    assert_eq!(spendable_under(st.wallet(), watch_only()), BTreeSet::new());
 }
 
 /// Tests that importing key material for a previously address-only import upgrades the
@@ -1533,7 +1940,7 @@ where
 
     // Import the key material for each address.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
     st.wallet_mut()
         .import_standalone_transparent_script(account_id, redeem_script)
@@ -1580,8 +1987,11 @@ where
     let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
     let pubkey = secret_key.public_key();
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 }
@@ -1604,8 +2014,11 @@ where
 
     // First import
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1617,8 +2030,11 @@ where
 
     // Second import to same account should also succeed (idempotent)
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1658,8 +2074,11 @@ where
 
     // Import to first account
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account1_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account1_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Ok(_)
     );
 
@@ -1682,8 +2101,11 @@ where
 
     // Import same pubkey to second account should fail
     assert_matches!(
-        st.wallet_mut()
-            .import_standalone_transparent_pubkey(account2_id, pubkey),
+        st.wallet_mut().import_standalone_transparent_pubkey(
+            account2_id,
+            pubkey,
+            SpendingKeyCustody::Held
+        ),
         Err(_)
     );
 }
@@ -1708,7 +2130,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
 
     // Derive the P2PKH address.
@@ -1738,7 +2160,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(
         balances.get(&taddr).map(|(_, b)| b.spendable_value()),
@@ -1754,6 +2181,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1781,7 +2209,7 @@ where
 
     // Import the public key.
     st.wallet_mut()
-        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .import_standalone_transparent_pubkey(account_id, pubkey, SpendingKeyCustody::Held)
         .unwrap();
 
     // Derive the P2PKH address.
@@ -1870,7 +2298,7 @@ where
         .expect("fee should be known for wallet-created transactions");
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let account_balance = summary.account_balances().get(&account_id).unwrap();
@@ -2074,7 +2502,12 @@ where
     let target_height = TargetHeight::from(height + 1);
     let balances = st
         .wallet()
-        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .get_transparent_balances(
+            account_id,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
         .unwrap();
     assert_eq!(
         balances.get(&taddr).map(|(_, b)| b.spendable_value()),
@@ -2090,6 +2523,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2205,7 +2639,7 @@ where
         .expect("fee should be known for wallet-created transactions");
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_authority())
         .unwrap()
         .unwrap();
     let account_balance = summary.account_balances().get(&account_id).unwrap();
@@ -2517,13 +2951,19 @@ where
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
                 LockFilter::Policy(&LockedInputPolicy::Exclude),
+                &st.full_spend_authority(),
             )
             .as_deref(),
         Ok(&[])
     );
     assert_matches!(
         st.wallet()
-            .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN),
+            .get_transparent_balances(
+                account_id,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &st.full_spend_authority(),
+            ),
         Ok(balances) if balances.get(&taddr).map(|(_, b)| b.total()) == Some(Zatoshis::ZERO)
             || balances.is_empty()
     );
@@ -2737,7 +3177,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             TargetHeight::from(h + 1),
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.is_empty()
     );
@@ -2765,7 +3205,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(&LockedInputPolicy::Exclude), &st.full_spend_authority(),
         ).as_deref(),
         Ok([ret]) if ret.outpoint() == &outpoint
     );
@@ -2773,7 +3213,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             target_height,
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.get(&taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
@@ -3001,7 +3441,7 @@ where
         st.wallet().get_transparent_balances(
             account_id,
             target_height,
-            ConfirmationsPolicy::MIN,
+            ConfirmationsPolicy::MIN, &st.full_spend_authority(),
         ),
         Ok(balances) if balances.is_empty()
     );
@@ -3280,6 +3720,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .expect("initial gather should succeed");
     let initial_gather_value: Zatoshis = initial_gather
@@ -3598,6 +4039,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .expect("value-bounded gather should succeed");
 
@@ -3647,6 +4089,7 @@ where
             usize::MAX,
             &StandardFeeRule::Zip317,
             LockFilter::Policy(&LockedInputPolicy::Exclude),
+            &st.full_spend_authority(),
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);

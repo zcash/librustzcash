@@ -103,8 +103,8 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
-        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, ChangeReceivers, Progress, Ratio, ReceivedTransactionOutput,
+        Account as _, AccountBalance, AccountBirthday, AccountSource, AddressInfo, AddressSource,
+        BlockMetadata, ChangeReceivers, Progress, Ratio, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
         TransactionStatus, WalletSummary, Zip32Derivation,
         anchor_retention::AnchorRetentionInterval,
@@ -112,6 +112,7 @@ use zcash_client_backend::{
         defaults::address_receiver_matches_ua,
         error::{FindAccountForAddressError, RewindError},
         scanning::{ScanPriority, ScanRange},
+        spend_authority::SpendAuthority,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{Note, NoteId, Recipient, WalletTx},
@@ -177,6 +178,11 @@ use {
     crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
     zcash_keys::keys::zcashd,
 };
+#[cfg(feature = "transparent-key-import")]
+use {
+    encoding::{SPENDING_KEY_CUSTODY_WATCH_ONLY, spending_key_custody_code},
+    zcash_client_backend::data_api::spend_authority::SpendingKeyCustody,
+};
 
 pub mod commitment_tree;
 pub(crate) mod common;
@@ -207,7 +213,6 @@ fn parse_account_source(
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
     #[cfg(feature = "zcashd-compat")] legacy_account_index: i64,
-    spending_key_available: bool,
     key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
     let derivation = hd_seed_fingerprint
@@ -237,11 +242,7 @@ fn parse_account_source(
             key_source,
         }),
         (1, derivation) => Ok(AccountSource::Imported {
-            purpose: if spending_key_available {
-                AccountPurpose::Spending { derivation }
-            } else {
-                AccountPurpose::ViewOnly
-            },
+            derivation,
             key_source,
         }),
         (0, None) => Err(SqliteClientError::CorruptedData(
@@ -486,19 +487,15 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     let account_uuid = AccountUuid(Uuid::new_v4());
 
-    let (derivation, spending_key_available, key_source) = match kind {
+    let (derivation, key_source) = match kind {
         AccountSource::Derived {
             derivation,
             key_source,
-        } => (Some(derivation), true, key_source),
+        } => (Some(derivation), key_source),
         AccountSource::Imported {
-            purpose: AccountPurpose::Spending { derivation },
+            derivation,
             key_source,
-        } => (derivation.as_ref(), true, key_source),
-        AccountSource::Imported {
-            purpose: AccountPurpose::ViewOnly,
-            key_source,
-        } => (None, false, key_source),
+        } => (derivation.as_ref(), key_source),
     };
 
     let ivk_cache = IvkItemCache::from_uivk(&uivk);
@@ -531,8 +528,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ufvk, uivk,
                 orchard_ivk_item_cache, sapling_ivk_item_cache, p2pkh_ivk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-                recover_until_height,
-                has_spend_key
+                recover_until_height
             )
             VALUES (
                 :account_name,
@@ -543,8 +539,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :ufvk, :uivk,
                 :orchard_ivk_item_cache, :sapling_ivk_item_cache, :p2pkh_ivk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
-                :recover_until_height,
-                :has_spend_key
+                :recover_until_height
             )
             RETURNING id
             "#,
@@ -565,7 +560,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                 ":recover_until_height": birthday.recover_until().map(u32::from),
-                ":has_spend_key": i64::from(spending_key_available),
             ],
             |row| row.get(0).map(AccountRef),
         )
@@ -954,21 +948,32 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
     Ok(rows_affected)
 }
 
-/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
+/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account, and
+/// records `custody` as described by [`WalletWrite::import_standalone_transparent_pubkey`].
 ///
 /// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
 /// when nothing was inserted because the receiver address was already present in the wallet.
+///
+/// [`WalletWrite::import_standalone_transparent_pubkey`]: zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_pubkey
 #[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
+    custody: SpendingKeyCustody,
 ) -> Result<usize, SqliteClientError> {
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
-    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+    import_standalone_transparent_pubkey_inner(
+        conn,
+        params,
+        account_uuid,
+        account_id,
+        pubkey,
+        custody,
+    )
 }
 
 /// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
@@ -980,6 +985,7 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     pubkeys: &[secp256k1::PublicKey],
+    custody: SpendingKeyCustody,
 ) -> Result<usize, SqliteClientError> {
     let account_id = get_account_ref(conn, account_uuid)?;
     let mut inserted = 0;
@@ -990,6 +996,7 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
             account_uuid,
             account_id,
             *pubkey,
+            custody,
         )?;
     }
     Ok(inserted)
@@ -1007,23 +1014,43 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     account_id: AccountRef,
     pubkey: secp256k1::PublicKey,
+    custody: SpendingKeyCustody,
 ) -> Result<usize, SqliteClientError> {
-    let existing_import_account = conn
+    let existing_import = conn
         .query_row(
-            "SELECT accounts.uuid AS account_uuid
+            "SELECT addresses.id, accounts.uuid AS account_uuid
              FROM addresses
              JOIN accounts ON accounts.id = addresses.account_id
              WHERE imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey",
             named_params![
                 ":imported_transparent_receiver_pubkey": pubkey.serialize()
             ],
-            |row| row.get::<_, Uuid>("account_uuid"),
+            |row| {
+                Ok((
+                    row.get::<_, i64>("id")?,
+                    row.get::<_, Uuid>("account_uuid")?,
+                ))
+            },
         )
         .optional()?;
 
-    if let Some(current) = existing_import_account {
+    if let Some((row_id, current)) = existing_import {
         if current == account_uuid.expose_uuid() {
-            // The key has already been imported; nothing to do.
+            // The key has already been imported. Record a held spending key for a key that was
+            // imported watch-only; never record a held spending key as watch-only.
+            if custody == SpendingKeyCustody::Held {
+                conn.execute(
+                    "UPDATE addresses
+                     SET imported_transparent_receiver_pubkey_custody = :custody
+                     WHERE id = :id
+                     AND imported_transparent_receiver_pubkey_custody = :watch_only",
+                    named_params![
+                        ":custody": spending_key_custody_code(custody),
+                        ":id": row_id,
+                        ":watch_only": SPENDING_KEY_CUSTODY_WATCH_ONLY,
+                    ],
+                )?;
+            }
             return Ok(0);
         } else {
             return Err(SqliteClientError::StandaloneImportConflict(current));
@@ -1038,10 +1065,12 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     if let Some(row_id) = standalone_address_only_row(conn, account_id, &addr_str)? {
         conn.execute(
             "UPDATE addresses
-             SET imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey
+             SET imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey,
+                 imported_transparent_receiver_pubkey_custody = :custody
              WHERE id = :id",
             named_params![
                 ":imported_transparent_receiver_pubkey": pubkey.serialize(),
+                ":custody": spending_key_custody_code(custody),
                 ":id": row_id,
             ],
         )?;
@@ -1063,11 +1092,13 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
-          receiver_flags, imported_transparent_receiver_pubkey
+          receiver_flags, imported_transparent_receiver_pubkey,
+          imported_transparent_receiver_pubkey_custody
         )
         VALUES (
           :account_id, :key_scope, :address, :address,
-          :receiver_flags, :imported_transparent_receiver_pubkey
+          :receiver_flags, :imported_transparent_receiver_pubkey,
+          :custody
         )
         "#,
         named_params![
@@ -1075,7 +1106,8 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2PKH.bits(),
-            ":imported_transparent_receiver_pubkey": pubkey.serialize()
+            ":imported_transparent_receiver_pubkey": pubkey.serialize(),
+            ":custody": spending_key_custody_code(custody),
         ],
     )?;
 
@@ -1842,7 +1874,6 @@ fn parse_account_row<P: consensus::Parameters>(
         row.get("hd_account_index")?,
         #[cfg(feature = "zcashd-compat")]
         row.get("zcashd_legacy_address_index")?,
-        row.get("has_spend_key")?,
         row.get("key_source")?,
     )?;
 
@@ -1889,7 +1920,7 @@ pub(crate) fn get_account<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, birthday_height
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -1926,7 +1957,7 @@ pub(crate) fn get_account_internal<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, birthday_height
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1963,7 +1994,7 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE orchard_ivk_item_cache = :orchard_ivk_item_cache
             OR sapling_ivk_item_cache = :sapling_ivk_item_cache
@@ -2045,7 +2076,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2103,7 +2134,7 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     let mut stmt = conn.prepare_cached(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, birthday_height
          FROM accounts
          WHERE id = :account_id",
     )?;
@@ -2721,6 +2752,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    spend_authority: &SpendAuthority<AccountUuid>,
 ) -> Result<Option<crate::WalletSnapshot<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
@@ -2997,12 +3029,41 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     )?;
     drop(sapling_trace);
 
+    // Shielded value in a pool that the spend authority does not authorize for its account is
+    // watch-only.
+    for (account, balance) in account_balances.iter_mut() {
+        let authorizes = |pool: ShieldedPool| {
+            spend_authority.authorizes_account_pool(account, PoolType::Shielded(pool))
+        };
+        if !authorizes(ShieldedPool::Sapling) {
+            balance.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Orchard) {
+            balance.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+        #[cfg(feature = "orchard")]
+        if !authorizes(ShieldedPool::Ironwood) {
+            balance.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
+                *bal = bal.into_watch_only();
+                Ok(())
+            })?;
+        }
+    }
+
     #[cfg(feature = "transparent-inputs")]
     transparent::add_transparent_account_balances(
         tx,
         params,
         target_height,
         confirmations_policy,
+        spend_authority,
         &mut account_balances,
     )?;
 
@@ -3050,6 +3111,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
+    spend_authority: &SpendAuthority<AccountUuid>,
     progress: &impl ProgressEstimator,
 ) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
@@ -3117,8 +3179,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         None => return Ok(None),
     };
 
-    Ok(get_wallet_snapshot(tx, params, confirmations_policy)?
-        .map(|snapshot| snapshot.into_wallet_summary(progress)))
+    Ok(
+        get_wallet_snapshot(tx, params, confirmations_policy, spend_authority)?
+            .map(|snapshot| snapshot.into_wallet_summary(progress)),
+    )
 }
 
 /// Returns the memo for a received note, if the note is known to the wallet.
@@ -6537,7 +6601,7 @@ mod tests {
         assert_eq!(
             st.wallet()
                 .db()
-                .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+                .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_authority())
                 .unwrap(),
             None
         );
@@ -6567,14 +6631,14 @@ mod tests {
         let snapshot = st
             .wallet()
             .db()
-            .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+            .get_wallet_snapshot(ConfirmationsPolicy::MIN, &st.full_spend_authority())
             .unwrap()
             .expect("scanned wallet must have a snapshot");
         assert_eq!(snapshot.account_balances().len(), 1);
 
         if let Some(summary) = st
             .wallet()
-            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .get_wallet_summary(ConfirmationsPolicy::MIN, &st.full_spend_authority())
             .unwrap()
         {
             assert_eq!(snapshot.account_balances(), summary.account_balances());
@@ -6645,13 +6709,23 @@ mod tests {
         }
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
-        let forced =
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &FixedProgress)
-                .unwrap()
-                .expect("fixed progress plus snapshot must yield a summary");
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("scanned wallet has a snapshot");
+        let forced = super::get_wallet_summary(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+            &FixedProgress,
+        )
+        .unwrap()
+        .expect("fixed progress plus snapshot must yield a summary");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
+        .unwrap()
+        .expect("scanned wallet has a snapshot");
         assert_eq!(snapshot.account_balances().len(), 2);
         assert_eq!(snapshot.account_balances(), forced.account_balances());
         assert_eq!(
@@ -6707,14 +6781,25 @@ mod tests {
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
         assert_eq!(
-            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &NoProgress)
-                .unwrap(),
+            super::get_wallet_summary(
+                &tx,
+                st.network(),
+                ConfirmationsPolicy::MIN,
+                &st.full_spend_authority(),
+                &NoProgress
+            )
+            .unwrap(),
             None,
             "missing progress must keep get_wallet_summary returning None"
         );
-        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
-            .unwrap()
-            .expect("snapshot must still return balances when progress is unavailable");
+        let snapshot = super::get_wallet_snapshot(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &st.full_spend_authority(),
+        )
+        .unwrap()
+        .expect("snapshot must still return balances when progress is unavailable");
         assert_eq!(snapshot.account_balances().len(), 1);
         assert_eq!(snapshot.chain_tip_height(), h);
     }

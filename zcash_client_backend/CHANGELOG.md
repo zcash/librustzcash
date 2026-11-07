@@ -142,6 +142,13 @@ workspace.
   `TxOut::to_txout` (behind `transparent-inputs`)
 - `zcash_client_backend::sync::decryptor::Handle::{closed, is_closed}` (behind
   `sync-decryptor`)
+- `zcash_client_backend::data_api::spend_authority` module, describing the
+  spend authority held by an application's key store.
+- `zcash_client_backend::data_api::Balance::{watch_only_value,
+  add_watch_only_value, into_watch_only}`
+- `zcash_client_backend::data_api::AccountBalance::{watch_only_value,
+  script_balances, with_script_balance_mut}`
+- `zcash_client_backend::data_api::wallet::SpendingKeys::spend_authority`
 
 ### Changed
 - Migrated to `arti-client 0.43`, `bip32 0.6`, `bls12_381 0.9`,
@@ -159,6 +166,49 @@ workspace.
   standalone transparent spending keys it holds when it is dropped.
 - `zcash_client_backend::data_api::locking::LockOwner::random` now requires its
   `rng` argument to implement `rand_core::Rng` in place of `rand_core::RngCore`.
+- `zcash_client_backend::data_api::AccountSource::Imported` has a
+  `derivation: Option<Zip32Derivation>` field in place of its `purpose` field.
+- `zcash_client_backend::data_api::WalletWrite::import_account_ufvk` takes a
+  `derivation: Option<Zip32Derivation>` argument in place of its `purpose`
+  argument. The wallet no longer records whether the application holds
+  spending keys for an account; state spend authority per query with a
+  `SpendAuthority` instead.
+- `zcash_client_backend::data_api::WalletWrite::{import_standalone_transparent_pubkey,
+  import_standalone_transparent_pubkeys}` take a
+  `custody: spend_authority::SpendingKeyCustody` argument, stating whether the
+  application holds each public key's spending key. Pass
+  `SpendingKeyCustody::Held` for a public key imported together with its
+  spending key.
+- `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_*`
+  now document the import contract: importing standalone transparent material
+  into an account asserts that the application can sign for it, and watch-only
+  material belongs in a view-only account.
+- `zcash_client_backend::data_api::Balance::total` now includes the
+  watch-only value.
+- Input selection now takes the caller's spend authority as a
+  `spend_authority: &SpendAuthority<AccountId>` argument, and selects only the
+  inputs that it authorizes:
+  - `zcash_client_backend::data_api::InputSource::{select_spendable_notes,
+    select_single_spendable_note, get_spendable_transparent_outputs,
+    get_spendable_transparent_outputs_for_addresses,
+    select_spendable_transparent_outputs}` take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+    and `ShieldingSelector::{propose_shielding, propose_shielding_coinbase}`
+    take it as a final argument.
+  - `zcash_client_backend::data_api::wallet::{propose_transfer,
+    propose_standard_transfer_to_address, propose_send_max_transfer,
+    propose_shielding, propose_shielding_coinbase}` take it as a final
+    argument.
+- `zcash_client_backend::data_api::WalletRead::{get_wallet_summary,
+  get_transparent_balances}` take a `spend_authority: &SpendAuthority<AccountId>`
+  argument, and report the value that it does not authorize as watch-only
+  value.
+- `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
+  selects only the transparent outputs that its `spending_keys` can spend, as
+  given by `SpendingKeys::spend_authority`.
+- `zcash_client_backend::data_api::AccountBalance` no longer implements `Copy`;
+  use `Clone`. Its `total`, `locked_value` and `uneconomic_value` now include
+  the script balances.
 - `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
   `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
   `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
@@ -300,6 +350,10 @@ workspace.
 ### Removed
 - `impl From<AnchorRetentionInterval> for zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`.
   Use `PoolMigrationParams::new`.
+
+### Removed
+- `zcash_client_backend::data_api::AccountPurpose`
+- `zcash_client_backend::data_api::Account::purpose`
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` now records the
