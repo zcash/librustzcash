@@ -643,6 +643,11 @@ either path can read a skill's `SKILL.md` directly.
 
 ## Changelog & Commit Discipline
 
+- For a crate listed in `.changes/projects.toml`, `CHANGELOG.md` is generated:
+  add a change fragment with `scripts/changelog.py new` instead of editing it,
+  and never edit, move, or delete a fragment that has already merged. The
+  rules below apply to the fragment's text and to the release section that
+  consolidates the fragments. See `.changes/README.md`.
 - Update the crate's `CHANGELOG.md` for any public API change, bug fix, or
   semantic change. This includes updating the version of a dependency whose
   types appear in the public API: types from two semver-incompatible versions
