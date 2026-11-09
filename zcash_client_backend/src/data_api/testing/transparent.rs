@@ -2219,7 +2219,7 @@ where
 
 /// Tests [`WalletWrite::mark_transparent_addresses_exposed`] by observing the effect on the
 /// address's exposure metadata via
-/// [`WalletRead::get_transparent_address_metadata`](crate::data_api::WalletRead::get_transparent_address_metadata).
+/// [`WalletRead::get_transparent_address_metadata`].
 pub fn mark_transparent_addresses_exposed<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,

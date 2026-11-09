@@ -232,7 +232,7 @@ pub trait OutputLockStore {
     ///
     /// Locks are advisory. Input selection excludes locked outputs by default, but a caller may
     /// deliberately draw on them by supplying an owner-scoped
-    /// [`LockedInputPolicy`](crate::data_api::wallet::input_selection::LockedInputPolicy) (via
+    /// [`LockedInputPolicy`] (via
     /// [`SpendPolicy::with_locked_input_policy`](crate::data_api::wallet::input_selection::SpendPolicy::with_locked_input_policy)),
     /// scoped to the lock owners it names; doing so spends through the lock during selection but
     /// never releases it. A locked output can be released only via [`Self::unlock_output`] (by its
@@ -261,7 +261,7 @@ pub trait OutputLockStore {
     /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
     /// fails with [`LockError::LockFailure`] naming the already-locked output. Callers that lock
     /// via a proposal-creation function surface this as
-    /// [`ProposalError::InputsLocked`](crate::proposal::ProposalError::InputsLocked). The
+    /// [`ProposalError::InputsLocked`]. The
     /// losing caller has not partially locked anything and should treat the failure as "the
     /// account is busy" and retry.
     fn lock_outputs(

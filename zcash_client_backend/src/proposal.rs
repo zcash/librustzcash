@@ -551,14 +551,15 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     }
 
     /// Returns a conservative upper-bound estimate of the total serialized byte size
-    /// of all transactions this proposal describes, by summing the per-step estimates
-    /// (see [`Step::estimated_serialized_size`]). Each step is estimated independently,
+    /// of all transactions this proposal describes. Each step is estimated independently,
     /// so the total is the sum of the per-step serialized sizes, not the size of a
     /// single transaction.
     ///
-    /// The estimate is conservative (it never under-counts). See
-    /// [`Step::estimated_serialized_size`] for the per-element costs and the
-    /// mineability caveat.
+    /// The estimate never under-counts. A transaction whose estimate is at most
+    /// [`MAX_BLOCK_BYTES`] does not exceed the block size limit when built, but it is not
+    /// necessarily mineable: a block must also contain its header and coinbase transaction.
+    ///
+    /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
     pub fn estimated_serialized_size(&self) -> usize {
         let steps = self.steps();
         steps
