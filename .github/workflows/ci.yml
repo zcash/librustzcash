@@ -89,7 +89,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
         with:
           transparent-pool: ${{ matrix.state == 'transparent' }}
           orchard-pool: ${{ matrix.state == 'Orchard' }}
@@ -145,7 +145,7 @@ jobs:
           persist-credentials: false
       - id: prepare
         if: ${{ github.event_name == 'pull_request' }}
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
         with:
           transparent-pool: ${{ matrix.state == 'transparent' }}
           orchard-pool: ${{ matrix.state == 'Orchard' }}
@@ -237,7 +237,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
         with:
           all-features: true
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -296,7 +296,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
         with:
           all-pools: true
           extra-features: pczt-tests
@@ -361,7 +361,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: latest
@@ -371,7 +371,7 @@ jobs:
       - name: Ensure rustup proxies take precedence
         shell: bash
         run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         id: toolchain
         with:
           toolchain: stable
@@ -542,7 +542,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         id: toolchain
         with:
           toolchain: stable
@@ -567,7 +567,7 @@ jobs:
       # We can't currently use only the common feature set (to exclude checking of
       # unstable in-progress code) because this action doesn't support spaces within CLI
       # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         id: toolchain
         with:
           toolchain: beta
@@ -617,7 +617,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         id: toolchain
         with:
           toolchain: stable
@@ -642,8 +642,8 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: $/.github/actions/prepare
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         id: toolchain
         with:
           toolchain: nightly
@@ -717,7 +717,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        uses: ./.github/actions/prepare
+        uses: $/.github/actions/prepare
       - name: Install protoc
         uses: supplypike/setup-bin@8365380a806a88e7a0f0d07059b175ca2f5418d7 # v5.0.1
         with:
