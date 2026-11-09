@@ -65,13 +65,14 @@
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::{self, Debug},
     hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
     ops::Range,
 };
+use zcash_address::unified::MetadataTypecode;
 
 use incrementalmerkletree::{Retention, frontier::Frontier};
 use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
@@ -706,18 +707,113 @@ pub trait Account {
         }
     }
 
-    /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    /// Returns the UFVK that the wallet backend has stored for the account, if any, with all
+    /// of the [ZIP 316] metadata items that it was imported or generated with.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn stored_ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the UIVK that the wallet backend has stored for the account, with all of the
+    /// [ZIP 316] metadata items that it was imported or generated with.
+    ///
+    /// For an account that has a UFVK, this is the UIVK derived from [`Account::stored_ufvk`].
+    /// Derivation keeps the birthday height and expiry metadata items, and drops metadata items
+    /// that this library does not recognize.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn stored_uivk(&self) -> UnifiedIncomingViewingKey;
+
+    /// Returns the UFVK for the account, if any, with the requested subset of its stored
+    /// [ZIP 316] metadata items.
+    ///
+    /// The result always holds every stored metadata item that a reader is required to
+    /// understand, such as the expiry height and expiry time.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn ufvk_with_metadata(
+        &self,
+        request: &ViewingKeyMetadataRequest,
+    ) -> Option<UnifiedFullViewingKey> {
+        self.stored_ufvk()
+            .map(|ufvk| request.apply_to_ufvk(ufvk.clone()))
+    }
+
+    /// Returns the UIVK for the account with the requested subset of its stored [ZIP 316]
+    /// metadata items. See [`Account::stored_uivk`] for the metadata items that are stored.
+    ///
+    /// The result always holds every stored metadata item that a reader is required to
+    /// understand, such as the expiry height and expiry time.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn uivk_with_metadata(&self, request: &ViewingKeyMetadataRequest) -> UnifiedIncomingViewingKey {
+        request.apply_to_uivk(self.stored_uivk())
+    }
+
+    /// Returns the UFVK for the account, if any.
+    ///
+    /// The result holds the key data and the stored [ZIP 316] metadata items that a reader is
+    /// required to understand, such as the expiry height and expiry time. It holds no other
+    /// metadata items; use [`Account::ufvk_with_metadata`] to obtain them.
     ///
     /// Accounts for which this returns `None` cannot be used in wallet contexts, because
     /// they are unable to maintain an accurate balance.
-    fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn ufvk(&self) -> Option<UnifiedFullViewingKey> {
+        self.ufvk_with_metadata(&ViewingKeyMetadataRequest::MUST_UNDERSTAND_ONLY)
+    }
 
-    /// Returns the UIVK that the wallet backend has stored for the account.
+    /// Returns the UIVK for the account.
+    ///
+    /// The result holds the key data and the stored [ZIP 316] metadata items that a reader is
+    /// required to understand, such as the expiry height and expiry time. It holds no other
+    /// metadata items; use [`Account::uivk_with_metadata`] to obtain them.
     ///
     /// All accounts are required to have at least an incoming viewing key. This gives no
     /// indication about whether an account can be used in a wallet context; for that, use
     /// [`Account::ufvk`].
-    fn uivk(&self) -> UnifiedIncomingViewingKey;
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.uivk_with_metadata(&ViewingKeyMetadataRequest::MUST_UNDERSTAND_ONLY)
+    }
+}
+
+/// The [ZIP 316] metadata items to include in a viewing key returned by
+/// [`Account::ufvk_with_metadata`] or [`Account::uivk_with_metadata`].
+///
+/// Every request includes the stored metadata items that a reader is required to understand,
+/// such as the expiry height and expiry time. These items limit how the key can be used, so
+/// removing them would change what the key means. To change the metadata of a returned key, use
+/// [`UnifiedFullViewingKey::with_metadata`] or [`UnifiedIncomingViewingKey::with_metadata`].
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ViewingKeyMetadataRequest {
+    /// Every stored metadata item, including items that this library does not recognize.
+    Stored,
+    /// The stored metadata items whose typecodes are in the set, and every stored metadata item
+    /// that a reader is required to understand.
+    Include(BTreeSet<MetadataTypecode>),
+}
+
+impl ViewingKeyMetadataRequest {
+    /// A request for only the stored metadata items that a reader is required to understand.
+    pub const MUST_UNDERSTAND_ONLY: Self = Self::Include(BTreeSet::new());
+
+    fn apply_to_ufvk(&self, ufvk: UnifiedFullViewingKey) -> UnifiedFullViewingKey {
+        match self {
+            ViewingKeyMetadataRequest::Stored => ufvk,
+            ViewingKeyMetadataRequest::Include(include) => ufvk.retain_metadata(include),
+        }
+    }
+
+    fn apply_to_uivk(&self, uivk: UnifiedIncomingViewingKey) -> UnifiedIncomingViewingKey {
+        match self {
+            ViewingKeyMetadataRequest::Stored => uivk,
+            ViewingKeyMetadataRequest::Include(include) => uivk.retain_metadata(include),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -743,11 +839,11 @@ impl<A: Copy> Account for (A, UnifiedFullViewingKey, BlockHeight) {
         }
     }
 
-    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+    fn stored_ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         Some(&self.1)
     }
 
-    fn uivk(&self) -> UnifiedIncomingViewingKey {
+    fn stored_uivk(&self) -> UnifiedIncomingViewingKey {
         self.1.to_unified_incoming_viewing_key()
     }
 }
@@ -775,11 +871,11 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey, BlockHeight) {
         }
     }
 
-    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+    fn stored_ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         None
     }
 
-    fn uivk(&self) -> UnifiedIncomingViewingKey {
+    fn stored_uivk(&self) -> UnifiedIncomingViewingKey {
         self.1.clone()
     }
 }
@@ -2440,6 +2536,12 @@ pub trait WalletRead {
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
+    ///
+    /// Each key holds its key data and its stored [ZIP 316] metadata items that a reader is
+    /// required to understand, such as the expiry height and expiry time, and no other metadata
+    /// items. Use [`Account::ufvk_with_metadata`] to obtain other stored metadata items.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
@@ -5401,6 +5503,65 @@ mod tests {
         )
         .expect("valid seed")
         .to_unified_full_viewing_key()
+    }
+
+    /// The plain accessors keep only MUST-understand metadata, and the metadata-selecting
+    /// accessors return the requested subset of the stored metadata.
+    #[test]
+    fn account_viewing_key_accessors_select_metadata() {
+        use super::{Account, ViewingKeyMetadataRequest};
+        use std::collections::BTreeSet;
+        use zcash_address::unified::MetadataTypecode;
+        use zcash_keys::keys::ViewingKeyMetadata;
+
+        const UNKNOWN_OPTIONAL_TYPECODE: u32 = 0xC1;
+        let birthday_height = BlockHeight::from_u32(2_000_000);
+        let expiry_height = BlockHeight::from_u32(3_000_000);
+        let stored_metadata = ViewingKeyMetadata::new(
+            Some(birthday_height),
+            Some(expiry_height),
+            None,
+            vec![(UNKNOWN_OPTIONAL_TYPECODE, vec![1, 2, 3])],
+        )
+        .unwrap();
+        let ufvk = test_ufvk(1).unsafe_with_metadata(stored_metadata.clone());
+        let account = (0u32, ufvk, birthday_height);
+
+        let expiry_only = ViewingKeyMetadata::new(None, Some(expiry_height), None, vec![]).unwrap();
+        assert_eq!(
+            account.ufvk().map(|k| k.metadata()),
+            Some(expiry_only.clone())
+        );
+        assert_eq!(account.uivk().metadata(), expiry_only);
+        assert_eq!(
+            account
+                .ufvk_with_metadata(&ViewingKeyMetadataRequest::Stored)
+                .map(|k| k.metadata()),
+            Some(stored_metadata)
+        );
+
+        let birthday_and_expiry =
+            ViewingKeyMetadata::new(Some(birthday_height), Some(expiry_height), None, vec![])
+                .unwrap();
+        let include_birthday =
+            ViewingKeyMetadataRequest::Include(BTreeSet::from([MetadataTypecode::BirthdayHeight]));
+        assert_eq!(
+            account
+                .ufvk_with_metadata(&include_birthday)
+                .map(|k| k.metadata()),
+            Some(birthday_and_expiry.clone())
+        );
+        assert_eq!(
+            account.uivk_with_metadata(&include_birthday).metadata(),
+            birthday_and_expiry.clone()
+        );
+        // UIVK derivation drops unrecognized metadata items.
+        assert_eq!(
+            account
+                .uivk_with_metadata(&ViewingKeyMetadataRequest::Stored)
+                .metadata(),
+            birthday_and_expiry
+        );
     }
 
     #[test]

@@ -4894,7 +4894,7 @@ mod tests {
             .wallet_mut()
             .import_account_hd("", &seed, zip32_index_1, &birthday, None)
             .unwrap();
-        let ufvk = first_account.ufvk().unwrap();
+        let ufvk = first_account.stored_ufvk().unwrap();
 
         assert_matches!(
             st.wallet_mut().import_account_hd("", &seed, zip32_index_1, &birthday, None),
@@ -5065,6 +5065,76 @@ mod tests {
         );
     }
 
+    /// The wallet stores an imported UFVK with all of its metadata, and the plain accessors
+    /// return only its MUST-understand metadata.
+    #[test]
+    fn import_account_ufvk_retains_stored_metadata() {
+        use zcash_client_backend::data_api::ViewingKeyMetadataRequest;
+        use zcash_keys::keys::ViewingKeyMetadata;
+
+        const UNKNOWN_OPTIONAL_TYPECODE: u32 = 0xC1;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let expiry_height = birthday.height() + 1_000_000;
+        let stored_metadata = ViewingKeyMetadata::new(
+            Some(birthday.height()),
+            Some(expiry_height),
+            None,
+            vec![(UNKNOWN_OPTIONAL_TYPECODE, vec![1, 2, 3])],
+        )
+        .unwrap();
+
+        let seed = Secret::new(vec![0u8; 32]);
+        let ufvk = UnifiedSpendingKey::from_seed(
+            st.network(),
+            seed.expose_secret(),
+            zip32::AccountId::ZERO,
+        )
+        .unwrap()
+        .to_unified_full_viewing_key()
+        .unsafe_with_metadata(stored_metadata.clone());
+
+        let account_id = st
+            .wallet_mut()
+            .import_account_ufvk("", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap()
+            .id();
+        let account = st.wallet().get_account(account_id).unwrap().unwrap();
+
+        assert_eq!(
+            account.stored_ufvk().map(|k| k.metadata()),
+            Some(stored_metadata.clone())
+        );
+        assert_eq!(
+            account
+                .ufvk_with_metadata(&ViewingKeyMetadataRequest::Stored)
+                .map(|k| k.metadata()),
+            Some(stored_metadata)
+        );
+
+        let expiry_only = ViewingKeyMetadata::new(None, Some(expiry_height), None, vec![]).unwrap();
+        assert_eq!(
+            account.ufvk().map(|k| k.metadata()),
+            Some(expiry_only.clone())
+        );
+        assert_eq!(account.uivk().metadata(), expiry_only);
+        assert_eq!(
+            st.wallet()
+                .get_unified_full_viewing_keys()
+                .unwrap()
+                .get(&account_id)
+                .map(|k| k.metadata()),
+            Some(expiry_only)
+        );
+    }
+
     #[test]
     pub(crate) fn import_account_ufvk_then_conflicts() {
         let mut st = TestBuilder::new()
@@ -5092,7 +5162,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(ufvk.is_equivalent_to(account.ufvk().unwrap()));
+        assert!(ufvk.is_equivalent_to(&account.ufvk().unwrap()));
 
         assert_matches!(
             account.source(),
@@ -5280,7 +5350,7 @@ mod tests {
             .create_account("", &seed, &birthday, None)
             .unwrap();
         let seed_based_account = st.wallet().get_account(seed_based.0).unwrap().unwrap();
-        let ufvk = seed_based_account.ufvk().unwrap();
+        let ufvk = seed_based_account.stored_ufvk().unwrap();
 
         assert_matches!(
             st.wallet_mut().import_account_hd("", &seed, zip32_index_0, &birthday, None),

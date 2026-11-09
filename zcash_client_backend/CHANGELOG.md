@@ -11,6 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::ViewingKeyMetadataRequest`
+- `zcash_client_backend::data_api::Account::{stored_ufvk, stored_uivk,
+  ufvk_with_metadata, uivk_with_metadata}`
 - `zcash_client_backend::scanning::ScanError::CommitmentTreeConflict`
 - `zcash_client_backend::data_api::PutBlocksError`
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::Continuity`
@@ -38,6 +41,20 @@ workspace.
   stabilized_note_spendable_across_small_tip_advance}`
 
 ### Changed
+- `zcash_client_backend::data_api::Account`:
+  - `stored_ufvk` and `stored_uivk` are new required methods, which return the
+    account's keys with all of their stored ZIP 316 metadata items. `ufvk` and
+    `uivk` are now provided methods; implementations must implement
+    `stored_ufvk` and `stored_uivk` instead.
+  - `ufvk` now returns `Option<UnifiedFullViewingKey>` instead of
+    `Option<&UnifiedFullViewingKey>`. Use `stored_ufvk` to borrow the key.
+  - `ufvk` and `uivk` now return keys that hold only the stored metadata items
+    that a reader is required to understand, such as expiry. Use
+    `ufvk_with_metadata` or `uivk_with_metadata` to obtain other stored
+    metadata items, such as the birthday height.
+- `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
+  must return keys that hold only the stored metadata items that a reader is
+  required to understand.
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
   `height` to be at or below the wallet birthday. An implementation returns an
   error, and leaves the scan queue unchanged, for a `height` above the wallet

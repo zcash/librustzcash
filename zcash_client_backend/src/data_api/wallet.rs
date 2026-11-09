@@ -3005,7 +3005,7 @@ where
         .get_account(account_id)
         .map_err(Error::DataSource)?
         .ok_or(Error::AccountIdNotRecognized)?;
-    let ufvk = account.ufvk().ok_or(Error::AccountCannotSpend)?;
+    let ufvk = account.stored_ufvk().ok_or(Error::AccountCannotSpend)?;
     let account_derivation = account.source().key_derivation();
 
     // For now we only support turning single-step proposals into PCZTs.
