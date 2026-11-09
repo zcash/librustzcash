@@ -1,0 +1,139 @@
+name: Benchmarks
+
+# Runs the criterion benchmarks on `main` and stores the results in the Actions
+# cache as the `main` baseline, keyed by commit. Each run benchmarks only the
+# packages that changed since the previous baseline, keeps the previous results
+# for the others, and reports regressions on the merged pull request. Pull
+# request runs can restore the baseline and compare against it with
+# `cargo bench -- --baseline main`. Run this workflow manually to benchmark
+# every package without waiting for a push.
+
+permissions: {}
+
+on:
+  push:
+    branches: main
+  workflow_dispatch:
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Save benchmark baseline
+    runs-on: ubuntu-latest
+    # Caches written from other refs are not visible to pull requests.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read # Read the repository contents for checkout.
+      pull-requests: write # Comment on the merged pull request when a benchmark regresses.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore previous baseline
+        id: restore-baseline
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/criterion
+          key: criterion-baseline-main-${{ github.sha }}
+          restore-keys: criterion-baseline-main-
+      # Select the packages that changed since the commit of the previous
+      # baseline. Without a previous baseline, or on a manual run, select every
+      # benchmarked package.
+      - name: Select benchmarks
+        id: select
+        env:
+          MATCHED_KEY: ${{ steps.restore-baseline.outputs.cache-matched-key }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          baseline_commit="${MATCHED_KEY#criterion-baseline-main-}"
+          echo "baseline-commit=$baseline_commit" >> "$GITHUB_OUTPUT"
+          packages="$RUNNER_TEMP/benchmark-packages"
+          if [ -z "$MATCHED_KEY" ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
+            python3 .github/helpers/affected-benchmark-packages.py --all > "$packages"
+          else
+            git fetch --no-tags --depth=1 origin "$baseline_commit"
+            python3 .github/helpers/affected-benchmark-packages.py \
+              --base "$baseline_commit" --head HEAD > "$packages"
+          fi
+          echo "Selected packages:"
+          cat "$packages"
+          if [ -s "$packages" ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.select.outputs.any == 'true'
+        with:
+          # Keep the build cache separate from the test jobs, which build with
+          # different profiles.
+          shared-key: benchmarks
+      # Criterion also stores the latest results in `new` and `change`
+      # directories. Remove the restored copies so that the report lists only
+      # the benchmarks that this run measures.
+      - name: Keep only the baseline results
+        if: steps.select.outputs.any == 'true'
+        run: |
+          if [ -d target/criterion ]; then
+            find target/criterion -type d \( -name new -o -name change \) -prune -exec rm -rf {} +
+          fi
+      # `--bench '*'` selects only `[[bench]]` targets. The library targets use
+      # the libtest harness, which rejects criterion's arguments. Criterion
+      # compares each result with the restored `main` baseline before it
+      # replaces it.
+      - name: Run benchmarks
+        if: steps.select.outputs.any == 'true'
+        run: |
+          package_args=()
+          while read -r package; do
+            package_args+=(-p "$package")
+          done < "$RUNNER_TEMP/benchmark-packages"
+          cargo bench "${package_args[@]}" --bench '*' -- --save-baseline main
+      - name: Report changes
+        id: report
+        if: steps.select.outputs.any == 'true'
+        env:
+          BASELINE_COMMIT: ${{ steps.select.outputs.baseline-commit }}
+        run: |
+          python3 .github/helpers/report-benchmark-changes.py target/criterion \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --regression-output "$GITHUB_OUTPUT" \
+            > "$RUNNER_TEMP/benchmark-report.md"
+          cat "$RUNNER_TEMP/benchmark-report.md" >> "$GITHUB_STEP_SUMMARY"
+      # Save the baseline even when a benchmark regresses: it records the
+      # performance of `main` as it is.
+      - name: Save baseline
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/criterion
+          key: criterion-baseline-main-${{ github.sha }}
+      - name: Comment on the merged pull request
+        if: steps.report.outputs.regressed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_COMMIT: ${{ steps.select.outputs.baseline-commit }}
+        run: |
+          pull_request=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty')
+          if [ -z "$pull_request" ]; then
+            echo "No pull request is associated with $GITHUB_SHA."
+            exit 0
+          fi
+          repository_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          {
+            echo "Possible performance regression on \`main\` after this pull request merged."
+            echo "The results cover [all changes between \`$BASELINE_COMMIT\` and \`$GITHUB_SHA\`]($repository_url/compare/$BASELINE_COMMIT...$GITHUB_SHA),"
+            echo "measured on a different runner than the baseline, so confirm the cause before acting on them."
+            echo "See the [workflow run]($repository_url/actions/runs/$GITHUB_RUN_ID)."
+            echo
+            cat "$RUNNER_TEMP/benchmark-report.md"
+          } > "$RUNNER_TEMP/benchmark-comment.md"
+          gh pr comment "$pull_request" --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/benchmark-comment.md"
+      - name: Fail on regression
+        if: steps.report.outputs.regressed == 'true'
+        run: |
+          echo "::error::A benchmark regressed by more than the reporting threshold. See the job summary."
+          exit 1
