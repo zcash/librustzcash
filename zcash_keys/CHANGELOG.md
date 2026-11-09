@@ -16,9 +16,15 @@ workspace.
   `unstable` feature)
 - `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
   `test-dependencies` feature)
-- `zcash_keys::keys::BirthdayHeightError`
-- `zcash_keys::keys::UnifiedFullViewingKey::{birthday_height, with_birthday_height}`
-- `zcash_keys::keys::UnifiedIncomingViewingKey::{birthday_height, with_birthday_height}`
+- `zcash_keys::keys::ViewingKeyMetadata`
+- `zcash_keys::keys::MetadataError`
+- `zcash_keys::keys::UnsafeMetadataChange`
+- `zcash_keys::keys::UnifiedFullViewingKey::{birthday_height, metadata, with_metadata,
+  unsafe_with_metadata, retain_metadata}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::{birthday_height, metadata,
+  with_metadata, unsafe_with_metadata, retain_metadata}`
+- `zcash_keys::keys::testing::arb_viewing_key_metadata` (under the
+  `test-dependencies` feature)
 
 ### Changed
 - `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
