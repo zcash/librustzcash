@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `zcash_address::unified::ParseError::{BirthdayAfterExpiry, NotPermittedInAddress}`
+- `zcash_address::unified::MetadataTypecode` now implements `PartialOrd` and `Ord`.
 
 ### Changed
 - `zcash_address::unified::MetadataTypecode` has a new `BirthdayHeight` variant, and

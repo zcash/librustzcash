@@ -125,7 +125,7 @@ where
         &gap_limits,
         account_ref,
         &account.uivk(),
-        account.ufvk(),
+        account.stored_ufvk(),
         key_scope,
         request,
         false,

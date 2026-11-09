@@ -518,7 +518,7 @@ where
                 .map_err(|e| Error::Wallet(Box::new(e)))?
                 .ok_or(Error::AccountUnknown)?;
         let ufvk = account
-            .ufvk()
+            .stored_ufvk()
             .cloned()
             .ok_or(Error::ViewingKeyUnavailable)?;
         let ufvks = HashMap::from([(self.account, ufvk)]);

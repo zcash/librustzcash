@@ -14,6 +14,9 @@ workspace.
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
 
 ### Changed
+- `WalletDb`'s implementation of `WalletRead::get_unified_full_viewing_keys`
+  returns keys that hold only the stored ZIP 316 metadata items that a reader
+  is required to understand, such as expiry.
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
   `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
   unchanged, when `height` is above the wallet birthday.

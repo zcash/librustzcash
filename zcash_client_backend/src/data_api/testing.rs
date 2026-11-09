@@ -528,12 +528,12 @@ impl<A: Account> Account for TestAccount<A> {
         self.account.source()
     }
 
-    fn ufvk(&self) -> Option<&zcash_keys::keys::UnifiedFullViewingKey> {
-        self.account.ufvk()
+    fn stored_ufvk(&self) -> Option<&zcash_keys::keys::UnifiedFullViewingKey> {
+        self.account.stored_ufvk()
     }
 
-    fn uivk(&self) -> zcash_keys::keys::UnifiedIncomingViewingKey {
-        self.account.uivk()
+    fn stored_uivk(&self) -> zcash_keys::keys::UnifiedIncomingViewingKey {
+        self.account.stored_uivk()
     }
 }
 
@@ -632,7 +632,7 @@ impl<Cache, DataStore: WalletTest, Network: consensus::Parameters>
     /// Returns the test account's Sapling DFVK, if one was configured.
     pub fn test_account_sapling(&self) -> Option<&DiversifiableFullViewingKey> {
         let (_, acct) = self.test_account.as_ref()?;
-        let ufvk = acct.ufvk()?;
+        let ufvk = acct.stored_ufvk()?;
         ufvk.sapling()
     }
 
@@ -640,7 +640,7 @@ impl<Cache, DataStore: WalletTest, Network: consensus::Parameters>
     #[cfg(feature = "orchard")]
     pub fn test_account_orchard(&self) -> Option<&::orchard::keys::FullViewingKey> {
         let (_, acct) = self.test_account.as_ref()?;
-        let ufvk = acct.ufvk()?;
+        let ufvk = acct.stored_ufvk()?;
         ufvk.orchard()
     }
 }

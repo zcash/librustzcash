@@ -104,7 +104,7 @@ impl From<DataTypecode> for u32 {
 }
 
 /// Typecodes for metadata items (0xC0..=0xFC).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MetadataTypecode {
     /// Viewing key birthday height (typecode 0xC0). 4-byte little-endian block height.
     BirthdayHeight,

@@ -80,7 +80,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     convert::TryFrom,
     io::{self, Cursor},
     num::NonZeroU32,
@@ -321,11 +321,11 @@ impl zcash_client_backend::data_api::Account for Account {
         &self.kind
     }
 
-    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+    fn stored_ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         self.viewing_key.ufvk()
     }
 
-    fn uivk(&self) -> UnifiedIncomingViewingKey {
+    fn stored_uivk(&self) -> UnifiedIncomingViewingKey {
         self.viewing_key.uivk()
     }
 }
@@ -465,7 +465,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Check whether any IVK component collides with an existing account.
     let uivk = viewing_key.uivk();
     if let Some(existing_account) = get_account_for_uivk(conn, params, &uivk)? {
-        match (&viewing_key, existing_account.ufvk()) {
+        match (&viewing_key, existing_account.stored_ufvk()) {
             (ViewingKey::Full(new_ufvk), _) => {
                 // FVK import over an existing account. The upgrade function
                 // validates that the new FVK strictly adds capability.
@@ -1812,6 +1812,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
         let ufvk_str: Option<String> = row.get(1)?;
         if let Some(ufvk_str) = ufvk_str {
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+                .map(|ufvk| ufvk.retain_metadata(&BTreeSet::new()))
                 .map_err(|e| SqliteClientError::CorruptedData(e.to_string()));
             Ok(Some((AccountUuid(row.get(0)?), ufvk)))
         } else {
@@ -2001,7 +2002,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     existing_account: &Account,
     ufvk: &UnifiedFullViewingKey,
 ) -> Result<Account, SqliteClientError> {
-    let existing_uivk = existing_account.uivk();
+    let existing_uivk = existing_account.stored_uivk();
 
     // The new FVK must subsume the existing account's IVK items.
     if !ufvk.subsumes_uivk(&existing_uivk) {
@@ -2011,7 +2012,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     // If the existing account already has a UFVK that subsumes the new one,
     // this is a duplicate import (no new capability).
     if existing_account
-        .ufvk()
+        .stored_ufvk()
         .is_some_and(|efvk| efvk.subsumes_ufvk(ufvk))
     {
         return Err(SqliteClientError::AccountCollision(existing_account.id()));
@@ -2065,7 +2066,7 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     existing_account: &Account,
     uivk: &UnifiedIncomingViewingKey,
 ) -> Result<Account, SqliteClientError> {
-    let existing_uivk = existing_account.uivk();
+    let existing_uivk = existing_account.stored_uivk();
 
     // The new UIVK must strictly add items: it must subsume the existing,
     // but not be identical to it.

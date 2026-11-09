@@ -728,7 +728,7 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
         params,
         account_id,
         &account.uivk(),
-        account.ufvk(),
+        account.stored_ufvk(),
         key_scope,
         request,
         range_to_store,

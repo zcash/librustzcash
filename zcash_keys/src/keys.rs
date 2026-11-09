@@ -112,6 +112,9 @@ pub mod transparent;
 #[cfg(feature = "zcashd-compat")]
 pub mod zcashd;
 
+mod metadata;
+pub use metadata::{MetadataError, UnsafeMetadataChange, ViewingKeyMetadata};
+
 #[cfg(feature = "transparent-inputs")]
 fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildIndex> {
     let (low_4_bytes, rest) = j.as_bytes().split_at(4);
@@ -154,37 +157,6 @@ impl Display for DerivationError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for DerivationError {}
-
-/// An error returned when a unified viewing key cannot hold a requested [ZIP 316] birthday
-/// height.
-///
-/// [ZIP 316]: https://zips.z.cash/zip-0316
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum BirthdayHeightError {
-    /// The birthday height is greater than the expiry height of the key.
-    AfterExpiry {
-        birthday_height: consensus::BlockHeight,
-        expiry_height: consensus::BlockHeight,
-    },
-}
-
-impl Display for BirthdayHeightError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BirthdayHeightError::AfterExpiry {
-                birthday_height,
-                expiry_height,
-            } => write!(
-                f,
-                "Birthday height {birthday_height} is greater than expiry height {expiry_height}"
-            ),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for BirthdayHeightError {}
 
 /// A version identifier for the encoding of unified spending keys.
 ///
@@ -1586,33 +1558,63 @@ impl UnifiedFullViewingKey {
         self.birthday_height
     }
 
-    /// Returns this key with its [ZIP 316] birthday height set to `birthday_height`, or
-    /// with no birthday height if `birthday_height` is `None`. The birthday height is the
-    /// height of the first block that a user of this key should scan in order to detect
-    /// funds. Unified addresses derived from this key never hold it.
+    /// Returns the [ZIP 316] metadata items of this key.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn metadata(&self) -> ViewingKeyMetadata {
+        ViewingKeyMetadata {
+            birthday_height: self.birthday_height,
+            expiry_height: self.expiry_height,
+            expiry_time: self.expiry_time,
+            unknown: self.unknown_metadata.clone(),
+        }
+    }
+
+    /// Returns this key with its [ZIP 316] metadata items replaced by `metadata`.
+    ///
+    /// The replacement must only narrow the items that a reader is required to understand.
+    /// An expiry height or expiry time can be added or moved earlier, but not removed or moved
+    /// later. Use [`UnifiedFullViewingKey::unsafe_with_metadata`] to make such a change deliberately.
     ///
     /// # Errors
     ///
-    /// Returns [`BirthdayHeightError::AfterExpiry`] if `birthday_height` is greater than
-    /// the expiry height of this key.
+    /// Returns the [`UnsafeMetadataChange`] that describes the first widening change.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn with_birthday_height(
-        self,
-        birthday_height: Option<consensus::BlockHeight>,
-    ) -> Result<Self, BirthdayHeightError> {
-        match (birthday_height, self.expiry_height) {
-            (Some(birthday_height), Some(expiry_height)) if birthday_height > expiry_height => {
-                Err(BirthdayHeightError::AfterExpiry {
-                    birthday_height,
-                    expiry_height,
-                })
-            }
-            _ => Ok(Self {
-                birthday_height,
-                ..self
-            }),
+    pub fn with_metadata(self, metadata: ViewingKeyMetadata) -> Result<Self, UnsafeMetadataChange> {
+        self.metadata().check_narrowing(&metadata)?;
+        Ok(self.unsafe_with_metadata(metadata))
+    }
+
+    /// Returns this key with its [ZIP 316] metadata items replaced by `metadata`, including
+    /// changes that widen the items that a reader is required to understand.
+    ///
+    /// For example, this can remove the expiry of the key or move it later. A key with a later
+    /// expiry, or with no expiry, is usable in more circumstances than its creator intended.
+    /// Make such a change only when that is the intent, for example to extend the validity of
+    /// a key whose planned rotation is delayed.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn unsafe_with_metadata(self, metadata: ViewingKeyMetadata) -> Self {
+        Self {
+            birthday_height: metadata.birthday_height,
+            expiry_height: metadata.expiry_height,
+            expiry_time: metadata.expiry_time,
+            unknown_metadata: metadata.unknown,
+            ..self
         }
+    }
+
+    /// Returns this key without the [ZIP 316] metadata items that a reader is not required to
+    /// understand, except for those whose typecodes are in `include`.
+    ///
+    /// The result always holds every metadata item that a reader is required to understand,
+    /// such as the expiry height and expiry time.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn retain_metadata(self, include: &BTreeSet<unified::MetadataTypecode>) -> Self {
+        let metadata = self.metadata().retain(include);
+        self.unsafe_with_metadata(metadata)
     }
 
     /// Returns the expiry height metadata for this key, if present.
@@ -2193,33 +2195,63 @@ impl UnifiedIncomingViewingKey {
         self.birthday_height
     }
 
-    /// Returns this key with its [ZIP 316] birthday height set to `birthday_height`, or
-    /// with no birthday height if `birthday_height` is `None`. The birthday height is the
-    /// height of the first block that a user of this key should scan in order to detect
-    /// funds. Unified addresses derived from this key never hold it.
+    /// Returns the [ZIP 316] metadata items of this key.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn metadata(&self) -> ViewingKeyMetadata {
+        ViewingKeyMetadata {
+            birthday_height: self.birthday_height,
+            expiry_height: self.expiry_height,
+            expiry_time: self.expiry_time,
+            unknown: self.unknown_metadata.clone(),
+        }
+    }
+
+    /// Returns this key with its [ZIP 316] metadata items replaced by `metadata`.
+    ///
+    /// The replacement must only narrow the items that a reader is required to understand.
+    /// An expiry height or expiry time can be added or moved earlier, but not removed or moved
+    /// later. Use [`UnifiedIncomingViewingKey::unsafe_with_metadata`] to make such a change deliberately.
     ///
     /// # Errors
     ///
-    /// Returns [`BirthdayHeightError::AfterExpiry`] if `birthday_height` is greater than
-    /// the expiry height of this key.
+    /// Returns the [`UnsafeMetadataChange`] that describes the first widening change.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn with_birthday_height(
-        self,
-        birthday_height: Option<consensus::BlockHeight>,
-    ) -> Result<Self, BirthdayHeightError> {
-        match (birthday_height, self.expiry_height) {
-            (Some(birthday_height), Some(expiry_height)) if birthday_height > expiry_height => {
-                Err(BirthdayHeightError::AfterExpiry {
-                    birthday_height,
-                    expiry_height,
-                })
-            }
-            _ => Ok(Self {
-                birthday_height,
-                ..self
-            }),
+    pub fn with_metadata(self, metadata: ViewingKeyMetadata) -> Result<Self, UnsafeMetadataChange> {
+        self.metadata().check_narrowing(&metadata)?;
+        Ok(self.unsafe_with_metadata(metadata))
+    }
+
+    /// Returns this key with its [ZIP 316] metadata items replaced by `metadata`, including
+    /// changes that widen the items that a reader is required to understand.
+    ///
+    /// For example, this can remove the expiry of the key or move it later. A key with a later
+    /// expiry, or with no expiry, is usable in more circumstances than its creator intended.
+    /// Make such a change only when that is the intent, for example to extend the validity of
+    /// a key whose planned rotation is delayed.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn unsafe_with_metadata(self, metadata: ViewingKeyMetadata) -> Self {
+        Self {
+            birthday_height: metadata.birthday_height,
+            expiry_height: metadata.expiry_height,
+            expiry_time: metadata.expiry_time,
+            unknown_metadata: metadata.unknown,
+            ..self
         }
+    }
+
+    /// Returns this key without the [ZIP 316] metadata items that a reader is not required to
+    /// understand, except for those whose typecodes are in `include`.
+    ///
+    /// The result always holds every metadata item that a reader is required to understand,
+    /// such as the expiry height and expiry time.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn retain_metadata(self, include: &BTreeSet<unified::MetadataTypecode>) -> Self {
+        let metadata = self.metadata().retain(include);
+        self.unsafe_with_metadata(metadata)
     }
 
     /// Returns the expiry height metadata for this key, if present.
@@ -2579,6 +2611,7 @@ pub mod testing {
     use proptest::prelude::*;
 
     use super::UnifiedSpendingKey;
+    pub use super::metadata::testing::arb_viewing_key_metadata;
     use zcash_protocol::consensus::Network;
     use zip32::AccountId;
 
@@ -3953,6 +3986,18 @@ mod tests {
         assert_zeroize_on_drop::<::orchard::keys::SpendingKey>();
     }
 
+    /// Returns a full viewing key with every component, derived from a fixed seed.
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn full_viewing_key() -> UnifiedFullViewingKey {
+        UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
+            .expect("the seed yields a valid spending key")
+            .to_unified_full_viewing_key()
+    }
+
     /// A birthday height survives encoding and decoding, is retained in a derived UIVK, and
     /// does not prevent a Revision 0 encoding.
     #[test]
@@ -3962,16 +4007,16 @@ mod tests {
         feature = "transparent-inputs"
     ))]
     fn birthday_height_roundtrip_and_uivk_derivation() {
+        use super::ViewingKeyMetadata;
         use zcash_protocol::consensus::BlockHeight;
 
         const BIRTHDAY_HEIGHT: u32 = 2_000_000;
         let birthday_height = BlockHeight::from_u32(BIRTHDAY_HEIGHT);
 
-        let ufvk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
-            .expect("the seed yields a valid spending key")
-            .to_unified_full_viewing_key()
-            .with_birthday_height(Some(birthday_height))
-            .expect("the key has no expiry height");
+        let metadata = ViewingKeyMetadata::new(Some(birthday_height), None, None, vec![]).unwrap();
+        let ufvk = full_viewing_key()
+            .with_metadata(metadata)
+            .expect("adding a birthday height is a safe change");
         assert_eq!(ufvk.birthday_height(), Some(birthday_height));
 
         let ufvk_encoded = ufvk.encode(&MAIN_NETWORK).unwrap();
@@ -3992,67 +4037,146 @@ mod tests {
         let uivk_decoded = UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, &uivk_encoded).unwrap();
         assert_eq!(uivk_decoded.birthday_height(), Some(birthday_height));
 
-        let cleared = ufvk.with_birthday_height(None).unwrap();
+        let cleared = ufvk
+            .with_metadata(ViewingKeyMetadata::default())
+            .expect("removing a birthday height is a safe change");
         assert_eq!(cleared.birthday_height(), None);
     }
 
-    /// A key accepts a birthday height equal to its expiry height, and rejects a greater one.
+    /// `with_metadata` rejects a change that removes or extends an expiry, and
+    /// `unsafe_with_metadata` accepts it.
     #[test]
     #[cfg(all(
         feature = "orchard",
         feature = "sapling",
         feature = "transparent-inputs"
     ))]
-    fn birthday_height_not_after_expiry_height() {
-        use super::BirthdayHeightError;
-        use zcash_address::unified::{Container, MetadataItem, Uitem};
+    fn with_metadata_rejects_widening_expiry() {
+        use super::{UnsafeMetadataChange, ViewingKeyMetadata};
         use zcash_protocol::consensus::BlockHeight;
 
         const EXPIRY_HEIGHT: u32 = 3_000_000;
         let expiry_height = BlockHeight::from_u32(EXPIRY_HEIGHT);
-        let later_height = expiry_height + 1;
+        let expiring = ViewingKeyMetadata::new(None, Some(expiry_height), None, vec![]).unwrap();
+        let extended =
+            ViewingKeyMetadata::new(None, Some(expiry_height + 1), None, vec![]).unwrap();
 
-        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
-            .expect("the seed yields a valid spending key");
-        let r2_encoding = usk
-            .to_unified_full_viewing_key()
-            .encode_revision(&MAIN_NETWORK, Revision::R2)
-            .unwrap();
-        let (_, _, container) = unified::Ufvk::decode(&r2_encoding).unwrap();
-        let items = container
-            .items_as_parsed()
-            .iter()
-            .cloned()
-            .chain(Some(Uitem::Metadata(MetadataItem::ExpiryHeight(
-                EXPIRY_HEIGHT,
-            ))))
-            .collect();
-        let ufvk = UnifiedFullViewingKey::parse(
-            &unified::Ufvk::try_from_items(Revision::R2, items).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(ufvk.expiry_height(), Some(expiry_height));
-
-        let expected = Err(BirthdayHeightError::AfterExpiry {
-            birthday_height: later_height,
-            expiry_height,
-        });
-        let uivk = ufvk.to_unified_incoming_viewing_key();
-        assert_eq!(
-            uivk.clone()
-                .with_birthday_height(Some(later_height))
-                .map(|k| k.birthday_height()),
-            expected.clone()
-        );
-        assert!(uivk.with_birthday_height(Some(expiry_height)).is_ok());
-
+        let ufvk = full_viewing_key().with_metadata(expiring.clone()).unwrap();
         assert_eq!(
             ufvk.clone()
-                .with_birthday_height(Some(later_height))
-                .map(|k| k.birthday_height()),
-            expected
+                .with_metadata(extended.clone())
+                .map(|k| k.metadata()),
+            Err(UnsafeMetadataChange::ExpiryHeightExtended {
+                current: expiry_height,
+                requested: expiry_height + 1,
+            })
         );
-        let ufvk = ufvk.with_birthday_height(Some(expiry_height)).unwrap();
-        assert_eq!(ufvk.birthday_height(), Some(expiry_height));
+        assert_eq!(
+            ufvk.clone()
+                .with_metadata(ViewingKeyMetadata::default())
+                .map(|k| k.metadata()),
+            Err(UnsafeMetadataChange::ExpiryHeightRemoved {
+                current: expiry_height
+            })
+        );
+        assert_eq!(
+            ufvk.clone()
+                .unsafe_with_metadata(extended.clone())
+                .expiry_height(),
+            Some(expiry_height + 1)
+        );
+
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+        assert_eq!(uivk.metadata(), expiring);
+        assert!(uivk.clone().with_metadata(extended.clone()).is_err());
+        assert_eq!(
+            uivk.unsafe_with_metadata(extended).expiry_height(),
+            Some(expiry_height + 1)
+        );
+    }
+
+    /// `retain_metadata` removes optional items that are not requested, and keeps expiry.
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn retain_metadata_keeps_expiry() {
+        use super::ViewingKeyMetadata;
+        use alloc::collections::BTreeSet;
+        use zcash_address::unified::MetadataTypecode;
+        use zcash_protocol::consensus::BlockHeight;
+
+        const UNKNOWN_OPTIONAL_TYPECODE: u32 = 0xC1;
+        let birthday_height = BlockHeight::from_u32(2_000_000);
+        let expiry_height = BlockHeight::from_u32(3_000_000);
+        let metadata = ViewingKeyMetadata::new(
+            Some(birthday_height),
+            Some(expiry_height),
+            None,
+            vec![(UNKNOWN_OPTIONAL_TYPECODE, vec![1, 2, 3])],
+        )
+        .unwrap();
+        let ufvk = full_viewing_key().with_metadata(metadata.clone()).unwrap();
+
+        let bare = ufvk.clone().retain_metadata(&BTreeSet::new());
+        assert_eq!(
+            bare.metadata(),
+            ViewingKeyMetadata::new(None, Some(expiry_height), None, vec![]).unwrap()
+        );
+
+        let with_birthday = ufvk
+            .clone()
+            .retain_metadata(&BTreeSet::from([MetadataTypecode::BirthdayHeight]));
+        assert_eq!(with_birthday.birthday_height(), Some(birthday_height));
+        assert!(with_birthday.metadata().unknown_items().is_empty());
+
+        let with_unknown = ufvk.retain_metadata(&BTreeSet::from([MetadataTypecode::Unknown(
+            UNKNOWN_OPTIONAL_TYPECODE,
+        )]));
+        assert_eq!(with_unknown.birthday_height(), None);
+        assert_eq!(
+            with_unknown.metadata().unknown_items(),
+            metadata.unknown_items()
+        );
+    }
+
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    proptest! {
+        /// Replacing a key's metadata with its own metadata is a safe change that leaves the
+        /// key unchanged, and a key holds whatever metadata it is given.
+        #[test]
+        fn metadata_replacement_laws(
+            first in super::testing::arb_viewing_key_metadata(),
+            second in super::testing::arb_viewing_key_metadata(),
+        ) {
+            let ufvk = full_viewing_key().unsafe_with_metadata(first.clone());
+            proptest::prop_assert_eq!(ufvk.metadata(), first.clone());
+            proptest::prop_assert_eq!(
+                ufvk.clone()
+                    .with_metadata(ufvk.metadata())
+                    .map(|k| k.encode(&MAIN_NETWORK)),
+                Ok(ufvk.encode(&MAIN_NETWORK))
+            );
+
+            let replaced = ufvk.clone().unsafe_with_metadata(second.clone());
+            proptest::prop_assert_eq!(replaced.metadata(), second.clone());
+            proptest::prop_assert_eq!(
+                ufvk.clone().with_metadata(second.clone()).is_ok(),
+                first.check_narrowing(&second).is_ok()
+            );
+
+            let decoded = UnifiedFullViewingKey::decode(
+                &MAIN_NETWORK,
+                &replaced.encode(&MAIN_NETWORK).unwrap(),
+            )
+            .unwrap();
+            proptest::prop_assert_eq!(decoded.metadata(), second);
+        }
     }
 }
