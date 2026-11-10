@@ -30,7 +30,7 @@ version = "0.31.0-keystone.0"
 audited_as = "0.31.0-pre.2"
 
 [[unpublished.zcash_proofs]]
-version = "0.31.0"
+version = "0.31.0-keystone.0"
 audited_as = "0.31.0-pre.2"
 
 [[unpublished.zcash_protocol]]

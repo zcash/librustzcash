@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.31.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `zcash_proofs 0.31.0`.
+
+### Changed
+- This release has the following differences from `zcash_proofs 0.31.0`:
+  - It depends on `zcash_primitives 0.31.0-keystone.0`, in place of
+    `zcash_primitives 0.31.0`.
+
 ## [0.31.0] - 2026-10-21
 
 ### Changed

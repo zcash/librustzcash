@@ -7709,7 +7709,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.31.0"
+version = "0.31.0-keystone.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
