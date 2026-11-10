@@ -9748,6 +9748,11 @@ pub fn proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
         Some(selected_anchor),
         "decoding must preserve the serialized anchor",
     );
+    assert_eq!(
+        decoded.min_target_height(),
+        proposal.min_target_height(),
+        "decoding must preserve the target height the proposal's fee was computed at",
+    );
 
     let usk = st.get_account().usk().clone();
     st.create_proposed_transactions::<Infallible, _, Infallible, _>(
@@ -12226,8 +12231,11 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
 const NU7_ACTIVATION_OFFSET: u32 = 10;
 
 /// Returns a test network on which every upgrade through NU6.3 activates at Sapling activation,
-/// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later.
-fn nu7_activating_network() -> LocalNetwork {
+/// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later. On a regtest network the fee
+/// reduction of [ZIP 2009] takes effect at the NU7 activation height.
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub(crate) fn nu7_activating_network() -> LocalNetwork {
     let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
         .sapling
         .expect("the default test network activates Sapling");

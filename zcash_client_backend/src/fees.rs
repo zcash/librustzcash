@@ -33,6 +33,11 @@ pub mod zip317;
 /// An enumeration of the standard fee rules supported by the wallet backend.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StandardFeeRule {
+    /// The [ZIP 317] fee rule: the marginal fee in effect at the target height
+    /// ([`zip317::marginal_fee`]).
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317
+    /// [`zip317::marginal_fee`]: zcash_primitives::transaction::fees::zip317::marginal_fee
     Zip317,
 }
 
@@ -50,7 +55,6 @@ impl FeeRule for StandardFeeRule {
         orchard_action_count: usize,
         ironwood_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
-        #[allow(deprecated)]
         match self {
             Self::Zip317 => prim_zip317::FeeRule::standard().fee_required(
                 params,
@@ -221,13 +225,17 @@ const CANONICAL_CROSSING_ORCHARD_ACTIONS: usize = 2;
 #[cfg(feature = "orchard")]
 const CANONICAL_CROSSING_IRONWOOD_ACTIONS: usize = 1;
 
-/// The fee a canonical ZIP 318 crossing pays at `target_height`, obtained by asking the STANDARD
-/// ZIP 317 rule what the canonical shape costs.
+/// The canonical ZIP 318 crossing's fee under the ZIP 317 marginal fee in effect at
+/// `target_height` ([`zip317::marginal_fee`]): what the STANDARD ZIP 317 rule charges the
+/// canonical shape, 15 000 zatoshis before the fee reduction of ZIP 2009 takes effect and 3 000
+/// from then on.
 ///
 /// ZIP 318 requires this exact fee. Any other value partitions the anonymity set, so a transaction
 /// paying a non-standard fee is not a canonical crossing however well its structure matches. The
 /// standard rule is used rather than the caller's: a proposal built on a fixed non-standard rule
 /// would otherwise be compared against its own fee and always agree.
+///
+/// [`zip317::marginal_fee`]: zcash_primitives::transaction::fees::zip317::marginal_fee
 #[cfg(feature = "orchard")]
 pub fn canonical_crossing_fee<P: consensus::Parameters>(
     params: &P,
@@ -532,12 +540,23 @@ pub struct SplitPolicy {
 }
 
 impl SplitPolicy {
+    /// The number of ZIP 317 marginal fees in the default "minimum usable note value".
+    const MIN_NOTE_VALUE_MARGINAL_FEES: u64 = 100;
+
     /// In the case that no other conditions provided by the user are available to fall back on,
-    /// a default value of [`MARGINAL_FEE`] * 100 will be used as the "minimum usable note value"
-    /// when retrieving wallet metadata.
+    /// [`MIN_NOTE_VALUE_MARGINAL_FEES`] times the ZIP 317 marginal fee in effect at
+    /// `target_height` will be used as the "minimum usable note value" when retrieving wallet
+    /// metadata.
     ///
-    /// [`MARGINAL_FEE`]: zcash_primitives::transaction::fees::zip317::MARGINAL_FEE
-    pub(crate) const MIN_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(500000);
+    /// [`MIN_NOTE_VALUE_MARGINAL_FEES`]: Self::MIN_NOTE_VALUE_MARGINAL_FEES
+    pub(crate) fn min_note_value<P: consensus::Parameters>(
+        params: &P,
+        target_height: TargetHeight,
+    ) -> Zatoshis {
+        (prim_zip317::marginal_fee(params, target_height.into())
+            * Self::MIN_NOTE_VALUE_MARGINAL_FEES)
+            .expect("a hundred marginal fees cannot overflow")
+    }
 
     /// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
     /// outputs exists within an account, each having at least the specified minimum note value.
@@ -715,9 +734,11 @@ pub trait ChangeStrategy {
     fn fee_rule(&self) -> &Self::FeeRule;
 
     /// Uses the provided metadata source to obtain the wallet metadata required for change
-    /// creation determinations.
-    fn fetch_wallet_meta(
+    /// creation determinations, for a transaction on the network `params` expected to be mined
+    /// at `target_height`.
+    fn fetch_wallet_meta<P: consensus::Parameters>(
         &self,
+        params: &P,
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as MetaSource>::AccountId,
         target_height: TargetHeight,
@@ -774,18 +795,27 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    #[cfg(feature = "orchard")]
-    use {
-        zcash_primitives::transaction::fees::zip317::MARGINAL_FEE,
-        zcash_protocol::consensus::{BlockHeight, MAIN_NETWORK},
-    };
+    use core::iter;
 
     use ::transparent::bundle::{OutPoint, TxOut};
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_primitives::transaction::fees::transparent;
-    use zcash_protocol::{consensus::Network, value::Zatoshis};
+    use zcash_primitives::transaction::fees::{
+        FeeRule as _,
+        transparent::{self, InputSize},
+        zip317::{GRACE_ACTIONS, minimum_fee},
+    };
+    use zcash_protocol::{
+        consensus::{Network, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
 
-    use crate::data_api::ChangeReceivers;
+    use crate::{
+        data_api::{ChangeReceivers, testing::pool::nu7_activating_network},
+        fees::{SplitPolicy, StandardFeeRule, zip317::Zip317FeeRule as _},
+    };
+
+    #[cfg(feature = "orchard")]
+    use zcash_primitives::transaction::fees::zip317::marginal_fee;
 
     /// The seed of the account of [`all_change_receivers`].
     const ALL_RECEIVERS_SEED: [u8; 32] = [0; 32];
@@ -804,17 +834,86 @@ pub(crate) mod tests {
         )
     }
 
-    /// The canonical crossing fee is three ZIP 317 marginal fees: the Orchard bundle's two actions
-    /// plus the single unpadded Ironwood one, which together exceed the grace allowance. Pinning it
-    /// means a change to the marginal fee or to the canonical shape surfaces here rather than
-    /// silently reclassifying transactions.
+    /// The standard rule, the marginal fee it exposes, and the canonical ZIP 318 crossing fee all
+    /// follow the ZIP 317 schedule at the target height. The literal values are deliberate pins:
+    /// a change to the marginal fee or to the canonical shape surfaces here rather than silently
+    /// reclassifying transactions.
     #[test]
-    #[cfg(feature = "orchard")]
-    fn canonical_crossing_fee_is_three_marginal_fees() {
-        let fee = super::canonical_crossing_fee(&MAIN_NETWORK, BlockHeight::from_u32(2_000_000))
-            .expect("the canonical shape is a valid input to the ZIP 317 rule");
-        assert_eq!(fee, (MARGINAL_FEE * 3u64).expect("a valid amount"));
-        assert_eq!(u64::from(fee), 15_000);
+    fn zip317_rule_charges_fee_in_effect_at_target_height() {
+        /// The marginal fee before the fee reduction of ZIP 2009 takes effect.
+        const PRE_REDUCTION_MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(5_000);
+        /// The marginal fee from the fee reduction onward.
+        const REDUCED_MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(1_000);
+
+        // On a regtest network the fee reduction takes effect at NU7 activation.
+        let network = nu7_activating_network();
+        let from = network
+            .activation_height(NetworkUpgrade::Nu7)
+            .expect("the test network activates NU7");
+        let before = from - 1;
+
+        // A transaction of exactly `GRACE_ACTIONS` Orchard actions pays the minimum fee at
+        // either side of the boundary.
+        let fee_at = |height| {
+            StandardFeeRule::Zip317
+                .fee_required(
+                    &network,
+                    height,
+                    iter::empty::<InputSize>(),
+                    iter::empty::<usize>(),
+                    0,
+                    0,
+                    GRACE_ACTIONS,
+                    0,
+                )
+                .expect("a valid input to the ZIP 317 rule")
+        };
+        assert_eq!(fee_at(before), minimum_fee(&network, before));
+        assert_eq!(u64::from(fee_at(before)), 10_000);
+        assert_eq!(fee_at(from), minimum_fee(&network, from));
+        assert_eq!(u64::from(fee_at(from)), 2_000);
+
+        assert_eq!(
+            StandardFeeRule::Zip317.marginal_fee(&network, before.into()),
+            PRE_REDUCTION_MARGINAL_FEE
+        );
+        assert_eq!(
+            StandardFeeRule::Zip317.marginal_fee(&network, from.into()),
+            REDUCED_MARGINAL_FEE
+        );
+
+        // The default minimum usable note value is a hundred marginal fees.
+        assert_eq!(
+            u64::from(SplitPolicy::min_note_value(&network, before.into())),
+            500_000
+        );
+        assert_eq!(
+            u64::from(SplitPolicy::min_note_value(&network, from.into())),
+            100_000
+        );
+
+        #[cfg(feature = "orchard")]
+        {
+            /// The number of logical actions in a canonical ZIP 318 crossing: two Orchard
+            /// actions plus one unpadded Ironwood action, which together exceed the grace
+            /// allowance.
+            const CANONICAL_CROSSING_ACTIONS: u64 = 3;
+
+            let crossing_fee = |height| {
+                super::canonical_crossing_fee(&network, height)
+                    .expect("the canonical shape is a valid input to the ZIP 317 rule")
+            };
+            assert_eq!(
+                crossing_fee(before),
+                (marginal_fee(&network, before) * CANONICAL_CROSSING_ACTIONS).unwrap()
+            );
+            assert_eq!(u64::from(crossing_fee(before)), 15_000);
+            assert_eq!(
+                crossing_fee(from),
+                (marginal_fee(&network, from) * CANONICAL_CROSSING_ACTIONS).unwrap()
+            );
+            assert_eq!(u64::from(crossing_fee(from)), 3_000);
+        }
     }
 
     use super::sapling;

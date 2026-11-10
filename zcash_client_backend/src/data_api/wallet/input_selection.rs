@@ -1244,7 +1244,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
 
             let wallet_meta = change_strategy
-                .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
+                .fetch_wallet_meta(
+                    params,
+                    wallet_db,
+                    account,
+                    target_height,
+                    &selected_input_ids,
+                )
                 .map_err(InputSelectorError::DataSource)?;
 
             #[cfg(not(feature = "transparent-inputs"))]
@@ -2234,7 +2240,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         )?;
 
         let wallet_meta = change_strategy
-            .fetch_wallet_meta(wallet_db, to_account, target_height, &[])
+            .fetch_wallet_meta(params, wallet_db, to_account, target_height, &[])
             .map_err(InputSelectorError::DataSource)?;
 
         let balance = compute_shielding_balance_with_dust_retry::<DbT, ChangeT, ParamsT>(
@@ -3096,8 +3102,9 @@ mod greedy_selection_tests {
                 &self.fee_rule
             }
 
-            fn fetch_wallet_meta(
+            fn fetch_wallet_meta<P: consensus::Parameters>(
                 &self,
+                _params: &P,
                 _meta_source: &Self::MetaSource,
                 _account: <Self::MetaSource as MetaSource>::AccountId,
                 _target_height: TargetHeight,
@@ -3153,8 +3160,9 @@ mod greedy_selection_tests {
                 &self.fee_rule
             }
 
-            fn fetch_wallet_meta(
+            fn fetch_wallet_meta<P: consensus::Parameters>(
                 &self,
+                _params: &P,
                 _meta_source: &Self::MetaSource,
                 _account: <Self::MetaSource as MetaSource>::AccountId,
                 _target_height: TargetHeight,
