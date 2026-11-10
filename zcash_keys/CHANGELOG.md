@@ -9,6 +9,28 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedSpendingKey::from_parts`
+- `zcash_keys::keys::DerivationError::Empty`
+- `zcash_keys::keys::DecodingError::{DuplicateTypecode, Empty}` (under the
+  `unstable` feature)
+- `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
+  `test-dependencies` feature)
+
+### Changed
+- `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
+  subset of the supported protocols:
+  - `UnifiedSpendingKey::{transparent, sapling, orchard}` now return an
+    `Option` of a reference to the key, which is `None` when the key does not
+    hold a key for that protocol. Keys derived with `from_seed` hold every
+    component.
+  - `UnifiedSpendingKey::to_unified_full_viewing_key` returns a viewing key
+    that holds exactly the protocols that the spending key holds.
+  - `UnifiedSpendingKey::to_bytes` encodes only the components that are
+    present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
+    non-empty subset of the components. `from_bytes` now reads the entire
+    input, and returns an error for trailing data or a repeated typecode.
+
 ## [0.17.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet

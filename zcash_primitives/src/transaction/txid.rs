@@ -296,11 +296,13 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
 /// This expects and relies upon the existence of canonical encodings for
 /// each effecting component of a transaction.
 ///
-/// Note that this cannot be used to compute the transaction ID for v4 or
-/// earlier transactions; those used `SHA-256(SHA-256(tx_encoding))` and are
+/// This implements transaction ID digests for v5 transactions ([ZIP 244]) and for
+/// v6 transactions ([ZIP 229]). It cannot be used to compute the transaction ID for
+/// v4 or earlier transactions; those used `SHA-256(SHA-256(tx_encoding))` and are
 /// malleable.
 ///
-/// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
+/// [ZIP 244]: https://zips.z.cash/zip-0244#txid-digest
+/// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
 pub struct TxIdDigester;
 
 impl<A: Authorization> TransactionDigest<A> for TxIdDigester {

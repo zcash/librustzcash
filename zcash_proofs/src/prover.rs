@@ -12,12 +12,15 @@ use sapling::{
     prover::{OutputProver, SpendProver},
     value::{NoteValue, ValueCommitTrapdoor},
 };
-use zcash_primitives::transaction::components::GROTH_PROOF_SIZE;
 
 use crate::{OutputParameters, SpendParameters, load_parameters, parse_parameters};
 
 #[cfg(feature = "local-prover")]
 use crate::{SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME, default_params_folder};
+
+// π_A + π_B + π_C
+// Inlined here to avoid a `zcash_primitives` dependency.
+const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// An implementation of [`SpendProver`] and [`OutputProver`] using Sapling Spend and
 /// Output parameters from locally-accessible paths.

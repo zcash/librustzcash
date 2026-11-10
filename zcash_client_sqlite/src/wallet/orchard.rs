@@ -1003,6 +1003,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_forward() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<OrchardPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::Forward,
+        )
+    }
+
+    #[test]
+    fn retained_boundaries_below_window_are_usable_anchors_tip_first() {
+        testing::pool::retained_boundaries_below_window_are_usable_anchors::<OrchardPoolTester>(
+            zcash_client_backend::data_api::testing::pool::BoundaryScanOrder::TipFirst,
+        )
+    }
+
+    #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
@@ -2319,8 +2333,8 @@ pub(crate) mod tests {
             // recipient. The transaction thus has no wallet-owned outputs: its only connection to
             // the wallet is the Ironwood spend.
             let usk = account.usk();
-            let spend_fvk = FullViewingKey::from(usk.orchard());
-            let orchard_sak = SpendAuthorizingKey::from(usk.orchard());
+            let spend_fvk = FullViewingKey::from(usk.orchard().unwrap());
+            let orchard_sak = SpendAuthorizingKey::from(usk.orchard().unwrap());
 
             let external_sk = OrchardPoolTester::sk(&[0xf5; 32]);
             let external_recipient =

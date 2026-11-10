@@ -148,7 +148,7 @@ impl BlockHeader {
         let mut nonce = [0; 32];
         reader.read_exact(&mut nonce)?;
 
-        let solution = Vector::read(&mut reader, |r| r.read_u8())?;
+        let solution = Vector::read_bytes(&mut reader)?;
 
         BlockHeader::from_data(BlockHeaderData {
             version,
@@ -170,7 +170,7 @@ impl BlockHeader {
         writer.write_u32_le(self.time)?;
         writer.write_u32_le(self.bits)?;
         writer.write_all(&self.nonce)?;
-        Vector::write(&mut writer, &self.solution, |w, b| w.write_u8(*b))?;
+        Vector::write_bytes(&mut writer, &self.solution)?;
 
         Ok(())
     }

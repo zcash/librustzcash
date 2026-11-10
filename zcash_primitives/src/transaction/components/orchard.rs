@@ -1,6 +1,4 @@
 //! Functions for parsing & serialization of Orchard transaction components.
-use crate::encoding::ReadBytesExt;
-
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use corez::io::{self, Read, Write};
@@ -121,7 +119,7 @@ fn read_bundle<R: Read>(
         let flags = read_flags(&mut reader, bundle_version)?;
         let value_balance = Transaction::read_amount(&mut reader)?;
         let anchor = read_anchor(&mut reader)?;
-        let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+        let proof_bytes = Vector::read_bytes(&mut reader)?;
         let actions = NonEmpty::from_vec(
             actions_without_auth
                 .into_iter()
@@ -341,11 +339,7 @@ fn write_bundle<W: Write>(
         writer.write_all(&[bundle.flag_byte()])?;
         writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
         writer.write_all(&bundle.anchor().to_bytes())?;
-        Vector::write(
-            &mut writer,
-            bundle.authorization().proof().as_ref(),
-            |w, b| w.write_all(&[*b]),
-        )?;
+        Vector::write_bytes(&mut writer, bundle.authorization().proof().as_ref())?;
         Array::write(
             &mut writer,
             bundle.actions().iter().map(|a| a.authorization()),

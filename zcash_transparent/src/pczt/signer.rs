@@ -96,17 +96,16 @@ impl Input {
     /// - P2PKH
     /// - P2MS
     /// - P2PK
-    pub fn sign<C: secp256k1::Signing, F>(
+    pub fn sign<F>(
         &mut self,
         index: usize,
         calculate_sighash: F,
         sk: &secp256k1::SecretKey,
-        secp: &secp256k1::Secp256k1<C>,
     ) -> Result<(), SignerError>
     where
         F: FnOnce(SignableInput) -> [u8; 32],
     {
-        self.sign_with_sighash_policy(index, calculate_sighash, sk, secp, SighashPolicy::ALL_ONLY)
+        self.sign_with_sighash_policy(index, calculate_sighash, sk, SighashPolicy::ALL_ONLY)
     }
 
     /// Signs the transparent spend with the given spend authorizing key, if the input’s
@@ -114,12 +113,11 @@ impl Input {
     /// is a decision for the Signer rather than for whoever supplied the PCZT.
     ///
     /// Otherwise behaves exactly as [`Input::sign`], which should be preferred.
-    pub fn sign_with_sighash_policy<C: secp256k1::Signing, F>(
+    pub fn sign_with_sighash_policy<F>(
         &mut self,
         index: usize,
         calculate_sighash: F,
         sk: &secp256k1::SecretKey,
-        secp: &secp256k1::Secp256k1<C>,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError>
     where
@@ -128,7 +126,7 @@ impl Input {
         self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
 
-        let pubkey = sk.public_key(secp).serialize();
+        let pubkey = sk.public_key().serialize();
         let p2pkh_addr = TransparentAddress::from_pubkey_bytes(&pubkey);
 
         // For P2PKH, `script_code` is always the same as `script_pubkey`.
@@ -170,7 +168,7 @@ impl Input {
         });
 
         let msg = secp256k1::Message::from_digest(sighash);
-        let sig = secp.sign_ecdsa(&msg, sk);
+        let sig = secp256k1::ecdsa::sign(msg, sk);
 
         // Signature has to have the SighashType appended to it.
         let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
@@ -201,12 +199,11 @@ impl Input {
     /// - P2PK
     ///
     /// [`Input::hash160_preimages`]: super::Input::hash160_preimages
-    pub fn append_signature<C: secp256k1::Verification, F>(
+    pub fn append_signature<F>(
         &mut self,
         index: usize,
         calculate_sighash: F,
         sig: secp256k1::ecdsa::Signature,
-        secp: &secp256k1::Secp256k1<C>,
     ) -> Result<(), SignerError>
     where
         F: FnOnce(SignableInput) -> [u8; 32],
@@ -215,7 +212,6 @@ impl Input {
             index,
             calculate_sighash,
             sig,
-            secp,
             SighashPolicy::ALL_ONLY,
         )
     }
@@ -226,12 +222,11 @@ impl Input {
     ///
     /// Otherwise behaves exactly as [`Input::append_signature`], which should be
     /// preferred.
-    pub fn append_signature_with_sighash_policy<C: secp256k1::Verification, F>(
+    pub fn append_signature_with_sighash_policy<F>(
         &mut self,
         index: usize,
         calculate_sighash: F,
         sig: secp256k1::ecdsa::Signature,
-        secp: &secp256k1::Secp256k1<C>,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError>
     where
@@ -286,7 +281,7 @@ impl Input {
             let pk = secp256k1::PublicKey::from_slice(&pubkey)
                 .map_err(|_| SignerError::UnsupportedPubkey)?;
 
-            if secp.verify_ecdsa(&msg, &sig, &pk).is_ok() {
+            if secp256k1::ecdsa::verify(&sig, msg, &pk).is_ok() {
                 // Signature has to have the SighashType appended to it.
                 let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
                 sig_bytes.extend([self.sighash_type.encode()]);
@@ -344,12 +339,11 @@ mod tests {
     const SIGHASH: [u8; 32] = [0; 32];
 
     fn secret_key(i: u8) -> secp256k1::SecretKey {
-        secp256k1::SecretKey::from_slice(&[i; 32]).expect("valid")
+        secp256k1::SecretKey::from_secret_bytes([i; 32]).expect("valid")
     }
 
     fn pubkey(sk: &secp256k1::SecretKey) -> [u8; 33] {
-        sk.public_key(&secp256k1::Secp256k1::signing_only())
-            .serialize()
+        sk.public_key().serialize()
     }
 
     fn sign(
@@ -357,13 +351,7 @@ mod tests {
         sk: &secp256k1::SecretKey,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError> {
-        input.sign_with_sighash_policy(
-            0,
-            |_| SIGHASH,
-            sk,
-            &secp256k1::Secp256k1::signing_only(),
-            sighash_policy,
-        )
+        input.sign_with_sighash_policy(0, |_| SIGHASH, sk, sighash_policy)
     }
 
     /// Appends an externally-produced signature over [`SIGHASH`] by `sk`.
@@ -372,9 +360,8 @@ mod tests {
         sk: &secp256k1::SecretKey,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError> {
-        let secp = secp256k1::Secp256k1::new();
-        let sig = secp.sign_ecdsa(&secp256k1::Message::from_digest(SIGHASH), sk);
-        input.append_signature_with_sighash_policy(0, |_| SIGHASH, sig, &secp, sighash_policy)
+        let sig = secp256k1::ecdsa::sign(secp256k1::Message::from_digest(SIGHASH), sk);
+        input.append_signature_with_sighash_policy(0, |_| SIGHASH, sig, sighash_policy)
     }
 
     /// A P2PKH input, with the `hash160` preimage that `Input::append_signature` needs in

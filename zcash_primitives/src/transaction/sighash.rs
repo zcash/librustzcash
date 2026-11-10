@@ -80,11 +80,13 @@ where
     /// Computes the digests for `tx`, which must be of version 5 or later.
     ///
     /// Unlike [`PrecomputedSighashData::new`], this does not require the Sapling proofs of
-    /// `tx` to be serialized, because [ZIP 244] signature hashes do not commit to them.
+    /// `tx` to be serialized, because [ZIP 244] and [ZIP 229] signature hashes do not commit
+    /// to them.
     ///
     /// Returns [`Zip244Error::NotZip244`] if `tx` is of version 4 or earlier.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244
+    /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
     pub fn new_zip244(tx: TransactionData<A>) -> Result<Self, Zip244Error<A>> {
         match tx.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
@@ -163,9 +165,10 @@ where
 #[non_exhaustive]
 pub enum Zip244Error<A: Authorization> {
     /// The transaction is of version 4 or earlier, so its signature hashes are not
-    /// [ZIP 244] signature hashes. This holds the transaction, unchanged.
+    /// [ZIP 244] or [ZIP 229] signature hashes. This holds the transaction, unchanged.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244
+    /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
     NotZip244(Box<TransactionData<A>>),
 }
 
@@ -185,7 +188,7 @@ impl<A: Authorization> fmt::Display for Zip244Error<A> {
         match self {
             Zip244Error::NotZip244(tx) => write!(
                 f,
-                "transaction version {:?} does not use ZIP 244 signature hashes",
+                "transaction version {:?} does not use ZIP 244 or ZIP 229 signature hashes",
                 tx.version
             ),
         }

@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Removed dependency on `zcash_primitives` to reduce churn.
+
 ## [0.31.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet
