@@ -337,17 +337,16 @@ where
             .unwrap_or(Zatoshis::ZERO);
         let mut expected_total = starting_balance;
         let mut summary = AddFundsSummary::default();
+        let mut note_values = vec![];
         for notes in blocks.into_iter() {
-            // Collect the notes while also counting their value.
+            // Collect the notes while also recording their values; which of them count towards
+            // the expected total depends on the tip reached after the whole loop, so they are
+            // classified once it is known.
             let (fake_outputs, note_configs): (Vec<_>, Vec<_>) = notes
                 .into_iter()
                 .map(|into_note_config| {
                     let note_config = into_note_config.into();
-                    if note_config.value > zip317::MARGINAL_FEE {
-                        // Don't include uneconomic (dust) notes in the expected
-                        // total, as the balance won't include them.
-                        expected_total = (expected_total + note_config.value).unwrap();
-                    }
+                    note_values.push(note_config.value);
                     (self.make_fake_output(&note_config), note_config)
                 })
                 .unzip();
@@ -378,6 +377,16 @@ where
         }
         if let Some(from_height) = from_height {
             summary.scan_summary = Some(self.scan_cached_blocks(from_height, limit));
+        }
+
+        // The balance summary classifies a note as uneconomic (dust) against the marginal fee in
+        // effect at the target height of a transaction built at the scanned tip, which is the tip
+        // reached after the loop plus one; such notes are not counted in the balance.
+        let uneconomic_threshold = zip317::marginal_fee(self.network(), current_height + 1);
+        for value in note_values {
+            if value > uneconomic_threshold {
+                expected_total = (expected_total + value).unwrap();
+            }
         }
 
         // Do most of the assertions that we care about at the "add funds" callsites

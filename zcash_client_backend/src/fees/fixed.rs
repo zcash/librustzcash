@@ -90,8 +90,9 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         &self.fee_rule
     }
 
-    fn fetch_wallet_meta(
+    fn fetch_wallet_meta<P: consensus::Parameters>(
         &self,
+        _params: &P,
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
         _target_height: TargetHeight,
