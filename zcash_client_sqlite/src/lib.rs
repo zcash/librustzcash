@@ -56,9 +56,9 @@ use uuid::Uuid;
 use zcash_client_backend::{
     TransferType,
     data_api::{
-        self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter,
-        NullifierQuery, OutputLockStore, PutBlocksError, ReceivedNotes, ReceivedTransactionOutput,
+        self, Account, AccountBirthday, AccountMeta, AccountSource, AddressInfo, BlockMetadata,
+        ChangeReceivers, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+        OutputLockStore, PutBlocksError, ReceivedNotes, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
         TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
         Zip32Derivation,
@@ -70,6 +70,7 @@ use zcash_client_backend::{
             ReceivedSaplingOutput, wallet::store_decrypted_tx,
         },
         scanning::{ScanPriority, ScanRange},
+        spend_authority::SpendAuthority,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     proto::compact_formats::CompactBlock,
@@ -87,7 +88,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
     value::Zatoshis,
@@ -154,8 +155,8 @@ use {
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
 use {crate::wallet::encoding::KeyScope, zcash_keys::address::Address};
 
-#[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
-use zcash_protocol::PoolType;
+#[cfg(feature = "transparent-key-import")]
+use zcash_client_backend::data_api::spend_authority::SpendingKeyCustody;
 
 use rusqlite::hooks::{AuthAction, Authorization};
 #[cfg(feature = "unstable")]
@@ -666,15 +667,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
     /// Returns `Ok(None)` when the wallet has no chain tip or birthday, matching
     /// the early-exit conditions of [`WalletRead::get_wallet_summary`]. Unlike
     /// that method, a missing progress estimate does not force `None` — progress
-    /// is simply not computed.
+    /// is simply not computed. Value that `spend_authority` does not authorize is reported as
+    /// watch-only value.
     pub fn get_wallet_snapshot(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<AccountUuid>,
     ) -> Result<Option<WalletSnapshot<AccountUuid>>, SqliteClientError> {
         wallet::get_wallet_snapshot(
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             confirmations_policy,
+            spend_authority,
         )
     }
 }
@@ -730,7 +734,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     ///         "external account",
     ///         &ufvk,
     ///         &birthday,
-    ///         AccountPurpose::ViewOnly,
+    ///         None,
     ///         None,
     ///     )?;
     ///     ext.execute(
@@ -925,9 +929,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        let selectable = |pool: ShieldedPool| {
+            sources.contains(&pool)
+                && spend_authority.authorizes_account_pool(&account, PoolType::Shielded(pool))
+        };
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedPool::Sapling) {
+            if selectable(ShieldedPool::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -942,7 +951,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Orchard) {
+            if selectable(ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -957,7 +966,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Ironwood) {
+            if selectable(ShieldedPool::Ironwood) {
                 wallet::orchard::select_spendable_ironwood_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -983,10 +992,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
-        // Pools are tried in the caller's preference order; the first pool holding a covering
-        // note supplies it.
-        for pool in sources {
+        // Pools are tried in the caller's preference order; the first authorized pool holding a
+        // covering note supplies it.
+        for pool in sources.iter().filter(|pool| {
+            spend_authority.authorizes_account_pool(&account, PoolType::Shielded(**pool))
+        }) {
             match pool {
                 ShieldedPool::Sapling => {
                     if let Some(note) = wallet::sapling::select_single_spendable_sapling_note(
@@ -1129,6 +1141,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -1138,6 +1151,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             lock_filter,
+            spend_authority,
         )
     }
 
@@ -1149,6 +1163,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs_for_addresses(
             self.conn.borrow(),
@@ -1158,6 +1173,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             lock_filter,
+            spend_authority,
         )
     }
 
@@ -1173,6 +1189,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
         lock_filter: LockFilter<'_>,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -1186,6 +1203,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             max_inputs,
             fee_rule,
             lock_filter,
+            spend_authority,
         )
     }
 
@@ -1406,6 +1424,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
@@ -1413,6 +1432,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             confirmations_policy,
+            spend_authority,
             &SubtreeProgressEstimator,
         )
     }
@@ -1571,6 +1591,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        spend_authority: &SpendAuthority<Self::AccountId>,
     ) -> Result<TransparentBalances, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
@@ -1578,6 +1599,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             account,
             target_height,
             confirmations_policy,
+            spend_authority,
         )
     }
 
@@ -1911,11 +1933,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account_name: &str,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        purpose: AccountPurpose,
+        derivation: Option<Zip32Derivation>,
         key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| {
-            wdb.import_account_ufvk(account_name, ufvk, birthday, purpose, key_source)
+            wdb.import_account_ufvk(account_name, ufvk, birthday, derivation, key_source)
         })
     }
 
@@ -1948,8 +1970,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
+        custody: SpendingKeyCustody,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkey(account, pubkey))
+        self.transactionally(|wdb| {
+            wdb.import_standalone_transparent_pubkey(account, pubkey, custody)
+        })
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1957,8 +1982,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
+        custody: SpendingKeyCustody,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
+        self.transactionally(|wdb| {
+            wdb.import_standalone_transparent_pubkeys(account, pubkeys, custody)
+        })
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2305,7 +2333,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account_name: &str,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        purpose: AccountPurpose,
+        derivation: Option<Zip32Derivation>,
         key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         wallet::add_account(
@@ -2313,7 +2341,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             &self.params,
             account_name,
             &AccountSource::Imported {
-                purpose,
+                derivation,
                 key_source: key_source.map(|s| s.to_owned()),
             },
             wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
@@ -2353,9 +2381,16 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
+        custody: SpendingKeyCustody,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkey(
+            self.conn.0,
+            &self.params,
+            account,
+            pubkey,
+            custody,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2363,9 +2398,16 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         &mut self,
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
+        custody: SpendingKeyCustody,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkeys(
+            self.conn.0,
+            &self.params,
+            account,
+            pubkeys,
+            custody,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -4154,8 +4196,8 @@ mod tests {
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
     use zcash_client_backend::{
         data_api::{
-            Account, AccountBirthday, AccountPurpose, AccountSource, MaxSpendMode,
-            SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
+            Account, AccountBirthday, AccountSource, MaxSpendMode, SAPLING_SHARD_HEIGHT,
+            WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
             chain::{ChainState, CommitmentTreeRoot},
             testing::{AddressType, TestBuilder, TestState},
             wallet::ConfirmationsPolicy,
@@ -4415,19 +4457,13 @@ mod tests {
         let ufvk = usk.to_unified_full_viewing_key();
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                FIRST_ACCOUNT_NAME,
-                &ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk(FIRST_ACCOUNT_NAME, &ufvk, &birthday, None, None)
             .unwrap();
         let account_id = account.id();
         assert_matches!(
             account.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::ViewOnly,
+                derivation: None,
                 ..
             }
         );
@@ -4824,7 +4860,7 @@ mod tests {
         // it should produce an AccountCollision error.
         assert_matches!(
             st.wallet_mut()
-                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
+                .import_account_ufvk("", ufvk, birthday, None, None),
             Err(e) if is_account_collision(&e)
         );
 
@@ -4845,7 +4881,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending { derivation: None },
+                    None,
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -4868,7 +4904,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending { derivation: None },
+                    None,
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -4937,13 +4973,7 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &ufvk, &birthday, None, None)
             .unwrap();
 
         let value = Zatoshis::const_from_u64(60000);
@@ -5006,13 +5036,7 @@ mod tests {
         let seed_derived_ufvk = seed_derived_usk.to_unified_full_viewing_key();
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &seed_derived_ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &seed_derived_ufvk, &birthday, None, None)
             .unwrap();
 
         let value = Zatoshis::const_from_u64(60000);
@@ -5084,23 +5108,11 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &ufvk, &birthday, None, None)
             .unwrap();
         assert!(ufvk.is_equivalent_to(account.ufvk().unwrap()));
 
-        assert_matches!(
-            account.source(),
-            AccountSource::Imported {
-                purpose: AccountPurpose::Spending { .. },
-                ..
-            }
-        );
+        assert_matches!(account.source(), AccountSource::Imported { .. });
 
         assert_matches!(
             st.wallet_mut().import_account_hd("", &seed, zip32_index_0, &birthday, None),
@@ -5145,13 +5157,7 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(
-                "transparent-only",
-                &ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("transparent-only", &ufvk, &birthday, None, None)
             .expect("a transparent-only UFVK can be imported");
 
         // The account was persisted with its UFVK.
@@ -5334,7 +5340,7 @@ mod tests {
                     &wdb.params,
                     "ivk-only",
                     &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
+                        derivation: None,
                         key_source: None,
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
@@ -5353,7 +5359,7 @@ mod tests {
                     &wdb.params,
                     "duplicate",
                     &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
+                        derivation: None,
                         key_source: None,
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
@@ -5368,13 +5374,7 @@ mod tests {
         // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
         let ufvk_upgraded = st
             .wallet_mut()
-            .import_account_ufvk(
-                "",
-                &ufvk,
-                &birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
+            .import_account_ufvk("", &ufvk, &birthday, None, None)
             .unwrap();
         // Should return the same account, now with the UFVK.
         assert_eq!(ufvk_upgraded.id(), ivk_account.id());
@@ -5389,7 +5389,7 @@ mod tests {
                     &wdb.params,
                     "downgrade",
                     &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
+                        derivation: None,
                         key_source: None,
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
@@ -5445,7 +5445,7 @@ mod tests {
                     &wdb.params,
                     "sapling-only",
                     &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
+                        derivation: None,
                         key_source: None,
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk)),
@@ -5466,7 +5466,7 @@ mod tests {
                     &wdb.params,
                     "upgraded",
                     &AccountSource::Imported {
-                        purpose: AccountPurpose::ViewOnly,
+                        derivation: None,
                         key_source: None,
                     },
                     crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
