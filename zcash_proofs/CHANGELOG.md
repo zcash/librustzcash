@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Removed dependency on `zcash_primitives` to reduce churn.
+
 ## [0.31.0] - 2026-10-21
 
 ### Changed
