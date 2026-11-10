@@ -9752,6 +9752,11 @@ pub fn proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
         Some(selected_anchor),
         "decoding must preserve the serialized anchor",
     );
+    assert_eq!(
+        decoded.min_target_height(),
+        proposal.min_target_height(),
+        "decoding must preserve the target height the proposal's fee was computed at",
+    );
 
     let usk = st.get_account().usk().clone();
     st.create_proposed_transactions::<Infallible, _, Infallible, _>(

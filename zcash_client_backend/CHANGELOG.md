@@ -47,7 +47,9 @@ workspace.
   in effect at that height.
 - `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy,
   MultiOutputChangeStrategy}` use the marginal fee in effect at the target height as the
-  default dust threshold and the uneconomic-input boundary. Previously both were fixed at 5000 zatoshis.
+  default dust threshold and the uneconomic-input boundary, and cap dust added to the fee
+  under `DustAction::AddDustToFee` at ten times the minimum fee in effect at that height.
+  Previously the threshold and boundary were fixed at 5000 zatoshis and the cap at 100000.
 - `zcash_client_backend::fees::canonical_crossing_fee` returns the canonical ZIP 318
   crossing's fee under the ZIP 317 marginal fee in effect at `target_height` (15000
   zatoshis below `FEE_REDUCTION_HEIGHT`, 3000 from it). Previously it always returned

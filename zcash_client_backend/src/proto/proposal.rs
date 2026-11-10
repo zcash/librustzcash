@@ -244,7 +244,8 @@ pub enum FeeRule {
     PreZip313 = 1,
     /// 1000 ZAT
     Zip313 = 2,
-    /// MAX(10000, 5000 * logical_actions) ZAT
+    /// ZIP 317: MAX(10000, 5000 * logical_actions) ZAT before FEE_REDUCTION_HEIGHT,
+    /// MAX(2000, 1000 * logical_actions) from it (ZIP 2009)
     Zip317 = 3,
 }
 impl FeeRule {
