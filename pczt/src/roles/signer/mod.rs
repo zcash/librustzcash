@@ -164,6 +164,7 @@ pub struct Signer {
     /// Cached across multiple signatures.
     sighash_data: PrecomputedSighashData<EffectsOnly>,
     shielded_sighash: [u8; 32],
+    secp: secp256k1::Secp256k1<secp256k1::All>,
     transparent_sighash_policy: SighashPolicy,
 }
 
@@ -207,6 +208,7 @@ impl Signer {
             empty_ironwood,
             sighash_data,
             shielded_sighash,
+            secp: secp256k1::Secp256k1::new(),
             transparent_sighash_policy: SighashPolicy::ALL_ONLY,
         })
     }
@@ -272,11 +274,12 @@ impl Signer {
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, sighash_data| {
+        self.generate_or_append_transparent_signature(index, |input, sighash_data, secp| {
             input.sign_with_sighash_policy(
                 index,
                 |input| sighash(sighash_data, &SignableInput::Transparent(input)),
                 sk,
+                secp,
                 sighash_policy,
             )
         })
@@ -293,11 +296,12 @@ impl Signer {
         signature: secp256k1::ecdsa::Signature,
     ) -> Result<(), Error> {
         let sighash_policy = self.transparent_sighash_policy;
-        self.generate_or_append_transparent_signature(index, |input, sighash_data| {
+        self.generate_or_append_transparent_signature(index, |input, sighash_data, secp| {
             input.append_signature_with_sighash_policy(
                 index,
                 |input| sighash(sighash_data, &SignableInput::Transparent(input)),
                 signature,
+                secp,
                 sighash_policy,
             )
         })
@@ -312,6 +316,7 @@ impl Signer {
         F: FnOnce(
             &mut transparent::pczt::Input,
             &PrecomputedSighashData<EffectsOnly>,
+            &secp256k1::Secp256k1<secp256k1::All>,
         ) -> Result<(), transparent::pczt::SignerError>,
     {
         let input = self
@@ -326,7 +331,7 @@ impl Signer {
         // out the transparent bundle and calls those methods directly.
 
         // Generate or apply the signature.
-        f(input, &self.sighash_data).map_err(Error::TransparentSign)?;
+        f(input, &self.sighash_data, &self.secp).map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:
         // - If the Signer added a signature that does not use `SIGHASH_ANYONECANPAY`, the
@@ -598,6 +603,7 @@ impl Signer {
             empty_ironwood,
             sighash_data: _,
             shielded_sighash: _,
+            secp: _,
             transparent_sighash_policy: _,
         } = self;
 

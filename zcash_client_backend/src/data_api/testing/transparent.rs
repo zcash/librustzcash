@@ -40,7 +40,7 @@ use {
         wallet::TransparentAddressSource,
     },
     rand::{rand_core::UnwrapErr, rngs::SysRng},
-    secp256k1::SecretKey,
+    secp256k1::{Secp256k1, SecretKey},
     secrecy::Secret,
     std::collections::HashMap,
     zcash_protocol::consensus::{NetworkUpgrade, Parameters},
@@ -1282,8 +1282,9 @@ where
 /// Builds a test 1-of-1 multisig redeem script from a single keypair.
 #[cfg(feature = "transparent-key-import")]
 fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
     let redeem_script = script::Component(
         check_multisig(1, &[&pubkey.serialize()], false)
             .unwrap()
@@ -1309,8 +1310,9 @@ where
     let account_id = st.test_account().unwrap().id();
 
     // A P2PKH address, imported without its pubkey.
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key());
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_address(account_id, p2pkh_addr),
@@ -1353,8 +1355,9 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
 
     assert_matches!(
         st.wallet_mut()
@@ -1394,8 +1397,9 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
 
     assert_matches!(
         st.wallet_mut()
@@ -1444,8 +1448,9 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key());
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
 
     // Import the address without its pubkey.
     st.wallet_mut()
@@ -1510,8 +1515,9 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
     let p2pkh_addr = TransparentAddress::from_pubkey(&pubkey);
 
     let (redeem_script, _) = build_test_redeem_script();
@@ -1577,8 +1583,9 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
     assert_matches!(
         st.wallet_mut()
             .import_standalone_transparent_pubkey(account_id, pubkey),
@@ -1599,8 +1606,9 @@ where
 
     let account_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
 
     // First import
     assert_matches!(
@@ -1653,8 +1661,9 @@ where
 
     let account1_id = st.test_account().unwrap().id();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
 
     // Import to first account
     assert_matches!(
@@ -1703,8 +1712,9 @@ where
     let account_id = st.test_account().unwrap().id();
     let birthday = st.test_account().unwrap().birthday().height();
 
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
 
     // Import the public key.
     st.wallet_mut()
@@ -1776,8 +1786,9 @@ where
     let account_id = account.id();
 
     // Create a keypair and derive the P2PKH address.
-    let secret_key = SecretKey::from_secret_bytes([1u8; 32]).expect("valid secret key");
-    let pubkey = secret_key.public_key();
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
 
     // Import the public key.
     st.wallet_mut()

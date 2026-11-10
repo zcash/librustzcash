@@ -131,7 +131,8 @@ fn transparent_to_orchard() {
     let transparent_sk = transparent_account_sk
         .derive_external_secret_key(address_index)
         .unwrap();
-    let transparent_pubkey = transparent_sk.public_key();
+    let secp = secp256k1::Secp256k1::signing_only();
+    let transparent_pubkey = transparent_sk.public_key(&secp);
     let p2pkh_addr = TransparentAddress::from_pubkey(&transparent_pubkey);
 
     // Create an Orchard account to receive funds.
@@ -1120,7 +1121,8 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
     let transparent_sk = transparent_account_sk
         .derive_external_secret_key(address_index)
         .unwrap();
-    let transparent_pubkey = transparent_sk.public_key();
+    let secp = secp256k1::Secp256k1::signing_only();
+    let transparent_pubkey = transparent_sk.public_key(&secp);
 
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
     let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);

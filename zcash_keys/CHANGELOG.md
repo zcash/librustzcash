@@ -9,6 +9,22 @@ workspace.
 
 ## [Unreleased]
 
+## [0.17.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `zcash_keys 0.17.0`.
+
+### Added
+- `zcash_keys::keys::transparent::Key::{pubkey_with_context,
+  der_encode_with_context}`, which `zcash_keys 0.17.0` does not provide.
+
+### Changed
+- This release has the following differences from `zcash_keys 0.17.0`:
+  - It depends on `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, and
+    `zcash_transparent 0.11.0-keystone.0`, in place of `bip32 0.6`,
+    `secp256k1 0.33`, and `zcash_transparent 0.11.0`.
+
 ## [0.17.0] - 2026-10-21
 
 ### Added

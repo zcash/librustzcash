@@ -3397,8 +3397,11 @@ mod tests {
         let key_info = [1u8, 2, 3]
             .iter()
             .map(|i| {
-                let sk = SecretKey::from_secret_bytes([*i; 32]).expect("valid secret key");
-                P2shKey::new([*i; 32], PublicKey::from_secret_key(&sk))
+                let sk = SecretKey::from_slice(&[*i; 32]).expect("valid secret key");
+                P2shKey::new(
+                    [*i; 32],
+                    PublicKey::from_secret_key(&secp256k1::Secp256k1::signing_only(), &sk),
+                )
             })
             .collect::<Vec<_>>();
         let item = P2shFullViewingKey::new(NonZeroU8::new(2).unwrap(), key_info)
@@ -3436,8 +3439,9 @@ mod tests {
         /// `P2shFullViewingKey::parse` only supports ZIP 48.
         const TEMPLATE: &str = "sh(sortedmulti(1,@0/**))";
 
-        let secret_key = SecretKey::from_secret_bytes([1; 32]).unwrap();
-        let public_key = PublicKey::from_secret_key(&secret_key);
+        let secret_key = SecretKey::from_slice(&[1; 32]).unwrap();
+        let public_key =
+            PublicKey::from_secret_key(&secp256k1::Secp256k1::signing_only(), &secret_key);
 
         let mut payload = vec![];
         CompactSize::write(&mut payload, TEMPLATE.len()).unwrap();

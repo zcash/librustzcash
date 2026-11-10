@@ -10,6 +10,27 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `zcash_transparent 0.11.0`.
+
+### Changed
+- This release has the following differences from `zcash_transparent 0.11.0`:
+  - It depends on `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, and
+    `zcash_script 0.4`, in place of `bip32 0.6`, `secp256k1 0.33`, and
+    `zcash_script 0.6`.
+  - `zcash_transparent::builder::TransparentSignatureContext` has a lifetime
+    parameter and a `secp256k1::Verification` type parameter, and
+    `zcash_transparent::bundle::Bundle<Unauthorized>::prepare_transparent_signatures`
+    takes a `&secp256k1::Secp256k1<secp256k1::VerifyOnly>` context as its
+    final argument.
+  - `zcash_transparent::pczt::Input::{sign, sign_with_sighash_policy,
+    append_signature, append_signature_with_sighash_policy}` take a
+    `&secp256k1::Secp256k1` context argument after the signing key or
+    signature argument.
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
