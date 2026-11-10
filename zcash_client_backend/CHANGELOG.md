@@ -38,6 +38,20 @@ workspace.
   stabilized_note_spendable_across_small_tip_advance}`
 
 ### Changed
+- Migrated to `zcash_primitives 0.32.0`.
+- `zcash_client_backend::fees::StandardFeeRule::Zip317` charges the ZIP 317 marginal fee
+  in effect at the target height (5000 zatoshis per logical action below
+  `FEE_REDUCTION_HEIGHT`, 1000 from it; ZIP 2009). Previously it always charged 5000.
+- `zcash_client_backend::fees::zip317::Zip317FeeRule::marginal_fee` takes
+  `params: &impl Parameters` and `target_height: BlockHeight` and returns the marginal fee
+  in effect at that height.
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy,
+  MultiOutputChangeStrategy}` use the marginal fee in effect at the target height as the
+  default dust threshold and the uneconomic-input boundary. Previously both were fixed at 5000 zatoshis.
+- `zcash_client_backend::fees::canonical_crossing_fee` returns the canonical ZIP 318
+  crossing's fee under the ZIP 317 marginal fee in effect at `target_height` (15000
+  zatoshis below `FEE_REDUCTION_HEIGHT`, 3000 from it). Previously it always returned
+  15000.
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
   `height` to be at or below the wallet birthday. An implementation returns an
   error, and leaves the scan queue unchanged, for a `height` above the wallet

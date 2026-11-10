@@ -1,36 +1,91 @@
 //! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
-//! [ZIP 317]: https//zips.z.cash/zip-0317
+//! [ZIP 317]: https://zips.z.cash/zip-0317
 use alloc::vec::Vec;
 use core::cmp::max;
 
 use ::transparent::bundle::OutPoint;
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, NetworkType, NetworkUpgrade},
     value::{BalanceError, Zatoshis},
 };
 
 use crate::transaction::fees::transparent;
 
-/// The standard [ZIP 317] marginal fee.
+/// The [ZIP 317] marginal fee before Revision 2 ([ZIP 2009]).
 ///
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
 pub const MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(5_000);
+
+/// The [ZIP 317] marginal fee from Revision 2 ([ZIP 2009]), in zatoshis per logical action.
+///
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub const REVISION_2_MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(1_000);
+
+/// The Mainnet height from which Revision 2 applies (`FEE_REDUCTION_HEIGHT` in [ZIP 2009]).
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub const MAINNET_FEE_REDUCTION_HEIGHT: BlockHeight = BlockHeight::from_u32(3_590_000);
+
+/// The Testnet height from which Revision 2 applies; equal to the Testnet NU7 activation height.
+pub const TESTNET_FEE_REDUCTION_HEIGHT: BlockHeight = BlockHeight::from_u32(4_465_026);
+
+/// Returns the height from which [ZIP 317] Revision 2 applies on the network `params` describes,
+/// or `None` if it never applies there. On a regtest network this is the NU7 activation height.
+///
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+pub fn fee_reduction_height<P: consensus::Parameters>(params: &P) -> Option<BlockHeight> {
+    match params.network_type() {
+        NetworkType::Main => Some(MAINNET_FEE_REDUCTION_HEIGHT),
+        NetworkType::Test => Some(TESTNET_FEE_REDUCTION_HEIGHT),
+        NetworkType::Regtest => params.activation_height(NetworkUpgrade::Nu7),
+    }
+}
+
+/// Whether Revision 2 applies to a transaction expected to be mined at `target_height`.
+fn revision_2_applies<P: consensus::Parameters>(params: &P, target_height: BlockHeight) -> bool {
+    fee_reduction_height(params).is_some_and(|h| h <= target_height)
+}
+
+/// Returns the [ZIP 317] marginal fee for a transaction expected to be mined at `target_height`:
+/// [`REVISION_2_MARGINAL_FEE`] from [`fee_reduction_height`], 5000 zatoshis before it.
+///
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+pub fn marginal_fee<P: consensus::Parameters>(params: &P, target_height: BlockHeight) -> Zatoshis {
+    if revision_2_applies(params, target_height) {
+        REVISION_2_MARGINAL_FEE
+    } else {
+        MARGINAL_FEE
+    }
+}
+
+/// Returns the [ZIP 317] minimum conventional fee at `target_height`: [`marginal_fee`] times
+/// [`GRACE_ACTIONS`].
+///
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+pub fn minimum_fee<P: consensus::Parameters>(params: &P, target_height: BlockHeight) -> Zatoshis {
+    // Cannot overflow: the product is at most `MARGINAL_FEE * GRACE_ACTIONS` (the value of
+    // `MINIMUM_FEE`), which is far below `MAX_MONEY`.
+    (marginal_fee(params, target_height) * GRACE_ACTIONS)
+        .expect("MARGINAL_FEE * GRACE_ACTIONS is below MAX_MONEY")
+}
 
 /// The minimum number of logical actions that must be paid according to [ZIP 317].
 ///
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
 pub const GRACE_ACTIONS: usize = 2;
 
 /// The standard size of a P2PKH input, in bytes, according to [ZIP 317].
 ///
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 
 /// The standard size of a P2PKH output, in bytes, according to [ZIP 317].
 ///
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
 /// The consensus maximum size of a serialized transparent input: outpoint (36) +
@@ -48,10 +103,11 @@ pub const TRANSPARENT_BUNDLE_OVERHEAD: usize = 18;
 /// leaves room for future header fields.
 pub const TX_HEADER_SIZE: usize = 32;
 
-/// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
+/// The [ZIP 317] minimum conventional fee before Revision 2 ([ZIP 2009]). Equivalent to
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
 pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
@@ -65,22 +121,33 @@ pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 /// `zcash_client_backend` crate.
 ///
 /// [`FeeRule`]: crate::transaction::fees::FeeRule
-/// [ZIP 317]: https//zips.z.cash/zip-0317
+/// [ZIP 317]: https://zips.z.cash/zip-0317
 #[derive(Clone, Debug)]
 pub struct FeeRule {
-    marginal_fee: Zatoshis,
+    marginal_fee: MarginalFee,
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
 }
 
+/// The marginal fee a [`FeeRule`] charges.
+#[derive(Clone, Debug)]
+enum MarginalFee {
+    /// The ZIP 317 schedule ([`marginal_fee`]).
+    Standard,
+    /// A fixed value, from [`FeeRule::non_standard`].
+    #[cfg(feature = "non-standard-fees")]
+    Fixed(Zatoshis),
+}
+
 impl FeeRule {
-    /// Construct a new FeeRule using the standard [ZIP 317] constants.
+    /// The standard [ZIP 317] rule: the marginal fee in effect at the height a transaction is
+    /// expected to be mined ([`marginal_fee`]), with the standard grace actions and P2PKH sizes.
     ///
-    /// [ZIP 317]: https//zips.z.cash/zip-0317
+    /// [ZIP 317]: https://zips.z.cash/zip-0317
     pub fn standard() -> Self {
         Self {
-            marginal_fee: MARGINAL_FEE,
+            marginal_fee: MarginalFee::Standard,
             grace_actions: GRACE_ACTIONS,
             p2pkh_standard_input_size: P2PKH_STANDARD_INPUT_SIZE,
             p2pkh_standard_output_size: P2PKH_STANDARD_OUTPUT_SIZE,
@@ -90,8 +157,8 @@ impl FeeRule {
     /// Construct a new FeeRule instance with the specified parameter values.
     ///
     /// Using this fee rule with
-    /// ```compile_fail
-    /// marginal_fee < 5000 || grace_actions < 2
+    /// ```text
+    /// marginal_fee < marginal_fee(params, target_height) || grace_actions < 2
     ///     || p2pkh_standard_input_size > P2PKH_STANDARD_INPUT_SIZE
     ///     || p2pkh_standard_output_size > P2PKH_STANDARD_OUTPUT_SIZE
     /// ```
@@ -110,7 +177,7 @@ impl FeeRule {
             None
         } else {
             Some(Self {
-                marginal_fee,
+                marginal_fee: MarginalFee::Fixed(marginal_fee),
                 grace_actions,
                 p2pkh_standard_input_size,
                 p2pkh_standard_output_size,
@@ -118,9 +185,18 @@ impl FeeRule {
         }
     }
 
-    /// Returns the ZIP 317 marginal fee.
-    pub fn marginal_fee(&self) -> Zatoshis {
-        self.marginal_fee
+    /// Returns the marginal fee this rule charges a transaction expected to be mined at
+    /// `target_height`.
+    pub fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis {
+        match self.marginal_fee {
+            MarginalFee::Standard => marginal_fee(params, target_height),
+            #[cfg(feature = "non-standard-fees")]
+            MarginalFee::Fixed(fee) => fee,
+        }
     }
     /// Returns the ZIP 317 number of grace actions
     pub fn grace_actions(&self) -> usize {
@@ -171,8 +247,8 @@ impl super::FeeRule for FeeRule {
 
     fn fee_required<P: consensus::Parameters>(
         &self,
-        _params: &P,
-        _target_height: BlockHeight,
+        params: &P,
+        target_height: BlockHeight,
         transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
         transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
@@ -208,7 +284,7 @@ impl super::FeeRule for FeeRule {
             + orchard_action_count
             + ironwood_action_count;
 
-        (self.marginal_fee * max(self.grace_actions, logical_actions))
+        (self.marginal_fee(params, target_height) * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())
     }
 }
@@ -217,15 +293,47 @@ impl super::FeeRule for FeeRule {
 mod tests {
     use core::iter;
 
-    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+    use zcash_protocol::{
+        consensus::{BlockHeight, MAIN_NETWORK, NetworkUpgrade, Parameters, TEST_NETWORK},
+        local_consensus::LocalNetwork,
+        value::Zatoshis,
+    };
 
-    use super::{FeeRule, MARGINAL_FEE};
+    use super::{
+        FeeRule, GRACE_ACTIONS, MAINNET_FEE_REDUCTION_HEIGHT, MARGINAL_FEE, MINIMUM_FEE,
+        REVISION_2_MARGINAL_FEE, TESTNET_FEE_REDUCTION_HEIGHT, fee_reduction_height, marginal_fee,
+        minimum_fee,
+    };
     use crate::transaction::fees::{FeeRule as _, transparent::InputSize};
+
+    #[cfg(feature = "non-standard-fees")]
+    use super::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE};
+
+    /// The regtest NU7 activation height used by the schedule tests.
+    const REGTEST_NU7_HEIGHT: BlockHeight = BlockHeight::from_u32(10);
+
+    fn regtest(nu7: Option<BlockHeight>) -> LocalNetwork {
+        LocalNetwork {
+            overwinter: None,
+            sapling: None,
+            blossom: None,
+            heartwood: None,
+            canopy: None,
+            nu5: None,
+            nu6: None,
+            nu6_1: None,
+            nu6_2: None,
+            nu6_3: None,
+            nu7,
+            #[cfg(zcash_unstable = "nutachyon")]
+            nu_tachyon: None,
+        }
+    }
 
     fn fee_for(orchard_action_count: usize, ironwood_action_count: usize) -> Zatoshis {
         FeeRule::standard()
             .fee_required(
-                &zcash_protocol::consensus::MAIN_NETWORK,
+                &MAIN_NETWORK,
                 BlockHeight::from_u32(1_000_000),
                 iter::empty::<InputSize>(),
                 iter::empty::<usize>(),
@@ -235,6 +343,36 @@ mod tests {
                 ironwood_action_count,
             )
             .unwrap()
+    }
+
+    /// The fee `rule` charges a transaction of `orchard_action_count` Orchard actions and nothing
+    /// else, expected to be mined at `height`.
+    fn fee_at<P: Parameters>(
+        rule: &FeeRule,
+        params: &P,
+        height: BlockHeight,
+        orchard_action_count: usize,
+    ) -> Zatoshis {
+        rule.fee_required(
+            params,
+            height,
+            iter::empty::<InputSize>(),
+            iter::empty::<usize>(),
+            0,
+            0,
+            orchard_action_count,
+            0,
+        )
+        .unwrap()
+    }
+
+    /// Asserts the marginal fee at `height`, and that the minimum fee follows it.
+    fn assert_fees_at<P: Parameters>(params: &P, height: BlockHeight, expected: Zatoshis) {
+        assert_eq!(marginal_fee(params, height), expected);
+        assert_eq!(
+            minimum_fee(params, height),
+            (expected * GRACE_ACTIONS).unwrap()
+        );
     }
 
     #[test]
@@ -248,5 +386,94 @@ mod tests {
     fn ironwood_actions_combine_with_orchard() {
         // Orchard and Ironwood actions are summed into the logical action count.
         assert_eq!(fee_for(2, 3), (MARGINAL_FEE * 5usize).unwrap());
+    }
+
+    #[test]
+    fn fee_reduction_height_and_marginal_fee_per_network() {
+        let below = |h: BlockHeight| h - 1;
+
+        assert_eq!(
+            fee_reduction_height(&MAIN_NETWORK),
+            Some(MAINNET_FEE_REDUCTION_HEIGHT)
+        );
+        assert_fees_at(
+            &MAIN_NETWORK,
+            below(MAINNET_FEE_REDUCTION_HEIGHT),
+            MARGINAL_FEE,
+        );
+        assert_fees_at(
+            &MAIN_NETWORK,
+            MAINNET_FEE_REDUCTION_HEIGHT,
+            REVISION_2_MARGINAL_FEE,
+        );
+
+        assert_eq!(
+            fee_reduction_height(&TEST_NETWORK),
+            Some(TESTNET_FEE_REDUCTION_HEIGHT)
+        );
+        assert_eq!(
+            TEST_NETWORK.activation_height(NetworkUpgrade::Nu7),
+            Some(TESTNET_FEE_REDUCTION_HEIGHT)
+        );
+        assert_fees_at(
+            &TEST_NETWORK,
+            below(TESTNET_FEE_REDUCTION_HEIGHT),
+            MARGINAL_FEE,
+        );
+        assert_fees_at(
+            &TEST_NETWORK,
+            TESTNET_FEE_REDUCTION_HEIGHT,
+            REVISION_2_MARGINAL_FEE,
+        );
+
+        let with_nu7 = regtest(Some(REGTEST_NU7_HEIGHT));
+        assert_eq!(fee_reduction_height(&with_nu7), Some(REGTEST_NU7_HEIGHT));
+        assert_fees_at(&with_nu7, below(REGTEST_NU7_HEIGHT), MARGINAL_FEE);
+        assert_fees_at(&with_nu7, REGTEST_NU7_HEIGHT, REVISION_2_MARGINAL_FEE);
+
+        let without_nu7 = regtest(None);
+        assert_eq!(fee_reduction_height(&without_nu7), None);
+        assert_fees_at(&without_nu7, BlockHeight::from_u32(u32::MAX), MARGINAL_FEE);
+
+        // The pre-Revision 2 constants keep their values.
+        assert_eq!(MARGINAL_FEE, Zatoshis::const_from_u64(5_000));
+        assert_eq!(MINIMUM_FEE, Zatoshis::const_from_u64(10_000));
+    }
+
+    #[test]
+    fn standard_rule_follows_schedule_and_fixed_rule_does_not() {
+        let rule = FeeRule::standard();
+        let before = MAINNET_FEE_REDUCTION_HEIGHT - 1;
+        let from = MAINNET_FEE_REDUCTION_HEIGHT;
+
+        // A transaction of exactly `GRACE_ACTIONS` logical actions pays the minimum fee.
+        assert_eq!(
+            fee_at(&rule, &MAIN_NETWORK, before, GRACE_ACTIONS),
+            minimum_fee(&MAIN_NETWORK, before)
+        );
+        assert_eq!(
+            fee_at(&rule, &MAIN_NETWORK, from, GRACE_ACTIONS),
+            minimum_fee(&MAIN_NETWORK, from)
+        );
+        assert_eq!(
+            rule.marginal_fee(&MAIN_NETWORK, from),
+            REVISION_2_MARGINAL_FEE
+        );
+
+        #[cfg(feature = "non-standard-fees")]
+        {
+            let fixed = FeeRule::non_standard(
+                MARGINAL_FEE,
+                GRACE_ACTIONS,
+                P2PKH_STANDARD_INPUT_SIZE,
+                P2PKH_STANDARD_OUTPUT_SIZE,
+            )
+            .unwrap();
+            assert_eq!(fixed.marginal_fee(&MAIN_NETWORK, from), MARGINAL_FEE);
+            assert_eq!(
+                fee_at(&fixed, &MAIN_NETWORK, from, GRACE_ACTIONS),
+                (MARGINAL_FEE * GRACE_ACTIONS).unwrap()
+            );
+        }
     }
 }

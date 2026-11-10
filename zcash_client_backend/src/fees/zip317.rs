@@ -41,16 +41,25 @@ use {super::orchard as orchard_fees, zcash_primitives::transaction::builder::Bun
 /// An extension to the [`FeeRule`] trait that exposes methods required for
 /// ZIP 317 fee calculation.
 pub trait Zip317FeeRule: FeeRule {
-    /// Returns the ZIP 317 marginal fee.
-    fn marginal_fee(&self) -> Zatoshis;
+    /// Returns the ZIP 317 marginal fee in effect for a transaction expected to be mined at
+    /// `target_height`.
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis;
 
     /// Returns the ZIP 317 number of grace actions
     fn grace_actions(&self) -> usize;
 }
 
 impl Zip317FeeRule for prim_zip317::FeeRule {
-    fn marginal_fee(&self) -> Zatoshis {
-        self.marginal_fee()
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis {
+        prim_zip317::FeeRule::marginal_fee(self, params, target_height)
     }
 
     fn grace_actions(&self) -> usize {
@@ -59,8 +68,12 @@ impl Zip317FeeRule for prim_zip317::FeeRule {
 }
 
 impl Zip317FeeRule for StandardFeeRule {
-    fn marginal_fee(&self) -> Zatoshis {
-        prim_zip317::FeeRule::standard().marginal_fee()
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis {
+        prim_zip317::marginal_fee(params, target_height)
     }
 
     fn grace_actions(&self) -> usize {
@@ -161,16 +174,17 @@ where
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
+        let marginal_fee = self.fee_rule.marginal_fee(params, target_height.into());
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             &split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             self.fee_rule.grace_actions(),
         );
 
@@ -315,16 +329,17 @@ where
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let marginal_fee = self.fee_rule.marginal_fee(params, target_height.into());
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             &self.split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             self.fee_rule.grace_actions(),
         );
 
