@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   deploy:
+    # GitHub Pages is not enabled on private repositories, and publishing their
+    # rustdocs would expose the private code.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages

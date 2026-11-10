@@ -13,6 +13,7 @@ jobs:
     name: Run zizmor 🌈
     runs-on: ubuntu-latest
     permissions:
+      contents: read # Required for actions/checkout when the repository is private.
       security-events: write # Required for upload-sarif (used by zizmor-action) to upload SARIF files.
     steps:
       - name: Checkout repository
@@ -22,3 +23,8 @@ jobs:
 
       - name: Run zizmor 🌈
         uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          # Code scanning (SARIF upload) is unavailable on private repositories
+          # without GitHub Code Security; report findings as annotations there.
+          advanced-security: ${{ !github.event.repository.private }}
+          annotations: ${{ github.event.repository.private }}

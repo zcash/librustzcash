@@ -656,6 +656,40 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
 }
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
+    /// The anchor-retention policy this wallet applies when it scans: the policy that its
+    /// [`WalletWrite::put_blocks`] passes to `put_blocks`, which a store that maintains this
+    /// wallet's note commitment trees by other means must apply as well, so that both retain
+    /// exactly the same anchors.
+    ///
+    /// Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
+    /// retention grids are retained as durable anchors. The activation height is `None` (and so
+    /// anchor retention is inactive) on networks that do not yet have an assigned NU6.3
+    /// activation height.
+    ///
+    /// The grids are this wallet's configured interval TOGETHER WITH the interval every
+    /// in-flight migration was committed under. The latter comes from the database, not from
+    /// configuration: a migration's transfers are anchored to boundaries of its committed grid
+    /// and are provable only while those checkpoints survive, so an application that reopens the
+    /// wallet without reapplying a non-default interval must not thereby cause a scan to pass a
+    /// boundary that migration still needs. Retaining the union costs at most a few extra
+    /// checkpoints and makes that failure unreachable.
+    pub fn anchor_retention(&self) -> Result<Option<AnchorRetention>, SqliteClientError> {
+        self.params
+            .activation_height(consensus::NetworkUpgrade::Nu6_3)
+            .map(|from_height| {
+                let committed = pool_migration::orchard_ironwood::active_anchor_bucket_intervals(
+                    self.conn.borrow(),
+                )?;
+                Ok(AnchorRetention::union(
+                    from_height,
+                    zcash_protocol::zip318::BlockSpacing::for_network(&self.params),
+                    core::iter::once(self.anchor_retention_interval).chain(committed),
+                ))
+            })
+            .transpose()
+            .map(Option::flatten)
+    }
+
     /// Returns wallet balances, heights, and subtree indices without computing scan progress.
     ///
     /// Callers that track sync progress outside of [`WalletSummary::progress`] can
@@ -2454,34 +2488,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
     ) -> Result<(), PutBlocksError<<Self as WalletRead>::Error>> {
-        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
-        // retention grids are retained as durable anchors. The activation height is `None` (and so
-        // anchor retention is inactive) on networks that do not yet have an assigned NU6.3
-        // activation height.
-        //
-        // The grids are this wallet's configured interval TOGETHER WITH the interval every
-        // in-flight migration was committed under. The latter comes from the database, not from
-        // configuration: a migration's transfers are anchored to boundaries of its committed grid
-        // and are provable only while those checkpoints survive, so an application that reopens the
-        // wallet without reapplying a non-default interval must not thereby cause this scan to pass
-        // a boundary that migration still needs. Retaining the union costs at most a few extra
-        // checkpoints and makes that failure unreachable.
-        let anchor_retention = self
-            .params
-            .activation_height(consensus::NetworkUpgrade::Nu6_3)
-            .map(|from_height| {
-                let committed = pool_migration::orchard_ironwood::active_anchor_bucket_intervals(
-                    self.conn.borrow(),
-                )?;
-                Ok::<_, SqliteClientError>(AnchorRetention::union(
-                    from_height,
-                    zcash_protocol::zip318::BlockSpacing::for_network(&self.params),
-                    core::iter::once(self.anchor_retention_interval).chain(committed),
-                ))
-            })
-            .transpose()
-            .map_err(PutBlocksError::Wallet)?
-            .flatten();
+        let anchor_retention = self.anchor_retention().map_err(PutBlocksError::Wallet)?;
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())
             .map_err(|e| PutBlocksError::Wallet(SqliteClientError::from(e)))?;
 

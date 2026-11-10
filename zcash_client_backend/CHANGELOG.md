@@ -19,6 +19,10 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
 - `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
 - `zcash_client_backend::data_api::ll::PutBlockMetaError`
+- `zcash_client_backend::data_api::ll::wallet::{PRUNING_DEPTH, checkpoint_floor,
+  keeps_checkpoint, BatchCheckpoints, batch_checkpoints, assign_block_end_retention}`:
+  the checkpoint planning of `put_blocks`, exposed so that a store maintaining
+  its note commitment trees by other means applies the same rule.
 - `zcash_client_backend::data_api::testing::pool::{anchor_is_policy_depth_state_or_absent,
   b_note_stable_across_rewind_below_birthday, BoundaryScanOrder,
   completed_shard_note_spendable_across_older_birthday_import,
