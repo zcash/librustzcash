@@ -7771,7 +7771,6 @@ dependencies = [
  "tracing",
  "wagyu-zcash-parameters",
  "xdg",
- "zcash_primitives",
 ]
 
 [[package]]

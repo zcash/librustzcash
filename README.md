@@ -79,7 +79,6 @@ graph TB
 
     zcash_client_backend --> zcash_proofs
 
-    zcash_proofs --> zcash_primitives
     pczt --> zcash_primitives
     %% zcash_client_backend --> zcash_primitives
     %% zcash_client_sqlite --> zcash_primitives
@@ -131,7 +130,7 @@ graph TB
     %% zcash_client_sqlite --> sapling-crypto
     %% zcash_client_backend --> sapling-crypto
     zcash_keys --> sapling-crypto
-    %% zcash_proofs --> sapling-crypto
+    zcash_proofs --> sapling-crypto
     zcash_primitives --> sapling-crypto
     %% pczt --> sapling-crypto
 
