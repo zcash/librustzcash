@@ -1354,6 +1354,7 @@ mod advance_tests {
             unsatisfiable: None,
             spend_nullifiers: Vec::new(),
             broadcast_failure_at: None,
+            orchard_change: None,
         }
     }
 
