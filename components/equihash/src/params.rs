@@ -12,7 +12,24 @@ impl Params {
         // - k >= 3 so the encoded solutions have an exact byte length.
         // - k < n, so the collision bit length is at least 1.
         // - n is a multiple of k + 1, so we have an integer collision bit length.
-        if n.is_multiple_of(8) && (k >= 3) && (k < n) && n.is_multiple_of(k + 1) {
+        // - n <= 512, so that one 512-bit BLAKE2b output covers at least one
+        //   index (`indices_per_hash_output` is `512 / n`).
+        // - n / (k + 1) < 25, so that the bit width of an index fits in the u32
+        //   accumulator used by `minimal` (which requires `7 + bit_width`
+        //   bits). This subsumes the index fitting in a `u32` at all.
+        //
+        // Without the last two, `is_valid_solution` panics for parameter
+        // sets this constructor accepts: a division by zero in the tree
+        // validator when `n > 512`, and assertion failures in `minimal`
+        // when an index is too wide. The C++ zcashd implementation was
+        // instantiated per parameter set and so never saw these inputs.
+        if n.is_multiple_of(8)
+            && (k >= 3)
+            && (k < n)
+            && n.is_multiple_of(k + 1)
+            && n <= 512
+            && n / (k + 1) < 25
+        {
             Some(Params { n, k })
         } else {
             None
