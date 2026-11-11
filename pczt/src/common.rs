@@ -623,62 +623,67 @@ mod determine_lock_time_tests {
     fn follows_bip_370() {
         let t = |time, height| TestInput { time, height };
 
-        for (inputs, expected) in [
+        // Each case is (inputs, fallback_lock_time, expected).
+        for (inputs, fallback, expected) in [
             // No input specifies a lock time: the fallback is used.
-            (vec![t(None, None)], Some(0)),
-            (vec![t(None, None)], Some(42)), // with fallback 42, below
+            (vec![t(None, None)], None, Some(0)),
+            (vec![t(None, None)], Some(42), Some(42)),
             // Only time lock times are required: the maximum is used.
-            (vec![t(Some(100), None), t(Some(200), None)], Some(200)),
+            (
+                vec![t(Some(100), None), t(Some(200), None)],
+                Some(42),
+                Some(200),
+            ),
             // Only height lock times are required: the maximum is used.
-            (vec![t(None, Some(50)), t(None, Some(75))], Some(75)),
+            (
+                vec![t(None, Some(50)), t(None, Some(75))],
+                Some(42),
+                Some(75),
+            ),
             // A time-only input and a height-only input are incompatible.
-            (vec![t(Some(100), None), t(None, Some(50))], None),
-            (vec![t(None, Some(50)), t(Some(100), None)], None),
+            (vec![t(Some(100), None), t(None, Some(50))], Some(42), None),
+            (vec![t(None, Some(50)), t(Some(100), None)], Some(42), None),
             // An input that specifies both types can take either (BIP 370:
             // "Inputs not specifying a lock time field can take both types of
             // lock times, as can those that specify both."), so on its own the
             // height lock time is chosen (BIP 370's final rule).
-            (vec![t(Some(100), Some(50))], Some(50)),
+            (vec![t(Some(100), Some(50))], Some(42), Some(50)),
             // Both-specifying plus time-only: time is the only type supported by
             // every input.
-            (vec![t(Some(100), Some(50)), t(Some(200), None)], Some(200)),
+            (
+                vec![t(Some(100), Some(50)), t(Some(200), None)],
+                Some(42),
+                Some(200),
+            ),
             // Both-specifying plus height-only: height is the only type supported
             // by every input.
-            (vec![t(Some(100), Some(50)), t(None, Some(75))], Some(75)),
+            (
+                vec![t(Some(100), Some(50)), t(None, Some(75))],
+                Some(42),
+                Some(75),
+            ),
             // Both-specifying plus an input that specifies neither.
-            (vec![t(Some(100), Some(50)), t(None, None)], Some(50)),
-            // A zero requirement does not force a zero lock time (matching Bitcoin
-            // Core, which treats a maximum of zero as no requirement).
-            (vec![t(None, Some(0))], Some(0)), // fallback 0
+            (
+                vec![t(Some(100), Some(50)), t(None, None)],
+                Some(42),
+                Some(50),
+            ),
+            // A zero requirement does not force a zero lock time (matching
+            // Bitcoin Core, which treats a maximum of zero as no requirement),
+            // so the fallback is consulted; a nonzero fallback must be returned
+            // here, not the zero that an implementation returning the explicit
+            // maximum would produce.
+            (vec![t(None, Some(0))], Some(42), Some(42)),
         ] {
-            // The fallback differs between the first two cases.
-            let fallback = match expected {
-                Some(42) => Some(42),
-                _ => None,
-            };
-            // The zero-requirement case falls back too.
-            let expected = match (inputs.as_slice(), expected) {
-                (
-                    [
-                        TestInput {
-                            height: Some(0), ..
-                        },
-                    ],
-                    Some(0),
-                ) if fallback.is_none() => {
-                    // With no fallback, a zero height requirement yields 0 anyway.
-                    Some(0)
-                }
-                (_, e) => e,
-            };
             assert_eq!(
                 determine_lock_time(&global(fallback), &inputs),
                 expected,
-                "inputs: {:?}",
+                "inputs: {:?}, fallback: {:?}",
                 inputs
                     .iter()
                     .map(|i| (i.time, i.height))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                fallback,
             );
         }
     }
