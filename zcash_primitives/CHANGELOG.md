@@ -15,8 +15,8 @@ workspace.
   format: `BundleType`, `BundleVariant`, `BundleId`, `BundleMap`, `TypedBundle`,
   `CoinbaseBundle`, `UnknownBundle`, `ValuePoolDeltas`, `ValuePoolDeltaKey`,
   `ValuePoolDeltaEntry`, `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`,
-  `MAX_COINBASE_DATA_LEN`, `opaque_effects_personalization`,
-  `read_bundle_data_framing` and `write_bundle_data_framing`.
+  `MAX_COINBASE_DATA_LEN`, `read_bundle_data_framing` and
+  `write_bundle_data_framing`.
 - `zcash_primitives::transaction::components::transparent`, a byte-level codec
   for the transparent bundle's wire structures:
   `TransparentOutPointBytes`, `TransparentOutputBytes`,
@@ -44,6 +44,16 @@ workspace.
   separately, distinguish a known bundle type with an unknown variant from an
   entirely unknown bundle type, and can represent recognized bundles whose
   authorizing data is absent.
+- `zcash_primitives::transaction::zip248::{BundleDigestKey,
+  BundleDigestProvider, SuppliedBundleDigests, V7DigestError}` (require
+  `zcash_unstable="nu8"`), the explicit per-bundle digest resolution API for
+  version 7 transactions.
+- `zcash_primitives::transaction::bytes::{TransactionBytes::{v7_txid_digests,
+  v7_txid, v7_auth_commitment}, V7TransactionBodyBytes::{value_pool_deltas_digest,
+  effects_bundles_digest, auth_bundles_digest}, V7BundleBytes::{digest_key,
+  effects_digest, auth_digest}}` (require `zcash_unstable="nu8"`), which
+  compute the ZIP 248 digest tree from the byte-layer representation and take
+  supplied digests for bundles the byte layer does not interpret.
 - `zcash_primitives::transaction::TransactionData::{from_parts_with_bundles,
   bundles, value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
 - `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
@@ -56,6 +66,11 @@ workspace.
   write_v7_effects, write_v7_auth}` (require `zcash_unstable="nu8"`)
 
 ### Changed
+- `zcash_primitives::transaction::Transaction::read` now rejects a version 7
+  transaction containing a bundle type or variant it does not interpret,
+  instead of inventing a provisional transaction identifier. Parse such a
+  transaction with `TransactionBytes::read` and supply the bundle digests to
+  `TransactionBytes::v7_txid` or `v7_auth_commitment`.
 - `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
   the V6 body and digest structure, and is gated on `zcash_unstable="nu8"`
   rather than `zcash_unstable="nutachyon"`: the format is deployed by its own
