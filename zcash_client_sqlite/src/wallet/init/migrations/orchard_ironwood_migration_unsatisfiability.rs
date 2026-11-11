@@ -344,6 +344,9 @@ impl RusqliteMigration for Migration {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+    #![allow(deprecated)]
+
     use rusqlite::{Connection, named_params};
 
     use super::*;
