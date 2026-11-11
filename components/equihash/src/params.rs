@@ -14,11 +14,12 @@ impl Params {
         // - n is a multiple of k + 1, so we have an integer collision bit length.
         // - n <= 512, so that one 512-bit BLAKE2b output covers at least one
         //   index (`indices_per_hash_output` is `512 / n`).
-        // - 7 <= n / (k + 1) < 25, so that the bit width of an index
-        //   (n / (k + 1) + 1) fits in the u32 accumulator used by `minimal`
-        //   (which requires `7 + bit_width <= 32` bits) and is at least the
-        //   8 bits that its byte-wise expansion requires. The upper bound
-        //   subsumes the index fitting in a `u32` at all.
+        // - 8 <= n / (k + 1) < 25, so that the collision bit width fits in the
+        //   byte-wise expansion of the leaf hashes (which requires at least 8
+        //   bits) and the bit width of an index (collision bit width + 1) fits
+        //   in the u32 accumulator used by `minimal` (which requires
+        //   `7 + bit_width <= 32` bits). The upper bound subsumes the index
+        //   fitting in a `u32` at all.
         //
         // Without the last two, `is_valid_solution` panics for parameter
         // sets this constructor accepts: a division by zero in the tree
@@ -30,7 +31,7 @@ impl Params {
             && (k < n)
             && n.is_multiple_of(k + 1)
             && n <= 512
-            && (7..25).contains(&(n / (k + 1)))
+            && (8..25).contains(&(n / (k + 1)))
         {
             Some(Params { n, k })
         } else {
