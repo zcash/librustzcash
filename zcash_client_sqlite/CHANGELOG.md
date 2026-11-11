@@ -19,7 +19,18 @@ workspace.
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
   `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
-  unchanged, when `height` is above the wallet birthday.
+  unchanged, when `height` is above the wallet birthday. It prunes `Scanned`
+  entries that end below `height`.
+- `WalletDb`'s `WalletWrite::delete_account` prunes `Scanned` scan queue entries
+  that end below the new wallet birthday when the deleted account had the
+  earliest birthday in the wallet.
+- Once either of the two changes above has pruned a `Scanned` entry that ended
+  below the wallet birthday, the fully-scanned height reported by
+  `WalletRead::block_fully_scanned`, `WalletRead::get_wallet_summary` and
+  `LowLevelWalletRead::block_fully_scanned_height` is no longer taken from that
+  entry. This also changes the spend-tracking floor used by
+  `WalletWrite::put_blocks` and the height up to which
+  `LowLevelWalletWrite::prune_tracked_spends` prunes.
 - `WalletDb`'s implementation of `WalletWrite::put_blocks` reports a note
   commitment tree conflict as `PutBlocksError::Continuity` rather than as
   `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other

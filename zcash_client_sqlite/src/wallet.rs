@@ -736,6 +736,8 @@ pub(crate) fn delete_account(
     conn: &rusqlite::Transaction,
     account_uuid: AccountUuid,
 ) -> Result<(), SqliteClientError> {
+    let prior_wallet_birthday = wallet_birthday(conn)?;
+
     // Update all `sent_notes` records where `to_account_id` refers to the account to be deleted to
     // have the `to_address` field set instead to the address at which the output was received.
     let mut to_account_tx = conn.prepare(
@@ -820,6 +822,15 @@ pub(crate) fn delete_account(
             ":account_uuid": account_uuid.0,
         ],
     )?;
+
+    // If the wallet birthday has moved up, `Scanned` coverage that ends below it belonged only to
+    // the deleted account. Prune it (retaining every other priority) so that it does not hold the
+    // wallet's fully-scanned height below the new birthday.
+    if let (Some(prior), Some(current)) = (prior_wallet_birthday, wallet_birthday(conn)?)
+        && current > prior
+    {
+        scanning::prune_scan_queue_below(conn, current, Some(ScanPriority::Historic))?;
+    }
 
     Ok(())
 }
