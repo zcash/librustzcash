@@ -935,6 +935,18 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
+        // Likewise the `orchard_change` column the reader selects, added by the unconditional
+        // descendant `..._transfer_change`, which also recreates `v_migration_transactions`: the
+        // view is created first, as the chain does, since this fixture lacks it.
+        conn.execute_batch(super::super::v_migration_transactions::CREATE_VIEW_SQL)
+            .unwrap();
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(
+            &super::super::orchard_ironwood_migration_transfer_change::Migration,
+            &tx,
+        )
+        .unwrap();
+        tx.commit().unwrap();
 
         let store = PoolMigrations::for_account((), (), &conn, AccountUuid::from_uuid(account))
             .expect("the account exists");

@@ -149,13 +149,8 @@ pub(crate) fn account_index_sql() -> String {
     store::create_account_index_sql(&TABLES)
 }
 
-/// The Orchard -> Ironwood transactions-table DDL, from the store's one generator, for the
+/// The due-transactions index DDL, from the store's one generator, for the
 /// `orchard_ironwood_migration_txid_blob` schema migration's table rebuild.
-pub(crate) fn transactions_table_sql() -> String {
-    store::create_transactions_sql(&TABLES)
-}
-
-/// The due-transactions index DDL, from the store's one generator, recreated by the same rebuild.
 pub(crate) fn tx_due_index_sql() -> String {
     store::create_tx_due_index_sql(&TABLES)
 }
@@ -3686,6 +3681,36 @@ mod tests {
             second in arb_migration_state(),
         ) {
             assert_put_replaces(&mut fresh_store(), &first, &second);
+        }
+
+        /// An error returned from the closure `replace_migration_with` runs inside its transaction
+        /// rolls the whole replacement back: the previously stored migration reads back unchanged,
+        /// `orchard_change` included, and no row of the replacement survives.
+        #[test]
+        fn replace_migration_with_rolls_back_on_error(
+            first in arb_migration_state(),
+            second in arb_migration_state(),
+        ) {
+            // A terminal state is retained as history rather than read back as the account's
+            // migration, so only a pending `first` can be compared against.
+            prop_assume!(!first.is_terminal());
+            let mut s = fresh_store();
+            s.replace_migration(&first).expect("write first");
+            let result = s
+                .store
+                .replace_migration_with(&second, |_| Err(Error::Corrupt("injected")));
+            prop_assert!(matches!(result, Err(Error::Corrupt("injected"))));
+            prop_assert_eq!(s.get_migration().expect("read"), Some(first.clone()));
+            let rows: i64 = s
+                .store
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM orchard_ironwood_migration_transactions",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count");
+            prop_assert_eq!(rows, first.transactions().len() as i64);
         }
 
         /// Updating a stored transaction's lifecycle state persists (the shared update property),

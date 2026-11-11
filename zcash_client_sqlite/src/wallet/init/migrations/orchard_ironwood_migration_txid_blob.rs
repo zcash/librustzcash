@@ -16,6 +16,31 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x62ccc269_f988_4bb2_8958_2cbaaa4
 
 pub(super) const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_broadcast_binding::MIGRATION_ID];
 
+/// The transactions table as this migration rebuilds it: the store's DDL as of this migration,
+/// frozen because what a migration does to a database must not follow an evolving definition
+/// (were it to follow the store's builder, the `ADD COLUMN` of a later migration would find its
+/// column already present). `verify_schema` pins the shape the migration path converges on.
+const CREATE_TRANSACTIONS_SQL: &str = "CREATE TABLE IF NOT EXISTS orchard_ironwood_migration_transactions (
+    migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
+    transfer_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    kind_layer INTEGER,
+    kind_index INTEGER,
+    kind_crossing INTEGER,
+    pczt BLOB NOT NULL,
+    scheduled_height INTEGER NOT NULL,
+    expiry_height INTEGER NOT NULL,
+    anchor_boundary INTEGER,
+    state TEXT NOT NULL,
+    txid BLOB,
+    mined_height INTEGER,
+    lock_owner BLOB,
+    unsatisfiable_at INTEGER,
+    unsatisfiable_kind TEXT,
+    broadcast_failure_at INTEGER,
+    PRIMARY KEY (migration_id, transfer_id)
+)";
+
 pub(super) struct Migration;
 
 impl schemerz::Migration<Uuid> for Migration {
@@ -54,8 +79,7 @@ impl RusqliteMigration for Migration {
              ALTER TABLE orchard_ironwood_migration_transactions
                 RENAME TO orchard_ironwood_migration_transactions_old;
              PRAGMA legacy_alter_table = OFF;
-             {};",
-            crate::pool_migration::orchard_ironwood::transactions_table_sql(),
+             {CREATE_TRANSACTIONS_SQL};",
         ))?;
 
         {
