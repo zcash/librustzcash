@@ -89,6 +89,28 @@ pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     inputs_digests: Option<&TransparentInputsDigests>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
+    transparent_sig_digest_inner(tx_data, inputs_digests, input, false)
+}
+
+/// Implements [ZIP 248 section S.3.0e](https://zips.z.cash/zip-0248#s-3-0e-sequence-sig-digest),
+/// which differs from [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest)
+/// only in that `sequence_sig_digest` is always the transaction's `sequence_digest`,
+/// including under `SIGHASH_ANYONECANPAY`.
+#[cfg(zcash_unstable = "nu8")]
+pub(super) fn transparent_sig_digest_v7<A: TransparentAuthorizingContext>(
+    tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
+    inputs_digests: Option<&TransparentInputsDigests>,
+    input: &SignableInput<'_>,
+) -> Blake2bHash {
+    transparent_sig_digest_inner(tx_data, inputs_digests, input, true)
+}
+
+fn transparent_sig_digest_inner<A: TransparentAuthorizingContext>(
+    tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
+    inputs_digests: Option<&TransparentInputsDigests>,
+    input: &SignableInput<'_>,
+    preserve_sequence_digest: bool,
+) -> Blake2bHash {
     match tx_data {
         // No transparent inputs or outputs.
         None => hash_transparent_txid_data(None),
@@ -124,7 +146,7 @@ pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                 }
             };
 
-            let sequence_digest = if flag_anyonecanpay {
+            let sequence_digest = if flag_anyonecanpay && !preserve_sequence_digest {
                 transparent_sequence_hash::<A>(&[])
             } else {
                 txid_digests.sequence_digest

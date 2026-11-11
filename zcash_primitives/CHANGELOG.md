@@ -16,6 +16,33 @@ workspace.
   `ValuePoolDeltas`, `ValuePoolDeltaKey`, `ValuePoolDeltaEntry`,
   `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`, `MAX_COINBASE_DATA_LEN`,
   `read_bundle_data_framing` and `write_bundle_data_framing`.
+- `zcash_primitives::transaction::zip248::{BundleDigestKey,
+  BundleDigestProvider, SuppliedBundleDigests, V7DigestError}` (require
+  `zcash_unstable="nu8"`), the explicit per-bundle digest resolution API for
+  version 7 transactions.
+- `zcash_primitives::transaction::bytes::{TransactionBytes::{v7_txid_digests,
+  v7_txid, v7_auth_commitment}, V7TransactionBodyBytes::{value_pool_deltas_digest,
+  effects_bundles_digest, auth_bundles_digest}, V7BundleBytes::{digest_key,
+  effects_digest, auth_digest}}` (require `zcash_unstable="nu8"`), which
+  compute the ZIP 248 digest tree from the byte-layer representation and take
+  supplied digests for bundles the byte layer does not interpret.
+- `zcash_primitives::transaction::TransactionData::{from_parts_with_value_pool_deltas,
+  value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
+- `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
+- `zcash_primitives::transaction::zip248::{WireKeyError, ValuePoolDeltaError}`
+- `zcash_primitives::transaction::TransactionData::{digest_v7,
+  check_v7_consensus_rules}`, `zcash_primitives::transaction::V7ConsensusError`
+  and `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`
+  (all require `zcash_unstable="nu8"`)
+- `zcash_primitives::transaction::{V7ValidationError, V7BundleMap}`,
+  `zcash_primitives::transaction::bytes::TransactionBytes::validate_v7`
+  and `zcash_primitives::transaction::Transaction::read_and_validate_v7`
+  (require `zcash_unstable="nu8"`), the full transaction-local validator for
+  version 7 transactions. It applies the ZIP 248 registry and map rules,
+  converts every known bundle to its typed representation, and applies the
+  typed consensus rules.
+- `zcash_primitives::transaction::components::orchard::{write_v7_effects,
+  write_v7_auth}` (require `zcash_unstable="nu8"`)
 - `zcash_primitives::transaction::components::transparent`, a byte-level codec
   for the transparent bundle's wire structures:
   `TransparentOutPointBytes`, `TransparentOutputBytes`,
@@ -25,7 +52,7 @@ workspace.
   `TransparentInputAuthBytes`, `TransparentEffectsBytes`,
   `TransparentAuthBytes` and `TransparentBundleBytes` (the last six require
   `zcash_unstable="nu8"`). The v7 types retain effecting and authorizing data
-  separately.
+  separately and convert to and from `transparent::bundle` domain types.
 - `zcash_primitives::transaction::bytes`, a byte-oriented representation of
   whole transactions for versions 1 through 7: `TransactionDataBytes` (also
   exported as `TransactionBytes`), `TransactionBodyBytes`,
@@ -43,35 +70,6 @@ workspace.
   separately, distinguish a known bundle type with an unknown variant from an
   entirely unknown bundle type, and can represent recognized bundles whose
   authorizing data is absent.
-- `zcash_primitives::transaction::zip248::{BundleDigestKey,
-  BundleDigestProvider, SuppliedBundleDigests, V7DigestError}` (require
-  `zcash_unstable="nu8"`), the explicit per-bundle digest resolution API for
-  version 7 transactions.
-- `zcash_primitives::transaction::bytes::{TransactionBytes::{v7_txid_digests,
-  v7_txid, v7_auth_commitment}, V7TransactionBodyBytes::{value_pool_deltas_digest,
-  effects_bundles_digest, auth_bundles_digest}, V7BundleBytes::{digest_key,
-  effects_digest, auth_digest}}` (require `zcash_unstable="nu8"`), which
-  compute the ZIP 248 digest tree from the byte-layer representation and take
-  supplied digests for bundles the byte layer does not interpret.
-- `zcash_primitives::transaction::TransactionData::{from_parts_with_value_pool_deltas,
-  value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
-- `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
-- `zcash_primitives::transaction::zip248::WireKeyError`
-- `zcash_primitives::transaction::TransactionData::{digest_v7,
-  check_v7_consensus_rules}`, `zcash_primitives::transaction::V7ConsensusError`
-  and `zcash_primitives::transaction::Transaction::{write_v7, write_v7_header}`
-  (all require `zcash_unstable="nu8"`)
-- `zcash_primitives::transaction::components::orchard::{write_v7_effects,
-  write_v7_auth}` (require `zcash_unstable="nu8"`)
-- `zcash_primitives::transaction::{V7ValidationContext, V7ValidationError,
-  V7BundleMap}`, `zcash_primitives::transaction::bytes::TransactionBytes::validate_v7`
-  and `zcash_primitives::transaction::Transaction::read_and_validate_v7`
-  (require `zcash_unstable="nu8"`), the full transaction-local validator for
-  version 7 transactions. It applies the ZIP 248 registry and map rules,
-  converts every known bundle to its typed representation, and applies the
-  typed consensus rules. `V7ValidationContext` supplies the block's ZIP 235
-  NSM fee contribution, which is required for the coinbase value pool delta
-  relation.
 - Byte-to-typed conversion for each protocol bundle:
   `LegacyTransparentBundleBytes::to_authorized`,
   `TransparentBundleBytes::to_authorized`, `SproutBundleBytes::to_bundle`,
@@ -96,6 +94,31 @@ workspace.
   bundles through the byte layer's per-protocol conversions; the other
   protocol's bundles remain bytes. `circuits` now implies both `sapling` and
   `orchard`.
+- `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
+  the V6 body and digest structure, and is gated on `zcash_unstable="nu8"`
+  rather than `zcash_unstable="nutachyon"`: the format is deployed by its own
+  network upgrade, NU8, rather than by NuTachyon. V6 (ZIP 229) is unchanged;
+  the Ironwood bundle is a per-protocol field, still reached through
+  `TransactionData::ironwood_bundle`.
+- `zcash_primitives::transaction::zip248::{ValuePoolDeltaKey::from_parts,
+  ValuePoolDeltaKey::zec, ValuePoolDeltaEntry::from_parts,
+  ValuePoolDeltas::insert_known, ValuePoolDeltas::insert_unknown}` now return
+  `Result<_, ValuePoolDeltaError>` and enforce the value pool delta invariants:
+  asset class 0 or 1, a zero UUID for ZEC and a 64-byte UUID for other assets,
+  nonzero values, `compactSize`-encodable raw identifiers, no duplicate wire
+  keys across the known and unknown maps, and one variant per bundle type.
+  `ValuePoolDeltas::to_wire_entries` constructs every entry through
+  `ValuePoolDeltaEntry::from_parts`, so it always produces a parseable
+  canonical encoding.
+- `zcash_primitives::transaction::zip248::ValuePoolDeltas::{set_transparent,
+  set_coinbase, set_sapling, set_orchard, set_ironwood, set_fee, set_zip233}`
+  now return `Result<(), ValuePoolDeltaError>` and reject a variant conflict
+  with any existing entry for the same bundle type, across both the known and
+  unknown maps and all assets, before mutating the map. A zero value still
+  elides the ZEC entry, but only after the variant check.
+- `zcash_primitives::transaction::zip248::CoinbaseBundle::from_parts` and
+  `CoinbaseBundle::block_height` now use `BlockHeight` instead of `u32`; the
+  wire and digest boundaries convert to `u32`.
 - `zcash_primitives::transaction::Transaction::read` now parses the wire bytes
   with `TransactionBytes::read` and interprets each known bundle, rather than
   running a second typed parser. For version 7 it rejects a transaction
@@ -106,25 +129,20 @@ workspace.
   transaction-local consensus checks; use `Transaction::read_and_validate_v7`
   for that.
 - `zcash_primitives::transaction::TransactionData::check_v7_consensus_rules`
-  now takes a `&V7ValidationContext`, which supplies the block's ZIP 235 NSM
-  fee contribution for the coinbase value pool delta relation. It also checks
-  the ZIP 248 input- and output-side conditions, the ZIP 233 NSM delta sign,
-  the Orchard `enableCrossAddress` restriction, the nonnegative Orchard pool
-  balance, and the registry and required-effect rules for value pool deltas.
-  Per-asset conservation now accumulates in a wider signed type, so an
-  intermediate partial sum outside the `ZatBalance` range no longer rejects a
+  no longer takes a context argument. It checks the ZIP 248 input- and
+  output-side conditions, the ZIP 233 NSM delta sign, the Orchard
+  `enableCrossAddress` restriction, the nonnegative Orchard pool balance, and
+  the registry and required-effect rules for value pool deltas. The coinbase
+  value pool delta relation is checked directly against the coinbase bundle's
+  `blockSubsidy - lockboxValue`; the ZIP 235 NSM fee contribution is applied to
+  the miner fee at the block level and is not part of transaction-local
+  validation. Per-asset conservation now accumulates in a wider signed type, so
+  an intermediate partial sum outside the `ZatBalance` range no longer rejects a
   transaction whose mathematical total is zero.
-- `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
-  the V6 body and digest structure, and is gated on `zcash_unstable="nu8"`
-  rather than `zcash_unstable="nutachyon"`: the format is deployed by its own
-  network upgrade, NU8, rather than by NuTachyon. V6 (ZIP 229) is unchanged;
-  the Ironwood bundle is a per-protocol field, still reached through
-  `TransactionData::ironwood_bundle`.
-- `zcash_primitives::transaction::zip248::ValuePoolDeltas`'s
-  `insert_unknown` method now returns `Result<(), WireKeyError>`, rejecting a
-  raw `(bundleType, bundleVariant)` pair that has no `compactSize` encoding.
-  Such a pair could not be serialized, and previously panicked when the v7
-  digests were computed.
+- `zcash_primitives::transaction::bytes::CoinbaseBundleBytes` now enforces the
+  ZIP 248 coinbase field constraints (`blockHeight` range, `lockboxValue <=
+  blockSubsidy`, and `coinbaseDataLen`) when reading and constructing a bundle,
+  rather than deferring them to typed conversion.
 - `zcash_primitives::transaction::TransactionData` stores each protocol bundle
   in its own optional field and its value balances as
   `zip248::ValuePoolDeltas`. The all-typed `zip248::BundleMap` and
@@ -141,6 +159,19 @@ workspace.
   byte.
 
 ### Fixed
+- The version 7 transparent signature digest now implements ZIP 248 §S.2: a
+  transparent input signature whose `hash_type` is not exactly `SIGHASH_ALL`
+  omits every transparent and fee value pool delta entry, including
+  `SIGHASH_ALL | SIGHASH_ANYONECANPAY`. Shielded signatures and exact
+  `SIGHASH_ALL` continue to commit to the complete value pool delta map.
+- `zcash_primitives::transaction::txid::to_txid` now returns `None` for a
+  version 7 digest tree that lacks the value pool deltas digest, instead of
+  substituting an empty-map digest.
+- The version 7 Sapling spends noncompact digest now hashes
+  `cv || anchor || rk` per spend under `ZTxIdSSpendNHash`, and the Ironwood
+  action sub-digests use the `ZTxIdIrnActCH_v6`, `ZTxIdIrnActMH_v6` and
+  `ZTxIdIrnActNH_v6` personalizations. The Orchard anchor is authorizing data
+  in version 7 and is committed only by the authorizing-data digest.
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also
   apply to v6 transactions, whose transaction IDs and signature digests are

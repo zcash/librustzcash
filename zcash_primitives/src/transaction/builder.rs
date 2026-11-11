@@ -1666,21 +1666,21 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // for each asset to sum to zero, so every pool that moves value needs
         // an entry, the transparent pool included.
         let mut vp_deltas = zip248::ValuePoolDeltas::empty();
-        vp_deltas.set_transparent(transparent_value_balance);
+        vp_deltas.set_zec_unchecked_for(zip248::BundleType::Transparent, transparent_value_balance);
         if let Some(ref sb) = sapling_bundle {
-            vp_deltas.set_sapling(*sb.value_balance());
+            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Sapling, *sb.value_balance());
         }
         if let Some(ref ob) = orchard_bundle {
-            vp_deltas.set_orchard(*ob.value_balance());
+            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Orchard, *ob.value_balance());
         }
         if let Some(ref ib) = ironwood_bundle {
-            vp_deltas.set_ironwood(*ib.value_balance());
+            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Ironwood, *ib.value_balance());
         }
         if let Some(fee) = fee {
-            vp_deltas.set_fee(fee);
+            vp_deltas.set_fee_unchecked(fee);
         }
         #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-        vp_deltas.set_zip233(self.zip233_amount);
+        vp_deltas.set_zip233_unchecked(self.zip233_amount);
 
         // We don't support constructing Sprout bundles.
         //
@@ -2085,6 +2085,9 @@ mod tests {
     // `transparent-inputs` feature these are not otherwise in scope.
     #[cfg(all(feature = "circuits", not(feature = "transparent-inputs")))]
     use {crate::transaction::TxVersion, zcash_protocol::consensus::BranchId};
+
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu8"))]
+    use alloc::vec::Vec;
 
     #[cfg(feature = "circuits")]
     fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
@@ -2903,7 +2906,7 @@ mod tests {
             data.value_pool_deltas().transparent_value(),
             Some(ZatBalance::from_i64(10_000).unwrap()),
         );
-        data.check_v7_consensus_rules(&Default::default())
+        data.check_v7_consensus_rules()
             .expect("the value pool deltas of a built v7 transaction must balance");
     }
 
@@ -2977,6 +2980,16 @@ mod tests {
 
         let txid = tx.txid();
         let sighash: &[u8] = txid.as_ref();
+
+        // The built transaction survives the byte-layer read path with the
+        // same identifier and wire encoding.
+        let mut encoded = Vec::new();
+        tx.write(&mut encoded).unwrap();
+        let parsed = crate::transaction::Transaction::read(&encoded[..], BranchId::Nu8).unwrap();
+        assert_eq!(parsed.txid(), txid);
+        let mut reserialized = Vec::new();
+        parsed.write(&mut reserialized).unwrap();
+        assert_eq!(reserialized, encoded);
 
         for bundle in [tx.orchard_bundle(), tx.ironwood_bundle()] {
             let bundle = bundle.expect("both Orchard-protocol bundles are present");

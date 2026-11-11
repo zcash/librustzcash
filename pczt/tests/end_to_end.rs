@@ -1680,7 +1680,7 @@ fn assert_shielded_sighash_is_txid(pczt: Pczt) {
     #[cfg(zcash_unstable = "nu8")]
     if effects.version() == zcash_primitives::transaction::TxVersion::V7 {
         effects
-            .check_v7_consensus_rules(&Default::default())
+            .check_v7_consensus_rules()
             .expect("the extracted transaction's value pool deltas must balance");
     }
 }

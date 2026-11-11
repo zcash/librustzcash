@@ -33,11 +33,14 @@ const ANCHOR_SIZE: usize = 32;
 ///
 /// ZIP 248 requires a bundle's `proofsOrchard` to be `2720 + 2272 * nActionsOrchard`
 /// bytes.
+#[cfg(zcash_unstable = "nu8")]
 const PROOF_BASE_SIZE: usize = 2720;
 /// The length that each action adds to an Orchard proof.
+#[cfg(zcash_unstable = "nu8")]
 const PROOF_PER_ACTION_SIZE: usize = 2272;
 
 /// Returns the required length of a bundle's proof for `n_actions` actions.
+#[cfg(zcash_unstable = "nu8")]
 fn expected_proof_size(n_actions: usize) -> Option<usize> {
     PROOF_PER_ACTION_SIZE
         .checked_mul(n_actions)
