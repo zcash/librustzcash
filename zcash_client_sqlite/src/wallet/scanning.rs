@@ -1194,7 +1194,7 @@ pub(crate) mod tests {
     use secrecy::{Secret, SecretVec};
     use tempfile::NamedTempFile;
     use zcash_client_backend::data_api::{
-        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
+        Account as _, AccountBirthday, AccountPurpose, Ratio, WalletRead, WalletWrite,
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, spanning_tree::testing::scan_range},
         testing::{
@@ -3072,6 +3072,68 @@ pub(crate) mod tests {
         assert_eq!(queue_contents(&st), before);
     }
 
+    /// A `Scanned` entry is retained only if it ends at or above `height`. One that ends below
+    /// it is pruned like any other unretained entry.
+    #[test]
+    fn prune_scan_queue_below_retains_scanned_only_at_or_above_height() {
+        let height = 663_150;
+        let cases = [
+            (
+                "scanned ending below height",
+                vec![
+                    scan_range(419_200..450_000, ScanPriority::Ignored),
+                    scan_range(450_000..460_000, ScanPriority::Scanned),
+                    scan_range(460_000..700_000, ScanPriority::FoundNote),
+                ],
+                vec![
+                    (419_200, 460_000, priority_code(&ScanPriority::Ignored)),
+                    (460_000, 700_000, priority_code(&ScanPriority::FoundNote)),
+                ],
+            ),
+            (
+                "scanned ending at height",
+                vec![
+                    scan_range(419_200..450_000, ScanPriority::Ignored),
+                    scan_range(450_000..height, ScanPriority::Scanned),
+                    scan_range(height..700_000, ScanPriority::Historic),
+                ],
+                vec![
+                    (419_200, 450_000, priority_code(&ScanPriority::Ignored)),
+                    (450_000, height, priority_code(&ScanPriority::Scanned)),
+                    (height, 700_000, priority_code(&ScanPriority::Historic)),
+                ],
+            ),
+            (
+                "scanned straddling height",
+                vec![
+                    scan_range(419_200..450_000, ScanPriority::Ignored),
+                    scan_range(450_000..680_000, ScanPriority::Scanned),
+                    scan_range(680_000..700_000, ScanPriority::Historic),
+                ],
+                vec![
+                    (419_200, 450_000, priority_code(&ScanPriority::Ignored)),
+                    (450_000, 680_000, priority_code(&ScanPriority::Scanned)),
+                    (680_000, 700_000, priority_code(&ScanPriority::Historic)),
+                ],
+            ),
+        ];
+
+        for (name, entries, expected) in cases {
+            let mut st = TestBuilder::new()
+                .with_data_store_factory(TestDbFactory::default())
+                .build();
+            insert_queue_entries(st.wallet().conn(), entries.iter()).unwrap();
+            st.wallet_mut()
+                .prune_scan_queue_below(
+                    BlockHeight::from_u32(height),
+                    Some(ScanPriority::OpenAdjacent),
+                )
+                .unwrap();
+            assert_eq!(queue_contents(&st), expected, "{name}");
+            assert_queue_contiguous(&st);
+        }
+    }
+
     /// `block_range_end` is exclusive: an entry ending exactly at `height` covers only
     /// heights strictly below it, so it is deleted whole rather than trimmed to an empty
     /// range (which the schema's `start < end` constraint would reject).
@@ -3804,5 +3866,151 @@ pub(crate) mod tests {
             #[cfg(feature = "orchard")]
             check("orchard");
         }
+    }
+
+    /// Builds a wallet whose original account has a birthday at Sapling activation, adds a
+    /// view-only account with a birthday `gap` blocks later, extends the chain `gap` blocks past
+    /// that birthday, and scans the first `scanned` blocks of the original account's history.
+    ///
+    /// Returns the state, the original account, and the second account's birthday height.
+    fn wallet_with_old_account_scanned_to(
+        gap: u32,
+        scanned: u32,
+    ) -> (
+        TestState<BlockCache, TestDb, LocalNetwork>,
+        crate::AccountUuid,
+        BlockHeight,
+    ) {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let old_account = st.test_account().unwrap().account().id();
+        let sap = st.sapling_activation_height();
+
+        for _ in 0..gap {
+            st.generate_empty_block();
+        }
+        let birthday = AccountBirthday::from_parts(
+            st.latest_cached_block().unwrap().chain_state().clone(),
+            None,
+        );
+        let ufvk = UnifiedSpendingKey::from_seed(st.network(), &[7; 32], zip32::AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key();
+        st.wallet_mut()
+            .import_account_ufvk("new", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap();
+        for _ in 0..gap {
+            st.generate_empty_block();
+        }
+        st.wallet_mut()
+            .update_chain_tip(sap + (2 * gap - 1))
+            .unwrap();
+        st.scan_cached_blocks(sap, usize::try_from(scanned).unwrap());
+
+        (st, old_account, birthday.height())
+    }
+
+    fn fully_scanned(st: &TestState<BlockCache, TestDb, LocalNetwork>) -> Option<BlockHeight> {
+        st.wallet()
+            .block_fully_scanned()
+            .unwrap()
+            .map(|meta| meta.block_height())
+    }
+
+    fn scanned_ranges_ending_below(
+        st: &TestState<BlockCache, TestDb, LocalNetwork>,
+        height: BlockHeight,
+    ) -> Vec<zcash_client_backend::data_api::scanning::ScanRange> {
+        suggest_scan_ranges(st.wallet().conn(), Ignored)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.priority() == Scanned && r.block_range().end < height)
+            .collect()
+    }
+
+    /// Deleting the account with the earliest birthday, after it has scanned part of its
+    /// history, must not leave a `Scanned` range below the new birthday: such a range would hold
+    /// the wallet's fully-scanned height below that birthday.
+    #[test]
+    fn delete_account_prunes_scanned_range_below_new_birthday() {
+        let gap = 300;
+        let (mut st, old_account, birthday) = wallet_with_old_account_scanned_to(gap, 10);
+        let tip = st.sapling_activation_height() + (2 * gap - 1);
+
+        st.wallet_mut().delete_account(old_account).unwrap();
+        assert_eq!(st.wallet().get_wallet_birthday().unwrap(), Some(birthday));
+        assert_eq!(scanned_ranges_ending_below(&st, birthday), vec![]);
+        assert_eq!(fully_scanned(&st), None);
+
+        // Scanning the remaining account's range completes the wallet's scan.
+        st.scan_cached_blocks(birthday, usize::try_from(gap).unwrap());
+        assert_eq!(fully_scanned(&st), Some(tip));
+    }
+
+    /// The same deletion followed by `prune_scan_queue_below`, as its documentation recommends,
+    /// leaves nothing below the birthday to scan, and the wallet reaches the chain tip.
+    #[test]
+    fn delete_account_then_prune_reaches_synced() {
+        let gap = 300;
+        let (mut st, old_account, birthday) = wallet_with_old_account_scanned_to(gap, 10);
+        let tip = st.sapling_activation_height() + (2 * gap - 1);
+
+        st.wallet_mut().delete_account(old_account).unwrap();
+        st.wallet_mut()
+            .prune_scan_queue_below(birthday, Some(OpenAdjacent))
+            .unwrap();
+        assert!(
+            st.wallet()
+                .suggest_scan_ranges()
+                .unwrap()
+                .iter()
+                .all(|r| r.block_range().start >= birthday)
+        );
+
+        st.scan_cached_blocks(birthday, usize::try_from(gap).unwrap());
+        assert_eq!(st.wallet().suggest_scan_ranges().unwrap(), vec![]);
+        assert_eq!(fully_scanned(&st), Some(tip));
+        let summary = st
+            .wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .unwrap()
+            .unwrap();
+        assert!(summary.is_synced());
+    }
+
+    /// Deleting an account that does not have the earliest birthday leaves the wallet birthday,
+    /// and with it the scan queue, unchanged.
+    #[test]
+    fn delete_account_keeps_scan_queue_when_wallet_birthday_is_unchanged() {
+        let (mut st, old_account, _) = wallet_with_old_account_scanned_to(300, 10);
+        let new_account = st
+            .wallet()
+            .get_account_ids()
+            .unwrap()
+            .into_iter()
+            .find(|account| *account != old_account)
+            .unwrap();
+        let queue_before = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+
+        st.wallet_mut().delete_account(new_account).unwrap();
+        assert_eq!(
+            suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap(),
+            queue_before
+        );
+    }
+
+    /// A `Scanned` range that ends exactly at the new birthday is kept: every block from the
+    /// birthday through `birthday - 1` is (vacuously) scanned, which is the fully-scanned height
+    /// that lets the next `put_blocks` batch derive its spend-tracking floor.
+    #[test]
+    fn delete_account_keeps_scanned_range_ending_at_new_birthday() {
+        let gap = 300;
+        let (mut st, old_account, birthday) = wallet_with_old_account_scanned_to(gap, gap);
+
+        st.wallet_mut().delete_account(old_account).unwrap();
+        assert_eq!(fully_scanned(&st), Some(birthday - 1));
     }
 }
