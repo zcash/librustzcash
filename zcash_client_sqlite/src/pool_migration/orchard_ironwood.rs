@@ -979,6 +979,7 @@ mod check_step_satisfiability {
             None,
             cache(nfs),
             None,
+            None,
         )
     }
 
@@ -1007,6 +1008,7 @@ mod check_step_satisfiability {
             None,
             None,
             Vec::new(),
+            None,
             None,
         )
     }
@@ -1068,6 +1070,7 @@ mod check_step_satisfiability {
             None,
             None,
             cache(nfs),
+            None,
             None,
         )
     }
@@ -2130,6 +2133,7 @@ mod truncation_follows_the_wallet {
             unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
             vec![[id as u8; 32]],
             None,
+            None,
         )
     }
 
@@ -2534,6 +2538,7 @@ mod tests {
                 None,
                 vec![[9; 32]],
                 None,
+                None,
             )],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -2733,6 +2738,7 @@ mod tests {
             None,
             txs[0].spend_nullifiers().to_vec(),
             None,
+            None,
         );
         txs.push(MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -2750,6 +2756,7 @@ mod tests {
             None,
             Vec::new(),
             None,
+            None,
         ));
         txs.push(MigrationTransaction::from_parts(
             MigrationTransferId::new(2),
@@ -2764,6 +2771,7 @@ mod tests {
             None,
             None,
             Vec::new(),
+            None,
             None,
         ));
         proved = MigrationState::from_parts(
@@ -2881,6 +2889,7 @@ mod tests {
             None,
             txs[0].spend_nullifiers().to_vec(),
             None,
+            None,
         );
         let failed =
             migration_with_transfer(MigrationStatus::Failed, 40_000, MigrationTxState::Proved);
@@ -2949,6 +2958,7 @@ mod tests {
             Some(MigrationLockOwner::from_bytes(owner)),
             None,
             txs[0].spend_nullifiers().to_vec(),
+            None,
             None,
         );
         let mut live = MigrationState::from_parts(
@@ -3106,6 +3116,7 @@ mod tests {
             unsatisfiable,
             spend_nullifiers.clone(),
             broadcast_failure_at,
+            None,
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -3121,6 +3132,7 @@ mod tests {
             unsatisfiable,
             spend_nullifiers,
             broadcast_failure_at,
+            None,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -3193,6 +3205,7 @@ mod tests {
                 lock_owner,
                 None,
                 Vec::new(),
+                None,
                 None,
             )
         };
@@ -3288,6 +3301,7 @@ mod tests {
                 None,
                 vec![[7u8; 32]],
                 None,
+                None,
             )],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -3378,6 +3392,7 @@ mod tests {
                 None,
                 None,
                 vec![[id as u8; 32]],
+                None,
                 None,
             )
         };

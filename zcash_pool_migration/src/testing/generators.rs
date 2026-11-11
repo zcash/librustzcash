@@ -277,6 +277,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     unsatisfiable,
                     spend_nullifiers,
                     broadcast_failure_at,
+                    None,
                 )
             },
         )
@@ -342,6 +343,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.unsatisfiable(),
                             tx.spend_nullifiers().clone(),
                             tx.broadcast_failure_at(),
+                            tx.orchard_change(),
                         )
                     })
                     .collect();
