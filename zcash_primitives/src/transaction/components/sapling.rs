@@ -1,12 +1,25 @@
+#[cfg(feature = "temporary-zcashd")]
 use alloc::vec::Vec;
 use core::mem::size_of;
-use corez::io::{self, Read, Write};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use corez::io::Write;
+use corez::io::{self, Read};
 use ff::PrimeField;
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use ::sapling::bundle::Bundle;
 use ::sapling::{
     Nullifier,
     bundle::{
-        Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
+        Authorization, Authorized, GrothProofBytes, OutputDescription, OutputDescriptionV5,
         SpendDescription, SpendDescriptionV5,
     },
     note::ExtractedNoteCommitment,
@@ -14,16 +27,27 @@ use ::sapling::{
     value::ValueCommitment,
 };
 use redjubjub::SpendAuth;
-use zcash_encoding::{Array, CompactSize, Vector};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use zcash_encoding::Vector;
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
+use zcash_encoding::{Array, CompactSize};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
-use zcash_protocol::{
-    consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
-    value::ZatBalance,
-};
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use zcash_protocol::value::ZatBalance;
 
 use super::GROTH_PROOF_SIZE;
+#[cfg(feature = "temporary-zcashd")]
 use crate::transaction::read_amount;
-#[cfg(zcash_unstable = "nu8")]
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 use crate::transaction::zip248::V7_SIGHASH_V0_INFO_WIRE;
 
 /// The size in bytes of a Sapling spend description in its v4 (pre-NU5) serialized form, as
@@ -98,9 +122,7 @@ pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip2
 
 /// A map from one bundle authorization to another.
 ///
-/// For use with [`TransactionData::map_authorization`].
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+/// For use with `TransactionData::map_authorization`.
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
     fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
@@ -110,10 +132,8 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 
 /// The identity map.
 ///
-/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// This can be used with `TransactionData::map_authorization` when you want to map the
 /// authorization of a subset of a transaction's bundles.
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_proof(
         &mut self,
@@ -248,6 +268,11 @@ pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescripti
     ))
 }
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
 fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>) -> io::Result<()> {
     writer.write_all(&spend.cv().to_bytes())?;
     writer.write_all(spend.anchor().to_repr().as_ref())?;
@@ -257,6 +282,7 @@ fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>)
     writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
 }
 
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 fn write_spend_v5_without_witness_data<W: Write>(
     mut writer: W,
     spend: &SpendDescription<Authorized>,
@@ -324,6 +350,11 @@ pub fn temporary_zcashd_write_output_v4<W: Write>(
     write_output_v4(writer, output)
 }
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
 pub(crate) fn write_output_v4<W: Write>(
     mut writer: W,
     output: &OutputDescription<GrothProofBytes>,
@@ -336,6 +367,7 @@ pub(crate) fn write_output_v4<W: Write>(
     writer.write_all(output.zkproof())
 }
 
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 fn write_output_v5_without_proof<W: Write>(
     mut writer: W,
     output: &OutputDescription<GrothProofBytes>,
@@ -386,6 +418,7 @@ pub fn temporary_zcashd_read_v4_components<R: Read>(
 }
 
 /// Reads the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
 #[allow(clippy::type_complexity)]
 pub(crate) fn read_v4_components<R: Read>(
     mut reader: R,
@@ -420,6 +453,10 @@ pub fn temporary_zcashd_write_v4_components<W: Write>(
 }
 
 /// Writes the Sapling components of a v4 transaction.
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd"
+))]
 pub(crate) fn write_v4_components<W: Write>(
     mut writer: W,
     bundle: Option<&Bundle<Authorized, ZatBalance>>,
@@ -452,6 +489,7 @@ pub(crate) fn write_v4_components<W: Write>(
 }
 
 /// Reads a [`Bundle`] from a v5 transaction format.
+#[cfg(all(feature = "sapling", feature = "orchard", feature = "temporary-zcashd"))]
 #[allow(clippy::redundant_closure)]
 pub(crate) fn read_v5_bundle<R: Read>(
     mut reader: R,
@@ -510,6 +548,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 }
 
 /// Writes a [`Bundle`] in the v5 transaction format.
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 pub(crate) fn write_v5_bundle<W: Write>(
     mut writer: W,
     sapling_bundle: Option<&Bundle<Authorized, ZatBalance>>,
@@ -567,6 +606,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
 /// The anchor is not part of the effecting data; it is written by
 /// [`write_v7_auth`].
 #[cfg(zcash_unstable = "nu8")]
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 pub(crate) fn write_v7_effects<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
@@ -599,6 +639,7 @@ pub(crate) fn write_v7_effects<W: Write>(
 ///         vOutputProofsSapling (192*nOutputs),
 ///         bindingSigSapling (SaplingSignature with sighashInfo).
 #[cfg(zcash_unstable = "nu8")]
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 pub(crate) fn write_v7_auth<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,

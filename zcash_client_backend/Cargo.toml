@@ -207,10 +207,10 @@ spend-index = ["transparent-inputs"]
 
 ## Enables receiving and spending Orchard funds.
 ##
-## The `orchard` crate itself is an unconditional dependency (via
-## `zcash_primitives`, which always requires it because every v5+ transaction
-## carries an Orchard bundle type); this feature gates the wallet's
-## Orchard note-handling code, not the crate linkage.
+## The `orchard` crate itself is linked through `zcash_primitives`, whose
+## `circuits` feature (enabled by this crate) enables its `orchard` feature;
+## this feature gates the wallet's Orchard note-handling code, not the crate
+## linkage.
 orchard = ["dep:pasta_curves", "zcash_keys/orchard"]
 
 ## Enables compatibility with legacy zcashd wallet data

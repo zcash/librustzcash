@@ -88,6 +88,7 @@ impl SaplingSpendBytes {
     ///
     /// The value commitment, nullifier, and randomized validating key are
     /// validated by the same decoders used for the v5 wire format.
+    #[cfg(feature = "sapling")]
     pub(crate) fn to_spend_v5(&self) -> io::Result<::sapling::bundle::SpendDescriptionV5> {
         let mut bytes = Vec::with_capacity(96);
         self.write(&mut bytes)?;
@@ -176,6 +177,7 @@ impl SaplingOutputBytes {
     ///
     /// The value commitment, note commitment, and ciphertexts are validated by
     /// the same decoders used for the v5 wire format.
+    #[cfg(feature = "sapling")]
     pub(crate) fn to_output_v5(&self) -> io::Result<::sapling::bundle::OutputDescriptionV5> {
         let mut bytes = Vec::with_capacity(756);
         self.write(&mut bytes)?;
@@ -274,6 +276,7 @@ impl SaplingSpendV4Bytes {
     ///
     /// The value commitment, anchor, nullifier, and randomized validating key
     /// are validated by the same decoder used for the v4 wire format.
+    #[cfg(feature = "sapling")]
     pub(crate) fn to_spend_v4(
         &self,
     ) -> io::Result<::sapling::bundle::SpendDescription<::sapling::bundle::Authorized>> {
@@ -372,6 +375,7 @@ impl SaplingOutputV4Bytes {
     ///
     /// The value commitment and note commitment are validated by the same
     /// decoder used for the v4 wire format.
+    #[cfg(feature = "sapling")]
     pub(crate) fn to_output_v4(
         &self,
     ) -> io::Result<::sapling::bundle::OutputDescription<::sapling::bundle::GrothProofBytes>> {
@@ -459,6 +463,7 @@ impl V4SaplingBundleBytes {
     ///
     /// Returns an error if the bundle is non-empty but no binding signature is
     /// supplied, or if a spend or output description is invalid.
+    #[cfg(feature = "sapling")]
     pub fn to_authorized(
         &self,
         binding_sig: Option<[u8; BINDING_SIG_SIZE]>,
@@ -695,6 +700,7 @@ impl SaplingBundleBytes {
     /// # Errors
     ///
     /// Returns an error if the bundle is empty, or if a field is invalid.
+    #[cfg(feature = "sapling")]
     pub fn to_authorized(
         &self,
     ) -> io::Result<::sapling::bundle::Bundle<::sapling::bundle::Authorized, ZatBalance>> {
@@ -1153,6 +1159,7 @@ impl V7SaplingBundleBytes {
     ///
     /// Returns an error if the bundle has no authorizing data, if a signature
     /// uses a sighash version other than 0, or if a field is invalid.
+    #[cfg(feature = "sapling")]
     pub fn to_authorized(
         &self,
         value_balance: ZatBalance,

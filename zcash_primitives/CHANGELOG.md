@@ -76,6 +76,17 @@ workspace.
   sighash version.
 
 ### Changed
+- The Sapling and Orchard protocol domains are now selected by the `sapling`
+  and `orchard` features. The byte layer
+  (`zcash_primitives::transaction::bytes`, `zip248`, and the byte-level
+  `txid` digest functions) is always available and does not require either
+  protocol crate. The typed transaction API (`Transaction`,
+  `TransactionData`, `builder`, `sighash`, `block`, and the typed `txid`
+  digesters) requires both features. A build with only one protocol feature
+  can parse every wire format as bytes and convert the enabled protocol's
+  bundles through the byte layer's per-protocol conversions; the other
+  protocol's bundles remain bytes. `circuits` now implies both `sapling` and
+  `orchard`.
 - `zcash_primitives::transaction::Transaction::read` now rejects a version 7
   transaction containing a bundle type or variant it does not interpret,
   instead of inventing a provisional transaction identifier. Parse such a

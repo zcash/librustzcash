@@ -148,6 +148,7 @@ impl OrchardActionBytes {
     /// The value commitment, nullifier, randomized validating key, note
     /// commitment, and ciphertext are validated by the same decoder used for
     /// the v5 wire format.
+    #[cfg(feature = "orchard")]
     pub(crate) fn to_action_without_auth(&self) -> io::Result<orchard::Action<()>> {
         let mut bytes = Vec::with_capacity(820);
         self.write(&mut bytes)?;
@@ -301,6 +302,7 @@ impl OrchardBundleBytes {
     ///
     /// Returns an error if the bundle is empty, if the pool is not supported
     /// under the supplied bundle version, or if a field is invalid.
+    #[cfg(feature = "orchard")]
     pub fn to_authorized(
         &self,
         bundle_version: Option<orchard::bundle::BundleVersion>,
@@ -715,6 +717,7 @@ impl V7OrchardBundleBytes {
     /// Returns an error if the bundle has no authorizing data, if a signature
     /// uses a sighash version other than 0, if the pool is not supported under
     /// the supplied bundle version, or if a field is invalid.
+    #[cfg(feature = "orchard")]
     pub fn to_authorized(
         &self,
         value_balance: ZatBalance,
