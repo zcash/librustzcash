@@ -3186,13 +3186,18 @@ fn parse_tx<P: consensus::Parameters>(
 
         let expiry_height = tx_data.expiry_height();
         if expiry_height > BlockHeight::from(0) {
-            TransactionData::from_parts_with_bundles(
+            TransactionData::from_parts_with_value_pool_deltas(
                 tx_data.version(),
                 BranchId::for_height(params, expiry_height),
                 tx_data.lock_time(),
                 expiry_height,
                 tx_data.value_pool_deltas().clone(),
-                tx_data.bundles().clone(),
+                tx_data.transparent_bundle().cloned(),
+                tx_data.sprout_bundle().cloned(),
+                tx_data.sapling_bundle().cloned(),
+                tx_data.orchard_bundle().cloned(),
+                tx_data.ironwood_bundle().cloned(),
+                tx_data.coinbase_bundle().cloned(),
             )
             .freeze()
             .map(|t| (expiry_height, t))

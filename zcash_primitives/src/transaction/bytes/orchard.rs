@@ -141,6 +141,18 @@ impl OrchardActionBytes {
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)
     }
+
+    /// Interprets this action description as an Orchard action without its
+    /// spend authorization signature.
+    ///
+    /// The value commitment, nullifier, randomized validating key, note
+    /// commitment, and ciphertext are validated by the same decoder used for
+    /// the v5 wire format.
+    pub(crate) fn to_action_without_auth(&self) -> io::Result<orchard::Action<()>> {
+        let mut bytes = Vec::with_capacity(820);
+        self.write(&mut bytes)?;
+        crate::transaction::components::orchard::read_action_without_auth(&mut &bytes[..])
+    }
 }
 
 /// A version 5 or 6 Orchard-protocol bundle in its wire representation.
@@ -276,6 +288,70 @@ impl OrchardBundleBytes {
             }
             None => CompactSize::write(&mut writer, 0),
         }
+    }
+
+    /// Interprets this bundle as an authorized Orchard-protocol bundle.
+    ///
+    /// `bundle_version` fixes the flag-byte grammar and circuit generation for
+    /// the consensus branch the transaction is in. It is `None` when the pool
+    /// is not supported under that branch, in which case a non-empty bundle is
+    /// rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle is empty, if the pool is not supported
+    /// under the supplied bundle version, or if a field is invalid.
+    pub fn to_authorized(
+        &self,
+        bundle_version: Option<orchard::bundle::BundleVersion>,
+    ) -> io::Result<orchard::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        use crate::transaction::components::orchard::{read_anchor, read_flags, read_signature};
+        use orchard::primitives::redpallas::{Binding, SpendAuth};
+
+        if self.actions.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Orchard-protocol bundle has no typed representation",
+            ));
+        }
+
+        let bundle_version = bundle_version.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Orchard-protocol bundles may not be present in this transaction version \
+                 under the transaction's consensus branch ID",
+            )
+        })?;
+        let flags = read_flags(&mut &[self.flags][..], bundle_version)?;
+        let anchor = read_anchor(&mut &self.anchor[..])?;
+
+        let actions = self
+            .actions
+            .iter()
+            .zip(self.spend_auth_sigs.iter())
+            .map(|(action, sig)| {
+                let action = action.to_action_without_auth()?;
+                action.try_map(|_| read_signature::<_, SpendAuth>(&mut &sig[..]))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let actions = nonempty::NonEmpty::from_vec(actions)
+            .expect("a non-empty action list has a typed representation");
+
+        let binding_signature = read_signature::<_, Binding>(&mut &self.binding_sig[..])?;
+        let authorization = orchard::bundle::Authorized::from_parts(
+            orchard::Proof::new(self.proof.clone()),
+            binding_signature,
+        );
+
+        orchard::Bundle::try_from_parts(
+            actions,
+            flags,
+            self.value_balance,
+            anchor,
+            authorization,
+            bundle_version,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -625,6 +701,97 @@ impl V7OrchardBundleBytes {
             Some(binding_sig) => binding_sig.write(&mut writer),
             None => Ok(()),
         }
+    }
+
+    /// Interprets this bundle as an authorized Orchard-protocol bundle.
+    ///
+    /// The value balance is not part of the v7 bundle encoding; it lives in
+    /// `mValuePoolDeltas` and is supplied by the caller. `bundle_version`
+    /// fixes the flag-byte grammar and circuit generation for the consensus
+    /// branch the transaction is in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle has no authorizing data, if a signature
+    /// uses a sighash version other than 0, if the pool is not supported under
+    /// the supplied bundle version, or if a field is invalid.
+    pub fn to_authorized(
+        &self,
+        value_balance: ZatBalance,
+        bundle_version: Option<orchard::bundle::BundleVersion>,
+    ) -> io::Result<orchard::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        use crate::transaction::components::orchard::{read_anchor, read_flags, read_signature};
+        use orchard::primitives::redpallas::{Binding, SpendAuth};
+
+        if self.actions.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Orchard-protocol bundle has no typed representation",
+            ));
+        }
+
+        let binding_sig = self.binding_sig.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v7 Orchard-protocol effecting data has no authorizing data",
+            )
+        })?;
+        if !binding_sig.sighash_info().is_v0() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported Orchard binding signature sighash version",
+            ));
+        }
+
+        let bundle_version = bundle_version.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Orchard-protocol bundles may not be present in this transaction version \
+                 under the transaction's consensus branch ID",
+            )
+        })?;
+        let flags = read_flags(&mut &[self.flags][..], bundle_version)?;
+        let anchor = self.anchor.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v7 Orchard-protocol authorizing data has no anchor",
+            )
+        })?;
+        let anchor = read_anchor(&mut &anchor[..])?;
+
+        let actions = self
+            .actions
+            .iter()
+            .zip(self.spend_auth_sigs.iter())
+            .map(|(action, sig)| {
+                if !sig.sighash_info().is_v0() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported Orchard spend authorization sighash version",
+                    ));
+                }
+                let action = action.to_action_without_auth()?;
+                action.try_map(|_| read_signature::<_, SpendAuth>(&mut &sig.signature()[..]))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let actions = nonempty::NonEmpty::from_vec(actions)
+            .expect("a non-empty action list has a typed representation");
+
+        let binding_signature = read_signature::<_, Binding>(&mut &binding_sig.signature()[..])?;
+        let authorization = orchard::bundle::Authorized::from_parts(
+            orchard::Proof::new(self.proof.clone()),
+            binding_signature,
+        );
+
+        orchard::Bundle::try_from_parts(
+            actions,
+            flags,
+            value_balance,
+            anchor,
+            authorization,
+            bundle_version,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 

@@ -1682,10 +1682,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
         vp_deltas.set_zip233(self.zip233_amount);
 
-        let mut bundles = zip248::BundleMap::new();
-        if let Some(b) = transparent_bundle {
-            bundles.insert_transparent(b);
-        }
         // We don't support constructing Sprout bundles.
         //
         // # Consensus
@@ -1695,23 +1691,18 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // > A coinbase transaction MUST NOT have any Spend descriptions.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        if let Some(b) = sapling_bundle {
-            bundles.insert_sapling(b);
-        }
-        if let Some(b) = orchard_bundle {
-            bundles.insert_orchard(b);
-        }
-        if let Some(b) = ironwood_bundle {
-            bundles.insert_ironwood(b);
-        }
-
-        let unauthed_tx: TransactionData<A> = TransactionData::from_parts_with_bundles(
+        let unauthed_tx: TransactionData<A> = TransactionData::from_parts_with_value_pool_deltas(
             self.tx_version,
             self.consensus_branch_id,
             0,
             self.expiry_height,
             vp_deltas,
-            bundles,
+            transparent_bundle,
+            None,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+            None,
         );
 
         //
@@ -1737,7 +1728,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map(|extsk| extsk.expsk().ask().clone())
             .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
-            .bundles
             .take_sapling()
             .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
@@ -1776,7 +1766,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_proving_key_storage.as_ref();
 
         let orchard_bundle = unauthed_tx
-            .bundles
             .take_orchard()
             .map(|b| {
                 b.create_proof(
@@ -1792,7 +1781,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map_err(Error::OrchardBuild)?;
 
         let ironwood_bundle = unauthed_tx
-            .bundles
             .take_ironwood()
             .map(|b| {
                 b.create_proof(
@@ -1815,28 +1803,19 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // Reassemble the authorized bundles, preserving the value pool deltas
         // computed for the unauthorized transaction (they commit to the fee and
         // the shielded value balances, which authorization does not change).
-        let mut authorized_bundles = zip248::BundleMap::new();
-        if let Some(b) = transparent_bundle {
-            authorized_bundles.insert_transparent(b);
-        }
         // We don't support constructing Sprout bundles.
-        if let Some(b) = sapling_bundle {
-            authorized_bundles.insert_sapling(b);
-        }
-        if let Some(b) = orchard_bundle {
-            authorized_bundles.insert_orchard(b);
-        }
-        if let Some(b) = ironwood_bundle {
-            authorized_bundles.insert_ironwood(b);
-        }
-
-        let authorized_tx = TransactionData::from_parts_with_bundles(
+        let authorized_tx = TransactionData::from_parts_with_value_pool_deltas(
             unauthed_tx.version(),
             unauthed_tx.consensus_branch_id(),
             unauthed_tx.lock_time(),
             unauthed_tx.expiry_height(),
             unauthed_tx.value_pool_deltas().clone(),
-            authorized_bundles,
+            transparent_bundle,
+            None,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+            None,
         );
 
         // The unwrap() here is safe because the txid hashing
@@ -2998,6 +2977,7 @@ mod tests {
 
         let txid = tx.txid();
         let sighash: &[u8] = txid.as_ref();
+
         for bundle in [tx.orchard_bundle(), tx.ironwood_bundle()] {
             let bundle = bundle.expect("both Orchard-protocol bundles are present");
             bundle

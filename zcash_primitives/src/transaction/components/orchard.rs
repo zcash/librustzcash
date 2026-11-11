@@ -21,9 +21,9 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
-use crate::transaction::Transaction;
+use crate::transaction::read_amount;
 #[cfg(zcash_unstable = "nu8")]
-use crate::transaction::zip248::{V7_SIGHASH_V0_INFO_WIRE, consume_v7_sighash_v0_info};
+use crate::transaction::zip248::V7_SIGHASH_V0_INFO_WIRE;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -119,7 +119,7 @@ fn read_bundle<R: Read>(
             )
         })?;
         let flags = read_flags(&mut reader, bundle_version)?;
-        let value_balance = Transaction::read_amount(&mut reader)?;
+        let value_balance = read_amount(&mut reader)?;
         let anchor = read_anchor(&mut reader)?;
         let proof_bytes = Vector::read_bytes(&mut reader)?;
         let actions = NonEmpty::from_vec(
@@ -232,121 +232,6 @@ pub fn read_v6_bundle<R: Read>(
     pool: ValuePool,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     read_bundle(reader, bundle_version_for_branch(consensus_branch_id, pool))
-}
-
-/// Reads an [`orchard::Bundle`] from v7 effecting + authorizing byte vectors.
-/// [ZIP 248 §Orchard Bundle](https://zips.z.cash/zip-0248#orchard-bundle)
-///
-/// `effects` and `auth` are the raw `vBundleData` payloads from the
-/// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
-/// value balance is *not* read from these bytes -- it lives in
-/// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(zcash_unstable = "nu8")]
-pub fn read_v7_bundle(
-    effects: &[u8],
-    auth: Option<&[u8]>,
-    value_balance: ZatBalance,
-    bundle_version: Option<BundleVersion>,
-) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    let mut effects_reader = effects;
-
-    // Effecting data: nActions || OrchardActionEffecting* || flags?
-    //                 (flags present iff nActions > 0; the anchor is
-    //                 authorizing data, not effecting data)
-    //
-    // # Correctness
-    // The closure is not redundant: `read_action_without_auth` has an HRTB
-    // bound that clippy cannot see through.
-    #[allow(clippy::redundant_closure)]
-    let actions_without_auth = Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
-
-    if actions_without_auth.is_empty() {
-        if !effects_reader.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "trailing bytes in v7 Orchard effecting data",
-            ));
-        }
-        if auth.is_some_and(|a| !a.is_empty()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "v7 Orchard auth bundle present for an empty effecting bundle",
-            ));
-        }
-        return Ok(None);
-    }
-
-    let bundle_version = bundle_version.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Orchard-protocol bundles may not be present in this transaction version \
-             under the transaction's consensus branch ID",
-        )
-    })?;
-    let flags = read_flags(&mut effects_reader, bundle_version)?;
-    if !effects_reader.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "trailing bytes in v7 Orchard effecting data",
-        ));
-    }
-
-    let auth_bytes = auth.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "v7 Orchard effecting bundle present without matching auth bundle",
-        )
-    })?;
-    let mut auth_reader = auth_bytes;
-
-    // Authorizing data: anchorOrchard || sizeProofsOrchard || proofsOrchard ||
-    //                   vSpendAuthSigsOrchard (OrchardSignature per action) ||
-    //                   bindingSigOrchard (OrchardSignature).
-    let anchor = read_anchor(&mut auth_reader)?;
-    let proof_bytes = Vector::read(&mut auth_reader, |mut r| {
-        let mut byte = [0u8; 1];
-        r.read_exact(&mut byte)?;
-        Ok(byte[0])
-    })?;
-    let actions = NonEmpty::from_vec(
-        actions_without_auth
-            .into_iter()
-            .map(|action| {
-                consume_v7_sighash_v0_info(&mut auth_reader, "Orchard spend auth sig")?;
-                action.try_map(|_| read_signature::<_, SpendAuth>(&mut auth_reader))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    )
-    .expect("nonempty by construction");
-
-    consume_v7_sighash_v0_info(&mut auth_reader, "Orchard binding sig")?;
-    let binding_signature = read_signature::<_, redpallas::Binding>(&mut auth_reader)?;
-
-    if !auth_reader.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "trailing bytes in v7 Orchard authorizing data",
-        ));
-    }
-
-    let authorization = orchard::bundle::Authorized::from_parts(
-        orchard::Proof::new(proof_bytes),
-        binding_signature,
-    );
-
-    // `try_from_parts` rejects a proof whose length is not the canonical size for
-    // the number of actions, preventing a proof padded with arbitrary data
-    // (GHSA-2x4w-pxqw-58v9).
-    orchard::Bundle::try_from_parts(
-        actions,
-        flags,
-        value_balance,
-        anchor,
-        authorization,
-        bundle_version,
-    )
-    .map(Some)
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Writes the effecting data for an Orchard bundle in v7 format.

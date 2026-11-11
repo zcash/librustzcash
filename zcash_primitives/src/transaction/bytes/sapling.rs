@@ -83,6 +83,16 @@ impl SaplingSpendBytes {
         writer.write_all(&self.nullifier)?;
         writer.write_all(&self.rk)
     }
+
+    /// Interprets this effecting data as a version 5 Sapling spend description.
+    ///
+    /// The value commitment, nullifier, and randomized validating key are
+    /// validated by the same decoders used for the v5 wire format.
+    pub(crate) fn to_spend_v5(&self) -> io::Result<::sapling::bundle::SpendDescriptionV5> {
+        let mut bytes = Vec::with_capacity(96);
+        self.write(&mut bytes)?;
+        crate::transaction::components::sapling::read_spend_v5(&mut &bytes[..])
+    }
 }
 
 /// A Sapling output description.
@@ -160,6 +170,16 @@ impl SaplingOutputBytes {
         writer.write_all(&self.ephemeral_key)?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)
+    }
+
+    /// Interprets this output description as a version 5 Sapling output.
+    ///
+    /// The value commitment, note commitment, and ciphertexts are validated by
+    /// the same decoders used for the v5 wire format.
+    pub(crate) fn to_output_v5(&self) -> io::Result<::sapling::bundle::OutputDescriptionV5> {
+        let mut bytes = Vec::with_capacity(756);
+        self.write(&mut bytes)?;
+        crate::transaction::components::sapling::read_output_v5(&mut &bytes[..])
     }
 }
 
@@ -249,6 +269,18 @@ impl SaplingSpendV4Bytes {
         writer.write_all(&self.zkproof)?;
         writer.write_all(&self.spend_auth_sig)
     }
+
+    /// Interprets this description as a version 4 Sapling spend.
+    ///
+    /// The value commitment, anchor, nullifier, and randomized validating key
+    /// are validated by the same decoder used for the v4 wire format.
+    pub(crate) fn to_spend_v4(
+        &self,
+    ) -> io::Result<::sapling::bundle::SpendDescription<::sapling::bundle::Authorized>> {
+        let mut bytes = Vec::with_capacity(32 + 32 + 32 + 32 + GROTH_PROOF_SIZE + 64);
+        self.write(&mut bytes)?;
+        crate::transaction::components::sapling::read_spend_v4(&mut &bytes[..])
+    }
 }
 
 /// A version 4 Sapling output description.
@@ -335,6 +367,20 @@ impl SaplingOutputV4Bytes {
         writer.write_all(&self.out_ciphertext)?;
         writer.write_all(&self.zkproof)
     }
+
+    /// Interprets this description as a version 4 Sapling output.
+    ///
+    /// The value commitment and note commitment are validated by the same
+    /// decoder used for the v4 wire format.
+    pub(crate) fn to_output_v4(
+        &self,
+    ) -> io::Result<::sapling::bundle::OutputDescription<::sapling::bundle::GrothProofBytes>> {
+        let mut bytes = Vec::with_capacity(
+            32 + 32 + 32 + ENC_CIPHERTEXT_SIZE + OUT_CIPHERTEXT_SIZE + GROTH_PROOF_SIZE,
+        );
+        self.write(&mut bytes)?;
+        crate::transaction::components::sapling::read_output_v4(&mut &bytes[..])
+    }
 }
 
 /// A version 4 Sapling bundle in its wire representation.
@@ -401,6 +447,59 @@ impl V4SaplingBundleBytes {
         writer.write_all(&self.value_balance.to_i64_le_bytes())?;
         Vector::write(&mut writer, &self.spends, |w, spend| spend.write(w))?;
         Vector::write(&mut writer, &self.outputs, |w, output| output.write(w))
+    }
+
+    /// Interprets this bundle as an authorized Sapling bundle.
+    ///
+    /// The binding signature is a transaction-level field in the version 4
+    /// format, so the caller supplies it. Returns `None` for an empty bundle,
+    /// matching the representation used by `TransactionData`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle is non-empty but no binding signature is
+    /// supplied, or if a spend or output description is invalid.
+    pub fn to_authorized(
+        &self,
+        binding_sig: Option<[u8; BINDING_SIG_SIZE]>,
+    ) -> io::Result<Option<::sapling::bundle::Bundle<::sapling::bundle::Authorized, ZatBalance>>>
+    {
+        if self.is_empty() {
+            if binding_sig.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a Sapling binding signature is present for an empty bundle",
+                ));
+            }
+            return Ok(None);
+        }
+
+        let binding_sig = binding_sig.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a non-empty Sapling bundle requires a binding signature",
+            )
+        })?;
+
+        let spends = self
+            .spends
+            .iter()
+            .map(SaplingSpendV4Bytes::to_spend_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+        let outputs = self
+            .outputs
+            .iter()
+            .map(SaplingOutputV4Bytes::to_output_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(::sapling::bundle::Bundle::from_parts(
+            spends,
+            outputs,
+            self.value_balance,
+            ::sapling::bundle::Authorized {
+                binding_sig: redjubjub::Signature::from(binding_sig),
+            },
+        ))
     }
 }
 
@@ -586,6 +685,79 @@ impl SaplingBundleBytes {
                 CompactSize::write(&mut writer, 0)
             }
         }
+    }
+
+    /// Interprets this bundle as an authorized Sapling bundle.
+    ///
+    /// The value balance, anchor, proofs, and signatures are validated by the
+    /// same decoders used for the v5 wire format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle is empty, or if a field is invalid.
+    pub fn to_authorized(
+        &self,
+    ) -> io::Result<::sapling::bundle::Bundle<::sapling::bundle::Authorized, ZatBalance>> {
+        use crate::transaction::components::sapling::{
+            read_base, read_spend_auth_sig, read_zkproof,
+        };
+
+        if self.spends.is_empty() && self.outputs.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Sapling bundle has no typed representation",
+            ));
+        }
+
+        let anchor = self
+            .anchor
+            .as_ref()
+            .map(|anchor| read_base(&mut &anchor[..], "anchor"))
+            .transpose()?;
+
+        let spends = self
+            .spends
+            .iter()
+            .zip(self.spend_proofs.iter().zip(self.spend_auth_sigs.iter()))
+            .map(|(spend, (proof, sig))| {
+                let spend = spend.to_spend_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                let spend_auth_sig = read_spend_auth_sig(&mut &sig[..])?;
+                Ok(spend.into_spend_description(
+                    anchor.expect("a non-empty spend list has an anchor"),
+                    zkproof,
+                    spend_auth_sig,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let outputs = self
+            .outputs
+            .iter()
+            .zip(self.output_proofs.iter())
+            .map(|(output, proof)| {
+                let output = output.to_output_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                Ok(output.into_output_description(zkproof))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let binding_sig = self.binding_sig.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a non-empty Sapling bundle requires a binding signature",
+            )
+        })?;
+
+        Ok(::sapling::bundle::Bundle::from_parts(
+            spends,
+            outputs,
+            self.value_balance,
+            ::sapling::bundle::Authorized {
+                binding_sig: redjubjub::Signature::from(binding_sig),
+            },
+        )
+        .expect("a non-empty Sapling bundle has a typed representation"))
     }
 }
 
@@ -970,6 +1142,93 @@ impl V7SaplingBundleBytes {
             Some(binding_sig) => binding_sig.write(&mut writer),
             None => Ok(()),
         }
+    }
+
+    /// Interprets this bundle as an authorized Sapling bundle.
+    ///
+    /// The value balance is not part of the v7 bundle encoding; it lives in
+    /// `mValuePoolDeltas` and is supplied by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle has no authorizing data, if a signature
+    /// uses a sighash version other than 0, or if a field is invalid.
+    pub fn to_authorized(
+        &self,
+        value_balance: ZatBalance,
+    ) -> io::Result<::sapling::bundle::Bundle<::sapling::bundle::Authorized, ZatBalance>> {
+        use crate::transaction::components::sapling::{
+            read_base, read_spend_auth_sig, read_zkproof,
+        };
+
+        if self.spends.is_empty() && self.outputs.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Sapling bundle has no typed representation",
+            ));
+        }
+
+        let binding_sig = self.binding_sig.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v7 Sapling effecting data has no authorizing data",
+            )
+        })?;
+        if !binding_sig.sighash_info().is_v0() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported Sapling binding signature sighash version",
+            ));
+        }
+
+        let anchor = self
+            .anchor
+            .as_ref()
+            .map(|anchor| read_base(&mut &anchor[..], "anchor"))
+            .transpose()?;
+
+        let spends = self
+            .spends
+            .iter()
+            .zip(self.spend_proofs.iter().zip(self.spend_auth_sigs.iter()))
+            .map(|(spend, (proof, sig))| {
+                if !sig.sighash_info().is_v0() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported Sapling spend authorization sighash version",
+                    ));
+                }
+                let spend = spend.to_spend_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                let spend_auth_sig = read_spend_auth_sig(&mut &sig.signature()[..])?;
+                Ok(spend.into_spend_description(
+                    anchor.expect("a non-empty spend list has an anchor"),
+                    zkproof,
+                    spend_auth_sig,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let outputs = self
+            .outputs
+            .iter()
+            .zip(self.output_proofs.iter())
+            .map(|(output, proof)| {
+                let output = output.to_output_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                Ok(output.into_output_description(zkproof))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(::sapling::bundle::Bundle::from_parts(
+            spends,
+            outputs,
+            value_balance,
+            ::sapling::bundle::Authorized {
+                binding_sig: redjubjub::Signature::from(*binding_sig.signature()),
+            },
+        )
+        .expect("a non-empty Sapling bundle has a typed representation"))
     }
 }
 

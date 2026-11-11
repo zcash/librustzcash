@@ -297,6 +297,31 @@ impl SproutBundleBytes {
             None => CompactSize::write(&mut writer, 0),
         }
     }
+
+    /// Interprets this bundle as a Sprout bundle.
+    ///
+    /// Each JoinSplit is decoded by the same decoder used for the legacy wire
+    /// format, with the proof encoding selected by the proof variant.
+    pub fn to_bundle(&self) -> io::Result<crate::transaction::components::sprout::Bundle> {
+        use crate::transaction::components::sprout::JsDescription;
+
+        let joinsplits = self
+            .joinsplits
+            .iter()
+            .map(|js| {
+                let use_groth = matches!(js.proof(), SproutProofBytes::Groth(_));
+                let mut bytes = Vec::new();
+                js.write(&mut bytes)?;
+                JsDescription::read(&mut &bytes[..], use_groth)
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(crate::transaction::components::sprout::Bundle {
+            joinsplits,
+            joinsplit_pubkey: self.joinsplit_pubkey,
+            joinsplit_sig: self.joinsplit_sig,
+        })
+    }
 }
 
 /// Reads a signed 64-bit value that must be non-negative.
