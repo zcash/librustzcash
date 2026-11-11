@@ -614,7 +614,7 @@ mod parse {
         bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
         combinator::{all_consuming, map_opt, map_res, opt, recognize},
-        sequence::{preceded, separated_pair, tuple},
+        sequence::{preceded, tuple},
     };
     use percent_encoding::percent_decode;
     use zcash_address::ZcashAddress;
@@ -753,10 +753,18 @@ mod parse {
         )(input)
     }
 
-    /// The primary parser for `name=value` query-string parameter pairs.
+    /// The primary parser for `name[.index][=value]` query-string parameter pairs.
+    ///
+    /// The value is optional, as allowed by the `otherparam` and `otherreqparam`
+    /// productions of the ZIP 321 grammar:
+    ///
+    /// ```abnf
+    /// otherreqparam   = "req-" paramname [ paramindex ] [ "=" *qchar ]
+    /// otherparam      = paramname [ paramindex ] [ "=" *qchar ]
+    /// ```
     pub fn zcashparam(input: &str) -> IResult<&str, IndexedParam> {
         map_res(
-            separated_pair(indexed_name, char('='), recognize(qchars)),
+            tuple((indexed_name, opt(preceded(char('='), recognize(qchars))))),
             to_indexed_param,
         )(input)
     }
@@ -833,43 +841,55 @@ mod parse {
     }
 
     fn to_indexed_param(
-        ((name, iopt), value): ((&str, Option<&str>), &str),
+        ((name, iopt), value): ((&str, Option<&str>), Option<&str>),
     ) -> Result<IndexedParam, String> {
-        let param = match name {
-            "address" => ZcashAddress::try_from_encoded(value)
-                .map(Box::new)
-                .map(Param::Addr)
-                .map_err(|err| {
-                    format!("Could not interpret {value} as a valid Zcash address: {err}")
-                }),
-
-            "amount" => parse_amount(value)
-                .map_err(|e| e.to_string())
-                .map(|(_, a)| Param::Amount(a)),
-
-            "label" => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Label(s.into_owned()))
-                .map_err(|e| e.to_string()),
-
-            "message" => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Message(s.into_owned()))
-                .map_err(|e| e.to_string()),
-
-            "memo" => memo_from_base64(value)
-                .map(Box::new)
-                .map(Param::Memo)
-                .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
-
-            other if other.starts_with("req-") => {
-                Err(format!("Required parameter {other} not recognized"))
+        let param = match value {
+            // A parameter with no value can only be an `otherparam` or
+            // `otherreqparam`: all of the reserved parameters (`address`,
+            // `amount`, `label`, `memo`, `message`) require "=" followed by
+            // their value in the grammar. In particular, a valueless
+            // parameter named `address` is an `otherparam`, not the
+            // payment's recipient address.
+            None if name.starts_with("req-") => {
+                Err(format!("Required parameter {name} not recognized"))
             }
+            None => Ok(Param::Other(name.to_string(), String::new())),
+            Some(value) => match name {
+                "address" => ZcashAddress::try_from_encoded(value)
+                    .map(Box::new)
+                    .map(Param::Addr)
+                    .map_err(|err| {
+                        format!("Could not interpret {value} as a valid Zcash address: {err}")
+                    }),
 
-            other => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Other(other.to_string(), s.into_owned()))
-                .map_err(|e| e.to_string()),
+                "amount" => parse_amount(value)
+                    .map_err(|e| e.to_string())
+                    .map(|(_, a)| Param::Amount(a)),
+
+                "label" => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Label(s.into_owned()))
+                    .map_err(|e| e.to_string()),
+
+                "message" => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Message(s.into_owned()))
+                    .map_err(|e| e.to_string()),
+
+                "memo" => memo_from_base64(value)
+                    .map(Box::new)
+                    .map(Param::Memo)
+                    .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
+
+                other if other.starts_with("req-") => {
+                    Err(format!("Required parameter {other} not recognized"))
+                }
+
+                other => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Other(other.to_string(), s.into_owned()))
+                    .map_err(|e| e.to_string()),
+            },
         }?;
 
         let payment_index = match iopt {
@@ -1328,5 +1348,106 @@ mod tests {
             let serialized = parsed.to_uri();
             assert_eq!(serialized, uri)
         }
+    }
+}
+
+#[cfg(test)]
+mod valueless_param_tests {
+    use super::{TransactionRequest, parse::Param};
+
+    const TADDR: &str = "tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+
+    /// The ZIP 321 grammar allows a parameter with no value:
+    ///
+    /// ```abnf
+    /// otherreqparam = "req-" paramname [ paramindex ] [ "=" *qchar ]
+    /// otherparam    = paramname [ paramindex ] [ "=" *qchar ]
+    /// ```
+    ///
+    /// Such a parameter is an `otherparam`; the reserved parameters all
+    /// require `=` followed by their value.
+    #[test]
+    fn valueless_other_param_is_accepted() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let payment = request.payments().get(&0).unwrap();
+        assert_eq!(
+            payment.other_params(),
+            &[("myflag".to_string(), String::new())][..]
+        );
+    }
+
+    #[test]
+    fn valueless_other_param_with_index_is_accepted() {
+        let uri = format!("zcash:?address={TADDR}&amount=1&address.1={TADDR}&amount.1=1&myflag.1");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let payment = request.payments().get(&1).unwrap();
+        assert_eq!(
+            payment.other_params(),
+            &[("myflag".to_string(), String::new())][..]
+        );
+    }
+
+    /// A valueless parameter is preserved by a round trip through the
+    /// canonical rendering, which appends `=` to it.
+    #[test]
+    fn valueless_other_param_round_trips() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let reparsed = TransactionRequest::from_uri(&request.to_uri()).unwrap();
+        assert_eq!(reparsed, request);
+    }
+
+    /// A valueless parameter named `address` is an `otherparam`, not the
+    /// payment's recipient address, so the payment is missing its recipient.
+    #[test]
+    fn valueless_address_param_is_not_the_recipient() {
+        // This payment has a recipient (the lead address); `address` is
+        // merely an otherparam.
+        let uri = format!("zcash:{TADDR}?amount=1&address");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let payment = request.payments().get(&0).unwrap();
+        assert_eq!(
+            payment.recipient_address().encode(),
+            TADDR,
+            "the lead address is the recipient"
+        );
+        assert_eq!(
+            payment.other_params(),
+            &[("address".to_string(), String::new())][..]
+        );
+
+        // Without a lead address, the valueless `address` otherparam does not
+        // supply one.
+        let uri = format!("zcash:?amount=1&address");
+        assert!(matches!(
+            TransactionRequest::from_uri(&uri),
+            Err(crate::Zip321Error::RecipientMissing(0))
+        ));
+    }
+
+    /// An unrecognised `req-` parameter without a value still invalidates the
+    /// request (ZIP 321: a parser that does not recognise a `req-` parameter
+    /// MUST consider the entire URI invalid).
+    #[test]
+    fn valueless_req_param_is_rejected() {
+        let uri = format!("zcash:{TADDR}?amount=1&req-unknown");
+        assert!(TransactionRequest::from_uri(&uri).is_err());
+    }
+
+    /// Parameters are still checked for duplicates when they are valueless.
+    #[test]
+    fn valueless_params_are_checked_for_duplicates() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag&myflag");
+        assert!(TransactionRequest::from_uri(&uri).is_err());
+    }
+
+    /// `zcashparam` parses a bare parameter name.
+    #[test]
+    fn zcashparam_parses_valueless() {
+        let (rest, param) = super::parse::zcashparam("myflag&next=1").unwrap();
+        assert_eq!(rest, "&next=1");
+        assert_eq!(param.param, Param::Other("myflag".into(), String::new()));
+        assert_eq!(param.payment_index, 0);
     }
 }
