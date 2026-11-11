@@ -14,6 +14,13 @@ workspace.
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
 
 ### Changed
+- Migrated to `zcash_client_backend 0.26.0`, `zcash_primitives 0.32.0`.
+- `WalletDb`'s note and transparent output selection, `get_wallet_summary`'s
+  uneconomic balance buckets, and `check_witnesses` classify a note or output as
+  uneconomic when its value is at or below the ZIP 317 marginal fee in effect at
+  the target height (`zcash_primitives::transaction::fees::zip317::marginal_fee`:
+  5000 zatoshis below `FEE_REDUCTION_HEIGHT`, 1000 from it). Previously the
+  threshold was always 5000.
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
   `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
   unchanged, when `height` is above the wallet birthday.

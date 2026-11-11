@@ -793,6 +793,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn proposal_fee_is_fixed_at_its_target_height_across_fee_reduction() {
+        testing::pool::proposal_fee_is_fixed_at_its_target_height_across_fee_reduction::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
+    fn dust_threshold_follows_marginal_fee_at_target_height() {
+        testing::pool::dust_threshold_follows_marginal_fee_at_target_height::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn canonical_crossing_fee_follows_fee_reduction_height() {
+        testing::pool::canonical_crossing_fee_follows_fee_reduction_height()
+    }
+
+    #[test]
     fn scan_full_block_detects_outputs() {
         testing::pool::scan_full_block_detects_outputs::<OrchardPoolTester>()
     }

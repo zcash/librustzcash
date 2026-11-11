@@ -596,13 +596,14 @@ where
     .next())
 }
 
-/// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
-/// specified shielded protocols from a given account, excepting any explicitly excluded note
-/// identifiers.
+/// Selects all the unspent notes with value greater than the ZIP 317 marginal fee in effect at
+/// the target height ([`zip317::marginal_fee`]) and for the specified shielded protocols from a
+/// given account, excepting any explicitly excluded note identifiers.
 ///
 /// Implementation details:
 ///
-/// - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+/// - Notes with individual value at or below the ZIP 317 marginal fee in effect at the target
+///   height will be ignored
 /// - Note spendability is determined using the `target_height`. If the note is mined at a height
 ///   greater than or equal to the target height, it will still be returned by this query.
 /// - The `to_received_note` function is expected to return `Ok(None)` in the case that spending
@@ -700,7 +701,7 @@ where
     let anchor_height_arg = note_request.anchor_height().map(u32::from);
     let prunable_window_scanned_arg = i64::from(anchor_conditions.prunable_window_scanned);
     let anchor_available_arg = i64::from(anchor_conditions.anchor_available);
-    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let min_value = u64::from(zip317::marginal_fee(params, target_height.into()));
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),
@@ -780,7 +781,8 @@ enum ValueSelection {
 /// covers ``target_value`` alone, oldest first; callers take the head.
 ///
 /// - Implementation details
-///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+///   - Notes with individual value at or below the ZIP 317 marginal fee in effect at the target
+///     height ([`zip317::marginal_fee`]) will be ignored
 ///   - Note spendability is determined using the `anchor_height`
 #[allow(clippy::too_many_arguments)]
 fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
@@ -952,7 +954,7 @@ where
     let target_value_arg = u64::from(target_value);
     let prunable_window_scanned_arg = i64::from(anchor_conditions.prunable_window_scanned);
     let anchor_available_arg = i64::from(anchor_conditions.anchor_available);
-    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let min_value = u64::from(zip317::marginal_fee(params, target_height.into()));
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":account_uuid", &account_uuid),
@@ -1047,6 +1049,11 @@ impl UnspentNoteMeta {
     }
 }
 
+/// Returns the metadata of the wallet's unspent notes of `protocol` that are believed to be
+/// spendable against an anchor at `anchor_height`: notes with a known nullifier and commitment
+/// tree position, whose shard has no unscanned range at or below `anchor_height` and above
+/// `wallet_birthday`, and whose value exceeds the ZIP 317 marginal fee in effect at the height
+/// after `anchor_height` ([`zip317::marginal_fee`]).
 pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1060,6 +1067,10 @@ pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
 
+    // A note is uneconomic at or below the marginal fee of a transaction mined at the height
+    // after the anchor.
+    let min_value = u64::from(zip317::marginal_fee(params, anchor_height + 1));
+
     // This query is effectively the same as the internal `eligible` subquery
     // used in `select_spendable_notes`.
     //
@@ -1069,7 +1080,7 @@ pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
                 commitment_tree_position, value
          FROM {table_prefix}_received_notes rn
          INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
-         WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
+         WHERE value > :min_value -- TODO(#1316): allow selection of dust inputs
          AND recipient_key_scope IS NOT NULL
          AND nf IS NOT NULL
          AND commitment_tree_position IS NOT NULL
@@ -1092,6 +1103,7 @@ pub(crate) fn select_unspent_note_meta<P: consensus::Parameters>(
             named_params![
                 ":wallet_birthday": u32::from(wallet_birthday),
                 ":anchor_height": u32::from(anchor_height),
+                ":min_value": min_value,
             ],
             |row| {
                 Ok(UnspentNoteMeta {
@@ -1312,7 +1324,10 @@ mod tests {
         scanning::ScanPriority,
         testing::{AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
-    use zcash_primitives::{block::BlockHash, transaction::builder::default_tx_expiry_delta};
+    use zcash_primitives::{
+        block::BlockHash,
+        transaction::{builder::default_tx_expiry_delta, fees::zip317},
+    };
     use zcash_protocol::{
         ShieldedPool,
         consensus::{BlockHeight, BranchId},
@@ -1330,6 +1345,10 @@ mod tests {
     /// The highest height at which the SQL expression is compared against the default delta.
     /// It lies above every activation height that the test networks set.
     const LAST_CHECKED_HEIGHT: u32 = 20;
+
+    /// NU7 activation, and so the regtest fee reduction height, on the network of the
+    /// fee-threshold test; above the funding block mined at Sapling activation.
+    const NU7_ACTIVATION_HEIGHT: u32 = 12;
 
     fn local_network(nu7: Option<BlockHeight>) -> LocalNetwork {
         LocalNetwork {
@@ -1402,6 +1421,58 @@ mod tests {
         .unwrap();
 
         assert_eq!(unspent_note_meta.len(), 1);
+    }
+
+    /// `select_unspent_note_meta` (and so `WalletDb::check_witnesses`, which passes the chain
+    /// tip as the anchor) classifies a note as uneconomic by the ZIP 317 marginal fee in effect
+    /// at the height after the anchor: a note worth the marginal fee before the fee reduction
+    /// height (NU7 activation on a regtest network) is left out while that height is below the
+    /// reduction, and included from it.
+    #[test]
+    fn select_unspent_note_meta_threshold_follows_marginal_fee_after_anchor() {
+        let network = local_network(Some(BlockHeight::from_u32(NU7_ACTIVATION_HEIGHT)));
+        let reduction_height =
+            zip317::fee_reduction_height(&network).expect("the test network reduces the fee");
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_block_cache(BlockCache::new())
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let birthday_height = st.test_account().unwrap().birthday().height();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        macro_rules! unspent_values {
+            ($anchor_height:expr) => {
+                super::select_unspent_note_meta(
+                    st.wallet().conn(),
+                    st.network(),
+                    ShieldedPool::Sapling,
+                    birthday_height,
+                    $anchor_height,
+                )
+                .unwrap()
+                .iter()
+                .map(|meta| meta.value())
+                .collect::<Vec<_>>()
+            };
+        }
+
+        let value = zip317::marginal_fee(st.network(), reduction_height - 1);
+        assert!(value > zip317::marginal_fee(st.network(), reduction_height));
+        let (received_height, _, _) =
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(received_height, 1);
+
+        // Anchored at a tip two blocks below the reduction, a transaction is mined below it: the
+        // note is uneconomic. One block later it is mined at the reduction: the note is economic.
+        let blocks_to_add = u32::from(reduction_height) - 2 - u32::from(received_height);
+        let tip = st.generate_and_scan_empty_blocks(
+            usize::try_from(blocks_to_add).expect("block count fits in a usize"),
+        );
+        assert_eq!(tip, reduction_height - 2);
+        assert!(unspent_values!(tip).is_empty());
+        let tip = st.generate_and_scan_empty_blocks(1);
+        assert_eq!(unspent_values!(tip), vec![value]);
     }
 
     /// The spendability condition holds only when each of its checks holds.

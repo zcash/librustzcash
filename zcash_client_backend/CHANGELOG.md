@@ -36,6 +36,10 @@ workspace.
   stabilized_note_rewind_un_mines_shard_completion,
   stabilized_note_settled_height_invalidated_by_reorg,
   stabilized_note_spendable_across_small_tip_advance}`
+- `zcash_client_backend::data_api::testing::pool::{canonical_crossing_fee_follows_fee_reduction_height,
+  dust_threshold_follows_marginal_fee_at_target_height,
+  proposal_fee_is_fixed_at_its_target_height_across_fee_reduction}`
+- `zcash_client_backend::data_api::testing::transparent::transparent_dust_threshold_follows_marginal_fee_at_target_height`
 
 ### Changed
 - Migrated to `zcash_primitives 0.32.0`.

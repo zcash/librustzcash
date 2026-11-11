@@ -2813,6 +2813,10 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
             common::spent_notes_clause(params, table_prefix),
         ))?;
 
+        // A note is uneconomic at or below the marginal fee of a transaction mined at the target
+        // height.
+        let uneconomic_threshold = zip317::marginal_fee(params, target_height.into());
+
         let mut rows = stmt_select_notes.query(named_params![
             ":target_height": u32::from(target_height),
             ":anchor_height": anchor_height.map(u32::from),
@@ -2879,7 +2883,7 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
                 uneconomic_value,
             ) = {
                 let zero = Zatoshis::ZERO;
-                if value <= zip317::MARGINAL_FEE {
+                if value <= uneconomic_threshold {
                     (zero, zero, zero, zero, value)
                 } else if is_spendable && is_locked {
                     // Only notes that would otherwise be spendable are counted as locked; a

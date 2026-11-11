@@ -75,6 +75,30 @@ pub(crate) fn create_pczt_uses_nu7_default_expiry<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn proposal_fee_is_fixed_at_its_target_height_across_fee_reduction<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::proposal_fee_is_fixed_at_its_target_height_across_fee_reduction::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn dust_threshold_follows_marginal_fee_at_target_height<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::dust_threshold_follows_marginal_fee_at_target_height::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn canonical_crossing_fee_follows_fee_reduction_height() {
+    zcash_client_backend::data_api::testing::pool::canonical_crossing_fee_follows_fee_reduction_height(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn scan_full_block_detects_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_full_block_detects_outputs::<T>(
         TestDbFactory::default(),
