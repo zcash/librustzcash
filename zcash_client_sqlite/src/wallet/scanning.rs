@@ -455,9 +455,17 @@ pub(crate) fn prune_scan_queue_below(
         });
     }
 
-    let is_retained = |priority: ScanPriority| {
-        retain_with_priority
-            .is_some_and(|retain| priority <= ScanPriority::Scanned || priority >= retain)
+    // `Ignored` entries are always retained. A `Scanned` entry is retained only if it ends at or
+    // above `height`: one that ends below it records coverage of history that no account needs
+    // (`height` is at most the wallet birthday), and keeping it would hold the wallet's
+    // fully-scanned height below the birthday.
+    let is_retained = |entry: &ScanRange| {
+        let priority = entry.priority();
+        retain_with_priority.is_some_and(|retain| {
+            priority == ScanPriority::Ignored
+                || (priority == ScanPriority::Scanned && entry.block_range().end >= height)
+                || priority >= retain
+        })
     };
 
     // Every entry this operation can touch starts below `height`; the queue's non-overlap
@@ -481,14 +489,14 @@ pub(crate) fn prune_scan_queue_below(
     // The lowest retained entry is the floor of the region that must remain covered.
     let fill_from = existing
         .iter()
-        .find(|entry| is_retained(entry.priority()))
+        .find(|entry| is_retained(entry))
         .map(|entry| entry.block_range().start);
 
     let replacement = existing
         .iter()
         .flat_map(|entry| {
             let range = entry.block_range();
-            if is_retained(entry.priority()) {
+            if is_retained(entry) {
                 vec![entry.clone()]
             } else {
                 // Only the part below `height` is pruned; any remainder keeps its priority.
@@ -2913,7 +2921,7 @@ pub(crate) mod tests {
             [
                 scan_range(419_200..450_000, ScanPriority::Ignored), // bookkeeping: kept
                 scan_range(450_000..460_000, ScanPriority::FoundNote), // retained priority: kept
-                scan_range(460_000..500_000, ScanPriority::Scanned), // bookkeeping: kept
+                scan_range(460_000..500_000, ScanPriority::Scanned), // ends below height: pruned
                 scan_range(500_000..700_000, ScanPriority::Historic), // straddler: split
                 scan_range(700_000..710_000, ScanPriority::ChainTip), // above height: untouched
             ]
@@ -2926,19 +2934,19 @@ pub(crate) mod tests {
             .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
             .unwrap();
         assert_eq!(
-            changed, 1,
-            "only the straddling `Historic` entry is altered"
+            changed, 2,
+            "the `Scanned` entry below the floor and the straddling `Historic` entry are altered"
         );
 
-        // The `Historic` entry's coverage below the floor is demoted rather than deleted:
-        // the `FoundNote` witness range still sits below it, so deleting would leave a gap.
+        // The `Scanned` entry and the `Historic` entry's coverage below the floor are demoted
+        // rather than deleted, and coalesce: the `FoundNote` witness range still sits below
+        // them, so deleting would leave a gap.
         assert_eq!(
             queue_contents(&st),
             vec![
                 (419_200, 450_000, priority_code(&ScanPriority::Ignored)),
                 (450_000, 460_000, priority_code(&ScanPriority::FoundNote)),
-                (460_000, 500_000, priority_code(&ScanPriority::Scanned)),
-                (500_000, 663_150, priority_code(&ScanPriority::Ignored)),
+                (460_000, 663_150, priority_code(&ScanPriority::Ignored)),
                 (663_150, 700_000, priority_code(&ScanPriority::Historic)),
                 (700_000, 710_000, priority_code(&ScanPriority::ChainTip)),
             ]
@@ -3054,8 +3062,8 @@ pub(crate) mod tests {
             .build();
         let entries = [
             scan_range(419_200..450_000, ScanPriority::Ignored),
-            scan_range(450_000..460_000, ScanPriority::Scanned),
-            scan_range(460_000..700_000, ScanPriority::FoundNote),
+            scan_range(450_000..460_000, ScanPriority::FoundNote),
+            scan_range(460_000..700_000, ScanPriority::Scanned),
         ];
         insert_queue_entries(st.wallet().conn(), entries.iter()).unwrap();
         let before = queue_contents(&st);
