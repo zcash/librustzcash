@@ -405,6 +405,9 @@ mod param_bounds_tests {
     ///   `7 + bit_len <= 32` accumulator bound.
     /// - `(528, 21)`: `n > 512` makes `indices_per_hash_output` zero, and the
     ///   tree validator divides by it.
+    /// - `(48, 7)`, `(24, 3)`, `(80, 15)`: the index bit width
+    ///   `n / (k + 1) + 1` is below the 8 bits that `expand_array`'s byte-wise
+    ///   expansion requires.
     #[test]
     fn panicking_params_are_rejected() {
         let input = [0u8; 108];
@@ -414,6 +417,9 @@ mod param_bounds_tests {
             (2048, 3, 513),
             (744, 23, 33_554_432),
             (528, 21, 6_553_600),
+            (48, 7, 112),
+            (24, 3, 7),
+            (80, 15, 24_576),
         ] {
             assert!(
                 Params::new(n, k).is_none(),
@@ -433,7 +439,17 @@ mod param_bounds_tests {
     /// `minimal`'s u32 accumulator permits.
     #[test]
     fn supported_params_are_still_accepted() {
-        for (n, k) in [(200, 9), (144, 5), (96, 5), (96, 3), (48, 5), (512, 63)] {
+        // (56, 7) has the narrowest index bit width (8) that `minimal`
+        // accepts; it exercises the lower boundary of the check.
+        for (n, k) in [
+            (200, 9),
+            (144, 5),
+            (96, 5),
+            (96, 3),
+            (48, 5),
+            (56, 7),
+            (512, 63),
+        ] {
             assert!(
                 Params::new(n, k).is_some(),
                 "({n}, {k}) must remain supported"
