@@ -21,7 +21,7 @@
 use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 use zcash_encoding::{CompactSize, Vector};
-use zcash_protocol::TxId;
+use zcash_protocol::{TxId, value::Zatoshis};
 
 /// The size in bytes of a transparent prevout index.
 const PREVOUT_INDEX_BYTE_SIZE: usize = 4;
@@ -497,8 +497,9 @@ impl TransparentEffectsBytes {
 
     /// Returns `true` if the effecting data has neither inputs nor outputs.
     ///
-    /// ZIP 248 requires such a bundle to be omitted from `mEffectBundles`
-    /// rather than encoded as an empty entry.
+    /// An empty bundle is encoded as two zero counts. Its presence in
+    /// `mEffectBundles` is distinct from absence and is committed to by the
+    /// effects digest, so the byte layer preserves it.
     pub fn is_empty(&self) -> bool {
         self.inputs.is_empty() && self.outputs.is_empty()
     }
@@ -580,9 +581,10 @@ impl TransparentAuthBytes {
 /// [ZIP 248 §Transparent Bundle](https://zips.z.cash/zip-0248#transparent-bundle)
 ///
 /// The two halves travel in different bundle maps: effecting data in
-/// `mEffectBundles` and authorizing data in `mAuthBundles`. ZIP 248 requires
-/// the authorizing entry to be omitted when there are no inputs, and requires
-/// one authorizing entry per input otherwise.
+/// `mEffectBundles` and authorizing data in `mAuthBundles`. When the
+/// authorizing entry is present it has one entry per input, so a bundle with
+/// no inputs has an empty authorizing payload. Whether that entry is present
+/// is preserved, because map presence is committed to by the digests.
 #[cfg(zcash_unstable = "nu8")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransparentBundleBytes {
@@ -594,30 +596,23 @@ pub struct TransparentBundleBytes {
 impl TransparentBundleBytes {
     /// Constructs a bundle from its effecting and authorizing data.
     ///
-    /// Returns an error if authorizing data is present for a bundle with no
-    /// inputs, or if the authorizing data does not contain exactly one entry
-    /// per input. Authorizing data may be absent even when the effecting data
-    /// has inputs; requiring it is a consensus rule enforced by typed
-    /// conversion rather than by the byte layer.
+    /// Returns an error if the authorizing data does not contain exactly one
+    /// entry per input. Authorizing data may be absent even when the effecting
+    /// data has inputs; requiring it is a consensus rule enforced by typed
+    /// conversion rather than by the byte layer. A present authorizing entry
+    /// for a bundle with no inputs is retained as empty, since map presence is
+    /// committed to by the digests.
     pub fn from_parts(
         effects: TransparentEffectsBytes,
         auth: Option<TransparentAuthBytes>,
     ) -> io::Result<Self> {
-        match (effects.inputs.is_empty(), &auth) {
-            (true, Some(_)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "transparent authorizing data present for a bundle with no inputs; \
-                     it must be omitted",
-                ));
-            }
-            (false, Some(auth)) if auth.inputs.len() != effects.inputs.len() => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "transparent authorizing data does not have one entry per input",
-                ));
-            }
-            _ => {}
+        if let Some(auth) = &auth
+            && auth.inputs.len() != effects.inputs.len()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "transparent authorizing data does not have one entry per input",
+            ));
         }
         Ok(Self { effects, auth })
     }
@@ -634,8 +629,8 @@ impl TransparentBundleBytes {
 
     /// Returns `true` if the effecting data has neither inputs nor outputs.
     ///
-    /// ZIP 248 requires such a bundle to be omitted from `mEffectBundles`
-    /// rather than encoded as an empty entry.
+    /// An empty effecting payload is encoded as two zero counts and is
+    /// preserved as a present entry, distinct from an absent bundle.
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }
@@ -686,8 +681,267 @@ impl TransparentBundleBytes {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Domain adaptation
+// ---------------------------------------------------------------------------
+
+/// Returns the raw bytes of a transparent script.
+///
+/// [`transparent::address::Script`] exposes its bytes through its public tuple
+/// representation; this helper keeps that detail in one place.
+fn script_bytes(script: &::transparent::address::Script) -> TransparentScriptBytes {
+    TransparentScriptBytes::from_bytes(script.0.0.clone())
+}
+
+/// Parses a raw script from its bytes.
+fn script_from_bytes(bytes: &TransparentScriptBytes) -> io::Result<::transparent::address::Script> {
+    // `Script::read` expects the CompactSize-prefixed encoding, so add the
+    // prefix that the byte representation omits.
+    let mut encoded = Vec::new();
+    Vector::write_bytes(&mut encoded, bytes.as_bytes())?;
+    let mut reader = &encoded[..];
+    let script = ::transparent::address::Script::read(&mut reader)?;
+    debug_assert!(reader.is_empty());
+    Ok(script)
+}
+
+/// Converts a raw output value to the domain type, applying the monetary range
+/// check that the byte layer deliberately does not enforce.
+fn output_value_from_bytes(value: TransparentOutputValueBytes) -> io::Result<Zatoshis> {
+    Zatoshis::from_nonnegative_i64_le_bytes(value.to_i64().to_le_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "output value out of range"))
+}
+
+impl From<&transparent::bundle::Bundle<transparent::bundle::Authorized>>
+    for LegacyTransparentBundleBytes
+{
+    fn from(bundle: &transparent::bundle::Bundle<transparent::bundle::Authorized>) -> Self {
+        Self {
+            inputs: bundle
+                .vin
+                .iter()
+                .map(|txin| {
+                    LegacyTransparentInputBytes::from_parts(
+                        TransparentOutPointBytes::from_parts(
+                            *txin.prevout().txid(),
+                            txin.prevout().n(),
+                        ),
+                        script_bytes(txin.script_sig()),
+                        txin.sequence(),
+                    )
+                })
+                .collect(),
+            outputs: bundle
+                .vout
+                .iter()
+                .map(|txout| {
+                    TransparentOutputBytes::from_parts(
+                        TransparentOutputValueBytes::from_i64(
+                            i64::try_from(u64::from(txout.value())).expect("Zatoshis fits in i64"),
+                        ),
+                        script_bytes(txout.script_pubkey()),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl LegacyTransparentBundleBytes {
+    /// Converts this byte representation to the transparent domain type.
+    ///
+    /// Returns `None` for an empty bundle, matching the representation used by
+    /// `TransactionData`. Returns an error if an output value is outside the
+    /// monetary range or a script is malformed.
+    pub fn to_authorized(
+        &self,
+    ) -> io::Result<Option<transparent::bundle::Bundle<transparent::bundle::Authorized>>> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+
+        let vin = self
+            .inputs
+            .iter()
+            .map(|input| {
+                Ok(transparent::bundle::TxIn::from_parts(
+                    transparent::bundle::OutPoint::new(
+                        *input.prevout.hash().as_ref(),
+                        input.prevout.index(),
+                    ),
+                    script_from_bytes(input.script_sig())?,
+                    input.sequence,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let vout = self
+            .outputs
+            .iter()
+            .map(|output| {
+                Ok(transparent::bundle::TxOut::new(
+                    output_value_from_bytes(output.value())?,
+                    script_from_bytes(output.script_pubkey())?,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Some(transparent::bundle::Bundle {
+            vin,
+            vout,
+            authorization: transparent::bundle::Authorized,
+        }))
+    }
+}
+
+#[cfg(zcash_unstable = "nu8")]
+impl From<&transparent::bundle::Bundle<transparent::bundle::Authorized>>
+    for TransparentBundleBytes
+{
+    fn from(bundle: &transparent::bundle::Bundle<transparent::bundle::Authorized>) -> Self {
+        let effects = TransparentEffectsBytes::from_parts(
+            bundle
+                .vin
+                .iter()
+                .map(|txin| {
+                    TransparentInputEffectingBytes::from_parts(
+                        TransparentOutPointBytes::from_parts(
+                            *txin.prevout().txid(),
+                            txin.prevout().n(),
+                        ),
+                        txin.sequence(),
+                    )
+                })
+                .collect(),
+            bundle
+                .vout
+                .iter()
+                .map(|txout| {
+                    TransparentOutputBytes::from_parts(
+                        TransparentOutputValueBytes::from_i64(
+                            i64::try_from(u64::from(txout.value())).expect("Zatoshis fits in i64"),
+                        ),
+                        script_bytes(txout.script_pubkey()),
+                    )
+                })
+                .collect(),
+        );
+
+        let auth = if bundle.vin.is_empty() {
+            None
+        } else {
+            Some(TransparentAuthBytes::from_parts(
+                bundle
+                    .vin
+                    .iter()
+                    .map(|txin| {
+                        TransparentInputAuthBytes::from_parts(
+                            TransparentSighashInfoBytes::v0(),
+                            script_bytes(txin.script_sig()),
+                        )
+                    })
+                    .collect(),
+            ))
+        };
+
+        Self { effects, auth }
+    }
+}
+
+#[cfg(zcash_unstable = "nu8")]
+impl TransparentBundleBytes {
+    /// Converts this byte representation to the transparent domain type.
+    ///
+    /// Returns an error for an empty bundle or for a present authorizing entry
+    /// with no inputs: the domain type has no representation for either map
+    /// presence, so accepting them would silently drop information that the
+    /// digests commit to. Returns an error if an input's sighash info is not
+    /// version 0, an output value is outside the monetary range, or a script is
+    /// malformed.
+    pub fn to_authorized(
+        &self,
+    ) -> io::Result<Option<transparent::bundle::Bundle<transparent::bundle::Authorized>>> {
+        if self.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty transparent bundle has no typed representation",
+            ));
+        }
+        if self.effects.inputs.is_empty() && self.auth.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a transparent authorizing entry with no inputs has no typed representation",
+            ));
+        }
+
+        let auth_inputs: &[TransparentInputAuthBytes] = match &self.auth {
+            Some(auth) => {
+                if auth.inputs.len() != self.effects.inputs.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "transparent authorizing data does not have one entry per input",
+                    ));
+                }
+                &auth.inputs
+            }
+            None if self.effects.inputs.is_empty() => &[],
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "transparent effecting data has inputs but no authorizing data",
+                ));
+            }
+        };
+
+        let vin = self
+            .effects
+            .inputs
+            .iter()
+            .zip(auth_inputs)
+            .map(|(input, auth)| {
+                if !auth.sighash_info.is_v0() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported transparent sighash version",
+                    ));
+                }
+                Ok(transparent::bundle::TxIn::from_parts(
+                    transparent::bundle::OutPoint::new(
+                        *input.prevout.hash().as_ref(),
+                        input.prevout.index(),
+                    ),
+                    script_from_bytes(auth.script_sig())?,
+                    input.sequence,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let vout = self
+            .effects
+            .outputs
+            .iter()
+            .map(|output| {
+                Ok(transparent::bundle::TxOut::new(
+                    output_value_from_bytes(output.value())?,
+                    script_from_bytes(output.script_pubkey())?,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Some(transparent::bundle::Bundle {
+            vin,
+            vout,
+            authorization: transparent::bundle::Authorized,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use ::transparent::address::Script;
+    use ::transparent::bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut};
+    use zcash_protocol::value::Zatoshis;
+
     use super::*;
 
     #[cfg(zcash_unstable = "nu8")]
@@ -909,15 +1163,20 @@ mod tests {
 
     #[cfg(zcash_unstable = "nu8")]
     #[test]
-    fn v7_auth_without_inputs_is_rejected() {
+    fn v7_auth_without_inputs_preserves_presence() {
         let bundle = v7_bundle(vec![], vec![(1000, &[0x51])]);
         let (effects, _) = encode_v7(&bundle);
 
-        // A present-but-empty authorizing payload is a second encoding of the
-        // same bundle, so it is rejected.
-        assert!(TransparentBundleBytes::read(&effects, Some(&[])).is_err());
+        // A present-but-empty authorizing payload is distinct from an absent
+        // one and is preserved.
+        let decoded = TransparentBundleBytes::read(&effects, Some(&[])).unwrap();
+        assert_eq!(decoded.effects(), bundle.effects());
+        assert_eq!(
+            decoded.auth(),
+            Some(&TransparentAuthBytes::from_parts(vec![]))
+        );
 
-        // A non-empty one is rejected too.
+        // A non-empty authorizing payload has no input to correspond to.
         let mut auth = Vec::new();
         TransparentInputAuthBytes::from_parts(
             TransparentSighashInfoBytes::v0(),
@@ -938,6 +1197,9 @@ mod tests {
         let decoded = TransparentBundleBytes::read(&effects, None).unwrap();
         assert_eq!(decoded.effects(), bundle.effects());
         assert!(decoded.auth().is_none());
+
+        // Typed conversion still requires authorizing data for inputs.
+        assert!(decoded.to_authorized().is_err());
     }
 
     #[cfg(zcash_unstable = "nu8")]
@@ -1021,5 +1283,90 @@ mod tests {
         effects.push(0xfd);
         effects.extend_from_slice(&1u16.to_le_bytes());
         assert!(TransparentEffectsBytes::read(&effects[..]).is_err());
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    #[test]
+    fn domain_round_trip_v7() {
+        let bundle = Bundle {
+            vin: vec![
+                TxIn::from_parts(OutPoint::new([1; 32], 2), Script::default(), 3),
+                TxIn::from_parts(OutPoint::new([4; 32], 5), Script::default(), u32::MAX),
+            ],
+            vout: vec![TxOut::new(
+                Zatoshis::from_u64(1000).unwrap(),
+                Script::default(),
+            )],
+            authorization: Authorized,
+        };
+
+        let bytes = TransparentBundleBytes::from(&bundle);
+        let (effects, auth) = encode_v7(&bytes);
+        let decoded = TransparentBundleBytes::read(&effects, auth.as_deref()).unwrap();
+        assert_eq!(decoded.to_authorized().unwrap(), Some(bundle));
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    #[test]
+    fn domain_round_trip_v7_outputs_only() {
+        let bundle = Bundle {
+            vin: vec![],
+            vout: vec![TxOut::new(
+                Zatoshis::from_u64(1000).unwrap(),
+                Script::default(),
+            )],
+            authorization: Authorized,
+        };
+
+        let bytes = TransparentBundleBytes::from(&bundle);
+        let (effects, auth) = encode_v7(&bytes);
+        let decoded = TransparentBundleBytes::read(&effects, auth.as_deref()).unwrap();
+        assert_eq!(decoded.to_authorized().unwrap(), Some(bundle));
+    }
+
+    #[test]
+    fn domain_round_trip_legacy() {
+        let bundle = Bundle {
+            vin: vec![TxIn::from_parts(
+                OutPoint::new([1; 32], 2),
+                Script::default(),
+                3,
+            )],
+            vout: vec![TxOut::new(
+                Zatoshis::from_u64(1000).unwrap(),
+                Script::default(),
+            )],
+            authorization: Authorized,
+        };
+
+        let bytes = LegacyTransparentBundleBytes::from(&bundle);
+        let mut encoded = Vec::new();
+        bytes.write(&mut encoded).unwrap();
+        let decoded = LegacyTransparentBundleBytes::read(&encoded[..]).unwrap();
+        assert_eq!(decoded.to_authorized().unwrap(), Some(bundle));
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    #[test]
+    fn domain_conversion_rejects_non_v0_sighash() {
+        let effects = TransparentEffectsBytes::from_parts(
+            vec![TransparentInputEffectingBytes::from_parts(
+                outpoint(1, 2),
+                3,
+            )],
+            vec![],
+        );
+        let auth = TransparentAuthBytes::from_parts(vec![TransparentInputAuthBytes::from_parts(
+            TransparentSighashInfoBytes::from_bytes(vec![0x01]),
+            TransparentScriptBytes::from_bytes(vec![]),
+        )]);
+        let bundle = TransparentBundleBytes::from_parts(effects, Some(auth)).unwrap();
+        assert!(bundle.to_authorized().is_err());
+    }
+
+    #[test]
+    fn domain_conversion_rejects_out_of_range_output_value() {
+        let bundle = LegacyTransparentBundleBytes::from_parts(vec![], vec![output(-1, &[])]);
+        assert!(bundle.to_authorized().is_err());
     }
 }

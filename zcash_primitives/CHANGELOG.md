@@ -27,6 +27,23 @@ workspace.
   `TransparentAuthBytes` and `TransparentBundleBytes` (the last six require
   `zcash_unstable="nu8"`). The v7 types retain effecting and authorizing data
   separately.
+- `zcash_primitives::transaction::bytes`, a byte-oriented representation of
+  whole transactions for versions 1 through 7: `TransactionDataBytes` (also
+  exported as `TransactionBytes`), `TransactionBodyBytes`,
+  `LegacyTransactionBodyBytes`, `V5TransactionBodyBytes`,
+  `V6TransactionBodyBytes`, `SproutBundleBytes`, `SproutJoinSplitBytes`,
+  `SproutProofBytes`, `SaplingBundleBytes`, `SaplingSpendBytes`,
+  `SaplingOutputBytes`, `SaplingSpendV4Bytes`, `SaplingOutputV4Bytes`,
+  `V4SaplingBundleBytes`, `OrchardBundleBytes`, `OrchardActionBytes` and
+  `IronwoodBundleBytes`, plus (requiring `zcash_unstable="nu8"`)
+  `V7TransactionBodyBytes`, `V7BundleBytes`, `V7SaplingBundleBytes`,
+  `V7OrchardBundleBytes`, `CoinbaseBundleBytes`, `ValuePoolDeltaBytes`,
+  `AssetClass`, `RawBundleType`, `RawBundleVariant`, `OpaqueBundleBytes`,
+  `SighashInfoBytes`, `SaplingSignatureBytes` and `OrchardSignatureBytes`.
+  The v7 types retain value pool deltas and the effect/auth bundle maps
+  separately, distinguish a known bundle type with an unknown variant from an
+  entirely unknown bundle type, and can represent recognized bundles whose
+  authorizing data is absent.
 - `zcash_primitives::transaction::TransactionData::{from_parts_with_bundles,
   bundles, value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
 - `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`

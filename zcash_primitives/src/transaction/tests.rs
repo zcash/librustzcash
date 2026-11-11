@@ -22,7 +22,7 @@ use {
     core::{cell::Cell, ops::Deref},
     ff::PrimeField,
     zcash_protocol::{
-        consensus::BranchId,
+        consensus::{BlockHeight, BranchId},
         value::{ZatBalance, Zatoshis},
     },
     zcash_script::script,
@@ -228,6 +228,52 @@ fn tx_read_write() {
     assert_eq!(&data[..], &encoded[..]);
 }
 
+/// `Transaction::read` parses the legacy versions through the byte layer, so
+/// the v1-v3 paths must still round-trip and reproduce their SHA-256d txid.
+#[test]
+fn legacy_v1_to_v3_read_roundtrip() {
+    use ::transparent::bundle::{Authorized, Bundle, TxOut};
+
+    let transparent = Bundle {
+        vin: vec![],
+        vout: vec![TxOut::new(
+            Zatoshis::from_u64(1000).unwrap(),
+            Script::default(),
+        )],
+        authorization: Authorized,
+    };
+
+    for (version, branch_id) in [
+        (TxVersion::Sprout(1), BranchId::Sprout),
+        (TxVersion::Sprout(2), BranchId::Sprout),
+        (TxVersion::V3, BranchId::Overwinter),
+    ] {
+        let tx = TransactionData::from_parts(
+            version,
+            branch_id,
+            0,
+            BlockHeight::from(0u32),
+            Some(transparent.clone()),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .unwrap();
+
+        let mut encoded = Vec::new();
+        tx.write(&mut encoded).unwrap();
+        let parsed = Transaction::read(&encoded[..], branch_id).unwrap();
+        assert_eq!(parsed.version(), version);
+        assert_eq!(parsed.txid(), tx.txid());
+        assert_eq!(parsed.transparent_bundle(), tx.transparent_bundle());
+
+        let mut reserialized = Vec::new();
+        parsed.write(&mut reserialized).unwrap();
+        assert_eq!(reserialized, encoded);
+    }
+}
+
 #[test]
 fn suggested_version_for_v5_branches_is_not_v6() {
     assert_eq!(
@@ -297,14 +343,19 @@ fn v7_fee_delta_matches_zip248_digests() {
     use super::zip248;
 
     let mut deltas = zip248::ValuePoolDeltas::empty();
-    deltas.set_fee(Zatoshis::const_from_u64(10_000));
-    let tx = TransactionData::<super::Authorized>::from_parts_with_bundles(
+    deltas.set_fee(Zatoshis::const_from_u64(10_000)).unwrap();
+    let tx = TransactionData::<super::Authorized>::from_parts_with_value_pool_deltas(
         TxVersion::V7,
         BranchId::Nu8,
         0,
         100u32.into(),
         deltas,
-        zip248::BundleMap::new(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     .freeze()
     .unwrap();
@@ -562,7 +613,11 @@ fn test_sapling_bundle(
         if let Some(bundle) = bundle_strategy.new_tree(runner).unwrap().current()
             && !bundle.shielded_spends().is_empty()
         {
-            return bundle;
+            // All spends in a Sapling bundle share one anchor, but the
+            // strategy generates each spend's anchor independently. Normalize
+            // them so the bundle is structurally valid.
+            let anchor = *bundle.shielded_spends()[0].anchor();
+            return sapling_bundle_with_anchor(&bundle, anchor);
         }
     }
 
@@ -965,6 +1020,50 @@ fn v6_sapling_spends_digest_uses_v6_noncompact_domain_without_anchor() {
     assert_eq!(
         hash_sapling_spends(TxVersion::V6, bundle_a.shielded_spends()),
         hash_sapling_spends(TxVersion::V6, bundle_b.shielded_spends())
+    );
+}
+
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_sapling_spends_digest_hashes_anchor_under_zip244_personalization() {
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let bundle = test_sapling_bundle(&mut runner);
+
+    let mut h = Params::new()
+        .hash_length(32)
+        .personal(b"ZTxIdSSpendsHash")
+        .to_state();
+    let mut ch = Params::new()
+        .hash_length(32)
+        .personal(b"ZTxIdSSpendCHash")
+        .to_state();
+    let mut nh = Params::new()
+        .hash_length(32)
+        .personal(b"ZTxIdSSpendNHash")
+        .to_state();
+
+    for spend in bundle.shielded_spends() {
+        ch.update(spend.nullifier().as_ref());
+        nh.update(&spend.cv().to_bytes());
+        nh.update(&spend.anchor().to_repr());
+        nh.update(&<[u8; 32]>::from(*spend.rk()));
+    }
+
+    h.update(ch.finalize().as_bytes());
+    h.update(nh.finalize().as_bytes());
+
+    assert_eq!(
+        hash_sapling_spends(TxVersion::V7, bundle.shielded_spends()),
+        h.finalize(),
+        "v7 hashes cv || anchor || rk per spend under ZTxIdSSpendNHash"
+    );
+
+    let bundle_a = sapling_bundle_with_anchor(&bundle, test_sapling_anchor(1));
+    let bundle_b = sapling_bundle_with_anchor(&bundle, test_sapling_anchor(2));
+    assert_ne!(
+        hash_sapling_spends(TxVersion::V7, bundle_a.shielded_spends()),
+        hash_sapling_spends(TxVersion::V7, bundle_b.shielded_spends()),
+        "the v7 spends digest must commit to the anchor"
     );
 }
 
@@ -1513,34 +1612,41 @@ fn zip_0244() {
     }
 }
 
-/// Roundtrip test for ZIP 233 NSM + fee VP deltas in ZIP 248 format.
-// TODO: regenerate cross-implementation test vectors from zcash-hackworks/zcash-test-vectors
+/// V7 value pool delta roundtrip for the fee and ZIP 233 bundle types.
+///
+/// No implemented transaction format supports ZIP 233, so `freeze` rejects a
+/// nonzero ZIP 233 amount. A zero amount is elided from the value pool delta
+/// map, leaving the fee entry to round-trip.
 #[cfg(all(zcash_unstable = "nu8", feature = "zip-233", zcash_unstable = "zip233"))]
 #[test]
-#[ignore = "Historical vectors for the withdrawn ZIP 233 v6-header experiment; \
-            current ZIP 233 requires ZIP 248 value-pool deltas, which are not implemented."]
 fn zip_0233() {
     use super::zip248;
     use zcash_protocol::consensus::BlockHeight;
 
-    let make_tx = |fee: u64, nsm: u64| {
+    let make_data = |fee: u64, nsm: u64| {
         let mut vp = zip248::ValuePoolDeltas::empty();
-        vp.set_fee(Zatoshis::from_u64(fee).unwrap());
-        vp.set_zip233(Zatoshis::from_u64(nsm).unwrap());
-        TransactionData::<super::Authorized>::from_parts_with_bundles(
+        vp.set_fee(Zatoshis::from_u64(fee).unwrap()).unwrap();
+        vp.set_zip233(Zatoshis::from_u64(nsm).unwrap()).unwrap();
+        TransactionData::<super::Authorized>::from_parts_with_value_pool_deltas(
             super::TxVersion::V7,
             BranchId::Nu8,
             0,
             BlockHeight::from_u32(100),
             vp,
-            zip248::BundleMap::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
-        .freeze()
-        .unwrap()
     };
 
-    // Roundtrip: serialize → read back → check VP deltas.
-    let tx = make_tx(10_000, 50_000);
+    // A nonzero ZIP 233 amount is not supported by any implemented format.
+    assert!(make_data(10_000, 50_000).freeze().is_err());
+
+    // A zero ZIP 233 amount is elided, and the fee round-trips.
+    let tx = make_data(10_000, 0).freeze().unwrap();
     let mut buf = Vec::new();
     tx.write(&mut buf).unwrap();
     let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
@@ -1548,17 +1654,14 @@ fn zip_0233() {
         tx.value_pool_deltas().fee(),
         Some(Zatoshis::from_u64(10_000).unwrap())
     );
-    assert_eq!(
-        tx.value_pool_deltas().zip233_amount(),
-        Some(Zatoshis::from_u64(50_000).unwrap())
-    );
+    assert_eq!(tx.value_pool_deltas().zip233_amount(), None);
 
     // Determinism: same inputs → same txid.
-    let tx2 = make_tx(10_000, 50_000);
+    let tx2 = make_data(10_000, 0).freeze().unwrap();
     assert_eq!(tx.txid(), tx2.txid());
 
-    // Different VP deltas → different txid.
-    let tx3 = make_tx(20_000, 50_000);
+    // Different fee → different txid.
+    let tx3 = make_data(20_000, 0).freeze().unwrap();
     assert_ne!(tx.txid(), tx3.txid());
 }
 
@@ -1572,17 +1675,23 @@ fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     use zcash_protocol::consensus::BlockHeight;
 
     let mut vp = zip248::ValuePoolDeltas::empty();
-    vp.set_fee(Zatoshis::from_u64(10_000).unwrap());
-    vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(10_000).unwrap());
+    vp.set_fee(Zatoshis::from_u64(10_000).unwrap()).unwrap();
+    vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(10_000).unwrap())
+        .unwrap();
     // `TestUnauthorized` supplies the transparent signing context that the
     // signature hash requires; this transaction has no transparent bundle.
-    let tx = TransactionData::<TestUnauthorized>::from_parts_with_bundles(
+    let tx = TransactionData::<TestUnauthorized>::from_parts_with_value_pool_deltas(
         super::TxVersion::V7,
         BranchId::Nu8,
         0,
         BlockHeight::from_u32(100),
         vp,
-        zip248::BundleMap::new(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
 
     let txid_parts = tx.digest_v7();
@@ -1595,6 +1704,404 @@ fn v7_signature_hash_without_transparent_inputs_is_the_txid() {
     );
 }
 
+/// Computes the transparent input amounts digest and scriptPubKeys digest for `bundle`.
+#[cfg(all(test, zcash_unstable = "nu8"))]
+fn manual_transparent_inputs_digests(
+    bundle: &transparent::Bundle<TestTransparentAuth>,
+) -> (Blake2bHash, Blake2bHash) {
+    use corez::io::Write;
+    use zcash_encoding::Array;
+
+    let mut amounts = Params::new()
+        .hash_length(32)
+        .personal(b"ZTxTrAmountsHash")
+        .to_state();
+    Array::write(
+        &mut amounts,
+        bundle.authorization.input_amounts(),
+        |w, amount| w.write_all(&amount.to_i64_le_bytes()),
+    )
+    .unwrap();
+
+    let mut scripts = Params::new()
+        .hash_length(32)
+        .personal(b"ZTxTrScriptsHash")
+        .to_state();
+    Array::write(
+        &mut scripts,
+        bundle.authorization.input_scriptpubkeys(),
+        |w, script| script.write(w),
+    )
+    .unwrap();
+
+    (amounts.finalize(), scripts.finalize())
+}
+
+/// Reconstructs the [ZIP 248 §S.3.0](https://zips.z.cash/zip-0248#s-3-0-transparent-sig-digest)
+/// transparent signature digest, whose `sequence_sig_digest` is always the transaction's
+/// `sequence_digest`, regardless of `hash_type`.
+#[cfg(all(test, zcash_unstable = "nu8"))]
+fn manual_v7_transparent_sig_digest(
+    bundle: &transparent::Bundle<TestTransparentAuth>,
+    txid_digests: &super::TransparentDigests<Blake2bHash>,
+    input: &SignableInput<'_>,
+) -> Blake2bHash {
+    use super::txid::{
+        ZCASH_TRANSPARENT_HASH_PERSONALIZATION, hash_transparent_txid_data,
+        transparent_outputs_hash, transparent_prevout_hash,
+    };
+    use ::transparent::sighash::{
+        SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE,
+    };
+    use corez::io::Write;
+
+    if bundle.is_coinbase() || bundle.vin.is_empty() {
+        return hash_transparent_txid_data(Some(txid_digests));
+    }
+
+    let hash_type = input.hash_type();
+    let flag_anyonecanpay = hash_type & SIGHASH_ANYONECANPAY != 0;
+    let flag_single = hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
+    let flag_none = hash_type & SIGHASH_MASK == SIGHASH_NONE;
+
+    let prevouts_digest = if flag_anyonecanpay {
+        transparent_prevout_hash::<TestTransparentAuth>(&[])
+    } else {
+        txid_digests.prevouts_digest
+    };
+
+    let (amounts_digest, scripts_digest) = if flag_anyonecanpay {
+        (
+            Params::new()
+                .hash_length(32)
+                .personal(b"ZTxTrAmountsHash")
+                .to_state()
+                .finalize(),
+            Params::new()
+                .hash_length(32)
+                .personal(b"ZTxTrScriptsHash")
+                .to_state()
+                .finalize(),
+        )
+    } else {
+        manual_transparent_inputs_digests(bundle)
+    };
+
+    // S.3.0e: sequence_sig_digest is identical to sequence_digest regardless of hash_type.
+    let sequence_digest = txid_digests.sequence_digest;
+
+    let outputs_digest = if let SignableInput::Transparent(input) = input {
+        if flag_single {
+            if *input.index() < bundle.vout.len() {
+                transparent_outputs_hash(&[&bundle.vout[*input.index()]])
+            } else {
+                transparent_outputs_hash::<transparent::TxOut>(&[])
+            }
+        } else if flag_none {
+            transparent_outputs_hash::<transparent::TxOut>(&[])
+        } else {
+            txid_digests.outputs_digest
+        }
+    } else {
+        txid_digests.outputs_digest
+    };
+
+    let mut ch = Params::new()
+        .hash_length(32)
+        .personal(b"Zcash___TxInHash")
+        .to_state();
+    if let SignableInput::Transparent(input) = input {
+        let txin = &bundle.vin[*input.index()];
+        txin.prevout().write(&mut ch).unwrap();
+        ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
+        input.script_pubkey().write(&mut ch).unwrap();
+        ch.write_all(&txin.sequence().to_le_bytes()).unwrap();
+    }
+    let txin_sig_digest = ch.finalize();
+
+    let mut h = Params::new()
+        .hash_length(32)
+        .personal(ZCASH_TRANSPARENT_HASH_PERSONALIZATION)
+        .to_state();
+    h.write_all(&[hash_type]).unwrap();
+    h.write_all(prevouts_digest.as_bytes()).unwrap();
+    h.write_all(amounts_digest.as_bytes()).unwrap();
+    h.write_all(scripts_digest.as_bytes()).unwrap();
+    h.write_all(sequence_digest.as_bytes()).unwrap();
+    h.write_all(outputs_digest.as_bytes()).unwrap();
+    h.write_all(txin_sig_digest.as_bytes()).unwrap();
+    h.finalize()
+}
+
+/// [ZIP 248 §S.2](https://zips.z.cash/zip-0248#s-2-value_pool_deltas_sig_digest):
+/// the signature digest uses the T.2 value pool deltas digest unchanged, so a
+/// transparent input signature commits to every value pool delta entry for
+/// every `hash_type`.
+///
+/// [ZIP 248 §S.3.0e](https://zips.z.cash/zip-0248#s-3-0e-sequence-sig-digest):
+/// `sequence_sig_digest` remains the transaction's `sequence_digest` under
+/// `SIGHASH_ANYONECANPAY`.
+#[test]
+#[cfg(all(test, zcash_unstable = "nu8"))]
+fn v7_transparent_sighash_commits_to_all_value_pool_deltas() {
+    use super::sighash_v5::transparent_sig_digest;
+    use super::txid::{
+        hash_v7_effects_bundles, hasher, tx_hash_personalization, v7_bundle_digest_entries,
+    };
+    use super::zip248;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use corez::io::Write;
+    use zcash_protocol::consensus::BlockHeight;
+
+    fn compact_size(value: u64) -> Vec<u8> {
+        match value {
+            0..=0xfc => vec![value as u8],
+            0xfd..=0xffff => {
+                let mut out = vec![0xfd];
+                out.extend_from_slice(&(value as u16).to_le_bytes());
+                out
+            }
+            0x1_0000..=0xffff_ffff => {
+                let mut out = vec![0xfe];
+                out.extend_from_slice(&(value as u32).to_le_bytes());
+                out
+            }
+            _ => {
+                let mut out = vec![0xff];
+                out.extend_from_slice(&value.to_le_bytes());
+                out
+            }
+        }
+    }
+
+    fn manual_vp_digest(entries: &[zip248::ValuePoolDeltaEntry]) -> Blake2bHash {
+        let mut preimage = Vec::new();
+        for entry in entries {
+            preimage.extend_from_slice(&compact_size(entry.bundle_type()));
+            preimage.extend_from_slice(&compact_size(entry.bundle_variant()));
+            preimage.push(entry.asset_class());
+            if let Some(uuid) = entry.asset_uuid() {
+                preimage.extend_from_slice(uuid);
+            }
+            preimage.extend_from_slice(&i64::from(entry.value()).to_le_bytes());
+        }
+        blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(b"ZTxIdVPDeltaHash")
+            .hash(&preimage)
+    }
+
+    fn make_tx(transparent_value: i64, fee: u64) -> TransactionData<TestUnauthorized> {
+        let transparent = transparent::Bundle {
+            vin: vec![transparent::TxIn::from_parts(
+                transparent::OutPoint::new([1; 32], 0),
+                Script::default(),
+                0,
+            )],
+            vout: vec![transparent::TxOut::new(
+                Zatoshis::from_u64(1000).unwrap(),
+                Script::default(),
+            )],
+            authorization: transparent::Authorized,
+        };
+
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_transparent(ZatBalance::from_i64(transparent_value).unwrap())
+            .unwrap();
+        vp.set_fee(Zatoshis::from_u64(fee).unwrap()).unwrap();
+        vp.set_sapling(ZatBalance::from_i64(500).unwrap()).unwrap();
+        vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(7).unwrap())
+            .unwrap();
+
+        let tx = TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from(100u32),
+            vp,
+            Some(transparent),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        with_test_transparent_auth(
+            tx,
+            vec![Zatoshis::from_u64(1000).unwrap()],
+            vec![Script::default()],
+        )
+    }
+
+    let tx = make_tx(-1000, 1000);
+    let txid_parts = tx.digest_v7();
+    let entries = tx.value_pool_deltas().to_wire_entries();
+    let bundle = tx.transparent_bundle().unwrap();
+    let script = Script::default();
+
+    for hash_type in [
+        SighashType::ALL,
+        SighashType::NONE,
+        SighashType::SINGLE,
+        SighashType::ALL_ANYONECANPAY,
+        SighashType::NONE_ANYONECANPAY,
+        SighashType::SINGLE_ANYONECANPAY,
+    ] {
+        let signable_input = SignableInput::Transparent(
+            ::transparent::sighash::SignableInput::from_parts(
+                bundle,
+                hash_type,
+                0,
+                &script,
+                &script,
+                Zatoshis::from_u64(1000).unwrap(),
+            )
+            .unwrap(),
+        );
+
+        let expected_vp = manual_vp_digest(&entries);
+        assert_eq!(
+            txid_parts.value_pool_deltas_digest.as_ref(),
+            Some(&expected_vp),
+            "T.2 reconstruction mismatch for {hash_type:?}"
+        );
+
+        let transparent_sig = manual_v7_transparent_sig_digest(
+            bundle,
+            txid_parts.transparent_digests.as_ref().unwrap(),
+            &signable_input,
+        );
+        let v5_transparent_sig = transparent_sig_digest(
+            Some((bundle, txid_parts.transparent_digests.as_ref().unwrap())),
+            None,
+            &signable_input,
+        );
+        if hash_type.encode() & ::transparent::sighash::SIGHASH_ANYONECANPAY != 0 {
+            // The V5 helper clears the sequence digest under ANYONECANPAY; the V7
+            // reconstruction must keep it, so the two digests differ.
+            assert_ne!(
+                transparent_sig.as_bytes(),
+                v5_transparent_sig.as_bytes(),
+                "V7 must preserve the sequence digest under {hash_type:?}"
+            );
+        } else {
+            assert_eq!(
+                transparent_sig.as_bytes(),
+                v5_transparent_sig.as_bytes(),
+                "V7 and V5 transparent digests must agree for {hash_type:?}"
+            );
+        }
+        let expected_bundles = hash_v7_effects_bundles(v7_bundle_digest_entries(
+            Some(&transparent_sig),
+            txid_parts.coinbase_digest.as_ref(),
+            txid_parts.sapling_digest.as_ref(),
+            txid_parts.orchard_digest.as_ref(),
+            txid_parts.ironwood_digest.as_ref(),
+            &txid_parts.unknown_effect_digests,
+        ));
+        let mut h = hasher(&tx_hash_personalization(BranchId::Nu8));
+        h.write_all(txid_parts.header_digest.as_bytes()).unwrap();
+        h.write_all(expected_vp.as_bytes()).unwrap();
+        h.write_all(expected_bundles.as_bytes()).unwrap();
+        let expected = h.finalize();
+
+        let sighash = v7_signature_hash(&tx, &signable_input, &txid_parts, None);
+        assert_eq!(
+            sighash.as_bytes(),
+            expected.as_bytes(),
+            "signature digest mismatch for {hash_type:?}"
+        );
+    }
+
+    // Changing only the transparent and fee deltas must change the signature
+    // for every hash type, because S.2 commits to the complete T.2 digest.
+    let tx_changed = make_tx(-2000, 2000);
+    let changed_parts = tx_changed.digest_v7();
+    let changed_bundle = tx_changed.transparent_bundle().unwrap();
+    for hash_type in [
+        SighashType::ALL,
+        SighashType::NONE,
+        SighashType::SINGLE,
+        SighashType::ALL_ANYONECANPAY,
+        SighashType::NONE_ANYONECANPAY,
+        SighashType::SINGLE_ANYONECANPAY,
+    ] {
+        let input = |bundle| {
+            SignableInput::Transparent(
+                ::transparent::sighash::SignableInput::from_parts(
+                    bundle,
+                    hash_type,
+                    0,
+                    &script,
+                    &script,
+                    Zatoshis::from_u64(1000).unwrap(),
+                )
+                .unwrap(),
+            )
+        };
+        let original = v7_signature_hash(&tx, &input(bundle), &txid_parts, None);
+        let changed = v7_signature_hash(&tx_changed, &input(changed_bundle), &changed_parts, None);
+        assert_ne!(
+            original.as_bytes(),
+            changed.as_bytes(),
+            "{hash_type:?} must commit to transparent and fee deltas"
+        );
+    }
+}
+
+/// A v7 digest tree built by `TxIdDigester` lacks the value pool deltas
+/// digest, so it cannot produce a v7 transaction identifier. The public
+/// `to_txid` path must return `None` rather than substituting an empty-map
+/// digest.
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_to_txid_rejects_incomplete_digest_tree() {
+    use super::zip248;
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut vp = zip248::ValuePoolDeltas::empty();
+    vp.set_fee(Zatoshis::from_u64(1000).unwrap()).unwrap();
+
+    let incomplete_tx = TransactionData::<TestUnauthorized>::from_parts_with_value_pool_deltas(
+        TxVersion::V7,
+        BranchId::Nu8,
+        0,
+        BlockHeight::from(100u32),
+        vp.clone(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let incomplete = incomplete_tx.digest(TxIdDigester);
+    assert!(incomplete.value_pool_deltas_digest.is_none());
+    assert_eq!(
+        super::txid::to_txid(TxVersion::V7, BranchId::Nu8, &incomplete),
+        None
+    );
+
+    let complete_tx = TransactionData::<Authorized>::from_parts_with_value_pool_deltas(
+        TxVersion::V7,
+        BranchId::Nu8,
+        0,
+        BlockHeight::from(100u32),
+        vp,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let complete = complete_tx.digest_v7();
+    assert!(complete.value_pool_deltas_digest.is_some());
+    let txid = super::txid::to_txid(TxVersion::V7, BranchId::Nu8, &complete).unwrap();
+    assert_eq!(txid, complete_tx.freeze().unwrap().txid());
+}
+
 #[cfg(test)]
 mod zip248_tests {
     use super::super::zip248;
@@ -1605,9 +2112,11 @@ mod zip248_tests {
     #[test]
     fn value_pool_deltas_write_read_roundtrip() {
         let mut vp = zip248::ValuePoolDeltas::empty();
-        vp.set_sapling(ZatBalance::from_i64(100_000).unwrap());
-        vp.set_orchard(ZatBalance::from_i64(-50_000).unwrap());
-        vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
+        vp.set_sapling(ZatBalance::from_i64(100_000).unwrap())
+            .unwrap();
+        vp.set_orchard(ZatBalance::from_i64(-50_000).unwrap())
+            .unwrap();
+        vp.set_fee(Zatoshis::from_u64(1_000).unwrap()).unwrap();
 
         let entries = vp.to_wire_entries();
         let mut buf = Vec::new();
@@ -1622,15 +2131,16 @@ mod zip248_tests {
         for _ in 0..n {
             let entry = zip248::ValuePoolDeltaEntry::read(&mut cursor).unwrap();
             if let (Some(bt), Some(bv)) = (
-                zip248::BundleType::from_u64(entry.bundle_type),
-                zip248::BundleVariant::from_u64(entry.bundle_variant),
+                zip248::BundleType::from_u64(entry.bundle_type()),
+                zip248::BundleVariant::from_u64(entry.bundle_variant()),
             ) {
-                let key = zip248::ValuePoolDeltaKey {
-                    bundle_type: bt,
-                    asset_class: entry.asset_class,
-                    asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
-                };
-                vp2.insert_known(key, bv, entry.value);
+                let key = zip248::ValuePoolDeltaKey::from_parts(
+                    bt,
+                    entry.asset_class(),
+                    entry.asset_uuid().copied().unwrap_or([0u8; 64]),
+                )
+                .unwrap();
+                vp2.insert_known(key, bv, entry.value()).unwrap();
             }
         }
 
@@ -1661,84 +2171,59 @@ mod zip248_tests {
         assert!(parsed_data.is_empty());
     }
 
-    fn test_unknown_bundle(data: &[u8]) -> zip248::UnknownBundle {
-        zip248::UnknownBundle {
-            effect_data: data.to_vec(),
-            effect_digest: blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(b"test_unknown_efx")
-                .hash(data),
-            auth_data: None,
-            auth_digest: None,
-        }
-    }
-
-    #[test]
-    fn bundle_map_unknown_iteration_order() {
-        use super::super::Authorized;
-
-        let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-        map.insert_unknown(99, 0, test_unknown_bundle(&[])).unwrap();
-        assert_eq!(
-            map.unknown_bundles()
-                .map(|(&(bt, _), _)| bt)
-                .collect::<Vec<_>>(),
-            vec![99],
-        );
-        map.insert_unknown(50, 0, test_unknown_bundle(&[1]))
-            .unwrap();
-        assert_eq!(
-            map.unknown_bundles()
-                .map(|(&(bt, _), _)| bt)
-                .collect::<Vec<_>>(),
-            vec![50, 99],
-        );
-    }
-
     /// Verifies that a v7 transaction with an unknown bundle type can be
-    /// parsed and re-serialized (ZIP 248 forward compatibility).
+    /// parsed and re-serialized at the byte layer (ZIP 248 forward
+    /// compatibility), and that the typed compatibility path rejects it rather
+    /// than inventing a digest.
     #[cfg(zcash_unstable = "nu8")]
     #[test]
     fn unknown_bundle_roundtrip() {
-        use super::super::{Authorized, Transaction, TransactionData, TxVersion};
+        use super::super::{
+            Transaction, TxVersion,
+            bytes::{
+                OpaqueBundleBytes, RawBundleType, RawBundleVariant, TransactionBodyBytes,
+                TransactionBytes, V7BundleBytes, V7TransactionBodyBytes,
+            },
+        };
         use zcash_protocol::consensus::{BlockHeight, BranchId};
 
-        let mut vp = zip248::ValuePoolDeltas::empty();
-        vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
-
-        let mut bundles: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-        bundles
-            .insert_unknown(42, 0, test_unknown_bundle(&[0xDE, 0xAD, 0xBE, 0xEF]))
+        let opaque = OpaqueBundleBytes::from_parts(
+            RawBundleType::from_u64(42),
+            RawBundleVariant::from_u64(0),
+            vec![0xDE, 0xAD, 0xBE, 0xEF],
+            None,
+        )
+        .unwrap();
+        let body = V7TransactionBodyBytes::from_parts(vec![], vec![V7BundleBytes::Unknown(opaque)])
             .unwrap();
-
-        let txdata = TransactionData::<Authorized>::from_parts_with_bundles(
+        let tx = TransactionBytes::from_parts(
             TxVersion::V7,
-            BranchId::Nu8,
+            Some(BranchId::Nu8),
             0,
             BlockHeight::from_u32(100),
-            vp,
-            bundles,
-        );
+            TransactionBodyBytes::V7(body),
+        )
+        .unwrap();
 
-        // Serialize.
-        let tx = txdata.freeze().unwrap();
         let mut buf = Vec::new();
         tx.write(&mut buf).unwrap();
 
-        // Parse back.
-        let tx2 = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
-
-        // The unknown bundle should be preserved.
-        let unknowns: Vec<_> = tx2.bundles().unknown_bundles().collect();
+        // The byte layer parses and re-serializes the unknown bundle.
+        let tx2 = TransactionBytes::read(&buf[..]).unwrap();
+        let body = tx2.body().as_v7().unwrap();
+        let unknowns: Vec<_> = body.opaque_bundles().collect();
         assert_eq!(unknowns.len(), 1);
-        assert_eq!(unknowns[0].0, &(42u64, 0u64));
-        assert_eq!(unknowns[0].1.effect_data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
-        assert!(unknowns[0].1.auth_data.is_none());
+        assert_eq!(unknowns[0].bundle_type().to_u64(), 42);
+        assert_eq!(unknowns[0].effects(), &[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert!(unknowns[0].auth().is_none());
 
-        // Re-serialize should produce identical bytes.
         let mut buf2 = Vec::new();
         tx2.write(&mut buf2).unwrap();
         assert_eq!(buf, buf2);
+
+        // The typed compatibility path cannot represent the unknown bundle, so
+        // it rejects the transaction instead of inventing a digest.
+        assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
     }
 
     // -- Consensus rule tests --------------------------------------------------
@@ -1752,13 +2237,79 @@ mod zip248_tests {
         use zcash_protocol::value::Zatoshis;
 
         fn make_v7(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
-            TransactionData::from_parts_with_bundles(
+            TransactionData::from_parts_with_value_pool_deltas(
                 TxVersion::V7,
                 BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(100),
                 vp,
-                zip248::BundleMap::new(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+
+        /// A transparent bundle with one input and one output, satisfying both
+        /// the input- and output-side conditions.
+        fn transparent_bundle() -> ::transparent::bundle::Bundle<::transparent::bundle::Authorized>
+        {
+            use ::transparent::{
+                address::Script,
+                bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
+            };
+
+            Bundle {
+                vin: vec![TxIn::from_parts(
+                    OutPoint::new([1; 32], 2),
+                    Script::default(),
+                    3,
+                )],
+                vout: vec![TxOut::new(
+                    Zatoshis::from_u64(1000).unwrap(),
+                    Script::default(),
+                )],
+                authorization: Authorized,
+            }
+        }
+
+        /// A transparent bundle with outputs but no inputs, as a coinbase
+        /// transaction may carry.
+        fn transparent_outputs_only()
+        -> ::transparent::bundle::Bundle<::transparent::bundle::Authorized> {
+            use ::transparent::{
+                address::Script,
+                bundle::{Authorized, Bundle, TxOut},
+            };
+
+            Bundle {
+                vin: vec![],
+                vout: vec![TxOut::new(
+                    Zatoshis::from_u64(1000).unwrap(),
+                    Script::default(),
+                )],
+                authorization: Authorized,
+            }
+        }
+
+        fn make_v7_with_transparent(
+            vp: zip248::ValuePoolDeltas,
+            transparent: ::transparent::bundle::Bundle<::transparent::bundle::Authorized>,
+        ) -> TransactionData<Authorized> {
+            TransactionData::from_parts_with_value_pool_deltas(
+                TxVersion::V7,
+                BranchId::Nu8,
+                0,
+                BlockHeight::from_u32(100),
+                vp,
+                Some(transparent),
+                None,
+                None,
+                None,
+                None,
+                None,
             )
         }
 
@@ -1767,14 +2318,16 @@ mod zip248_tests {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Insert a fee entry with non-ZEC asset class via the raw API.
             vp.insert_known(
-                zip248::ValuePoolDeltaKey {
-                    bundle_type: zip248::BundleType::Fee,
-                    asset_class: zip248::ASSET_CLASS_OTHER,
-                    asset_uuid: [0x42; 64],
-                },
+                zip248::ValuePoolDeltaKey::from_parts(
+                    zip248::BundleType::Fee,
+                    zip248::ASSET_CLASS_OTHER,
+                    [0x42; 64],
+                )
+                .unwrap(),
                 zip248::BundleVariant::Default,
                 ZatBalance::from_i64(-1000).unwrap(),
-            );
+            )
+            .unwrap();
             let tx = make_v7(vp);
             assert_eq!(
                 tx.check_v7_consensus_rules(),
@@ -1788,7 +2341,7 @@ mod zip248_tests {
         /// `lockbox` of it deposited into the lockbox.
         fn coinbase_bundle(subsidy: u64, lockbox: u64) -> zip248::CoinbaseBundle {
             zip248::CoinbaseBundle::from_parts(
-                100,
+                BlockHeight::from(100u32),
                 Zatoshis::from_u64(subsidy).unwrap(),
                 Zatoshis::from_u64(lockbox).unwrap(),
                 vec![],
@@ -1800,22 +2353,25 @@ mod zip248_tests {
             vp: zip248::ValuePoolDeltas,
             coinbase: zip248::CoinbaseBundle,
         ) -> TransactionData<Authorized> {
-            let mut bundles = zip248::BundleMap::new();
-            bundles.insert_coinbase(coinbase);
-            TransactionData::from_parts_with_bundles(
+            TransactionData::from_parts_with_value_pool_deltas(
                 TxVersion::V7,
                 BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(100),
                 vp,
-                bundles,
+                Some(transparent_outputs_only()),
+                None,
+                None,
+                None,
+                None,
+                Some(coinbase),
             )
         }
 
         #[test]
         fn coinbase_fee_delta_must_be_nonnegative() {
             let mut vp = zip248::ValuePoolDeltas::empty();
-            vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // stored as -1000
+            vp.set_fee(Zatoshis::from_u64(1000).unwrap()).unwrap(); // stored as -1000
             let tx = make_v7_coinbase(vp, coinbase_bundle(0, 0));
             assert_eq!(
                 tx.check_v7_consensus_rules(),
@@ -1829,13 +2385,14 @@ mod zip248_tests {
         fn coinbase_vp_delta_must_equal_subsidy_less_lockbox() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // The bundle issues 3 and locks 1, so the delta must be 2.
-            vp.set_coinbase(ZatBalance::from_i64(3).unwrap());
-            vp.set_transparent(ZatBalance::from_i64(-3).unwrap());
+            vp.set_coinbase(ZatBalance::from_i64(3).unwrap()).unwrap();
+            vp.set_transparent(ZatBalance::from_i64(-3).unwrap())
+                .unwrap();
             let tx = make_v7_coinbase(vp, coinbase_bundle(3, 1));
             assert_eq!(
                 tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::CoinbaseValueDeltaMismatch {
-                    expected: ZatBalance::from_i64(2).unwrap(),
+                    expected: 2,
                     actual: ZatBalance::from_i64(3).unwrap(),
                 }),
             );
@@ -1846,8 +2403,9 @@ mod zip248_tests {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Issue 3, lock 1: the bundle contributes 2 to the transparent
             // transaction value pool, and the transparent outputs consume it.
-            vp.set_coinbase(ZatBalance::from_i64(2).unwrap());
-            vp.set_transparent(ZatBalance::from_i64(-2).unwrap());
+            vp.set_coinbase(ZatBalance::from_i64(2).unwrap()).unwrap();
+            vp.set_transparent(ZatBalance::from_i64(-2).unwrap())
+                .unwrap();
             let tx = make_v7_coinbase(vp, coinbase_bundle(3, 1));
             assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
         }
@@ -1856,7 +2414,7 @@ mod zip248_tests {
         fn coinbase_bundle_rejects_lockbox_above_subsidy() {
             assert!(
                 zip248::CoinbaseBundle::from_parts(
-                    100,
+                    BlockHeight::from(100u32),
                     Zatoshis::from_u64(2).unwrap(),
                     Zatoshis::from_u64(3).unwrap(),
                     vec![],
@@ -1869,7 +2427,7 @@ mod zip248_tests {
         fn coinbase_bundle_rejects_oversized_coinbase_data() {
             assert!(
                 zip248::CoinbaseBundle::from_parts(
-                    100,
+                    BlockHeight::from(100u32),
                     Zatoshis::ZERO,
                     Zatoshis::ZERO,
                     vec![0u8; zip248::MAX_COINBASE_DATA_LEN + 1],
@@ -1880,7 +2438,7 @@ mod zip248_tests {
 
         #[test]
         fn coinbase_bundle_rejects_out_of_range_block_height() {
-            for height in [0, 500_000_000] {
+            for height in [BlockHeight::from(0u32), BlockHeight::from(500_000_000u32)] {
                 assert!(
                     zip248::CoinbaseBundle::from_parts(
                         height,
@@ -1896,7 +2454,7 @@ mod zip248_tests {
         #[test]
         fn coinbase_bundle_roundtrips() {
             let bundle = zip248::CoinbaseBundle::from_parts(
-                123_456,
+                BlockHeight::from(123_456u32),
                 Zatoshis::from_u64(312_500_000).unwrap(),
                 Zatoshis::from_u64(31_250_000).unwrap(),
                 b"miner data".to_vec(),
@@ -1914,10 +2472,11 @@ mod zip248_tests {
             // Manually insert a positive fee delta (simulating a coinbase-style
             // fee entry in a non-coinbase transaction).
             vp.insert_known(
-                zip248::ValuePoolDeltaKey::zec(zip248::BundleType::Fee),
+                zip248::ValuePoolDeltaKey::zec(zip248::BundleType::Fee).unwrap(),
                 zip248::BundleVariant::Default,
                 ZatBalance::from_i64(1000).unwrap(),
-            );
+            )
+            .unwrap();
             let tx = make_v7(vp);
             assert_eq!(
                 tx.check_v7_consensus_rules(),
@@ -1930,9 +2489,11 @@ mod zip248_tests {
         #[test]
         fn vp_deltas_must_balance() {
             let mut vp = zip248::ValuePoolDeltas::empty();
-            // Sapling adds 100k to the pool but nothing subtracts it.
-            vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap());
-            let tx = make_v7(vp);
+            // The transparent bundle adds 100k to the pool but nothing
+            // subtracts it.
+            vp.set_transparent(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap())
+                .unwrap();
+            let tx = make_v7_with_transparent(vp, transparent_bundle());
             let err = tx.check_v7_consensus_rules().unwrap_err();
             assert!(matches!(err, V7ConsensusError::ValueImbalance { .. }));
         }
@@ -1940,9 +2501,63 @@ mod zip248_tests {
         #[test]
         fn balanced_non_coinbase_passes() {
             let mut vp = zip248::ValuePoolDeltas::empty();
-            vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // -1000
-            vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(1000).unwrap()); // +1000
-            let tx = make_v7(vp);
+            vp.set_fee(Zatoshis::from_u64(1000).unwrap()).unwrap(); // -1000
+            vp.set_transparent(zcash_protocol::value::ZatBalance::from_i64(1000).unwrap())
+                .unwrap(); // +1000
+            let tx = make_v7_with_transparent(vp, transparent_bundle());
+            assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+        }
+
+        /// A non-ZEC asset entry that does not balance per asset is rejected by
+        /// conservation, not by a ZEC-only restriction.
+        #[test]
+        fn unbalanced_non_zec_delta_is_rejected_by_conservation() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.insert_known(
+                zip248::ValuePoolDeltaKey::from_parts(
+                    zip248::BundleType::Transparent,
+                    zip248::ASSET_CLASS_OTHER,
+                    [0x42; 64],
+                )
+                .unwrap(),
+                zip248::BundleVariant::Default,
+                ZatBalance::from_i64(-1000).unwrap(),
+            )
+            .unwrap();
+            let tx = make_v7_with_transparent(vp, transparent_bundle());
+            assert_eq!(
+                tx.check_v7_consensus_rules(),
+                Err(V7ConsensusError::ValueImbalance {
+                    bundle_type_for_asset: zip248::BundleType::Transparent.to_u64(),
+                    asset_class: zip248::ASSET_CLASS_OTHER,
+                    sum: -1000,
+                }),
+            );
+        }
+
+        /// Non-ZEC entries in bundle types other than fee and coinbase are
+        /// accepted when they balance per asset.
+        #[test]
+        fn balanced_non_zec_delta_passes() {
+            let uuid = [0x42; 64];
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            for (bundle_type, value) in [
+                (zip248::BundleType::Transparent, -1000),
+                (zip248::BundleType::Zip233Nsm, 1000),
+            ] {
+                vp.insert_known(
+                    zip248::ValuePoolDeltaKey::from_parts(
+                        bundle_type,
+                        zip248::ASSET_CLASS_OTHER,
+                        uuid,
+                    )
+                    .unwrap(),
+                    zip248::BundleVariant::Default,
+                    ZatBalance::from_i64(value).unwrap(),
+                )
+                .unwrap();
+            }
+            let tx = make_v7_with_transparent(vp, transparent_bundle());
             assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
         }
     }
@@ -2011,13 +2626,13 @@ mod zip248_tests {
             buf
         }
 
-        /// A transparent bundle holding only outputs has nothing to authorize,
-        /// so its `mAuthBundles` entry is omitted. The serializer, the parser
-        /// and `auth_commitment` must agree: a present-but-empty entry would be
-        /// a second encoding, and a commitment over an entry absent from the
-        /// wire would diverge from a validator digesting the parsed map.
+        /// A transparent bundle holding only outputs has no authorizing input
+        /// data, but ZIP 248 permits a present-but-empty `mAuthBundles` entry
+        /// and it is a distinct encoding from an absent one. The byte layer
+        /// preserves the distinction; typed conversion rejects the present
+        /// case because its bundle type cannot represent map presence.
         #[test]
-        fn transparent_outputs_only_omit_the_auth_entry() {
+        fn transparent_outputs_only_preserve_auth_entry_presence() {
             // nIn = 0, then one 1000-zatoshi output with an empty script.
             let mut effects = Vec::new();
             CompactSize::write(&mut effects, 0).unwrap();
@@ -2035,7 +2650,8 @@ mod zip248_tests {
             tx.write(&mut reserialized).unwrap();
             assert_eq!(reserialized, buf);
 
-            // The same transaction with an empty auth entry must be rejected.
+            // The same transaction with a present-but-empty auth entry parses
+            // and re-serializes exactly at the byte layer.
             let mut with_empty_auth = v7_header(BranchId::Nu8);
             CompactSize::write(&mut with_empty_auth, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nEffectBundles
@@ -2043,15 +2659,29 @@ mod zip248_tests {
             CompactSize::write(&mut with_empty_auth, 1).unwrap(); // nAuthBundles
             write_bundle_entry(&mut with_empty_auth, transparent, variant, &[]);
 
-            let err = Transaction::read(&with_empty_auth[..], BranchId::Nu8).unwrap_err();
-            let msg = alloc::format!("{err:?}");
-            assert!(msg.contains("must be omitted"), "unexpected error: {msg}");
+            let bytes =
+                crate::transaction::bytes::TransactionBytes::read(&with_empty_auth[..]).unwrap();
+            assert!(
+                bytes
+                    .body()
+                    .as_v7()
+                    .unwrap()
+                    .transparent()
+                    .unwrap()
+                    .auth()
+                    .is_some()
+            );
+            let mut byte_reserialized = Vec::new();
+            bytes.write(&mut byte_reserialized).unwrap();
+            assert_eq!(byte_reserialized, with_empty_auth);
+
+            // The typed representation cannot retain the present empty entry.
+            assert!(Transaction::read(&with_empty_auth[..], BranchId::Nu8).is_err());
         }
 
-        /// ZIP 248 encodes an absent bundle by omitting its entry. An entry
-        /// that decodes to no contents is a second encoding of the same
-        /// transaction, and would re-serialize to the omitted form under a
-        /// txid that does not commit to the bytes it was parsed from.
+        /// An empty transparent effecting payload is a valid byte encoding and
+        /// is preserved by the byte layer, but the typed representation has no
+        /// way to retain its map presence, so typed conversion rejects it.
         #[test]
         fn rejects_empty_transparent_effect_bundle() {
             let mut effects = Vec::new();
@@ -2108,9 +2738,13 @@ mod zip248_tests {
 
         /// A bundleType this implementation knows may carry a bundleVariant it
         /// does not. Reinterpreting it as the default variant would change the
-        /// bytes it re-serializes to, so it is preserved opaquely instead.
+        /// bytes it re-serializes to, so the byte layer preserves it opaquely.
+        /// The typed compatibility path cannot resolve its digest, so it
+        /// rejects the transaction.
         #[test]
         fn preserves_unknown_variant_of_known_bundle_type() {
+            use crate::transaction::bytes::{TransactionBytes, V7BundleBytes};
+
             let opaque = [0xAAu8; 8];
             let unknown_variant = zip248::BundleVariant::Default.to_u64() + 1;
             let buf = v7_with_effect_bundle(
@@ -2119,16 +2753,18 @@ mod zip248_tests {
                 &opaque,
             );
 
-            let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
-            assert!(
-                tx.sapling_bundle().is_none(),
-                "a variant this implementation does not understand must not parse as Sapling"
-            );
-            assert_eq!(tx.bundles().unknown_bundles().count(), 1);
+            let tx = TransactionBytes::read(&buf[..]).unwrap();
+            let body = tx.body().as_v7().unwrap();
+            assert!(matches!(
+                body.bundles()[0],
+                V7BundleBytes::KnownTypeUnknownVariant(_)
+            ));
 
             let mut reserialized = Vec::new();
             tx.write(&mut reserialized).unwrap();
             assert_eq!(reserialized, buf);
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
@@ -2283,7 +2919,7 @@ mod zip248_tests {
         #[test]
         fn coinbase_bundle_roundtrips_through_a_transaction() {
             let coinbase = zip248::CoinbaseBundle::from_parts(
-                1_500_000,
+                BlockHeight::from(1_500_000u32),
                 Zatoshis::from_u64(156_250_000).unwrap(),
                 Zatoshis::from_u64(18_750_000).unwrap(),
                 b"a miner was here".to_vec(),
@@ -2291,21 +2927,39 @@ mod zip248_tests {
             .expect("valid coinbase bundle");
 
             let mut vp = zip248::ValuePoolDeltas::empty();
-            vp.set_coinbase(coinbase.value_pool_delta());
+            vp.set_coinbase(coinbase.value_pool_delta()).unwrap();
             // Something has to consume what the coinbase bundle contributes;
-            // an Orchard delta stands in for the outputs that would.
-            vp.set_orchard(-coinbase.value_pool_delta());
+            // a transparent output stands in for the outputs that would.
+            vp.set_transparent(-coinbase.value_pool_delta()).unwrap();
 
-            let mut bundles = zip248::BundleMap::new();
-            bundles.insert_coinbase(coinbase.clone());
+            let transparent = {
+                use ::transparent::{
+                    address::Script,
+                    bundle::{Authorized as TransparentAuthorized, Bundle, TxOut},
+                };
 
-            let tx = TransactionData::<Authorized>::from_parts_with_bundles(
+                Bundle {
+                    vin: vec![],
+                    vout: vec![TxOut::new(
+                        Zatoshis::from_u64(1_000).unwrap(),
+                        Script::default(),
+                    )],
+                    authorization: TransparentAuthorized,
+                }
+            };
+
+            let tx = TransactionData::<Authorized>::from_parts_with_value_pool_deltas(
                 TxVersion::V7,
                 BranchId::Nu8,
                 0,
                 BlockHeight::from_u32(1_500_100),
                 vp,
-                bundles,
+                Some(transparent),
+                None,
+                None,
+                None,
+                None,
+                Some(coinbase.clone()),
             )
             .freeze()
             .expect("v7 transaction data can be frozen");
@@ -2338,25 +2992,29 @@ mod zip248_tests {
 
                 let build = |as_ironwood: bool| {
                     let mut vp = zip248::ValuePoolDeltas::empty();
-                    let mut bundles = zip248::BundleMap::<Authorized>::new();
-                    if as_ironwood {
-                        vp.set_ironwood(value_balance);
-                        bundles.insert_ironwood(bundle.clone());
+                    let (orchard, ironwood) = if as_ironwood {
+                        vp.set_ironwood(value_balance).unwrap();
+                        (None, Some(bundle.clone()))
                     } else {
-                        vp.set_orchard(value_balance);
-                        bundles.insert_orchard(bundle.clone());
-                    }
+                        vp.set_orchard(value_balance).unwrap();
+                        (Some(bundle.clone()), None)
+                    };
                     // Balance the transaction so that it satisfies the
                     // value pool delta rule.
-                    vp.set_transparent(-value_balance);
+                    vp.set_transparent(-value_balance).unwrap();
 
-                    TransactionData::<Authorized>::from_parts_with_bundles(
+                    TransactionData::<Authorized>::from_parts_with_value_pool_deltas(
                         TxVersion::V7,
                         BranchId::Nu8,
                         0,
                         BlockHeight::from_u32(100),
                         vp,
-                        bundles,
+                        None,
+                        None,
+                        None,
+                        orchard,
+                        ironwood,
+                        None,
                     )
                     .freeze()
                     .expect("v7 transaction data can be frozen")
@@ -2391,14 +3049,15 @@ mod zip248_tests {
         fn to_wire_entries_canonical_order_with_unknown() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Known: Orchard (3), Fee (5)
-            vp.set_orchard(ZatBalance::from_i64(50_000).unwrap());
-            vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
+            vp.set_orchard(ZatBalance::from_i64(50_000).unwrap())
+                .unwrap();
+            vp.set_fee(Zatoshis::from_u64(1_000).unwrap()).unwrap();
             // Unknown: bundleType 8 (sorts after all known types)
             vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(99_000).unwrap())
                 .unwrap();
 
             let entries = vp.to_wire_entries();
-            let types: Vec<u64> = entries.iter().map(|e| e.bundle_type).collect();
+            let types: Vec<u64> = entries.iter().map(|e| e.bundle_type()).collect();
             // Orchard=3, Fee=5, Unknown=8 — strictly increasing.
             assert_eq!(types, vec![3, 5, 8]);
         }
@@ -2429,11 +3088,1829 @@ mod zip248_tests {
         }
     }
 
+    // -- Full transaction-local validation -------------------------------------
+
+    #[cfg(zcash_unstable = "nu8")]
+    mod v7_validation {
+        use super::super::super::{
+            Transaction, TransactionBytes, V7BundleMap, V7ConsensusError, V7ValidationError,
+            bytes::{TransactionBodyBytes, V5TransactionBodyBytes},
+            zip248,
+        };
+        use alloc::vec;
+        use alloc::vec::Vec;
+        use proptest::prelude::*;
+        use zcash_encoding::CompactSize;
+        #[cfg(not(zcash_unstable = "zip233"))]
+        use zcash_protocol::value::MAX_MONEY;
+        use zcash_protocol::{
+            consensus::{BlockHeight, BranchId},
+            constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID},
+            value::{ZatBalance, Zatoshis},
+        };
+
+        fn v7_header(branch_id: BranchId) -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&(V7_TX_VERSION | (1 << 31)).to_le_bytes());
+            buf.extend_from_slice(&V7_VERSION_GROUP_ID.to_le_bytes());
+            buf.extend_from_slice(&u32::from(branch_id).to_le_bytes());
+            buf.extend_from_slice(&0u32.to_le_bytes());
+            buf.extend_from_slice(&100u32.to_le_bytes());
+            buf
+        }
+
+        fn vp_entry(
+            bundle_type: u64,
+            variant: u64,
+            asset_class: u8,
+            uuid: Option<[u8; 64]>,
+            value: i64,
+        ) -> Vec<u8> {
+            let mut buf = Vec::new();
+            CompactSize::write(&mut buf, bundle_type as usize).unwrap();
+            CompactSize::write(&mut buf, variant as usize).unwrap();
+            buf.push(asset_class);
+            if let Some(uuid) = uuid {
+                buf.extend_from_slice(&uuid);
+            }
+            buf.extend_from_slice(&value.to_le_bytes());
+            buf
+        }
+
+        fn wire_tx(
+            branch_id: BranchId,
+            vp: &[Vec<u8>],
+            effects: &[(u64, u64, Vec<u8>)],
+            auth: &[(u64, u64, Vec<u8>)],
+        ) -> Vec<u8> {
+            let mut buf = v7_header(branch_id);
+            CompactSize::write(&mut buf, vp.len()).unwrap();
+            for entry in vp {
+                buf.extend_from_slice(entry);
+            }
+            CompactSize::write(&mut buf, effects.len()).unwrap();
+            for (bundle_type, variant, data) in effects {
+                zip248::write_bundle_data_framing(&mut buf, *bundle_type, *variant, data).unwrap();
+            }
+            CompactSize::write(&mut buf, auth.len()).unwrap();
+            for (bundle_type, variant, data) in auth {
+                zip248::write_bundle_data_framing(&mut buf, *bundle_type, *variant, data).unwrap();
+            }
+            buf
+        }
+
+        fn validate(bytes: &[u8]) -> Result<Transaction, V7ValidationError> {
+            let tx = TransactionBytes::read(bytes).expect("fixture must be well-formed");
+            tx.validate_v7()
+        }
+
+        fn transparent_outputs_only_effects() -> Vec<u8> {
+            let mut buf = Vec::new();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
+            buf.extend_from_slice(&1000i64.to_le_bytes());
+            CompactSize::write(&mut buf, 0).unwrap();
+            buf
+        }
+
+        fn transparent_input_effects(outputs: bool) -> Vec<u8> {
+            let mut buf = Vec::new();
+            CompactSize::write(&mut buf, 1).unwrap();
+            buf.extend_from_slice(&[1u8; 32]);
+            buf.extend_from_slice(&2u32.to_le_bytes());
+            buf.extend_from_slice(&3u32.to_le_bytes());
+            CompactSize::write(&mut buf, usize::from(outputs)).unwrap();
+            if outputs {
+                buf.extend_from_slice(&1000i64.to_le_bytes());
+                CompactSize::write(&mut buf, 0).unwrap();
+            }
+            buf
+        }
+
+        fn transparent_auth(sighash_version: u8) -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&[0x01, sighash_version]);
+            CompactSize::write(&mut buf, 0).unwrap();
+            buf
+        }
+
+        fn coinbase_effects(subsidy: u64, lockbox: u64) -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&100u32.to_le_bytes());
+            buf.extend_from_slice(&subsidy.to_le_bytes());
+            buf.extend_from_slice(&lockbox.to_le_bytes());
+            CompactSize::write(&mut buf, 0).unwrap();
+            buf
+        }
+
+        fn sapling_effects() -> Vec<u8> {
+            let mut buf = Vec::new();
+            CompactSize::write(&mut buf, 1).unwrap();
+            buf.extend_from_slice(&[0u8; 96]);
+            CompactSize::write(&mut buf, 0).unwrap();
+            buf
+        }
+
+        fn sapling_auth() -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&[0u8; 32]);
+            buf.extend_from_slice(&[0u8; 192]);
+            buf.extend_from_slice(&[0x01, 0x00]);
+            buf.extend_from_slice(&[0u8; 64]);
+            buf.extend_from_slice(&[0x01, 0x00]);
+            buf.extend_from_slice(&[0u8; 64]);
+            buf
+        }
+
+        fn orchard_effects(flags: u8) -> Vec<u8> {
+            let mut buf = Vec::new();
+            CompactSize::write(&mut buf, 1).unwrap();
+            buf.extend_from_slice(&[0u8; 820]);
+            buf.push(flags);
+            buf
+        }
+
+        fn orchard_auth() -> Vec<u8> {
+            // ZIP 248: 2720 + 2272 * nActionsOrchard, for the single action
+            // encoded by `orchard_effects`.
+            const PROOF_LEN: usize = 2720 + 2272;
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&[0u8; 32]);
+            CompactSize::write(&mut buf, PROOF_LEN).unwrap();
+            buf.resize(buf.len() + PROOF_LEN, 0);
+            buf.extend_from_slice(&[0x01, 0x00]);
+            buf.extend_from_slice(&[0u8; 64]);
+            buf.extend_from_slice(&[0x01, 0x00]);
+            buf.extend_from_slice(&[0u8; 64]);
+            buf
+        }
+
+        fn transparent_bundle() -> ::transparent::bundle::Bundle<::transparent::bundle::Authorized>
+        {
+            use ::transparent::{
+                address::Script,
+                bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
+            };
+
+            Bundle {
+                vin: vec![TxIn::from_parts(
+                    OutPoint::new([1; 32], 2),
+                    Script::default(),
+                    3,
+                )],
+                vout: vec![TxOut::new(
+                    Zatoshis::from_u64(1000).unwrap(),
+                    Script::default(),
+                )],
+                authorization: Authorized,
+            }
+        }
+
+        #[test]
+        fn unknown_bundle_type_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(42, 0, vec![0xAA])], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::UnknownBundleType { bundle_type: 42 })
+            ));
+        }
+
+        #[test]
+        fn unknown_bundle_variant_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(2, 1, vec![0xAA])], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::UnknownBundleVariant {
+                    bundle_type: 2,
+                    bundle_variant: 1
+                })
+            ));
+        }
+
+        #[test]
+        fn coinbase_auth_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(1, 0, coinbase_effects(0, 0))],
+                &[(1, 0, vec![0xAA])],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::ProhibitedBundleEntry {
+                    bundle_type: 1,
+                    map: V7BundleMap::AuthBundles
+                })
+            ));
+        }
+
+        #[test]
+        fn fee_effect_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(5, 0, vec![0xAA])], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::ProhibitedBundleEntry {
+                    bundle_type: 5,
+                    map: V7BundleMap::EffectBundles
+                })
+            ));
+        }
+
+        #[test]
+        fn nsm_effect_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(6, 0, vec![0xAA])], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::ProhibitedBundleEntry {
+                    bundle_type: 6,
+                    map: V7BundleMap::EffectBundles
+                })
+            ));
+        }
+
+        #[test]
+        fn missing_effect_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[vp_entry(0, 0, 0, None, -1000)], &[], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::MissingEffectBundle { bundle_type: 0 })
+            ));
+        }
+
+        #[test]
+        fn missing_transparent_auth_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(0, 0, transparent_input_effects(true))],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::MissingTransparentAuth { tx_in_count: 1 })
+            ));
+        }
+
+        #[test]
+        fn missing_sapling_auth_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(2, 0, sapling_effects())], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::MissingShieldedAuth { bundle_type: 2 })
+            ));
+        }
+
+        #[test]
+        fn missing_orchard_auth_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(3, 0, orchard_effects(0))], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::MissingShieldedAuth { bundle_type: 3 })
+            ));
+        }
+
+        #[test]
+        fn missing_ironwood_auth_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(4, 0, orchard_effects(0))], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::MissingShieldedAuth { bundle_type: 4 })
+            ));
+        }
+
+        #[test]
+        fn unbalanced_non_zec_transparent_delta_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(0, 0, 1, Some([0x42; 64]), -1000)],
+                &[(0, 0, transparent_outputs_only_effects())],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::ValueImbalance {
+                        asset_class: 1,
+                        sum: -1000,
+                        ..
+                    }
+                ))
+            ));
+        }
+
+        #[test]
+        fn balanced_non_zec_transparent_delta_passes() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[
+                    vp_entry(0, 0, 1, Some([0x42; 64]), -1000),
+                    vp_entry(6, 0, 1, Some([0x42; 64]), 1000),
+                ],
+                &[(0, 0, transparent_input_effects(true))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            assert!(validate(&bytes).is_ok());
+        }
+
+        #[test]
+        fn non_zec_fee_delta_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(5, 0, 1, Some([0x42; 64]), -1000)],
+                &[],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::FeeAssetClassNotZec { asset_class: 1 }
+                ))
+            ));
+        }
+
+        #[test]
+        fn non_zec_coinbase_delta_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(1, 0, 1, Some([0x42; 64]), 1000)],
+                &[(1, 0, coinbase_effects(0, 0))],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseAssetClassNotZec { asset_class: 1 }
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_transparent_inputs_are_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[
+                    (0, 0, transparent_input_effects(true)),
+                    (1, 0, coinbase_effects(0, 0)),
+                ],
+                &[(0, 0, transparent_auth(0))],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseTransparentInputs { tx_in_count: 1 }
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_sapling_spends_are_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(1, 0, coinbase_effects(0, 0)), (2, 0, sapling_effects())],
+                &[(2, 0, sapling_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseSaplingSpends { spend_count: 1 }
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_orchard_enable_spends_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(1, 0, coinbase_effects(0, 0)), (3, 0, orchard_effects(1))],
+                &[(3, 0, orchard_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseEnableSpendsOrchardSet
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_ironwood_enable_spends_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(1, 0, coinbase_effects(0, 0)), (4, 0, orchard_effects(1))],
+                &[(4, 0, orchard_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseEnableSpendsOrchardSet
+                ))
+            ));
+        }
+
+        #[test]
+        fn orchard_cross_address_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(3, 0, orchard_effects(0b100))],
+                &[(3, 0, orchard_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::OrchardEnableCrossAddressSet
+                ))
+            ));
+        }
+
+        #[test]
+        fn non_coinbase_positive_fee_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(5, 0, 0, None, 1000)],
+                &[(0, 0, transparent_outputs_only_effects())],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::NonCoinbaseFeeDeltaPositive { .. }
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_negative_fee_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(5, 0, 0, None, -1000)],
+                &[(1, 0, coinbase_effects(0, 0))],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseFeeDeltaNegative { .. }
+                ))
+            ));
+        }
+
+        #[test]
+        fn coinbase_value_delta_mismatch_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(0, 0, 0, None, -3), vp_entry(1, 0, 0, None, 3)],
+                &[
+                    (0, 0, transparent_outputs_only_effects()),
+                    (1, 0, coinbase_effects(0, 0)),
+                ],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::CoinbaseValueDeltaMismatch {
+                        expected: 0,
+                        actual
+                    }
+                )) if actual == ZatBalance::from_i64(3).unwrap()
+            ));
+        }
+
+        #[test]
+        fn coinbase_value_delta_ignores_nsm_contribution() {
+            // The coinbase bundle issues 3 and locks 1, so its value pool
+            // delta is 2 regardless of the block's ZIP 235 NSM fee
+            // contribution. That contribution reduces the miner fee available
+            // from the fee bundle; it does not change the coinbase bundle's
+            // subsidy-minus-lockbox delta.
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[
+                    vp_entry(0, 0, 0, None, -2),
+                    vp_entry(1, 0, 0, None, 2),
+                    vp_entry(5, 0, 0, None, 1),
+                    vp_entry(6, 0, 0, None, -1),
+                ],
+                &[
+                    (0, 0, transparent_outputs_only_effects()),
+                    (1, 0, coinbase_effects(3, 1)),
+                ],
+                &[],
+            );
+            assert!(validate(&bytes).is_ok());
+        }
+
+        #[test]
+        fn value_imbalance_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(0, 0, 0, None, 1000)],
+                &[(0, 0, transparent_outputs_only_effects())],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::ValueImbalance { .. }
+                ))
+            ));
+        }
+
+        #[test]
+        fn missing_input_side_condition_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(0, 0, transparent_outputs_only_effects())],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::MissingInputSideCondition
+                ))
+            ));
+        }
+
+        #[test]
+        fn missing_output_side_condition_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(0, 0, transparent_input_effects(false))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::MissingOutputSideCondition
+                ))
+            ));
+        }
+
+        #[test]
+        fn positive_zip233_delta_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(6, 0, 0, None, 1000)],
+                &[(0, 0, transparent_outputs_only_effects())],
+                &[],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::Consensus(
+                    V7ConsensusError::Zip233DeltaPositive { .. }
+                ))
+            ));
+        }
+
+        #[test]
+        fn zip233_amount_satisfies_output_side_condition() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[
+                    vp_entry(0, 0, 0, None, 1000),
+                    vp_entry(6, 0, 0, None, -1000),
+                ],
+                &[(0, 0, transparent_input_effects(false))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            assert!(validate(&bytes).is_ok());
+        }
+
+        #[test]
+        fn domain_invalid_sapling_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(2, 0, sapling_effects())],
+                &[(2, 0, sapling_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::InvalidBundle { .. })
+            ));
+        }
+
+        #[test]
+        fn domain_invalid_orchard_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(3, 0, orchard_effects(0))],
+                &[(3, 0, orchard_auth())],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::InvalidBundle { .. })
+            ));
+        }
+
+        #[test]
+        fn unsupported_sighash_version_is_rejected() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(0, 0, transparent_input_effects(true))],
+                &[(0, 0, transparent_auth(1))],
+            );
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::InvalidBundle { .. })
+            ));
+        }
+
+        #[test]
+        fn not_v7_is_rejected() {
+            let body = V5TransactionBodyBytes::from_parts(
+                crate::transaction::components::transparent::LegacyTransparentBundleBytes::from_parts(
+                    vec![],
+                    vec![],
+                ),
+                None,
+                None,
+            );
+            let tx = TransactionBytes::from_parts(
+                crate::transaction::TxVersion::V5,
+                Some(BranchId::Nu5),
+                0,
+                BlockHeight::from_u32(100),
+                TransactionBodyBytes::V5(body),
+            )
+            .unwrap();
+            assert!(matches!(tx.validate_v7(), Err(V7ValidationError::NotV7)));
+        }
+
+        #[test]
+        fn not_activated_is_rejected() {
+            let bytes = wire_tx(BranchId::Nu7, &[], &[], &[]);
+            assert!(matches!(
+                validate(&bytes),
+                Err(V7ValidationError::NotActivated {
+                    branch_id: BranchId::Nu7
+                })
+            ));
+        }
+
+        #[test]
+        fn valid_transparent_transaction_passes() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[
+                    vp_entry(0, 0, 0, None, 1000),
+                    vp_entry(5, 0, 0, None, -1000),
+                ],
+                &[(0, 0, transparent_input_effects(true))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            assert!(validate(&bytes).is_ok());
+        }
+
+        #[test]
+        fn valid_coinbase_transaction_passes() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[vp_entry(0, 0, 0, None, -2), vp_entry(1, 0, 0, None, 2)],
+                &[
+                    (0, 0, transparent_outputs_only_effects()),
+                    (1, 0, coinbase_effects(3, 1)),
+                ],
+                &[],
+            );
+            assert!(validate(&bytes).is_ok());
+        }
+
+        #[test]
+        fn malformed_coinbase_height_fails_byte_parsing() {
+            let mut effects = coinbase_effects(0, 0);
+            effects[..4].copy_from_slice(&0u32.to_le_bytes());
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(1, 0, effects)], &[]);
+            assert!(TransactionBytes::read(&bytes[..]).is_err());
+        }
+
+        #[test]
+        fn malformed_coinbase_lockbox_fails_byte_parsing() {
+            let bytes = wire_tx(BranchId::Nu8, &[], &[(1, 0, coinbase_effects(1, 2))], &[]);
+            assert!(TransactionBytes::read(&bytes[..]).is_err());
+        }
+
+        #[test]
+        fn read_and_validate_v7_returns_the_typed_transaction() {
+            let bytes = wire_tx(
+                BranchId::Nu8,
+                &[
+                    vp_entry(0, 0, 0, None, 1000),
+                    vp_entry(5, 0, 0, None, -1000),
+                ],
+                &[(0, 0, transparent_input_effects(true))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            let tx = Transaction::read_and_validate_v7(&bytes[..]).unwrap();
+            assert_eq!(tx.version(), crate::transaction::TxVersion::V7);
+            assert!(tx.transparent_bundle().is_some());
+
+            // The validated typed transaction and the byte layer agree on the
+            // identifier, and the unvalidated typed reader produces the same
+            // transaction.
+            let byte_tx = TransactionBytes::read(&bytes[..]).unwrap();
+            let expected_txid = byte_tx
+                .v7_txid(&zip248::SuppliedBundleDigests::new())
+                .unwrap();
+            assert_eq!(tx.txid(), expected_txid);
+            assert_eq!(
+                Transaction::read(&bytes[..], BranchId::Nu8).unwrap().txid(),
+                expected_txid
+            );
+        }
+
+        #[test]
+        fn read_and_validate_v7_reports_encoding_errors() {
+            let bytes = [0u8; 4];
+            assert!(matches!(
+                Transaction::read_and_validate_v7(&bytes[..]),
+                Err(V7ValidationError::InvalidEncoding { .. })
+            ));
+        }
+
+        /// Builds a value pool delta map with a non-ZEC entry for
+        /// `bundle_type` balanced against a non-ZEC transparent entry.
+        fn balanced_non_zec_vp(bundle_type: zip248::BundleType) -> zip248::ValuePoolDeltas {
+            let uuid = [0x42; 64];
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            for (bundle_type, value) in [
+                (zip248::BundleType::Transparent, -1000i64),
+                (bundle_type, 1000i64),
+            ] {
+                vp.insert_known(
+                    zip248::ValuePoolDeltaKey::from_parts(
+                        bundle_type,
+                        zip248::ASSET_CLASS_OTHER,
+                        uuid,
+                    )
+                    .unwrap(),
+                    zip248::BundleVariant::Default,
+                    ZatBalance::from_i64(value).unwrap(),
+                )
+                .unwrap();
+            }
+            vp
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(4))]
+
+            /// A non-ZEC Sapling entry is accepted when it balances per asset.
+            #[test]
+            fn balanced_non_zec_sapling_delta_passes(
+                bundle in crate::transaction::components::sapling::testing::arb_bundle_for_version(
+                    crate::transaction::TxVersion::V7,
+                ).prop_filter("a Sapling bundle is only interesting when present", |b| b.is_some()),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+                let tx = super::super::super::TransactionData::<super::super::super::Authorized>::from_parts_with_value_pool_deltas(
+                    crate::transaction::TxVersion::V7,
+                    BranchId::Nu8,
+                    0,
+                    BlockHeight::from_u32(100),
+                    balanced_non_zec_vp(zip248::BundleType::Sapling),
+                    Some(transparent_bundle()),
+                    None,
+                    Some(bundle),
+                    None,
+                    None,
+                    None,
+                )
+                .freeze()
+                .unwrap();
+
+                prop_assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+            }
+
+            /// A non-ZEC Orchard entry is accepted when it balances per asset.
+            #[test]
+            fn balanced_non_zec_orchard_delta_passes(
+                bundle in crate::transaction::components::orchard::testing::arb_bundle_for_version(
+                    crate::transaction::TxVersion::V7,
+                ).prop_filter("an Orchard bundle is only interesting when present", |b| b.is_some()),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+                let tx = super::super::super::TransactionData::<super::super::super::Authorized>::from_parts_with_value_pool_deltas(
+                    crate::transaction::TxVersion::V7,
+                    BranchId::Nu8,
+                    0,
+                    BlockHeight::from_u32(100),
+                    balanced_non_zec_vp(zip248::BundleType::Orchard),
+                    Some(transparent_bundle()),
+                    None,
+                    None,
+                    Some(bundle),
+                    None,
+                    None,
+                )
+                .freeze()
+                .unwrap();
+
+                prop_assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+            }
+
+            /// A valid Ironwood bundle may set `enableCrossAddress`; the
+            /// restriction applies only to the Orchard bundle.
+            #[test]
+            fn valid_ironwood_cross_address_passes(
+                bundle in crate::transaction::components::orchard::testing::arb_ironwood_bundle_for_version(
+                    crate::transaction::TxVersion::V7,
+                ).prop_filter("an Ironwood bundle is only interesting when present", |b| b.is_some()),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+                let value_balance = *bundle.value_balance();
+
+                let mut vp = zip248::ValuePoolDeltas::empty();
+                vp.set_ironwood(value_balance).unwrap();
+                vp.set_transparent(-value_balance).unwrap();
+
+                let tx = super::super::super::TransactionData::<super::super::super::Authorized>::from_parts_with_value_pool_deltas(
+                    crate::transaction::TxVersion::V7,
+                    BranchId::Nu8,
+                    0,
+                    BlockHeight::from_u32(100),
+                    vp,
+                    Some(transparent_bundle()),
+                    None,
+                    None,
+                    None,
+                    Some(bundle),
+                    None,
+                )
+                .freeze()
+                .unwrap();
+
+                let mut buf = Vec::new();
+                tx.write(&mut buf).unwrap();
+                let validated = Transaction::read_and_validate_v7(&buf[..])
+                    .expect("a valid Ironwood transaction must validate");
+                prop_assert_eq!(validated.txid(), tx.txid());
+            }
+
+            /// The Orchard pool balance must be nonnegative. Sapling and
+            /// Ironwood balances are unrestricted.
+            #[test]
+            fn orchard_pool_balance_must_be_nonnegative(
+                bundle in crate::transaction::components::orchard::testing::arb_bundle_for_version(
+                    crate::transaction::TxVersion::V7,
+                ).prop_filter("an Orchard bundle is only interesting when present", |b| b.is_some()),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+
+                let build = |orchard_delta: i64| {
+                    let mut vp = zip248::ValuePoolDeltas::empty();
+                    vp.set_orchard(ZatBalance::from_i64(orchard_delta).unwrap()).unwrap();
+                    vp.set_transparent(ZatBalance::from_i64(-orchard_delta).unwrap()).unwrap();
+                    super::super::super::TransactionData::<super::super::super::Authorized>::from_parts_with_value_pool_deltas(
+                        crate::transaction::TxVersion::V7,
+                        BranchId::Nu8,
+                        0,
+                        BlockHeight::from_u32(100),
+                        vp,
+                        Some(transparent_bundle()),
+                        None,
+                        None,
+                        Some(bundle.clone()),
+                        None,
+                        None,
+                    )
+                    .freeze()
+                    .unwrap()
+                };
+
+                let negative = build(-1000);
+                assert!(matches!(
+                    negative.check_v7_consensus_rules(),
+                    Err(V7ConsensusError::OrchardPoolBalanceNegative { .. })
+                ));
+
+                let mut negative_bytes = Vec::new();
+                negative.write(&mut negative_bytes).unwrap();
+                assert!(matches!(
+                    Transaction::read_and_validate_v7(&negative_bytes[..]),
+                    Err(V7ValidationError::Consensus(
+                        V7ConsensusError::OrchardPoolBalanceNegative { .. }
+                    ))
+                ));
+
+                for delta in [0, 1000] {
+                    let tx = build(delta);
+                    prop_assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+                    let mut buf = Vec::new();
+                    tx.write(&mut buf).unwrap();
+                    let validated = Transaction::read_and_validate_v7(&buf[..])
+                        .expect("a nonnegative Orchard balance must validate");
+                    prop_assert_eq!(validated.txid(), tx.txid());
+                }
+            }
+
+            /// A transaction whose per-asset deltas sum to zero must not be
+            /// rejected because an intermediate partial sum leaves the
+            /// `ZatBalance` range.
+            ///
+            /// The ZIP 233 opt-in rejects nonzero ZIP 233 amounts, so this
+            /// offsetting case is only applicable without it.
+            #[cfg(not(zcash_unstable = "zip233"))]
+            #[test]
+            fn offsetting_value_pool_deltas_do_not_overflow(
+                bundle in crate::transaction::components::orchard::testing::arb_bundle_for_version(
+                    crate::transaction::TxVersion::V7,
+                ).prop_filter("an Orchard bundle is only interesting when present", |b| b.is_some()),
+            ) {
+                let bundle = bundle.expect("filtered to Some");
+                let max = i64::try_from(MAX_MONEY).unwrap();
+
+                let mut vp = zip248::ValuePoolDeltas::empty();
+                vp.set_transparent(ZatBalance::from_i64(max).unwrap()).unwrap();
+                vp.set_orchard(ZatBalance::from_i64(max).unwrap()).unwrap();
+                vp.set_fee(Zatoshis::from_u64(MAX_MONEY).unwrap()).unwrap();
+                vp.set_zip233(Zatoshis::from_u64(MAX_MONEY).unwrap()).unwrap();
+
+                let tx = super::super::super::TransactionData::<super::super::super::Authorized>::from_parts_with_value_pool_deltas(
+                    crate::transaction::TxVersion::V7,
+                    BranchId::Nu8,
+                    0,
+                    BlockHeight::from_u32(100),
+                    vp,
+                    Some(transparent_bundle()),
+                    None,
+                    None,
+                    Some(bundle),
+                    None,
+                    None,
+                )
+                .freeze()
+                .unwrap();
+
+                prop_assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
+
+                let mut buf = Vec::new();
+                tx.write(&mut buf).unwrap();
+                let validated = Transaction::read_and_validate_v7(&buf[..])
+                    .expect("an offsetting transaction must validate");
+                prop_assert_eq!(validated.txid(), tx.txid());
+            }
+        }
+    }
+
     // -- In-memory-only BundleType panic tests ---------------------------------
 
     #[test]
     #[should_panic(expected = "in-memory-only")]
     fn sprout_bundle_type_has_no_wire_encoding() {
         let _ = zip248::BundleType::Sprout.to_u64();
+    }
+}
+
+/// Byte-level ZIP 248 digest resolution.
+///
+/// These tests compare the byte-layer digest tree against the typed path for
+/// the same transaction, and exercise the explicit-digest route for bundles the
+/// byte layer does not interpret.
+#[cfg(all(test, zcash_unstable = "nu8"))]
+mod v7_byte_digests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use blake2b_simd::Hash as Blake2bHash;
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        value::{ZatBalance, Zatoshis},
+    };
+
+    use super::{
+        Authorized, TransactionData, TxVersion, test_ironwood_bundle, test_orchard_bundle,
+        test_sapling_bundle, test_sapling_output_only_bundle,
+    };
+    use crate::transaction::{
+        bytes::{
+            OpaqueBundleBytes, OrchardSignatureBytes, RawBundleType, RawBundleVariant,
+            SaplingSignatureBytes, SighashInfoBytes, TransactionBodyBytes, TransactionBytes,
+            V7BundleBytes, V7OrchardBundleBytes, V7SaplingBundleBytes, V7TransactionBodyBytes,
+        },
+        zip248::{self, BundleDigestKey, SuppliedBundleDigests, V7DigestError},
+    };
+
+    fn transparent_bundle() -> ::transparent::bundle::Bundle<::transparent::bundle::Authorized> {
+        use ::transparent::{
+            address::Script,
+            bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
+        };
+
+        Bundle {
+            vin: vec![TxIn::from_parts(
+                OutPoint::new([1; 32], 2),
+                Script::default(),
+                3,
+            )],
+            vout: vec![TxOut::new(
+                Zatoshis::from_u64(1000).unwrap(),
+                Script::default(),
+            )],
+            authorization: Authorized,
+        }
+    }
+
+    fn typed_v7_tx(
+        runner: &mut proptest::test_runner::TestRunner,
+        sapling: bool,
+        orchard: bool,
+        ironwood: bool,
+        coinbase: bool,
+    ) -> TransactionData<Authorized> {
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_transparent(ZatBalance::from_i64(-1000).unwrap())
+            .unwrap();
+        vp.set_fee(Zatoshis::from_u64(1000).unwrap()).unwrap();
+
+        let transparent = Some(transparent_bundle());
+
+        let coinbase = coinbase.then(|| {
+            let bundle = zip248::CoinbaseBundle::from_parts(
+                BlockHeight::from(100u32),
+                Zatoshis::from_u64(1_000_000).unwrap(),
+                Zatoshis::from_u64(0).unwrap(),
+                vec![0x51],
+            )
+            .unwrap();
+            vp.set_coinbase(ZatBalance::from_i64(1_000_000).unwrap())
+                .unwrap();
+            bundle
+        });
+        let sapling = sapling.then(|| {
+            let bundle = test_sapling_bundle(runner);
+            vp.set_sapling(*bundle.value_balance()).unwrap();
+            bundle
+        });
+        let orchard = orchard.then(|| {
+            let bundle = test_orchard_bundle(runner);
+            vp.set_orchard(*bundle.value_balance()).unwrap();
+            bundle
+        });
+        let ironwood = ironwood.then(|| {
+            let bundle = test_ironwood_bundle(runner);
+            vp.set_ironwood(*bundle.value_balance()).unwrap();
+            bundle
+        });
+
+        TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from_u32(100),
+            vp,
+            transparent,
+            None,
+            sapling,
+            orchard,
+            ironwood,
+            coinbase,
+        )
+    }
+
+    fn byte_tx(tx: &TransactionData<Authorized>) -> TransactionBytes {
+        let tx = tx.clone().freeze().unwrap();
+        let mut encoded = Vec::new();
+        tx.write(&mut encoded).unwrap();
+        TransactionBytes::read(&encoded[..]).unwrap()
+    }
+
+    fn assert_digests_match(typed: &TransactionData<Authorized>, bytes: &TransactionBytes) {
+        let empty = SuppliedBundleDigests::new();
+        let typed_digests = typed.digest_v7();
+        let byte_digests = bytes.v7_txid_digests(&empty).unwrap();
+
+        assert_eq!(byte_digests.header_digest, typed_digests.header_digest);
+        match (
+            &byte_digests.transparent_digests,
+            &typed_digests.transparent_digests,
+        ) {
+            (Some(byte), Some(typed)) => {
+                assert_eq!(byte.prevouts_digest, typed.prevouts_digest);
+                assert_eq!(byte.sequence_digest, typed.sequence_digest);
+                assert_eq!(byte.outputs_digest, typed.outputs_digest);
+            }
+            (None, None) => {}
+            _ => panic!("transparent digest presence differs between paths"),
+        }
+        assert_eq!(byte_digests.coinbase_digest, typed_digests.coinbase_digest);
+        assert_eq!(byte_digests.sapling_digest, typed_digests.sapling_digest);
+        assert_eq!(byte_digests.orchard_digest, typed_digests.orchard_digest);
+        assert_eq!(byte_digests.ironwood_digest, typed_digests.ironwood_digest);
+        assert_eq!(
+            byte_digests.value_pool_deltas_digest,
+            typed_digests.value_pool_deltas_digest
+        );
+        assert_eq!(
+            byte_digests.unknown_effect_digests,
+            typed_digests.unknown_effect_digests
+        );
+
+        let typed_tx = typed.clone().freeze().unwrap();
+        assert_eq!(bytes.v7_txid(&empty).unwrap(), typed_tx.txid());
+        assert_eq!(
+            bytes.v7_auth_commitment(&empty).unwrap(),
+            typed_tx.auth_commitment()
+        );
+    }
+
+    #[test]
+    fn byte_digests_match_typed_path_for_all_known_bundles() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, true, true);
+        let bytes = byte_tx(&typed);
+        assert_digests_match(&typed, &bytes);
+    }
+
+    /// [ZIP 248 §T.3.4] gives the Ironwood action sub-digests their own
+    /// personalizations, distinct from both the Orchard ones and the v6
+    /// Ironwood ones. Recompute the effects digest from the bundle's actions
+    /// using the literal spec strings so that a regression in the shared
+    /// constants cannot silently change the txid.
+    ///
+    /// [ZIP 248 §T.3.4]: https://zips.z.cash/zip-0248#t-3-4-ironwood-effects-digest
+    #[test]
+    fn ironwood_effects_digest_uses_zip248_action_personalizations() {
+        use blake2b_simd::Params;
+
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let bundle = test_ironwood_bundle(&mut runner);
+        assert!(
+            !bundle.actions().is_empty(),
+            "the regression fixture must have Ironwood actions"
+        );
+
+        let hasher =
+            |personal: &[u8; 16]| Params::new().hash_length(32).personal(personal).to_state();
+
+        let mut compact = hasher(b"ZTxIdIrnActCHash");
+        let mut memos = hasher(b"ZTxIdIrnActMHash");
+        let mut noncompact = hasher(b"ZTxIdIrnActNHash");
+        for action in bundle.actions().iter() {
+            let note = action.encrypted_note();
+            let enc_ciphertext: &[u8; 580] = note
+                .enc_ciphertext
+                .as_ref()
+                .try_into()
+                .expect("Orchard enc_ciphertext is 580 bytes");
+
+            compact.update(&action.nullifier().to_bytes());
+            compact.update(&action.cmx().to_bytes());
+            compact.update(&note.epk_bytes);
+            compact.update(&enc_ciphertext[..52]);
+
+            memos.update(&enc_ciphertext[52..564]);
+
+            noncompact.update(&action.cv_net().to_bytes());
+            noncompact.update(&<[u8; 32]>::from(action.rk()));
+            noncompact.update(&enc_ciphertext[564..]);
+            noncompact.update(&note.out_ciphertext);
+        }
+
+        let mut expected = hasher(b"ZTxIdIronwd_Hash");
+        expected.update(compact.finalize().as_bytes());
+        expected.update(memos.finalize().as_bytes());
+        expected.update(noncompact.finalize().as_bytes());
+        expected.update(&[bundle.flag_byte()]);
+        let expected = expected.finalize();
+
+        assert_eq!(
+            crate::transaction::txid::hash_v7_ironwood_effects(&bundle).as_bytes(),
+            expected.as_bytes(),
+        );
+    }
+
+    #[test]
+    fn v7_byte_bundles_convert_to_typed() {
+        use crate::transaction::components::orchard::bundle_version_for_branch;
+
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, true, true);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+        let vp = body.to_value_pool_deltas().unwrap();
+
+        assert_eq!(
+            body.transparent().unwrap().to_authorized().unwrap(),
+            typed.transparent_bundle().cloned(),
+        );
+        assert_eq!(
+            body.coinbase().unwrap().to_coinbase_bundle().unwrap(),
+            *typed.coinbase_bundle().unwrap(),
+        );
+        let sapling = body
+            .sapling()
+            .unwrap()
+            .to_authorized(vp.sapling_value().unwrap())
+            .unwrap();
+        let mut effects = Vec::new();
+        crate::transaction::components::sapling::write_v7_effects(&mut effects, &sapling).unwrap();
+        let mut auth = Vec::new();
+        crate::transaction::components::sapling::write_v7_auth(&mut auth, &sapling).unwrap();
+        let mut expected_effects = Vec::new();
+        body.sapling()
+            .unwrap()
+            .write_effects(&mut expected_effects)
+            .unwrap();
+        let mut expected_auth = Vec::new();
+        body.sapling()
+            .unwrap()
+            .write_auth(&mut expected_auth)
+            .unwrap();
+        assert_eq!(effects, expected_effects);
+        assert_eq!(auth, expected_auth);
+
+        let orchard = body
+            .orchard()
+            .unwrap()
+            .to_authorized(
+                vp.orchard_value().unwrap(),
+                bundle_version_for_branch(BranchId::Nu8, orchard::ValuePool::Orchard),
+            )
+            .unwrap();
+        let mut effects = Vec::new();
+        crate::transaction::components::orchard::write_v7_effects(&mut effects, &orchard).unwrap();
+        let mut auth = Vec::new();
+        crate::transaction::components::orchard::write_v7_auth(&mut auth, &orchard).unwrap();
+        let mut expected_effects = Vec::new();
+        body.orchard()
+            .unwrap()
+            .write_effects(&mut expected_effects)
+            .unwrap();
+        let mut expected_auth = Vec::new();
+        body.orchard()
+            .unwrap()
+            .write_auth(&mut expected_auth)
+            .unwrap();
+        assert_eq!(effects, expected_effects);
+        assert_eq!(auth, expected_auth);
+
+        let ironwood = body
+            .ironwood()
+            .unwrap()
+            .to_authorized(
+                vp.ironwood_value().unwrap(),
+                bundle_version_for_branch(BranchId::Nu8, orchard::ValuePool::Ironwood),
+            )
+            .unwrap();
+        let mut effects = Vec::new();
+        crate::transaction::components::orchard::write_v7_effects(&mut effects, &ironwood).unwrap();
+        let mut auth = Vec::new();
+        crate::transaction::components::orchard::write_v7_auth(&mut auth, &ironwood).unwrap();
+        let mut expected_effects = Vec::new();
+        body.ironwood()
+            .unwrap()
+            .write_effects(&mut expected_effects)
+            .unwrap();
+        let mut expected_auth = Vec::new();
+        body.ironwood()
+            .unwrap()
+            .write_auth(&mut expected_auth)
+            .unwrap();
+        assert_eq!(effects, expected_effects);
+        assert_eq!(auth, expected_auth);
+    }
+
+    #[test]
+    fn v7_effect_only_bundles_have_no_typed_representation() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, false, false);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+
+        let sapling = body.sapling().unwrap();
+        let effect_only = V7SaplingBundleBytes::from_parts(
+            sapling.spends().to_vec(),
+            sapling.outputs().to_vec(),
+            None,
+            vec![],
+            vec![],
+            vec![],
+            None,
+        )
+        .unwrap();
+        let err = effect_only.to_authorized(ZatBalance::zero()).unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("no authorizing data"));
+
+        let orchard = body.orchard().unwrap();
+        let effect_only = V7OrchardBundleBytes::from_parts(
+            orchard.actions().to_vec(),
+            orchard.flags(),
+            None,
+            vec![],
+            vec![],
+            None,
+        )
+        .unwrap();
+        let err = effect_only
+            .to_authorized(
+                ZatBalance::zero(),
+                crate::transaction::components::orchard::bundle_version_for_branch(
+                    BranchId::Nu8,
+                    orchard::ValuePool::Orchard,
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("no authorizing data"));
+    }
+
+    #[test]
+    fn v7_bundles_reject_unsupported_sighash_versions() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, false, false);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+
+        let sapling = body.sapling().unwrap();
+        let bad_sig =
+            SaplingSignatureBytes::from_parts(SighashInfoBytes::from_bytes(vec![0x01]), [0u8; 64]);
+        let bad_sapling = V7SaplingBundleBytes::from_parts(
+            sapling.spends().to_vec(),
+            sapling.outputs().to_vec(),
+            sapling.anchor().copied(),
+            sapling.spend_proofs().to_vec(),
+            vec![bad_sig.clone(); sapling.spends().len()],
+            sapling.output_proofs().to_vec(),
+            Some(bad_sig),
+        )
+        .unwrap();
+        let err = bad_sapling.to_authorized(ZatBalance::zero()).unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("sighash version"));
+
+        let orchard = body.orchard().unwrap();
+        let bad_sig =
+            OrchardSignatureBytes::from_parts(SighashInfoBytes::from_bytes(vec![0x01]), [0u8; 64]);
+        let bad_orchard = V7OrchardBundleBytes::from_parts(
+            orchard.actions().to_vec(),
+            orchard.flags(),
+            orchard.anchor().copied(),
+            orchard.proof().to_vec(),
+            vec![bad_sig.clone(); orchard.actions().len()],
+            Some(bad_sig),
+        )
+        .unwrap();
+        let err = bad_orchard
+            .to_authorized(
+                ZatBalance::zero(),
+                crate::transaction::components::orchard::bundle_version_for_branch(
+                    BranchId::Nu8,
+                    orchard::ValuePool::Orchard,
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("sighash version"));
+    }
+
+    #[test]
+    fn v7_orchard_bundle_rejects_unsupported_branch() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, false, true, false, false);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+        let orchard = body.orchard().unwrap();
+
+        let err = orchard.to_authorized(ZatBalance::zero(), None).unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("may not be present"));
+    }
+
+    #[test]
+    fn byte_digests_match_typed_path_for_sapling_output_only() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_transparent(ZatBalance::from_i64(-1000).unwrap())
+            .unwrap();
+        vp.set_fee(Zatoshis::from_u64(1000).unwrap()).unwrap();
+        let bundle = test_sapling_output_only_bundle(&mut runner);
+        vp.set_sapling(*bundle.value_balance()).unwrap();
+
+        let typed = TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from_u32(100),
+            vp,
+            Some(transparent_bundle()),
+            None,
+            Some(bundle),
+            None,
+            None,
+            None,
+        );
+        let bytes = byte_tx(&typed);
+        assert_digests_match(&typed, &bytes);
+    }
+
+    #[test]
+    fn sapling_effects_digest_requires_anchor_when_spends_are_present() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, true, false);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+
+        let sapling = body.sapling().unwrap();
+        let effect_only = crate::transaction::bytes::V7SaplingBundleBytes::from_parts(
+            sapling.spends().to_vec(),
+            sapling.outputs().to_vec(),
+            None,
+            vec![],
+            vec![],
+            vec![],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::transaction::txid::hash_v7_sapling_effects_bytes(&effect_only),
+            Err(V7DigestError::MissingSaplingAnchor),
+            "a Sapling bundle with spends cannot resolve its effects digest without an anchor"
+        );
+    }
+
+    #[test]
+    fn orchard_effects_digest_does_not_depend_on_authorizing_data() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let typed = typed_v7_tx(&mut runner, true, true, true, false);
+        let bytes = byte_tx(&typed);
+        let body = bytes.body().as_v7().unwrap();
+
+        let orchard = body.orchard().unwrap();
+        let effect_only = crate::transaction::bytes::V7OrchardBundleBytes::from_parts(
+            orchard.actions().to_vec(),
+            orchard.flags(),
+            None,
+            vec![],
+            vec![],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::transaction::txid::hash_v7_orchard_effects_bytes(&effect_only),
+            crate::transaction::txid::hash_v7_orchard_effects_bytes(orchard)
+        );
+    }
+
+    #[test]
+    fn v7_sapling_anchor_changes_txid_and_auth_commitment() {
+        use super::{sapling_bundle_with_anchor, test_sapling_anchor};
+
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let base = typed_v7_tx(&mut runner, true, true, false, false);
+        let vp = base.value_pool_deltas().clone();
+        let sapling = base.sapling_bundle().unwrap().clone();
+        let orchard = base.orchard_bundle().unwrap().clone();
+
+        let build = |sapling| {
+            TransactionData::from_parts_with_value_pool_deltas(
+                TxVersion::V7,
+                BranchId::Nu8,
+                0,
+                BlockHeight::from_u32(100),
+                vp.clone(),
+                Some(transparent_bundle()),
+                None,
+                Some(sapling),
+                Some(orchard.clone()),
+                None,
+                None,
+            )
+        };
+
+        let tx_a = build(sapling.clone());
+        let tx_b = build(sapling_bundle_with_anchor(&sapling, test_sapling_anchor(1)));
+
+        let bytes_a = byte_tx(&tx_a);
+        let bytes_b = byte_tx(&tx_b);
+        let empty = SuppliedBundleDigests::new();
+
+        assert_ne!(
+            bytes_a.v7_txid(&empty).unwrap(),
+            bytes_b.v7_txid(&empty).unwrap(),
+            "the v7 Sapling spends digest hashes the anchor once per spend"
+        );
+        assert_ne!(
+            bytes_a.v7_auth_commitment(&empty).unwrap(),
+            bytes_b.v7_auth_commitment(&empty).unwrap(),
+            "the anchor must change the authorizing-data commitment"
+        );
+    }
+
+    #[test]
+    fn v7_orchard_anchor_changes_auth_commitment_not_txid() {
+        use super::{bundle_with_anchor, test_anchor};
+
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let base = typed_v7_tx(&mut runner, true, true, false, false);
+        let vp = base.value_pool_deltas().clone();
+        let sapling = base.sapling_bundle().unwrap().clone();
+        let orchard = base.orchard_bundle().unwrap().clone();
+
+        let build = |orchard| {
+            TransactionData::from_parts_with_value_pool_deltas(
+                TxVersion::V7,
+                BranchId::Nu8,
+                0,
+                BlockHeight::from_u32(100),
+                vp.clone(),
+                Some(transparent_bundle()),
+                None,
+                Some(sapling.clone()),
+                Some(orchard),
+                None,
+                None,
+            )
+        };
+
+        let tx_a = build(orchard.clone());
+        let tx_b = build(bundle_with_anchor(&orchard, test_anchor(1)));
+
+        let bytes_a = byte_tx(&tx_a);
+        let bytes_b = byte_tx(&tx_b);
+        let empty = SuppliedBundleDigests::new();
+
+        assert_eq!(
+            bytes_a.v7_txid(&empty).unwrap(),
+            bytes_b.v7_txid(&empty).unwrap(),
+            "the anchor is authorizing data and must not change the txid"
+        );
+        assert_ne!(
+            bytes_a.v7_auth_commitment(&empty).unwrap(),
+            bytes_b.v7_auth_commitment(&empty).unwrap(),
+            "the anchor must change the authorizing-data commitment"
+        );
+    }
+
+    fn unknown_body(bundle: V7BundleBytes) -> TransactionBytes {
+        let body = V7TransactionBodyBytes::from_parts(vec![], vec![bundle]).unwrap();
+        TransactionBytes::from_parts(
+            TxVersion::V7,
+            Some(BranchId::Nu8),
+            0,
+            BlockHeight::from_u32(100),
+            TransactionBodyBytes::V7(body),
+        )
+        .unwrap()
+    }
+
+    fn test_digest(byte: u8) -> Blake2bHash {
+        blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(b"test_unknown_efx")
+            .hash(&[byte])
+    }
+
+    #[test]
+    fn unknown_bundle_requires_supplied_effect_digest() {
+        let opaque = OpaqueBundleBytes::from_parts(
+            RawBundleType::from_u64(99),
+            RawBundleVariant::from_u64(0),
+            vec![1, 2, 3],
+            None,
+        )
+        .unwrap();
+        let tx = unknown_body(V7BundleBytes::Unknown(opaque));
+        let key = BundleDigestKey::new(99, 0);
+
+        let empty = SuppliedBundleDigests::new();
+        assert_eq!(
+            tx.v7_txid(&empty),
+            Err(V7DigestError::MissingEffectsDigest { key })
+        );
+
+        // A digest supplied under the wrong key does not resolve the needed
+        // key.
+        let mut wrong = SuppliedBundleDigests::new();
+        wrong
+            .insert_effects(BundleDigestKey::new(98, 0), test_digest(1))
+            .unwrap();
+        assert_eq!(
+            tx.v7_txid(&wrong),
+            Err(V7DigestError::MissingEffectsDigest { key })
+        );
+
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(2)).unwrap();
+        assert!(tx.v7_txid(&supplied).is_ok());
+    }
+
+    #[test]
+    fn known_type_unknown_variant_requires_supplied_digest() {
+        let opaque = OpaqueBundleBytes::from_parts(
+            RawBundleType::from_u64(2),
+            RawBundleVariant::from_u64(1),
+            vec![1, 2, 3],
+            Some(vec![4, 5]),
+        )
+        .unwrap();
+        let tx = unknown_body(V7BundleBytes::KnownTypeUnknownVariant(opaque));
+        let key = BundleDigestKey::new(2, 1);
+
+        let empty = SuppliedBundleDigests::new();
+        assert_eq!(
+            tx.v7_txid(&empty),
+            Err(V7DigestError::MissingEffectsDigest { key })
+        );
+        assert_eq!(
+            tx.v7_auth_commitment(&empty),
+            Err(V7DigestError::MissingAuthDigest { key })
+        );
+
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(3)).unwrap();
+        assert_eq!(
+            tx.v7_auth_commitment(&supplied),
+            Err(V7DigestError::MissingAuthDigest { key })
+        );
+        supplied.insert_auth(key, test_digest(4)).unwrap();
+        assert!(tx.v7_txid(&supplied).is_ok());
+        assert!(tx.v7_auth_commitment(&supplied).is_ok());
+    }
+
+    #[test]
+    fn known_opaque_bundle_requires_supplied_digest() {
+        let opaque = OpaqueBundleBytes::from_parts(
+            RawBundleType::from_u64(5),
+            RawBundleVariant::from_u64(0),
+            vec![0x00],
+            None,
+        )
+        .unwrap();
+        let tx = unknown_body(V7BundleBytes::KnownOpaque(opaque));
+        let key = BundleDigestKey::new(5, 0);
+
+        let empty = SuppliedBundleDigests::new();
+        assert_eq!(
+            tx.v7_txid(&empty),
+            Err(V7DigestError::MissingEffectsDigest { key })
+        );
+
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(5)).unwrap();
+        assert!(tx.v7_txid(&supplied).is_ok());
+    }
+
+    #[test]
+    fn supplied_unknown_digest_gives_canonical_txid() {
+        let effect_digest = test_digest(2);
+        let auth_digest = test_digest(3);
+        let key = BundleDigestKey::new(99, 0);
+
+        let opaque = OpaqueBundleBytes::from_parts(
+            RawBundleType::from_u64(99),
+            RawBundleVariant::from_u64(0),
+            vec![1, 2, 3],
+            Some(vec![4, 5]),
+        )
+        .unwrap();
+        let tx = unknown_body(V7BundleBytes::Unknown(opaque));
+
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, effect_digest).unwrap();
+        supplied.insert_auth(key, auth_digest).unwrap();
+
+        let txid = tx.v7_txid(&supplied).unwrap();
+        let digests = tx.v7_txid_digests(&supplied).unwrap();
+        assert_eq!(
+            txid,
+            super::super::txid::to_txid(TxVersion::V7, BranchId::Nu8, &digests).unwrap()
+        );
+
+        // The supplied digests are what the transaction commits to: changing
+        // the effecting digest changes the txid, and changing the authorizing
+        // digest changes the auth commitment.
+        let auth_commitment = tx.v7_auth_commitment(&supplied).unwrap();
+        let mut other_effects = SuppliedBundleDigests::new();
+        other_effects.insert_effects(key, test_digest(5)).unwrap();
+        other_effects.insert_auth(key, auth_digest).unwrap();
+        assert_ne!(txid, tx.v7_txid(&other_effects).unwrap());
+
+        let mut other_auth = SuppliedBundleDigests::new();
+        other_auth.insert_effects(key, effect_digest).unwrap();
+        other_auth.insert_auth(key, test_digest(4)).unwrap();
+        assert_ne!(auth_commitment, tx.v7_auth_commitment(&other_auth).unwrap());
+    }
+
+    #[test]
+    fn supplied_digests_reject_duplicates_and_conflicts() {
+        let key = BundleDigestKey::new(99, 0);
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(1)).unwrap();
+        assert_eq!(
+            supplied.insert_effects(key, test_digest(1)),
+            Err(V7DigestError::DuplicateEffectsDigest { key })
+        );
+        assert_eq!(
+            supplied.insert_effects(key, test_digest(2)),
+            Err(V7DigestError::ConflictingEffectsDigest { key })
+        );
+
+        supplied.insert_auth(key, test_digest(3)).unwrap();
+        assert_eq!(
+            supplied.insert_auth(key, test_digest(3)),
+            Err(V7DigestError::DuplicateAuthDigest { key })
+        );
+        assert_eq!(
+            supplied.insert_auth(key, test_digest(4)),
+            Err(V7DigestError::ConflictingAuthDigest { key })
+        );
+    }
+
+    #[test]
+    fn supplied_digests_reject_unexpected_keys() {
+        let key = BundleDigestKey::new(99, 0);
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(1)).unwrap();
+        supplied.insert_auth(key, test_digest(2)).unwrap();
+
+        assert_eq!(
+            supplied.validate_for([&BundleDigestKey::new(98, 0)]),
+            Err(V7DigestError::UnexpectedEffectsDigest { key })
+        );
+
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_auth(key, test_digest(2)).unwrap();
+        assert_eq!(
+            supplied.validate_for([&BundleDigestKey::new(98, 0)]),
+            Err(V7DigestError::UnexpectedAuthDigest { key })
+        );
+    }
+}
+
+/// Byte-to-typed conversion tests for the pre-v7 bundle formats.
+#[cfg(test)]
+mod conversions {
+    use super::*;
+    use crate::transaction::{
+        bytes::{
+            OrchardBundleBytes, SaplingBundleBytes, SaplingSpendV4Bytes, V4SaplingBundleBytes,
+        },
+        components::{orchard as orchard_serialization, sapling as sapling_serialization},
+    };
+
+    #[test]
+    fn v4_sapling_requires_a_binding_signature() {
+        let bundle = V4SaplingBundleBytes::from_parts(
+            ZatBalance::zero(),
+            vec![SaplingSpendV4Bytes::from_parts(
+                [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 192], [0u8; 64],
+            )],
+            vec![],
+        );
+
+        let err = bundle.to_authorized(None).unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("binding signature"));
+    }
+
+    #[test]
+    fn v5_sapling_and_orchard_convert_to_typed() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+
+        let sapling = test_sapling_bundle(&mut runner);
+        let mut buf = Vec::new();
+        sapling_serialization::write_v5_bundle(&mut buf, Some(&sapling)).unwrap();
+        let bytes = SaplingBundleBytes::read(&buf[..]).unwrap().unwrap();
+        let converted = bytes.to_authorized().unwrap();
+        let mut reserialized = Vec::new();
+        sapling_serialization::write_v5_bundle(&mut reserialized, Some(&converted)).unwrap();
+        assert_eq!(reserialized, buf);
+
+        let orchard = test_orchard_bundle(&mut runner);
+        let mut buf = Vec::new();
+        orchard_serialization::write_v5_bundle(Some(&orchard), &mut buf).unwrap();
+        let bytes = OrchardBundleBytes::read(&buf[..]).unwrap().unwrap();
+        let version = orchard_serialization::bundle_version_for_branch(
+            BranchId::Nu6_3,
+            orchard::ValuePool::Orchard,
+        );
+        let converted = bytes.to_authorized(version).unwrap();
+        let mut reserialized = Vec::new();
+        orchard_serialization::write_v5_bundle(Some(&converted), &mut reserialized).unwrap();
+        assert_eq!(reserialized, buf);
+    }
+
+    #[test]
+    fn v5_orchard_bundle_rejects_unsupported_branch() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let orchard = test_orchard_bundle(&mut runner);
+        let mut buf = Vec::new();
+        orchard_serialization::write_v5_bundle(Some(&orchard), &mut buf).unwrap();
+        let bytes = OrchardBundleBytes::read(&buf[..]).unwrap().unwrap();
+
+        let err = bytes.to_authorized(None).unwrap_err();
+        assert_eq!(err.kind(), corez::io::ErrorKind::InvalidData);
+        assert!(alloc::format!("{err:?}").contains("may not be present"));
     }
 }
