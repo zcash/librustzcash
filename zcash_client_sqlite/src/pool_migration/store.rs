@@ -1337,6 +1337,7 @@ fn read_transactions(
             unsatisfiable,
             spend_nullifiers,
             r.broadcast_failure_at.map(BlockHeight::from_u32),
+            None,
         ));
     }
     Ok(out)
