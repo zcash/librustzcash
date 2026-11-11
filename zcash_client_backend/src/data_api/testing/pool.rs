@@ -25,7 +25,7 @@ use zcash_primitives::{
         builder::{
             BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
         },
-        fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE, marginal_fee},
+        fees::zip317::{FeeRule as Zip317FeeRule, marginal_fee, minimum_fee},
     },
 };
 use zcash_protocol::{
@@ -124,7 +124,7 @@ use {
     zcash_keys::keys::transparent::{
         NonHardenedChildIndex, TransparentKeyScope, gap_limits::GapLimits,
     },
-    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
+    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize},
     zcash_protocol::{
         TxId,
         value::{BalanceError, ZatBalance},
@@ -1673,7 +1673,7 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
 
     // The proposed transaction carries one shielded spend (padded to two shielded
     // outputs) and one transparent output.
-    let expected_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_fee = (marginal_fee_at_target(&st) * 3u64).unwrap();
     let expected_payment = (value - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
@@ -1798,7 +1798,7 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     // The proposed transaction spends one note in each pool and pays a single shielded
     // output; under ZIP 317, each of the two shielded bundles is padded to two logical
     // actions.
-    let expected_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_fee = (marginal_fee_at_target(&st) * 4u64).unwrap();
     let expected_payment = (total - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
@@ -1867,13 +1867,42 @@ const DUST_SHORTFALL_P1_NOTE_COVERING_FEE: Zatoshis = Zatoshis::const_from_u64(2
 #[cfg(feature = "orchard")]
 const DUST_SHORTFALL_P1_NOTE_BELOW_FEE: Zatoshis = Zatoshis::const_from_u64(6_000);
 
+/// Returns the ZIP 317 marginal fee in effect at the [`proposal_target_height`] of `st`.
+fn marginal_fee_at_target<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
+    marginal_fee(st.network(), proposal_target_height(st))
+}
+
+/// Returns the ZIP 317 minimum conventional fee in effect at the [`proposal_target_height`] of
+/// `st`.
+fn minimum_fee_at_target<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
+    minimum_fee(st.network(), proposal_target_height(st))
+}
+
+/// Returns the target height the wallet of `st` assigns to a transaction proposed now.
+fn proposal_target_height<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> BlockHeight {
+    st.wallet()
+        .get_target_and_anchor_heights(NonZeroU32::MIN)
+        .expect("the wallet can be read")
+        .expect("the wallet knows its chain tip")
+        .0
+        .into()
+}
+
 /// The ZIP 317 fee of a transaction spending from two shielded pools, each bundle padded to
 /// two logical actions.
 #[cfg(feature = "orchard")]
-fn two_bundle_fee() -> Zatoshis {
+fn two_bundle_fee<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
     const BUNDLES: u64 = 2;
     const PADDED_ACTIONS_PER_BUNDLE: u64 = 2;
-    (MARGINAL_FEE * (BUNDLES * PADDED_ACTIONS_PER_BUNDLE)).unwrap()
+    (marginal_fee_at_target(st) * (BUNDLES * PADDED_ACTIONS_PER_BUNDLE)).unwrap()
 }
 
 /// The across-pools dust shortfall scenario: an account holding a `P0` note and a smaller `P1`
@@ -1951,7 +1980,7 @@ pub fn transfer_grows_across_pools_at_a_dust_shortfall<
         DUST_SHORTFALL_P1_NOTE_COVERING_FEE,
     );
 
-    let expected_fee = two_bundle_fee();
+    let expected_fee = two_bundle_fee(&st);
     let expected_change = (total - amount - expected_fee).unwrap();
 
     let proposal = st.propose_transfer_to(&recipient, amount);
@@ -2011,7 +2040,7 @@ pub fn transfer_fails_across_pools_at_a_dust_shortfall<
         DUST_SHORTFALL_P1_NOTE_BELOW_FEE,
     );
 
-    let required = (amount + two_bundle_fee()).unwrap();
+    let required = (amount + two_bundle_fee(&st)).unwrap();
 
     st.expect_insufficient_funds(&recipient, amount, total, required);
 }
@@ -2085,7 +2114,7 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
 
     // The proposed transaction carries one Sapling spend and one requested Sapling
     // output (padded to two logical actions under ZIP 317).
-    let expected_fee = MINIMUM_FEE;
+    let expected_fee = minimum_fee_at_target(&st);
     let expected_payment = (value - expected_fee).unwrap();
 
     let proposal = st
@@ -2166,10 +2195,10 @@ pub fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>(
 
     // Add funds equal to the exact fee of a send-max transaction spending a single note
     // to a same-pool recipient (two logical actions under ZIP 317).
-    let value = MINIMUM_FEE;
+    let account = st.test_account().cloned().unwrap();
+    let value = minimum_fee(st.network(), account.birthday().height() + 1);
     st.add_a_single_note_checking_balance(value);
 
-    let account = st.test_account().cloned().unwrap();
     let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -2427,8 +2456,8 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_target(&st) * 3u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_target(&st);
     let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
     let expected_step0_change = (value - expected_step0_fee).unwrap();
@@ -2580,8 +2609,8 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 4u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_target(&st) * 4u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_target(&st);
     let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
     let expected_step0_change = (value - expected_step0_fee).unwrap();
@@ -2716,7 +2745,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 
     for _ in 0..number_of_notes {
         st.add_a_single_note_checking_balance(note_value);
-        st.add_a_single_note_checking_balance(zip317::MARGINAL_FEE);
+        let marginal_fee = marginal_fee_at_target(&st);
+        st.add_a_single_note_checking_balance(marginal_fee);
     }
 
     let account = st.test_account().cloned().unwrap();
@@ -2726,8 +2756,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
         non_marginal_notes_value
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * (number_of_notes + 1)).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_target(&st) * (number_of_notes + 1)).unwrap();
+    let expected_step1_fee = minimum_fee_at_target(&st);
     let expected_ephemeral_spend =
         (non_marginal_notes_value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (non_marginal_notes_value - expected_step0_fee).unwrap();
@@ -2898,7 +2928,7 @@ pub fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>(
     // The transaction would spend the transparent input and the note, paying the recipient
     // and a change output in the note's pool: one transparent logical action plus two
     // shielded ones.
-    let expected_required = (amount + (MARGINAL_FEE * 3u64).unwrap()).unwrap();
+    let expected_required = (amount + (marginal_fee_at_target(&st) * 3u64).unwrap()).unwrap();
     let expected_available = (note_value + utxo_value).unwrap();
 
     assert_matches!(
@@ -3121,8 +3151,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
             initial_balance.unwrap()
         );
 
-        let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-        let expected_step1_fee = zip317::MINIMUM_FEE;
+        let expected_step0_fee = (marginal_fee_at_target(st) * 3u64).unwrap();
+        let expected_step1_fee = minimum_fee_at_target(st);
         let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         let expected_step0_change =
             (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
@@ -3314,7 +3344,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     }
 
     let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
-    let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
+    let utxo_value = (value - minimum_fee_at_target(&st)).unwrap();
     let to = Address::from(*colliding_addr);
     let proposal = st.propose_transfer_to(&to, utxo_value);
 
@@ -3589,8 +3619,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_target(&st) * 3u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_target(&st);
     let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
     let expected_step0_change =
         (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
@@ -4202,7 +4232,7 @@ where
         )
         .unwrap()[0];
 
-    let bal_1 = (value - (bal_2 + MINIMUM_FEE).unwrap()).unwrap();
+    let bal_1 = (value - (bal_2 + minimum_fee_at_target(&st)).unwrap()).unwrap();
     assert_eq!(st.get_total_balance(account1), bal_1);
 
     let (h, _) = st.generate_next_block_including(txid1);
@@ -4272,7 +4302,7 @@ where
         )
         .unwrap()[0];
 
-    let bal_2_final = (bal_2 - (bal_3 + MINIMUM_FEE).unwrap()).unwrap();
+    let bal_2_final = (bal_2 - (bal_3 + minimum_fee_at_target(&st)).unwrap()).unwrap();
     assert_eq!(st.get_total_balance(account2), bal_2_final);
 
     let (h, _) = st.generate_next_block_including(txid2);
@@ -4524,7 +4554,9 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
         )
         .unwrap()[0];
 
-    let amount_left = (value - (amount_sent + MINIMUM_FEE + MARGINAL_FEE).unwrap()).unwrap();
+    let amount_left = (value
+        - (amount_sent + minimum_fee_at_target(&st) + marginal_fee_at_target(&st)).unwrap())
+    .unwrap();
     let pending_change = (amount_left - amount_legacy_change).unwrap();
 
     // The "legacy change" is not counted by get_pending_change().

@@ -2,6 +2,9 @@
 //! It doubles as a usage example: plan the denomination plan, plan the preparation transactions, build and
 //! pre-sign one, then build and pre-sign a pool-crossing transfer.
 
+// Network-less planner arithmetic at the pre-Revision-2 marginal fee.
+#![allow(deprecated)]
+
 use orchard::keys::{FullViewingKey, SpendAuthorizingKey};
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
