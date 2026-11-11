@@ -30,6 +30,10 @@ workspace.
   in bulk, rather than making one call to the underlying reader or writer per
   byte.
 
+### Deprecated
+- `zcash_primitives::transaction::fees::zip317::{MARGINAL_FEE, MINIMUM_FEE}` (use
+  `marginal_fee` and `minimum_fee` instead).
+
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also

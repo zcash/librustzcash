@@ -370,6 +370,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+    #![allow(deprecated)]
+
     use crate::fees::tests::all_change_receivers;
     // `sapling_fees` is named by both the orchard and the transparent-inputs tests.
     #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]

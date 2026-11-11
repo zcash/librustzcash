@@ -17,6 +17,10 @@ use crate::transaction::fees::transparent;
 ///
 /// [ZIP 317]: https://zips.z.cash/zip-0317
 /// [ZIP 2009]: https://zips.z.cash/zip-2009
+#[deprecated(
+    since = "0.32.0",
+    note = "Use `zip317::marginal_fee(params, target_height)` for the marginal fee in effect at the height a transaction is expected to be mined."
+)]
 pub const MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(5_000);
 
 /// The [ZIP 317] marginal fee from Revision 2 ([ZIP 2009]), in zatoshis per logical action.
@@ -55,10 +59,13 @@ fn revision_2_applies<P: consensus::Parameters>(params: &P, target_height: Block
 ///
 /// [ZIP 317]: https://zips.z.cash/zip-0317
 pub fn marginal_fee<P: consensus::Parameters>(params: &P, target_height: BlockHeight) -> Zatoshis {
+    // The pre-Revision-2 constant is deprecated for external callers; this is its only reader.
+    #[allow(deprecated)]
+    let pre_revision_2 = MARGINAL_FEE;
     if revision_2_applies(params, target_height) {
         REVISION_2_MARGINAL_FEE
     } else {
-        MARGINAL_FEE
+        pre_revision_2
     }
 }
 
@@ -108,6 +115,10 @@ pub const TX_HEADER_SIZE: usize = 32;
 ///
 /// [ZIP 317]: https://zips.z.cash/zip-0317
 /// [ZIP 2009]: https://zips.z.cash/zip-2009
+#[deprecated(
+    since = "0.32.0",
+    note = "Use `zip317::minimum_fee(params, target_height)` for the minimum conventional fee in effect at the height a transaction is expected to be mined."
+)]
 pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
@@ -291,6 +302,9 @@ impl super::FeeRule for FeeRule {
 
 #[cfg(test)]
 mod tests {
+    // The tests pin the deprecated pre-Revision-2 constants themselves.
+    #![allow(deprecated)]
+
     use core::iter;
 
     use zcash_protocol::{

@@ -1984,6 +1984,9 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+    #![allow(deprecated)]
+
     #[cfg(all(feature = "circuits", feature = "std"))]
     use {super::cached_orchard_proving_key, core::ptr, orchard::circuit::OrchardCircuitVersion};
 

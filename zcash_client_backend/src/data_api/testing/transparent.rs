@@ -1080,8 +1080,6 @@ where
     DSF: DataStoreFactory,
 {
     let dust_value = Zatoshis::const_from_u64(1000);
-    assert!(dust_value <= zip317::MARGINAL_FEE);
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
@@ -1089,6 +1087,7 @@ where
         .build();
 
     let account = st.test_account().cloned().unwrap();
+    assert!(dust_value <= zip317::marginal_fee(st.network(), account.birthday().height() + 1));
     let uaddr = st
         .wallet()
         .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
@@ -3537,8 +3536,9 @@ where
     // The gather stops at `CAP` inputs, whose value the error reports as available; the
     // request needs the payment plus one logical action per gathered input.
     let expected_available = Zatoshis::const_from_u64(DUST_VALUE * (CAP as u64));
-    let expected_required =
-        (payment_amount + (zip317::MARGINAL_FEE * (CAP as u64)).unwrap()).unwrap();
+    let expected_required = (payment_amount
+        + (zip317::marginal_fee(st.network(), height + 1) * (CAP as u64)).unwrap())
+    .unwrap();
     assert_matches!(
         result,
         Err(crate::data_api::error::Error::InsufficientFunds { available, required })
