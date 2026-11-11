@@ -43,6 +43,9 @@ and this library adheres to Rust's notion of
   funding note does not cover the crossing plus that fee.
 - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` charge the ZIP 317
   marginal fee in effect at `target_height`.
+- `zcash_pool_migration::testing::arb_migration_transaction` (and through it
+  `arb_migration_state`) draws `MigrationTransaction::orchard_change` as an arbitrary
+  `Option<Zatoshis>`; previously every generated transaction carried `None`.
 
 ## [0.2.0] - 2026-10-21
 

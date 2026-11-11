@@ -23,6 +23,51 @@ pub(super) const DEPENDENCIES: &[Uuid] = &[
     v_transactions_zip318_kind::MIGRATION_ID,
 ];
 
+/// `v_migration_transactions` as this migration created it, frozen because what a migration does
+/// to a database must not follow an evolving definition; `orchard_ironwood_migration_transfer_change`
+/// recreates the view from the store's current builder.
+pub(super) const CREATE_VIEW_SQL: &str = "CREATE VIEW v_migration_transactions AS
+SELECT accounts.uuid AS account_uuid,
+       m.uuid AS migration_uuid,
+       mt.txid AS txid,
+       mt.kind AS kind,
+       mt.state AS state,
+       mt.scheduled_height AS scheduled_height,
+       mt.expiry_height AS expiry_height,
+       CASE mt.kind WHEN 'transfer' THEN cv.value + m.note_split_fee_buffer
+            ELSE pin.value_in END AS value_spent,
+       CASE mt.kind WHEN 'transfer' THEN cv.value
+            ELSE pout.value_out END AS value_received,
+       CASE mt.kind WHEN 'transfer' THEN m.note_split_fee_buffer
+            ELSE pin.value_in - pout.value_out END AS fee,
+       CASE mt.kind WHEN 'transfer' THEN cv.value END AS pool_crossing_value,
+       CASE mt.kind WHEN 'transfer' THEN 1 ELSE pin.input_count END AS spent_note_count,
+       CASE mt.kind WHEN 'transfer' THEN 1
+            ELSE pout.output_count - pout.change_count END AS received_note_count,
+       CASE mt.kind WHEN 'transfer' THEN 0
+            ELSE pout.change_count > 0 END AS has_change,
+       CASE mt.kind WHEN 'transfer' THEN 3
+            ELSE 2 END AS zip318_kind
+FROM orchard_ironwood_migration_transactions mt
+JOIN orchard_ironwood_migrations m ON m.id = mt.migration_id
+JOIN accounts ON accounts.id = m.account_id
+LEFT JOIN orchard_ironwood_migration_crossing_values cv
+       ON cv.migration_id = mt.migration_id AND cv.ordinal = mt.kind_crossing
+LEFT JOIN (SELECT migration_id, layer, tx_index,
+                  SUM(value) AS value_in, COUNT(*) AS input_count
+             FROM orchard_ironwood_migration_prep_inputs GROUP BY migration_id, layer, tx_index) pin
+       ON pin.migration_id = mt.migration_id
+      AND pin.layer = mt.kind_layer AND pin.tx_index = mt.kind_index
+LEFT JOIN (SELECT migration_id, layer, tx_index,
+                  SUM(value) AS value_out, COUNT(*) AS output_count,
+                  SUM(role = 'change') AS change_count
+             FROM orchard_ironwood_migration_prep_outputs GROUP BY migration_id, layer, tx_index) pout
+       ON pout.migration_id = mt.migration_id
+      AND pout.layer = mt.kind_layer AND pout.tx_index = mt.kind_index
+WHERE m.status NOT IN ('complete', 'failed', 'superseded', 'cancelled')
+  AND mt.state IN ('awaiting_signature', 'signed', 'proved')
+  AND NOT EXISTS (SELECT 1 FROM transactions tt WHERE tt.txid = mt.txid)";
+
 pub(super) struct Migration;
 
 impl schemerz::Migration<Uuid> for Migration {
@@ -45,7 +90,7 @@ impl RusqliteMigration for Migration {
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         transaction.execute_batch(&format!(
             "{};\n{};",
-            crate::pool_migration::orchard_ironwood::migration_tx_view_sql(),
+            CREATE_VIEW_SQL,
             crate::wallet::db::VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS,
         ))?;
         Ok(())

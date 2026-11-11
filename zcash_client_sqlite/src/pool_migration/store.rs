@@ -238,7 +238,7 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
     )
 }
 
-pub(crate) fn create_transactions_sql(t: &Tables) -> String {
+fn create_transactions_sql(t: &Tables) -> String {
     // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
     // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
     // together or non-`NULL` together, and the read path rejects a row where they disagree.
@@ -247,6 +247,9 @@ pub(crate) fn create_transactions_sql(t: &Tables) -> String {
     // that REJECTED a broadcast, standing until the engine adjudicates the rejection against the
     // wallet's own view. The three columns that migration adds are listed here in the order it adds
     // them, so the created and repaired schemas stay comparable.
+    //
+    // `orchard_change` is the value the transaction returns to the source pool as change, `NULL`
+    // when it produces none; listed last, where its migration adds it, for the same reason.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
@@ -266,6 +269,7 @@ pub(crate) fn create_transactions_sql(t: &Tables) -> String {
             unsatisfiable_at INTEGER,
             unsatisfiable_kind TEXT,
             broadcast_failure_at INTEGER,
+            orchard_change INTEGER,
             PRIMARY KEY (migration_id, transfer_id)
         )",
         t.transactions, t.migrations
@@ -321,10 +325,11 @@ pub(crate) fn create_tx_due_index_sql(t: &Tables) -> String {
 /// The `v_migration_transactions` view DDL: one row per SCHEDULED migration transaction — a
 /// transaction of a non-terminal migration that has not yet been broadcast (and so has no row in
 /// the wallet's `transactions` table). Values are projected from the migration store's typed
-/// columns: a transfer spends its funding note (crossing value plus the per-note fee buffer,
-/// which IS the canonical transfer's ZIP-317 fee) and receives the crossing; a preparation's
-/// values are the sums of its input and output rows. Every wire name, classification code, and
-/// the terminal-status list are generated from their defining types.
+/// columns: a transfer spends its funding note (crossing value plus the per-note fee buffer) and
+/// receives the crossing plus whatever of that buffer it returns as Orchard change, so its fee is
+/// the buffer net of that change; a preparation's values are the sums of its input and output
+/// rows. Every wire name, classification code, and the terminal-status list are generated from
+/// their defining types.
 pub(crate) fn create_migration_tx_view_sql(t: &Tables) -> String {
     use zcash_pool_migration::engine::{MigrationTxKind, MigrationTxState};
     use zcash_protocol::zip318::{Zip318Classification, Zip318TxKind};
@@ -350,15 +355,15 @@ pub(crate) fn create_migration_tx_view_sql(t: &Tables) -> String {
                mt.expiry_height AS expiry_height,
                CASE mt.kind WHEN '{transfer}' THEN cv.value + m.note_split_fee_buffer
                     ELSE pin.value_in END AS value_spent,
-               CASE mt.kind WHEN '{transfer}' THEN cv.value
+               CASE mt.kind WHEN '{transfer}' THEN cv.value + COALESCE(mt.orchard_change, 0)
                     ELSE pout.value_out END AS value_received,
-               CASE mt.kind WHEN '{transfer}' THEN m.note_split_fee_buffer
+               CASE mt.kind WHEN '{transfer}' THEN m.note_split_fee_buffer - COALESCE(mt.orchard_change, 0)
                     ELSE pin.value_in - pout.value_out END AS fee,
                CASE mt.kind WHEN '{transfer}' THEN cv.value END AS pool_crossing_value,
                CASE mt.kind WHEN '{transfer}' THEN 1 ELSE pin.input_count END AS spent_note_count,
                CASE mt.kind WHEN '{transfer}' THEN 1
                     ELSE pout.output_count - pout.change_count END AS received_note_count,
-               CASE mt.kind WHEN '{transfer}' THEN 0
+               CASE mt.kind WHEN '{transfer}' THEN mt.orchard_change IS NOT NULL
                     ELSE pout.change_count > 0 END AS has_change,
                CASE mt.kind WHEN '{transfer}' THEN {transfer_code}
                     ELSE {prep_code} END AS zip318_kind
@@ -1244,7 +1249,8 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT transfer_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner, unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at
+                    lock_owner, unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at,
+                    orchard_change
                FROM {}
               WHERE migration_id = ?
               ORDER BY transfer_id",
@@ -1268,6 +1274,7 @@ fn read_transactions(
                 unsatisfiable_at: row.get(13)?,
                 unsatisfiable_kind: row.get(14)?,
                 broadcast_failure_at: row.get(15)?,
+                orchard_change: row.get(16)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -1322,6 +1329,13 @@ fn read_transactions(
                 ));
             }
         };
+        // `NULL` (every row written before the column existed) is a transaction that produces no
+        // change; an out-of-range stored amount is corruption, like any other amount column's.
+        let orchard_change = r
+            .orchard_change
+            .map(Zatoshis::from_u64)
+            .transpose()
+            .map_err(|_| Error::Corrupt("orchard_change"))?;
 
         out.push(MigrationTransaction::from_parts(
             id,
@@ -1337,7 +1351,7 @@ fn read_transactions(
             unsatisfiable,
             spend_nullifiers,
             r.broadcast_failure_at.map(BlockHeight::from_u32),
-            None,
+            orchard_change,
         ));
     }
     Ok(out)
@@ -1404,6 +1418,9 @@ struct TxRow {
     /// transaction, while that rejection stands unadjudicated; `NULL` otherwise. Independent of
     /// the mark columns above in both directions.
     broadcast_failure_at: Option<u32>,
+    /// The zatoshi value the transaction returns to the source pool as change; `NULL` for a
+    /// transaction that produces none.
+    orchard_change: Option<u64>,
 }
 
 fn read_deps(
@@ -2032,11 +2049,13 @@ fn replace_migration_row(
                 "INSERT INTO {} (migration_id, transfer_id, kind, kind_layer, kind_index,
                                  kind_crossing, pczt, scheduled_height, expiry_height,
                                  anchor_boundary, state, txid, mined_height, lock_owner,
-                                 unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at)
+                                 unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at,
+                                 orchard_change)
                  VALUES (:migration_id, :transfer_id, :kind, :kind_layer, :kind_index,
                          :kind_crossing, :pczt, :scheduled_height, :expiry_height,
                          :anchor_boundary, :state, :txid, :mined_height, :lock_owner,
-                         :unsatisfiable_at, :unsatisfiable_kind, :broadcast_failure_at)",
+                         :unsatisfiable_at, :unsatisfiable_kind, :broadcast_failure_at,
+                         :orchard_change)",
                 t.transactions
             ),
             named_params! {
@@ -2057,6 +2076,7 @@ fn replace_migration_row(
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
                 ":unsatisfiable_kind": unsatisfiable_kind.as_ref().map(|k| k.as_ref()),
                 ":broadcast_failure_at": mtx.broadcast_failure_at().map(u32::from),
+                ":orchard_change": mtx.orchard_change().map(Zatoshis::into_u64),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {
