@@ -63,6 +63,15 @@ workspace.
   (all require `zcash_unstable="nu8"`)
 - `zcash_primitives::transaction::components::orchard::{write_v7_effects,
   write_v7_auth}` (require `zcash_unstable="nu8"`)
+- `zcash_primitives::transaction::{V7ValidationContext, V7ValidationError,
+  V7BundleMap}`, `zcash_primitives::transaction::bytes::TransactionBytes::validate_v7`
+  and `zcash_primitives::transaction::Transaction::read_and_validate_v7`
+  (require `zcash_unstable="nu8"`), the full transaction-local validator for
+  version 7 transactions. It applies the ZIP 248 registry and map rules,
+  converts every known bundle to its typed representation, and applies the
+  typed consensus rules. `V7ValidationContext` supplies the block's ZIP 235
+  NSM fee contribution, which is required for the coinbase value pool delta
+  relation.
 - Byte-to-typed conversion for each protocol bundle:
   `LegacyTransparentBundleBytes::to_authorized`,
   `TransparentBundleBytes::to_authorized`, `SproutBundleBytes::to_bundle`,
@@ -87,11 +96,24 @@ workspace.
   bundles through the byte layer's per-protocol conversions; the other
   protocol's bundles remain bytes. `circuits` now implies both `sapling` and
   `orchard`.
-- `zcash_primitives::transaction::Transaction::read` now rejects a version 7
-  transaction containing a bundle type or variant it does not interpret,
-  instead of inventing a provisional transaction identifier. Parse such a
-  transaction with `TransactionBytes::read` and supply the bundle digests to
-  `TransactionBytes::v7_txid` or `v7_auth_commitment`.
+- `zcash_primitives::transaction::Transaction::read` now parses the wire bytes
+  with `TransactionBytes::read` and interprets each known bundle, rather than
+  running a second typed parser. For version 7 it rejects a transaction
+  containing a bundle type or variant it does not interpret, instead of
+  inventing a provisional transaction identifier. Parse such a transaction with
+  `TransactionBytes::read` and supply the bundle digests to
+  `TransactionBytes::v7_txid` or `v7_auth_commitment`. It does not perform the
+  transaction-local consensus checks; use `Transaction::read_and_validate_v7`
+  for that.
+- `zcash_primitives::transaction::TransactionData::check_v7_consensus_rules`
+  now takes a `&V7ValidationContext`, which supplies the block's ZIP 235 NSM
+  fee contribution for the coinbase value pool delta relation. It also checks
+  the ZIP 248 input- and output-side conditions, the ZIP 233 NSM delta sign,
+  the Orchard `enableCrossAddress` restriction, the nonnegative Orchard pool
+  balance, and the registry and required-effect rules for value pool deltas.
+  Per-asset conservation now accumulates in a wider signed type, so an
+  intermediate partial sum outside the `ZatBalance` range no longer rejects a
+  transaction whose mathematical total is zero.
 - `TxVersion::V7` now uses the [ZIP 248] transaction format instead of sharing
   the V6 body and digest structure, and is gated on `zcash_unstable="nu8"`
   rather than `zcash_unstable="nutachyon"`: the format is deployed by its own

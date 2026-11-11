@@ -2903,7 +2903,7 @@ mod tests {
             data.value_pool_deltas().transparent_value(),
             Some(ZatBalance::from_i64(10_000).unwrap()),
         );
-        data.check_v7_consensus_rules()
+        data.check_v7_consensus_rules(&Default::default())
             .expect("the value pool deltas of a built v7 transaction must balance");
     }
 
