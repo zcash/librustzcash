@@ -5409,6 +5409,74 @@ mod tests {
         );
     }
 
+    /// A UIVK-only account (imported via `ViewingKey::Incoming`, so it has no
+    /// UFVK) whose UIVK includes a transparent component must be able to generate
+    /// new unified addresses that require a transparent receiver.
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    pub(crate) fn uivk_only_account_generates_transparent_addresses() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+        assert!(
+            full_uivk.p2pkh().is_some(),
+            "the test requires the UIVK to have a transparent component"
+        );
+
+        // Import the full UIVK (transparent included) as a view-only account. The
+        // account holds no UFVK, only the UIVK.
+        let account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "uivk-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+        assert!(account.ufvk().is_none());
+
+        // New-address allocation requires a chain tip.
+        st.wallet_mut()
+            .update_chain_tip(birthday.height())
+            .unwrap();
+
+        // A request that requires a transparent receiver: the UIVK has one, so
+        // the account must be able to produce a new address.
+        let request = UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require);
+        let addr = st.wallet_mut().get_next_available_address(account.id(), request);
+        assert!(
+            addr.is_ok(),
+            "get_next_available_address failed: {:?}",
+            addr.as_ref().err()
+        );
+        assert!(
+            addr.unwrap().is_some(),
+            "no address was generated for the UIVK-only account"
+        );
+    }
+
     /// Tests that importing a UIVK with additional items over an existing IVK-only
     /// account succeeds as an additive upgrade. Only meaningful when features provide
     /// more than one shielded pool (e.g. `orchard`).
