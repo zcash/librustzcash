@@ -2,6 +2,7 @@
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;
+pub mod transparent;
 
 pub use self::sprout::JsDescription;
 

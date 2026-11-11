@@ -17,6 +17,16 @@ workspace.
   `ValuePoolDeltaEntry`, `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`,
   `MAX_COINBASE_DATA_LEN`, `opaque_effects_personalization`,
   `read_bundle_data_framing` and `write_bundle_data_framing`.
+- `zcash_primitives::transaction::components::transparent`, a byte-level codec
+  for the transparent bundle's wire structures:
+  `TransparentOutPointBytes`, `TransparentOutputBytes`,
+  `TransparentOutputValueBytes`, `TransparentScriptBytes`,
+  `LegacyTransparentInputBytes` and `LegacyTransparentBundleBytes`, plus
+  `TransparentInputEffectingBytes`, `TransparentSighashInfoBytes`,
+  `TransparentInputAuthBytes`, `TransparentEffectsBytes`,
+  `TransparentAuthBytes` and `TransparentBundleBytes` (the last six require
+  `zcash_unstable="nu8"`). The v7 types retain effecting and authorizing data
+  separately.
 - `zcash_primitives::transaction::TransactionData::{from_parts_with_bundles,
   bundles, value_pool_deltas, coinbase_bundle, fee_amount, txid_digests}`
 - `zcash_primitives::transaction::TransactionData::from_parts_v7_balanced`
