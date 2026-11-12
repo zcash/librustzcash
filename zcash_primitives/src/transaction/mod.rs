@@ -70,6 +70,7 @@ use zcash_protocol::value::ZatBalance;
 use self::{
     bytes::{CoinbaseBundleBytes, V7TransactionBodyBytes},
     components::transparent::TransparentBundleBytes,
+    zip248::{BundleType, BundleVariant},
 };
 #[cfg(all(feature = "sapling", feature = "orchard"))]
 use self::{
@@ -468,11 +469,13 @@ impl<A: Authorization> TransactionData<A> {
     ) {
         if let Some(b) = sapling_bundle {
             value_pool_deltas
-                .set_zec_unchecked_for(zip248::BundleType::Sapling, *b.value_balance());
+                .set_sapling(*b.value_balance())
+                .expect("fresh value pool delta map");
         }
         if let Some(b) = orchard_bundle {
             value_pool_deltas
-                .set_zec_unchecked_for(zip248::BundleType::Orchard, *b.value_balance());
+                .set_orchard(*b.value_balance())
+                .expect("fresh value pool delta map");
         }
     }
 
@@ -545,7 +548,9 @@ impl<A: Authorization> TransactionData<A> {
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
         let mut value_pool_deltas = zip248::ValuePoolDeltas::empty();
-        value_pool_deltas.set_zip233_unchecked(zip233_amount);
+        value_pool_deltas
+            .set_zip233(zip233_amount)
+            .expect("fresh value pool delta map");
         Self::set_shielded_value_pool_deltas(
             &mut value_pool_deltas,
             sapling_bundle.as_ref(),
@@ -719,7 +724,8 @@ impl<A: Authorization> TransactionData<A> {
             ironwood_bundle,
         );
         data.value_pool_deltas
-            .set_zec_unchecked_for(zip248::BundleType::Transparent, transparent_value_balance);
+            .set_transparent(transparent_value_balance)
+            .expect("fresh value pool delta map");
 
         let total = [
             data.value_pool_deltas.transparent_value(),
@@ -733,7 +739,8 @@ impl<A: Authorization> TransactionData<A> {
         .sum::<Option<ZatBalance>>()
         .ok_or(BalanceError::Overflow)?;
         data.value_pool_deltas
-            .set_fee_unchecked(Zatoshis::try_from(total).map_err(|_| BalanceError::Underflow)?);
+            .set_fee(Zatoshis::try_from(total).map_err(|_| BalanceError::Underflow)?)
+            .expect("fresh value pool delta map");
 
         Ok(data)
     }
@@ -775,7 +782,9 @@ impl<A: Authorization> TransactionData<A> {
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
         let mut value_pool_deltas = zip248::ValuePoolDeltas::empty();
-        value_pool_deltas.set_zip233_unchecked(zip233_amount);
+        value_pool_deltas
+            .set_zip233(zip233_amount)
+            .expect("fresh value pool delta map");
         Self::set_shielded_value_pool_deltas(
             &mut value_pool_deltas,
             sapling_bundle.as_ref(),
@@ -783,7 +792,8 @@ impl<A: Authorization> TransactionData<A> {
         );
         if let Some(b) = &ironwood_bundle {
             value_pool_deltas
-                .set_zec_unchecked_for(zip248::BundleType::Ironwood, *b.value_balance());
+                .set_ironwood(*b.value_balance())
+                .expect("fresh value pool delta map");
         }
 
         Self::from_parts_with_value_pool_deltas(
@@ -1756,29 +1766,34 @@ impl Transaction {
         // 3. Effect bundles map.
         let mut effect_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
         if let Some(tb) = self.transparent_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(zip248::BundleId::TRANSPARENT, |buf| {
-                zip248::write_v7_transparent_effects(buf, tb)
-            })?);
+            effect_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::TRANSPARENT, BundleVariant::DEFAULT),
+                |buf| zip248::write_v7_transparent_effects(buf, tb),
+            )?);
         }
         if let Some(cb) = self.coinbase_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(zip248::BundleId::COINBASE, |buf| {
-                cb.write(buf)
-            })?);
+            effect_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::COINBASE, BundleVariant::DEFAULT),
+                |buf| cb.write(buf),
+            )?);
         }
         if let Some(sb) = self.sapling_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(zip248::BundleId::SAPLING, |buf| {
-                sapling_serialization::write_v7_effects(buf, sb)
-            })?);
+            effect_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::SAPLING, BundleVariant::DEFAULT),
+                |buf| sapling_serialization::write_v7_effects(buf, sb),
+            )?);
         }
         if let Some(ob) = self.orchard_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(zip248::BundleId::ORCHARD, |buf| {
-                orchard_serialization::write_v7_effects(buf, ob)
-            })?);
+            effect_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::ORCHARD, BundleVariant::DEFAULT),
+                |buf| orchard_serialization::write_v7_effects(buf, ob),
+            )?);
         }
         if let Some(ib) = self.ironwood_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(zip248::BundleId::IRONWOOD, |buf| {
-                orchard_serialization::write_v7_effects(buf, ib)
-            })?);
+            effect_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::IRONWOOD, BundleVariant::DEFAULT),
+                |buf| orchard_serialization::write_v7_effects(buf, ib),
+            )?);
         }
         zip248::write_bundle_data_map(&mut writer, effect_bundles)?;
 
@@ -1786,24 +1801,28 @@ impl Transaction {
         // authorizing data; see `v7_transparent_auth`.
         let mut auth_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
         if let Some(tb) = self.v7_transparent_auth() {
-            auth_bundles.push(Self::tag_v7_bundle(zip248::BundleId::TRANSPARENT, |buf| {
-                zip248::write_v7_transparent_auth(buf, tb)
-            })?);
+            auth_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::TRANSPARENT, BundleVariant::DEFAULT),
+                |buf| zip248::write_v7_transparent_auth(buf, tb),
+            )?);
         }
         if let Some(sb) = self.sapling_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(zip248::BundleId::SAPLING, |buf| {
-                sapling_serialization::write_v7_auth(buf, sb)
-            })?);
+            auth_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::SAPLING, BundleVariant::DEFAULT),
+                |buf| sapling_serialization::write_v7_auth(buf, sb),
+            )?);
         }
         if let Some(ob) = self.orchard_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(zip248::BundleId::ORCHARD, |buf| {
-                orchard_serialization::write_v7_auth(buf, ob)
-            })?);
+            auth_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::ORCHARD, BundleVariant::DEFAULT),
+                |buf| orchard_serialization::write_v7_auth(buf, ob),
+            )?);
         }
         if let Some(ib) = self.ironwood_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(zip248::BundleId::IRONWOOD, |buf| {
-                orchard_serialization::write_v7_auth(buf, ib)
-            })?);
+            auth_bundles.push(Self::tag_v7_bundle(
+                zip248::BundleId::new(BundleType::IRONWOOD, BundleVariant::DEFAULT),
+                |buf| orchard_serialization::write_v7_auth(buf, ib),
+            )?);
         }
         zip248::write_bundle_data_map(&mut writer, auth_bundles)?;
 
@@ -2017,7 +2036,7 @@ pub struct Zip244Digests<A> {
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
     #[cfg(zcash_unstable = "nu8")]
-    pub(crate) unknown_effect_digests: alloc::vec::Vec<((u64, u64), A)>,
+    pub(crate) unknown_effect_digests: alloc::vec::Vec<(zip248::BundleId, A)>,
 }
 
 impl<A> Zip244Digests<A> {
@@ -2173,6 +2192,11 @@ pub enum V7ValidationError {
         /// The branch ID encoded in the transaction.
         branch_id: BranchId,
     },
+    /// `nExpiryHeight` is outside the range permitted by ZIP 248.
+    InvalidExpiryHeight {
+        /// The encoded expiry height.
+        expiry_height: u32,
+    },
     /// A bundle type is not registered for version 7.
     UnknownBundleType {
         /// The raw `bundleType`.
@@ -2235,6 +2259,10 @@ impl core::fmt::Display for V7ValidationError {
             Self::NotActivated { branch_id } => {
                 write!(f, "version 7 is not activated under {branch_id:?}")
             }
+            Self::InvalidExpiryHeight { expiry_height } => write!(
+                f,
+                "nExpiryHeight {expiry_height} is outside the ZIP 248 range"
+            ),
             Self::UnknownBundleType { bundle_type } => {
                 write!(
                     f,
@@ -2300,6 +2328,11 @@ pub enum V7ConsensusError {
     NotActivated {
         /// The branch ID encoded in the transaction.
         branch_id: BranchId,
+    },
+    /// `nExpiryHeight` is outside the range permitted by ZIP 248.
+    InvalidExpiryHeight {
+        /// The encoded expiry height.
+        expiry_height: u32,
     },
     /// A value pool delta entry names a bundle type that is not registered for
     /// version 7.
@@ -2397,6 +2430,10 @@ impl core::fmt::Display for V7ConsensusError {
             V7ConsensusError::NotActivated { branch_id } => {
                 write!(f, "version 7 is not activated under {branch_id:?}")
             }
+            V7ConsensusError::InvalidExpiryHeight { expiry_height } => write!(
+                f,
+                "nExpiryHeight {expiry_height} is outside the ZIP 248 range"
+            ),
             V7ConsensusError::UnregisteredBundleType { bundle_type } => write!(
                 f,
                 "bundleType {bundle_type} is not registered for version 7"
@@ -2522,6 +2559,10 @@ impl<A: Authorization> TransactionData<A> {
                 branch_id: self.consensus_branch_id,
             });
         }
+        let expiry_height = u32::from(self.expiry_height);
+        if expiry_height > zip248::MAX_EXPIRY_HEIGHT {
+            return Err(V7ConsensusError::InvalidExpiryHeight { expiry_height });
+        }
 
         let coinbase_bundle = self.coinbase_bundle.as_ref();
         let is_coinbase = coinbase_bundle.is_some();
@@ -2530,29 +2571,23 @@ impl<A: Authorization> TransactionData<A> {
         // name a registered bundle type and variant. The byte validator also
         // checks the effect and auth maps, which a typed transaction cannot
         // represent for unregistered types.
-        for (key, _) in self.value_pool_deltas.iter() {
-            if zip248::bundle_registry_row(key.bundle_type())
-                .is_none_or(|row| !row.value_pool_deltas)
-            {
+        for (key, (bundle_variant, _)) in self.value_pool_deltas.iter() {
+            let bundle_type = key.bundle_type();
+            if !bundle_type.is_known() {
                 return Err(V7ConsensusError::UnregisteredBundleType {
-                    bundle_type: key.bundle_type().to_u64(),
+                    bundle_type: bundle_type.to_u64(),
                 });
             }
-        }
-        for (key, (bundle_variant, _)) in self.value_pool_deltas.unknown_iter() {
-            let (bundle_type, _, _) = *key;
-            let bundle_variant = *bundle_variant;
-            let Some(known_type) = zip248::BundleType::from_u64(bundle_type) else {
-                return Err(V7ConsensusError::UnregisteredBundleType { bundle_type });
-            };
-            if zip248::BundleVariant::from_u64(bundle_variant).is_none() {
+            if !bundle_variant.is_known() {
                 return Err(V7ConsensusError::UnregisteredBundleVariant {
-                    bundle_type,
-                    bundle_variant,
+                    bundle_type: bundle_type.to_u64(),
+                    bundle_variant: bundle_variant.to_u64(),
                 });
             }
-            if zip248::bundle_registry_row(known_type).is_none_or(|row| !row.value_pool_deltas) {
-                return Err(V7ConsensusError::UnregisteredBundleType { bundle_type });
+            if zip248::bundle_registry_row(bundle_type).is_none_or(|row| !row.value_pool_deltas) {
+                return Err(V7ConsensusError::UnregisteredBundleType {
+                    bundle_type: bundle_type.to_u64(),
+                });
             }
         }
 
@@ -2561,11 +2596,11 @@ impl<A: Authorization> TransactionData<A> {
         // bundle.
         for (key, _) in self.value_pool_deltas.iter() {
             let present = match key.bundle_type() {
-                zip248::BundleType::Transparent => self.transparent_bundle.is_some(),
-                zip248::BundleType::Coinbase => self.coinbase_bundle.is_some(),
-                zip248::BundleType::Sapling => self.sapling_bundle.is_some(),
-                zip248::BundleType::Orchard => self.orchard_bundle.is_some(),
-                zip248::BundleType::Ironwood => self.ironwood_bundle.is_some(),
+                zip248::BundleType::TRANSPARENT => self.transparent_bundle.is_some(),
+                zip248::BundleType::COINBASE => self.coinbase_bundle.is_some(),
+                zip248::BundleType::SAPLING => self.sapling_bundle.is_some(),
+                zip248::BundleType::ORCHARD => self.orchard_bundle.is_some(),
+                zip248::BundleType::IRONWOOD => self.ironwood_bundle.is_some(),
                 _ => true,
             };
             if !present {
@@ -2581,12 +2616,12 @@ impl<A: Authorization> TransactionData<A> {
         for (key, _) in self.value_pool_deltas.iter() {
             if key.asset_class() != zip248::ASSET_CLASS_ZEC {
                 match key.bundle_type() {
-                    zip248::BundleType::Fee => {
+                    zip248::BundleType::FEE => {
                         return Err(V7ConsensusError::FeeAssetClassNotZec {
                             asset_class: key.asset_class(),
                         });
                     }
-                    zip248::BundleType::Coinbase => {
+                    zip248::BundleType::COINBASE => {
                         return Err(V7ConsensusError::CoinbaseAssetClassNotZec {
                             asset_class: key.asset_class(),
                         });
@@ -2664,7 +2699,7 @@ impl<A: Authorization> TransactionData<A> {
             .value_pool_deltas
             .iter()
             .find_map(|(key, &(_, value))| {
-                (key.bundle_type() == zip248::BundleType::Fee
+                (key.bundle_type() == zip248::BundleType::FEE
                     && key.asset_class() == zip248::ASSET_CLASS_ZEC)
                     .then_some(value)
             })
@@ -2682,7 +2717,7 @@ impl<A: Authorization> TransactionData<A> {
             .value_pool_deltas
             .iter()
             .find_map(|(key, &(_, value))| {
-                (key.bundle_type() == zip248::BundleType::Zip233Nsm
+                (key.bundle_type() == zip248::BundleType::ZIP233_NSM
                     && key.asset_class() == zip248::ASSET_CLASS_ZEC)
                     .then_some(value)
             })
@@ -2720,7 +2755,7 @@ impl<A: Authorization> TransactionData<A> {
         // bounded by `ZatBalance`; the accumulation is widened so that an
         // intermediate sum outside that range does not fail a transaction
         // whose mathematical total is zero.
-        let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, i128)> = BTreeMap::new();
+        let mut by_asset: BTreeMap<(u8, [u8; 64]), (BundleType, i128)> = BTreeMap::new();
         for entry in self.value_pool_deltas.to_wire_entries() {
             let asset_key = (
                 entry.asset_class(),
@@ -2734,7 +2769,7 @@ impl<A: Authorization> TransactionData<A> {
         for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
             if sum != 0 {
                 return Err(V7ConsensusError::ValueImbalance {
-                    bundle_type_for_asset: any_bundle_type,
+                    bundle_type_for_asset: any_bundle_type.to_u64(),
                     asset_class,
                     sum,
                 });

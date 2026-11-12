@@ -1589,11 +1589,13 @@ fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
     }
 }
 
-/// A regtest network with NU8 activated, for exercising v7 transactions.
+/// A regtest network with NU7 activated at height 11 and NU8 at height 12,
+/// for exercising v7 transactions.
 #[cfg(zcash_unstable = "nu8")]
 fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
     zcash_protocol::local_consensus::LocalNetwork {
-        nu8: Some(BlockHeight::from_u32(11)),
+        nu7: Some(BlockHeight::from_u32(11)),
+        nu8: Some(BlockHeight::from_u32(12)),
         ..nu6_3_test_network()
     }
 }
@@ -1696,10 +1698,17 @@ fn v6_ironwood_pczt_signs_over_its_txid() {
 #[test]
 #[cfg(zcash_unstable = "nu8")]
 fn v7_ironwood_pczt_signs_over_its_zip248_txid() {
-    assert_shielded_sighash_is_txid(orchard_to_ironwood_pczt(
-        nu8_test_network(),
-        BlockHeight::from_u32(11),
-    ));
+    let pczt = orchard_to_ironwood_pczt(nu8_test_network(), BlockHeight::from_u32(12));
+    let effects = pczt.clone().into_effects().unwrap();
+    assert_eq!(
+        effects.consensus_branch_id(),
+        zcash_protocol::consensus::BranchId::Nu8
+    );
+    assert_eq!(
+        effects.version(),
+        zcash_primitives::transaction::TxVersion::V7
+    );
+    assert_shielded_sighash_is_txid(pczt);
 }
 
 #[test]

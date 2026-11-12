@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 use zcash_encoding::{Array, CompactSize, Vector};
+#[cfg(feature = "orchard")]
 use zcash_protocol::value::ZatBalance;
 
 #[cfg(zcash_unstable = "nu8")]
@@ -168,7 +169,7 @@ impl OrchardActionBytes {
 pub struct OrchardBundleBytes {
     actions: Vec<OrchardActionBytes>,
     flags: u8,
-    value_balance: ZatBalance,
+    value_balance: i64,
     anchor: [u8; ANCHOR_SIZE],
     proof: Vec<u8>,
     spend_auth_sigs: Vec<[u8; SPEND_AUTH_SIG_SIZE]>,
@@ -184,7 +185,7 @@ impl OrchardBundleBytes {
     pub fn from_parts(
         actions: Vec<OrchardActionBytes>,
         flags: u8,
-        value_balance: ZatBalance,
+        value_balance: i64,
         anchor: [u8; ANCHOR_SIZE],
         proof: Vec<u8>,
         spend_auth_sigs: Vec<[u8; SPEND_AUTH_SIG_SIZE]>,
@@ -224,7 +225,7 @@ impl OrchardBundleBytes {
     }
 
     /// Returns the value balance.
-    pub fn value_balance(&self) -> ZatBalance {
+    pub fn value_balance(&self) -> i64 {
         self.value_balance
     }
 
@@ -282,7 +283,7 @@ impl OrchardBundleBytes {
             Some(bundle) => {
                 Vector::write(&mut writer, &bundle.actions, |w, action| action.write(w))?;
                 writer.write_all(&[bundle.flags])?;
-                writer.write_all(&bundle.value_balance.to_i64_le_bytes())?;
+                writer.write_all(&bundle.value_balance.to_le_bytes())?;
                 writer.write_all(&bundle.anchor)?;
                 Vector::write_bytes(&mut writer, &bundle.proof)?;
                 Array::write(&mut writer, &bundle.spend_auth_sigs, |w, sig| {
@@ -351,7 +352,7 @@ impl OrchardBundleBytes {
         orchard::Bundle::try_from_parts(
             actions,
             flags,
-            self.value_balance,
+            value_balance_from_raw(self.value_balance)?,
             anchor,
             authorization,
             bundle_version,
@@ -801,10 +802,16 @@ impl V7OrchardBundleBytes {
     }
 }
 
-/// Reads a signed 64-bit value balance.
-fn read_balance<R: Read>(mut reader: R) -> io::Result<ZatBalance> {
+/// Reads a signed 64-bit value balance without narrowing it to the monetary
+/// domain.
+fn read_balance<R: Read>(mut reader: R) -> io::Result<i64> {
     let mut bytes = [0u8; 8];
     reader.read_exact(&mut bytes)?;
-    ZatBalance::from_i64_le_bytes(bytes)
+    Ok(i64::from_le_bytes(bytes))
+}
+
+#[cfg(feature = "orchard")]
+fn value_balance_from_raw(value: i64) -> io::Result<ZatBalance> {
+    ZatBalance::from_i64(value)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
 }

@@ -731,6 +731,7 @@ fn transparent_value_balance(
     bundle: &crate::transparent::Bundle,
 ) -> Result<ZatBalance, ExtractError> {
     fn total(mut values: impl Iterator<Item = u64>) -> Result<ZatBalance, ExtractError> {
+        // `Iterator::try_reduce` is still unstable, so fold explicitly.
         values.try_fold(ZatBalance::zero(), |acc, value| {
             let value = Zatoshis::from_u64(value)
                 .map_err(ExtractError::TransparentValueBalance)

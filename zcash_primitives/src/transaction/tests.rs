@@ -1878,8 +1878,8 @@ fn v7_transparent_sighash_commits_to_all_value_pool_deltas() {
     fn manual_vp_digest(entries: &[zip248::ValuePoolDeltaEntry]) -> Blake2bHash {
         let mut preimage = Vec::new();
         for entry in entries {
-            preimage.extend_from_slice(&compact_size(entry.bundle_type()));
-            preimage.extend_from_slice(&compact_size(entry.bundle_variant()));
+            preimage.extend_from_slice(&compact_size(entry.bundle_type().to_u64()));
+            preimage.extend_from_slice(&compact_size(entry.bundle_variant().to_u64()));
             preimage.push(entry.asset_class());
             if let Some(uuid) = entry.asset_uuid() {
                 preimage.extend_from_slice(uuid);
@@ -1911,8 +1911,13 @@ fn v7_transparent_sighash_commits_to_all_value_pool_deltas() {
             .unwrap();
         vp.set_fee(Zatoshis::from_u64(fee).unwrap()).unwrap();
         vp.set_sapling(ZatBalance::from_i64(500).unwrap()).unwrap();
-        vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(7).unwrap())
-            .unwrap();
+        vp.insert(
+            zip248::ValuePoolDeltaKey::from_parts(zip248::BundleType::from_u64(8), 0, [0u8; 64])
+                .unwrap(),
+            zip248::BundleVariant::from_u64(0),
+            ZatBalance::from_i64(7).unwrap(),
+        )
+        .unwrap();
 
         let tx = TransactionData::from_parts_with_value_pool_deltas(
             TxVersion::V7,
@@ -2130,18 +2135,14 @@ mod zip248_tests {
         let mut vp2 = zip248::ValuePoolDeltas::empty();
         for _ in 0..n {
             let entry = zip248::ValuePoolDeltaEntry::read(&mut cursor).unwrap();
-            if let (Some(bt), Some(bv)) = (
-                zip248::BundleType::from_u64(entry.bundle_type()),
-                zip248::BundleVariant::from_u64(entry.bundle_variant()),
-            ) {
-                let key = zip248::ValuePoolDeltaKey::from_parts(
-                    bt,
-                    entry.asset_class(),
-                    entry.asset_uuid().copied().unwrap_or([0u8; 64]),
-                )
+            let key = zip248::ValuePoolDeltaKey::from_parts(
+                entry.bundle_type(),
+                entry.asset_class(),
+                entry.asset_uuid().copied().unwrap_or([0u8; 64]),
+            )
+            .unwrap();
+            vp2.insert(key, entry.bundle_variant(), entry.value())
                 .unwrap();
-                vp2.insert_known(key, bv, entry.value()).unwrap();
-            }
         }
 
         assert_eq!(
@@ -2157,17 +2158,17 @@ mod zip248_tests {
 
     #[test]
     fn bundle_data_framing_empty() {
-        let bt = zip248::BundleType::Transparent.to_u64();
-        let bv = zip248::BundleVariant::Default.to_u64();
+        let bt = zip248::BundleType::TRANSPARENT;
+        let bv = zip248::BundleVariant::DEFAULT;
         let data: Vec<u8> = vec![];
 
         let mut buf = Vec::new();
-        zip248::write_bundle_data_framing(&mut buf, bt, bv, &data).unwrap();
+        zip248::write_bundle_data_framing(&mut buf, bt.to_u64(), bv.to_u64(), &data).unwrap();
 
         let ((parsed_bt, parsed_bv), parsed_data) =
             zip248::read_bundle_data_framing(&buf[..]).unwrap();
-        assert_eq!(parsed_bt, bt);
-        assert_eq!(parsed_bv, bv);
+        assert_eq!(parsed_bt, bt.to_u64());
+        assert_eq!(parsed_bv, bv.to_u64());
         assert!(parsed_data.is_empty());
     }
 
@@ -2181,15 +2182,15 @@ mod zip248_tests {
         use super::super::{
             Transaction, TxVersion,
             bytes::{
-                OpaqueBundleBytes, RawBundleType, RawBundleVariant, TransactionBodyBytes,
+                BundleType, BundleVariant, OpaqueBundleBytes, TransactionBodyBytes,
                 TransactionBytes, V7BundleBytes, V7TransactionBodyBytes,
             },
         };
         use zcash_protocol::consensus::{BlockHeight, BranchId};
 
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(42),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(42),
+            BundleVariant::from_u64(0),
             vec![0xDE, 0xAD, 0xBE, 0xEF],
             None,
         )
@@ -2317,14 +2318,14 @@ mod zip248_tests {
         fn fee_asset_class_must_be_zec() {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Insert a fee entry with non-ZEC asset class via the raw API.
-            vp.insert_known(
+            vp.insert(
                 zip248::ValuePoolDeltaKey::from_parts(
-                    zip248::BundleType::Fee,
+                    zip248::BundleType::FEE,
                     zip248::ASSET_CLASS_OTHER,
                     [0x42; 64],
                 )
                 .unwrap(),
-                zip248::BundleVariant::Default,
+                zip248::BundleVariant::DEFAULT,
                 ZatBalance::from_i64(-1000).unwrap(),
             )
             .unwrap();
@@ -2471,9 +2472,9 @@ mod zip248_tests {
             let mut vp = zip248::ValuePoolDeltas::empty();
             // Manually insert a positive fee delta (simulating a coinbase-style
             // fee entry in a non-coinbase transaction).
-            vp.insert_known(
-                zip248::ValuePoolDeltaKey::zec(zip248::BundleType::Fee).unwrap(),
-                zip248::BundleVariant::Default,
+            vp.insert(
+                zip248::ValuePoolDeltaKey::zec(zip248::BundleType::FEE),
+                zip248::BundleVariant::DEFAULT,
                 ZatBalance::from_i64(1000).unwrap(),
             )
             .unwrap();
@@ -2513,14 +2514,14 @@ mod zip248_tests {
         #[test]
         fn unbalanced_non_zec_delta_is_rejected_by_conservation() {
             let mut vp = zip248::ValuePoolDeltas::empty();
-            vp.insert_known(
+            vp.insert(
                 zip248::ValuePoolDeltaKey::from_parts(
-                    zip248::BundleType::Transparent,
+                    zip248::BundleType::TRANSPARENT,
                     zip248::ASSET_CLASS_OTHER,
                     [0x42; 64],
                 )
                 .unwrap(),
-                zip248::BundleVariant::Default,
+                zip248::BundleVariant::DEFAULT,
                 ZatBalance::from_i64(-1000).unwrap(),
             )
             .unwrap();
@@ -2528,7 +2529,7 @@ mod zip248_tests {
             assert_eq!(
                 tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::ValueImbalance {
-                    bundle_type_for_asset: zip248::BundleType::Transparent.to_u64(),
+                    bundle_type_for_asset: zip248::BundleType::TRANSPARENT.to_u64(),
                     asset_class: zip248::ASSET_CLASS_OTHER,
                     sum: -1000,
                 }),
@@ -2542,17 +2543,17 @@ mod zip248_tests {
             let uuid = [0x42; 64];
             let mut vp = zip248::ValuePoolDeltas::empty();
             for (bundle_type, value) in [
-                (zip248::BundleType::Transparent, -1000),
-                (zip248::BundleType::Zip233Nsm, 1000),
+                (zip248::BundleType::TRANSPARENT, -1000),
+                (zip248::BundleType::ZIP233_NSM, 1000),
             ] {
-                vp.insert_known(
+                vp.insert(
                     zip248::ValuePoolDeltaKey::from_parts(
                         bundle_type,
                         zip248::ASSET_CLASS_OTHER,
                         uuid,
                     )
                     .unwrap(),
-                    zip248::BundleVariant::Default,
+                    zip248::BundleVariant::DEFAULT,
                     ZatBalance::from_i64(value).unwrap(),
                 )
                 .unwrap();
@@ -2612,12 +2613,27 @@ mod zip248_tests {
         }
 
         /// Writes an `mEffectBundles`/`mAuthBundles` TLV entry.
-        fn write_bundle_entry(buf: &mut Vec<u8>, bundle_type: u64, variant: u64, data: &[u8]) {
-            zip248::write_bundle_data_framing(&mut *buf, bundle_type, variant, data).unwrap();
+        fn write_bundle_entry(
+            buf: &mut Vec<u8>,
+            bundle_type: zip248::BundleType,
+            variant: zip248::BundleVariant,
+            data: &[u8],
+        ) {
+            zip248::write_bundle_data_framing(
+                &mut *buf,
+                bundle_type.to_u64(),
+                variant.to_u64(),
+                data,
+            )
+            .unwrap();
         }
 
         /// A v7 transaction carrying a single `mEffectBundles` entry.
-        fn v7_with_effect_bundle(bundle_type: u64, variant: u64, data: &[u8]) -> Vec<u8> {
+        fn v7_with_effect_bundle(
+            bundle_type: zip248::BundleType,
+            variant: zip248::BundleVariant,
+            data: &[u8],
+        ) -> Vec<u8> {
             let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut buf, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut buf, 1).unwrap(); // nEffectBundles
@@ -2640,8 +2656,8 @@ mod zip248_tests {
             effects.extend_from_slice(&1_000u64.to_le_bytes());
             CompactSize::write(&mut effects, 0).unwrap();
 
-            let transparent = zip248::BundleType::Transparent.to_u64();
-            let variant = zip248::BundleVariant::Default.to_u64();
+            let transparent = zip248::BundleType::TRANSPARENT;
+            let variant = zip248::BundleVariant::DEFAULT;
             let buf = v7_with_effect_bundle(transparent, variant, &effects);
 
             let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
@@ -2688,8 +2704,8 @@ mod zip248_tests {
             CompactSize::write(&mut effects, 0).unwrap(); // nIn
             CompactSize::write(&mut effects, 0).unwrap(); // nOut
             let buf = v7_with_effect_bundle(
-                zip248::BundleType::Transparent.to_u64(),
-                zip248::BundleVariant::Default.to_u64(),
+                zip248::BundleType::TRANSPARENT,
+                zip248::BundleVariant::DEFAULT,
                 &effects,
             );
 
@@ -2708,8 +2724,8 @@ mod zip248_tests {
             let mut effects = Vec::new();
             CompactSize::write(&mut effects, 1 << 20).unwrap(); // nIn, with no inputs following
             let buf = v7_with_effect_bundle(
-                zip248::BundleType::Transparent.to_u64(),
-                zip248::BundleVariant::Default.to_u64(),
+                zip248::BundleType::TRANSPARENT,
+                zip248::BundleVariant::DEFAULT,
                 &effects,
             );
 
@@ -2723,7 +2739,7 @@ mod zip248_tests {
             let mut buf = v7_header(BranchId::Nu8);
             CompactSize::write(&mut buf, 0).unwrap(); // nValuePoolDeltas
             CompactSize::write(&mut buf, 1).unwrap(); // nEffectBundles
-            CompactSize::write(&mut buf, zip248::BundleType::Transparent.to_u64() as usize)
+            CompactSize::write(&mut buf, zip248::BundleType::TRANSPARENT.to_u64() as usize)
                 .unwrap();
             CompactSize::write(&mut buf, 0).unwrap(); // bundleVariant
             CompactSize::write(&mut buf, MAX_BLOCK_BYTES + 1).unwrap(); // claimed length
@@ -2746,12 +2762,9 @@ mod zip248_tests {
             use crate::transaction::bytes::{TransactionBytes, V7BundleBytes};
 
             let opaque = [0xAAu8; 8];
-            let unknown_variant = zip248::BundleVariant::Default.to_u64() + 1;
-            let buf = v7_with_effect_bundle(
-                zip248::BundleType::Sapling.to_u64(),
-                unknown_variant,
-                &opaque,
-            );
+            let unknown_variant =
+                zip248::BundleVariant::from_u64(zip248::BundleVariant::DEFAULT.to_u64() + 1);
+            let buf = v7_with_effect_bundle(zip248::BundleType::SAPLING, unknown_variant, &opaque);
 
             let tx = TransactionBytes::read(&buf[..]).unwrap();
             let body = tx.body().as_v7().unwrap();
@@ -3053,11 +3066,20 @@ mod zip248_tests {
                 .unwrap();
             vp.set_fee(Zatoshis::from_u64(1_000).unwrap()).unwrap();
             // Unknown: bundleType 8 (sorts after all known types)
-            vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(99_000).unwrap())
-                .unwrap();
+            vp.insert(
+                zip248::ValuePoolDeltaKey::from_parts(
+                    zip248::BundleType::from_u64(8),
+                    0,
+                    [0u8; 64],
+                )
+                .unwrap(),
+                zip248::BundleVariant::from_u64(0),
+                ZatBalance::from_i64(99_000).unwrap(),
+            )
+            .unwrap();
 
             let entries = vp.to_wire_entries();
-            let types: Vec<u64> = entries.iter().map(|e| e.bundle_type()).collect();
+            let types: Vec<u64> = entries.iter().map(|e| e.bundle_type().to_u64()).collect();
             // Orchard=3, Fee=5, Unknown=8 — strictly increasing.
             assert_eq!(types, vec![3, 5, 8]);
         }
@@ -3786,17 +3808,20 @@ mod zip248_tests {
         }
 
         #[test]
-        fn malformed_coinbase_height_fails_byte_parsing() {
+        fn malformed_coinbase_height_fails_validation() {
             let mut effects = coinbase_effects(0, 0);
             effects[..4].copy_from_slice(&0u32.to_le_bytes());
             let bytes = wire_tx(BranchId::Nu8, &[], &[(1, 0, effects)], &[]);
-            assert!(TransactionBytes::read(&bytes[..]).is_err());
+            // The byte layer retains the raw height; validation rejects it.
+            assert!(TransactionBytes::read(&bytes[..]).is_ok());
+            assert!(validate(&bytes).is_err());
         }
 
         #[test]
-        fn malformed_coinbase_lockbox_fails_byte_parsing() {
+        fn malformed_coinbase_lockbox_fails_validation() {
             let bytes = wire_tx(BranchId::Nu8, &[], &[(1, 0, coinbase_effects(1, 2))], &[]);
-            assert!(TransactionBytes::read(&bytes[..]).is_err());
+            assert!(TransactionBytes::read(&bytes[..]).is_ok());
+            assert!(validate(&bytes).is_err());
         }
 
         #[test]
@@ -3843,17 +3868,17 @@ mod zip248_tests {
             let uuid = [0x42; 64];
             let mut vp = zip248::ValuePoolDeltas::empty();
             for (bundle_type, value) in [
-                (zip248::BundleType::Transparent, -1000i64),
+                (zip248::BundleType::TRANSPARENT, -1000i64),
                 (bundle_type, 1000i64),
             ] {
-                vp.insert_known(
+                vp.insert(
                     zip248::ValuePoolDeltaKey::from_parts(
                         bundle_type,
                         zip248::ASSET_CLASS_OTHER,
                         uuid,
                     )
                     .unwrap(),
-                    zip248::BundleVariant::Default,
+                    zip248::BundleVariant::DEFAULT,
                     ZatBalance::from_i64(value).unwrap(),
                 )
                 .unwrap();
@@ -3877,7 +3902,7 @@ mod zip248_tests {
                     BranchId::Nu8,
                     0,
                     BlockHeight::from_u32(100),
-                    balanced_non_zec_vp(zip248::BundleType::Sapling),
+                    balanced_non_zec_vp(zip248::BundleType::SAPLING),
                     Some(transparent_bundle()),
                     None,
                     Some(bundle),
@@ -3904,7 +3929,7 @@ mod zip248_tests {
                     BranchId::Nu8,
                     0,
                     BlockHeight::from_u32(100),
-                    balanced_non_zec_vp(zip248::BundleType::Orchard),
+                    balanced_non_zec_vp(zip248::BundleType::ORCHARD),
                     Some(transparent_bundle()),
                     None,
                     None,
@@ -4061,14 +4086,6 @@ mod zip248_tests {
             }
         }
     }
-
-    // -- In-memory-only BundleType panic tests ---------------------------------
-
-    #[test]
-    #[should_panic(expected = "in-memory-only")]
-    fn sprout_bundle_type_has_no_wire_encoding() {
-        let _ = zip248::BundleType::Sprout.to_u64();
-    }
 }
 
 /// Byte-level ZIP 248 digest resolution.
@@ -4093,11 +4110,11 @@ mod v7_byte_digests {
     };
     use crate::transaction::{
         bytes::{
-            OpaqueBundleBytes, OrchardSignatureBytes, RawBundleType, RawBundleVariant,
+            BundleType, BundleVariant, OpaqueBundleBytes, OrchardSignatureBytes,
             SaplingSignatureBytes, SighashInfoBytes, TransactionBodyBytes, TransactionBytes,
             V7BundleBytes, V7OrchardBundleBytes, V7SaplingBundleBytes, V7TransactionBodyBytes,
         },
-        zip248::{self, BundleDigestKey, SuppliedBundleDigests, V7DigestError},
+        zip248::{self, BundleId, SuppliedBundleDigests, V7DigestError},
     };
 
     fn transparent_bundle() -> ::transparent::bundle::Bundle<::transparent::bundle::Authorized> {
@@ -4674,14 +4691,14 @@ mod v7_byte_digests {
     #[test]
     fn unknown_bundle_requires_supplied_effect_digest() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(99),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(99),
+            BundleVariant::from_u64(0),
             vec![1, 2, 3],
             None,
         )
         .unwrap();
         let tx = unknown_body(V7BundleBytes::Unknown(opaque));
-        let key = BundleDigestKey::new(99, 0);
+        let key = BundleId::new(BundleType::from_u64(99), BundleVariant::from_u64(0));
 
         let empty = SuppliedBundleDigests::new();
         assert_eq!(
@@ -4693,7 +4710,10 @@ mod v7_byte_digests {
         // key.
         let mut wrong = SuppliedBundleDigests::new();
         wrong
-            .insert_effects(BundleDigestKey::new(98, 0), test_digest(1))
+            .insert_effects(
+                BundleId::new(BundleType::from_u64(98), BundleVariant::from_u64(0)),
+                test_digest(1),
+            )
             .unwrap();
         assert_eq!(
             tx.v7_txid(&wrong),
@@ -4708,14 +4728,14 @@ mod v7_byte_digests {
     #[test]
     fn known_type_unknown_variant_requires_supplied_digest() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(1),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(1),
             vec![1, 2, 3],
             Some(vec![4, 5]),
         )
         .unwrap();
         let tx = unknown_body(V7BundleBytes::KnownTypeUnknownVariant(opaque));
-        let key = BundleDigestKey::new(2, 1);
+        let key = BundleId::new(BundleType::from_u64(2), BundleVariant::from_u64(1));
 
         let empty = SuppliedBundleDigests::new();
         assert_eq!(
@@ -4741,14 +4761,14 @@ mod v7_byte_digests {
     #[test]
     fn known_opaque_bundle_requires_supplied_digest() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(5),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(5),
+            BundleVariant::from_u64(0),
             vec![0x00],
             None,
         )
         .unwrap();
         let tx = unknown_body(V7BundleBytes::KnownOpaque(opaque));
-        let key = BundleDigestKey::new(5, 0);
+        let key = BundleId::new(BundleType::from_u64(5), BundleVariant::from_u64(0));
 
         let empty = SuppliedBundleDigests::new();
         assert_eq!(
@@ -4765,11 +4785,11 @@ mod v7_byte_digests {
     fn supplied_unknown_digest_gives_canonical_txid() {
         let effect_digest = test_digest(2);
         let auth_digest = test_digest(3);
-        let key = BundleDigestKey::new(99, 0);
+        let key = BundleId::new(BundleType::from_u64(99), BundleVariant::from_u64(0));
 
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(99),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(99),
+            BundleVariant::from_u64(0),
             vec![1, 2, 3],
             Some(vec![4, 5]),
         )
@@ -4804,7 +4824,7 @@ mod v7_byte_digests {
 
     #[test]
     fn supplied_digests_reject_duplicates_and_conflicts() {
-        let key = BundleDigestKey::new(99, 0);
+        let key = BundleId::new(BundleType::from_u64(99), BundleVariant::from_u64(0));
         let mut supplied = SuppliedBundleDigests::new();
         supplied.insert_effects(key, test_digest(1)).unwrap();
         assert_eq!(
@@ -4829,20 +4849,32 @@ mod v7_byte_digests {
 
     #[test]
     fn supplied_digests_reject_unexpected_keys() {
-        let key = BundleDigestKey::new(99, 0);
+        let key = BundleId::new(BundleType::from_u64(99), BundleVariant::from_u64(0));
         let mut supplied = SuppliedBundleDigests::new();
         supplied.insert_effects(key, test_digest(1)).unwrap();
         supplied.insert_auth(key, test_digest(2)).unwrap();
 
         assert_eq!(
-            supplied.validate_for([&BundleDigestKey::new(98, 0)]),
+            supplied.validate_for(
+                [&BundleId::new(
+                    BundleType::from_u64(98),
+                    BundleVariant::from_u64(0)
+                )],
+                []
+            ),
             Err(V7DigestError::UnexpectedEffectsDigest { key })
         );
 
         let mut supplied = SuppliedBundleDigests::new();
         supplied.insert_auth(key, test_digest(2)).unwrap();
         assert_eq!(
-            supplied.validate_for([&BundleDigestKey::new(98, 0)]),
+            supplied.validate_for(
+                [&BundleId::new(
+                    BundleType::from_u64(98),
+                    BundleVariant::from_u64(0)
+                )],
+                []
+            ),
             Err(V7DigestError::UnexpectedAuthDigest { key })
         );
     }
@@ -4862,7 +4894,7 @@ mod conversions {
     #[test]
     fn v4_sapling_requires_a_binding_signature() {
         let bundle = V4SaplingBundleBytes::from_parts(
-            ZatBalance::zero(),
+            0,
             vec![SaplingSpendV4Bytes::from_parts(
                 [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 192], [0u8; 64],
             )],

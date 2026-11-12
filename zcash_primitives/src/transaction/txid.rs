@@ -31,6 +31,8 @@ use super::{Authorization, Authorized, TransactionDigest};
 use super::{TransparentDigests, TxId, TxVersion, Zip244Digests};
 
 #[cfg(zcash_unstable = "nu8")]
+use super::zip248::{BundleId, BundleType, BundleVariant};
+#[cfg(zcash_unstable = "nu8")]
 use super::{
     bytes::{
         CoinbaseBundleBytes, OrchardActionBytes, V7OrchardBundleBytes, V7SaplingBundleBytes,
@@ -1007,7 +1009,11 @@ pub(crate) fn transparent_digests_bytes(
 /// over a byte-layer transparent bundle.
 #[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_transparent_effects_bytes(bundle: &TransparentBundleBytes) -> Blake2bHash {
-    hash_transparent_txid_data(Some(&transparent_digests_bytes(bundle)))
+    if bundle.effects().inputs().is_empty() && bundle.effects().outputs().is_empty() {
+        hash_transparent_txid_data(None)
+    } else {
+        hash_transparent_txid_data(Some(&transparent_digests_bytes(bundle)))
+    }
 }
 
 /// [ZIP 248 §T.3.1](https://zips.z.cash/zip-0248#t-3-1-coinbase-effects-digest)
@@ -1531,32 +1537,46 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
     sapling_digest: Option<&'a Blake2bHash>,
     orchard_digest: Option<&'a Blake2bHash>,
     ironwood_digest: Option<&'a Blake2bHash>,
-    unknown: &'a [((u64, u64), Blake2bHash)],
+    unknown: &'a [(BundleId, Blake2bHash)],
 ) -> alloc::vec::Vec<((u64, u64), &'a Blake2bHash)> {
-    use super::zip248::BundleId;
     let mut entries: alloc::vec::Vec<((u64, u64), &'a Blake2bHash)> = alloc::vec::Vec::new();
     // Known bundles, pushed in the natural order of their wire keys.
     if let Some(d) = transparent_digest {
-        entries.push((BundleId::TRANSPARENT.wire_key(), d));
+        entries.push((
+            BundleId::new(BundleType::TRANSPARENT, BundleVariant::DEFAULT).wire_key(),
+            d,
+        ));
     }
     if let Some(d) = coinbase_digest {
-        entries.push((BundleId::COINBASE.wire_key(), d));
+        entries.push((
+            BundleId::new(BundleType::COINBASE, BundleVariant::DEFAULT).wire_key(),
+            d,
+        ));
     }
     if let Some(d) = sapling_digest {
-        entries.push((BundleId::SAPLING.wire_key(), d));
+        entries.push((
+            BundleId::new(BundleType::SAPLING, BundleVariant::DEFAULT).wire_key(),
+            d,
+        ));
     }
     if let Some(d) = orchard_digest {
-        entries.push((BundleId::ORCHARD.wire_key(), d));
+        entries.push((
+            BundleId::new(BundleType::ORCHARD, BundleVariant::DEFAULT).wire_key(),
+            d,
+        ));
     }
     if let Some(d) = ironwood_digest {
-        entries.push((BundleId::IRONWOOD.wire_key(), d));
+        entries.push((
+            BundleId::new(BundleType::IRONWOOD, BundleVariant::DEFAULT).wire_key(),
+            d,
+        ));
     }
     // Unknown bundles: these were round-tripped from the wire and may include
     // bundle types introduced by future network upgrades that this code does
     // not yet understand. They participate in the digest identically to known
     // bundles so that the txid is stable across software versions.
     for (key, digest) in unknown {
-        entries.push((*key, digest));
+        entries.push((key.wire_key(), digest));
     }
     // Sort to guarantee the strictly-increasing order required by ZIP 248.
     entries.sort_by_key(|(key, _)| *key);

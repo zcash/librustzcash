@@ -14,9 +14,7 @@ use zcash_protocol::consensus::BranchId;
 
 use crate::transaction::{
     Transaction, TxVersion, V7BundleMap, V7ValidationError,
-    bytes::{
-        RawBundleType, RawBundleVariant, TransactionBytes, V7BundleBytes, V7TransactionBodyBytes,
-    },
+    bytes::{TransactionBytes, V7BundleBytes, V7TransactionBodyBytes},
     zip248::{self, BundleType, BundleVariant},
 };
 
@@ -81,6 +79,10 @@ impl TransactionBytes {
         if !TxVersion::V7.valid_in_branch(branch_id) {
             return Err(V7ValidationError::NotActivated { branch_id });
         }
+        let expiry_height = u32::from(self.expiry_height());
+        if expiry_height > zip248::MAX_EXPIRY_HEIGHT {
+            return Err(V7ValidationError::InvalidExpiryHeight { expiry_height });
+        }
         let body = self.body().as_v7().ok_or(V7ValidationError::NotV7)?;
 
         check_registry(body)?;
@@ -133,22 +135,22 @@ fn check_registry(body: &V7TransactionBodyBytes) -> Result<(), V7ValidationError
 
 /// Checks one `(bundleType, bundleVariant)` entry against the registry.
 fn check_registry_entry(
-    bundle_type: RawBundleType,
-    bundle_variant: RawBundleVariant,
+    bundle_type: BundleType,
+    bundle_variant: BundleVariant,
     map: V7BundleMap,
 ) -> Result<(), V7ValidationError> {
-    let Some(known_type) = bundle_type.known() else {
+    if !bundle_type.is_known() {
         return Err(V7ValidationError::UnknownBundleType {
             bundle_type: bundle_type.to_u64(),
         });
-    };
-    if BundleVariant::from_u64(bundle_variant.to_u64()).is_none() {
+    }
+    if !bundle_variant.is_known() {
         return Err(V7ValidationError::UnknownBundleVariant {
             bundle_type: bundle_type.to_u64(),
             bundle_variant: bundle_variant.to_u64(),
         });
     }
-    let Some(row) = zip248::bundle_registry_row(known_type) else {
+    let Some(row) = zip248::bundle_registry_row(bundle_type) else {
         return Err(V7ValidationError::UnknownBundleType {
             bundle_type: bundle_type.to_u64(),
         });
@@ -176,17 +178,19 @@ fn check_registry_entry(
 /// data has a corresponding effecting bundle.
 fn check_required_effects(body: &V7TransactionBodyBytes) -> Result<(), V7ValidationError> {
     for entry in body.value_pool_deltas() {
-        let Some(bundle_type) = entry.bundle_type().known() else {
+        let bundle_type = entry.bundle_type();
+        if !bundle_type.is_known() {
             // The registry check reports the unknown type.
             continue;
-        };
+        }
         let present = match bundle_type {
-            BundleType::Transparent => body.transparent().is_some(),
-            BundleType::Coinbase => body.coinbase().is_some(),
-            BundleType::Sapling => body.sapling().is_some(),
-            BundleType::Orchard => body.orchard().is_some(),
-            BundleType::Ironwood => body.ironwood().is_some(),
-            BundleType::Fee | BundleType::Zip233Nsm | BundleType::Sprout => true,
+            BundleType::TRANSPARENT => body.transparent().is_some(),
+            BundleType::COINBASE => body.coinbase().is_some(),
+            BundleType::SAPLING => body.sapling().is_some(),
+            BundleType::ORCHARD => body.orchard().is_some(),
+            BundleType::IRONWOOD => body.ironwood().is_some(),
+            BundleType::FEE | BundleType::ZIP233_NSM => true,
+            _ => true,
         };
         if !present {
             return Err(V7ValidationError::MissingEffectBundle {
@@ -207,19 +211,26 @@ fn check_required_auth(body: &V7TransactionBodyBytes) -> Result<(), V7Validation
                     return Err(V7ValidationError::MissingTransparentAuth { tx_in_count });
                 }
             }
-            V7BundleBytes::Sapling(sapling) if !sapling.has_auth() => {
+            V7BundleBytes::Sapling(sapling)
+                if (!sapling.spends().is_empty() || !sapling.outputs().is_empty())
+                    && !sapling.has_auth() =>
+            {
                 return Err(V7ValidationError::MissingShieldedAuth {
-                    bundle_type: BundleType::Sapling.to_u64(),
+                    bundle_type: BundleType::SAPLING.to_u64(),
                 });
             }
-            V7BundleBytes::Orchard(orchard) if !orchard.has_auth() => {
+            V7BundleBytes::Orchard(orchard)
+                if !orchard.actions().is_empty() && !orchard.has_auth() =>
+            {
                 return Err(V7ValidationError::MissingShieldedAuth {
-                    bundle_type: BundleType::Orchard.to_u64(),
+                    bundle_type: BundleType::ORCHARD.to_u64(),
                 });
             }
-            V7BundleBytes::Ironwood(ironwood) if !ironwood.has_auth() => {
+            V7BundleBytes::Ironwood(ironwood)
+                if !ironwood.actions().is_empty() && !ironwood.has_auth() =>
+            {
                 return Err(V7ValidationError::MissingShieldedAuth {
-                    bundle_type: BundleType::Ironwood.to_u64(),
+                    bundle_type: BundleType::IRONWOOD.to_u64(),
                 });
             }
             _ => {}
@@ -242,11 +253,11 @@ fn check_fee_and_coinbase_zec(body: &V7TransactionBodyBytes) -> Result<(), V7Val
             crate::transaction::bytes::AssetClass::Zec => continue,
             crate::transaction::bytes::AssetClass::Other(_) => zip248::ASSET_CLASS_OTHER,
         };
-        let error = match entry.bundle_type().known() {
-            Some(BundleType::Fee) => {
+        let error = match entry.bundle_type() {
+            BundleType::FEE => {
                 crate::transaction::V7ConsensusError::FeeAssetClassNotZec { asset_class }
             }
-            Some(BundleType::Coinbase) => {
+            BundleType::COINBASE => {
                 crate::transaction::V7ConsensusError::CoinbaseAssetClassNotZec { asset_class }
             }
             _ => continue,

@@ -5,9 +5,7 @@ use corez::io::{self, Read, Write};
 use zcash_encoding::CompactSize;
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
-use crate::transaction::zip248::{
-    CoinbaseBundle, MAX_COINBASE_BLOCK_HEIGHT, MAX_COINBASE_DATA_LEN,
-};
+use crate::transaction::zip248::CoinbaseBundle;
 
 /// The size in bytes of the coinbase bundle's block height.
 const BLOCK_HEIGHT_SIZE: usize = 4;
@@ -16,11 +14,8 @@ const AMOUNT_SIZE: usize = 8;
 
 /// The effecting data of a version 7 coinbase bundle.
 ///
-/// The amounts are retained as the raw unsigned 64-bit integers from the wire.
-/// The byte layer enforces the bundle's field constraints: `blockHeight` is in
-/// `1..=499_999_999`, `lockboxValue` does not exceed `blockSubsidy`, and
-/// `coinbaseDataLen` is at most [`MAX_COINBASE_DATA_LEN`]. Narrowing to
-/// [`Zatoshis`] happens when the bundle is converted to its typed
+/// The fields are retained as they appear on the wire. Bundle-local field
+/// constraints are enforced when the bundle is converted to its typed
 /// representation.
 ///
 /// [ZIP 248 §Coinbase Effecting Data](https://zips.z.cash/zip-0248#coinbase-effecting-data)
@@ -36,35 +31,12 @@ pub struct CoinbaseBundleBytes {
 #[cfg(zcash_unstable = "nu8")]
 impl CoinbaseBundleBytes {
     /// Constructs a coinbase bundle from its wire fields.
-    ///
-    /// Returns an error if `blockHeight` is outside `1..=499_999_999`, if
-    /// `lockboxValue` exceeds `blockSubsidy`, or if the coinbase data exceeds
-    /// [`MAX_COINBASE_DATA_LEN`].
     pub fn from_parts(
         block_height: BlockHeight,
         block_subsidy: u64,
         lockbox_value: u64,
         coinbase_data: Vec<u8>,
     ) -> io::Result<Self> {
-        let height = u32::from(block_height);
-        if height == 0 || height > MAX_COINBASE_BLOCK_HEIGHT {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "coinbase blockHeight is outside the ZIP 248 range",
-            ));
-        }
-        if lockbox_value > block_subsidy {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "coinbase lockboxValue exceeds blockSubsidy",
-            ));
-        }
-        if coinbase_data.len() > MAX_COINBASE_DATA_LEN {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "coinbase coinbaseDataLen exceeds the ZIP 248 limit",
-            ));
-        }
         Ok(Self {
             block_height,
             block_subsidy,
@@ -96,9 +68,8 @@ impl CoinbaseBundleBytes {
 
     /// Reads a coinbase bundle's effecting data.
     ///
-    /// The amounts are retained as raw unsigned 64-bit integers and are not
-    /// narrowed to the monetary domain. The `coinbaseDataLen` field is bounded
-    /// by [`MAX_COINBASE_DATA_LEN`] before the payload is allocated.
+    /// The fields are retained as they appear on the wire. The payload length
+    /// is bounded by the enclosing bundle's wire length.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut block_height = [0u8; BLOCK_HEIGHT_SIZE];
         reader.read_exact(&mut block_height)?;
@@ -112,12 +83,6 @@ impl CoinbaseBundleBytes {
         let lockbox_value = u64::from_le_bytes(amount);
 
         let data_len = CompactSize::read_t::<_, usize>(&mut reader)?;
-        if data_len > MAX_COINBASE_DATA_LEN {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "coinbase coinbaseDataLen exceeds the ZIP 248 limit",
-            ));
-        }
         let mut coinbase_data = alloc::vec![0u8; data_len];
         reader.read_exact(&mut coinbase_data)?;
 

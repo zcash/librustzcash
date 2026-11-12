@@ -18,56 +18,6 @@ const ASSET_UUID_SIZE: usize = 64;
 /// The size in bytes of a value pool delta.
 const VALUE_SIZE: usize = 8;
 
-/// A raw `bundleType` identifier.
-///
-/// The wire may name bundle types this implementation does not recognize, so
-/// the byte layer retains the raw value rather than requiring a
-/// [`BundleType`] variant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RawBundleType(u64);
-
-impl RawBundleType {
-    /// Constructs a raw bundle type from its wire value.
-    pub const fn from_u64(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the raw wire value.
-    pub const fn to_u64(self) -> u64 {
-        self.0
-    }
-
-    /// Returns the recognized bundle type, if this implementation knows it.
-    pub fn known(self) -> Option<BundleType> {
-        BundleType::from_u64(self.0)
-    }
-}
-
-/// A raw `bundleVariant` identifier.
-///
-/// The wire may name variants this implementation does not recognize, so the
-/// byte layer retains the raw value rather than requiring a
-/// [`BundleVariant`] variant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RawBundleVariant(u64);
-
-impl RawBundleVariant {
-    /// Constructs a raw bundle variant from its wire value.
-    pub const fn from_u64(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the raw wire value.
-    pub const fn to_u64(self) -> u64 {
-        self.0
-    }
-
-    /// Returns the recognized bundle variant, if this implementation knows it.
-    pub fn known(self) -> Option<BundleVariant> {
-        BundleVariant::from_u64(self.0)
-    }
-}
-
 /// The asset class of a value pool delta.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AssetClass {
@@ -126,8 +76,8 @@ impl AssetClass {
 /// [ZIP 248 §ValuePoolDelta](https://zips.z.cash/zip-0248#valuepooldelta)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValuePoolDeltaBytes {
-    bundle_type: RawBundleType,
-    bundle_variant: RawBundleVariant,
+    bundle_type: BundleType,
+    bundle_variant: BundleVariant,
     asset_class: AssetClass,
     value: i64,
 }
@@ -139,8 +89,8 @@ impl ValuePoolDeltaBytes {
     /// elided from the encoding, or if a raw identifier has no `compactSize`
     /// encoding.
     pub fn from_parts(
-        bundle_type: RawBundleType,
-        bundle_variant: RawBundleVariant,
+        bundle_type: BundleType,
+        bundle_variant: BundleVariant,
         asset_class: AssetClass,
         value: i64,
     ) -> io::Result<Self> {
@@ -160,12 +110,12 @@ impl ValuePoolDeltaBytes {
     }
 
     /// Returns the raw bundle type.
-    pub fn bundle_type(&self) -> RawBundleType {
+    pub fn bundle_type(&self) -> BundleType {
         self.bundle_type
     }
 
     /// Returns the raw bundle variant.
-    pub fn bundle_variant(&self) -> RawBundleVariant {
+    pub fn bundle_variant(&self) -> BundleVariant {
         self.bundle_variant
     }
 
@@ -184,10 +134,7 @@ impl ValuePoolDeltaBytes {
     /// The fee and ZIP 233 NSM bundle types carry only a value pool delta and
     /// have no effecting or authorizing data.
     pub fn is_value_only(&self) -> bool {
-        matches!(
-            self.bundle_type.known(),
-            Some(BundleType::Fee | BundleType::Zip233Nsm)
-        )
+        matches!(self.bundle_type, BundleType::FEE | BundleType::ZIP233_NSM)
     }
 
     /// Reads a value pool delta entry.
@@ -195,8 +142,8 @@ impl ValuePoolDeltaBytes {
     /// The value is retained as the raw signed 64-bit integer from the wire and
     /// is not narrowed to the monetary domain.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let bundle_type = RawBundleType::from_u64(CompactSize::read(&mut reader)?);
-        let bundle_variant = RawBundleVariant::from_u64(CompactSize::read(&mut reader)?);
+        let bundle_type = BundleType::from_u64(CompactSize::read(&mut reader)?);
+        let bundle_variant = BundleVariant::from_u64(CompactSize::read(&mut reader)?);
         let asset_class = AssetClass::read(&mut reader)?;
         let mut value = [0u8; VALUE_SIZE];
         reader.read_exact(&mut value)?;
@@ -220,8 +167,8 @@ impl ValuePoolDeltaBytes {
 /// and for recognized types whose payload is not interpreted at this layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpaqueBundleBytes {
-    bundle_type: RawBundleType,
-    bundle_variant: RawBundleVariant,
+    bundle_type: BundleType,
+    bundle_variant: BundleVariant,
     effects: Vec<u8>,
     auth: Option<Vec<u8>>,
 }
@@ -233,8 +180,8 @@ impl OpaqueBundleBytes {
     /// if either payload exceeds [`MAX_BLOCK_BYTES`], which the wire encoding
     /// cannot represent.
     pub fn from_parts(
-        bundle_type: RawBundleType,
-        bundle_variant: RawBundleVariant,
+        bundle_type: BundleType,
+        bundle_variant: BundleVariant,
         effects: Vec<u8>,
         auth: Option<Vec<u8>>,
     ) -> io::Result<Self> {
@@ -262,12 +209,12 @@ impl OpaqueBundleBytes {
     }
 
     /// Returns the raw bundle type.
-    pub fn bundle_type(&self) -> RawBundleType {
+    pub fn bundle_type(&self) -> BundleType {
         self.bundle_type
     }
 
     /// Returns the raw bundle variant.
-    pub fn bundle_variant(&self) -> RawBundleVariant {
+    pub fn bundle_variant(&self) -> BundleVariant {
         self.bundle_variant
     }
 
@@ -315,15 +262,13 @@ pub enum V7BundleBytes {
 
 impl V7BundleBytes {
     /// Returns the raw bundle type.
-    pub fn bundle_type(&self) -> RawBundleType {
+    pub fn bundle_type(&self) -> BundleType {
         match self {
-            Self::Transparent(_) => RawBundleType::from_u64(BundleType::Transparent.to_u64()),
-            Self::Coinbase(_) | Self::CoinbaseWithAuth(..) => {
-                RawBundleType::from_u64(BundleType::Coinbase.to_u64())
-            }
-            Self::Sapling(_) => RawBundleType::from_u64(BundleType::Sapling.to_u64()),
-            Self::Orchard(_) => RawBundleType::from_u64(BundleType::Orchard.to_u64()),
-            Self::Ironwood(_) => RawBundleType::from_u64(BundleType::Ironwood.to_u64()),
+            Self::Transparent(_) => BundleType::TRANSPARENT,
+            Self::Coinbase(_) | Self::CoinbaseWithAuth(..) => BundleType::COINBASE,
+            Self::Sapling(_) => BundleType::SAPLING,
+            Self::Orchard(_) => BundleType::ORCHARD,
+            Self::Ironwood(_) => BundleType::IRONWOOD,
             Self::KnownOpaque(bundle)
             | Self::KnownTypeUnknownVariant(bundle)
             | Self::Unknown(bundle) => bundle.bundle_type,
@@ -331,14 +276,14 @@ impl V7BundleBytes {
     }
 
     /// Returns the raw bundle variant.
-    pub fn bundle_variant(&self) -> RawBundleVariant {
+    pub fn bundle_variant(&self) -> BundleVariant {
         match self {
             Self::Transparent(_)
             | Self::Coinbase(_)
             | Self::CoinbaseWithAuth(..)
             | Self::Sapling(_)
             | Self::Orchard(_)
-            | Self::Ironwood(_) => RawBundleVariant::from_u64(BundleVariant::Default.to_u64()),
+            | Self::Ironwood(_) => BundleVariant::DEFAULT,
             Self::KnownOpaque(bundle)
             | Self::KnownTypeUnknownVariant(bundle)
             | Self::Unknown(bundle) => bundle.bundle_variant,
@@ -421,8 +366,8 @@ impl V7BundleBytes {
     }
 
     /// Returns the exact raw digest key of this bundle.
-    pub fn digest_key(&self) -> zip248::BundleDigestKey {
-        zip248::BundleDigestKey::new(self.bundle_type().to_u64(), self.bundle_variant().to_u64())
+    pub fn digest_key(&self) -> zip248::BundleId {
+        zip248::BundleId::new(self.bundle_type(), self.bundle_variant())
     }
 
     /// Computes this bundle's effecting-data digest.
@@ -621,33 +566,14 @@ impl V7TransactionBodyBytes {
                 .asset_uuid()
                 .copied()
                 .unwrap_or([0u8; 64]);
-            match (entry.bundle_type().known(), entry.bundle_variant().known()) {
-                (Some(bundle_type), Some(bundle_variant)) => {
-                    let key =
-                        zip248::ValuePoolDeltaKey::from_parts(bundle_type, asset_class, asset_uuid)
-                            .map_err(|e| {
-                                io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{e}"))
-                            })?;
-                    deltas
-                        .insert_known(key, bundle_variant, value)
-                        .map_err(|e| {
-                            io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{e}"))
-                        })?;
-                }
-                _ => {
-                    deltas
-                        .insert_unknown(
-                            entry.bundle_type().to_u64(),
-                            asset_class,
-                            asset_uuid,
-                            entry.bundle_variant().to_u64(),
-                            value,
-                        )
-                        .map_err(|e| {
-                            io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{e}"))
-                        })?;
-                }
-            }
+            let key =
+                zip248::ValuePoolDeltaKey::from_parts(entry.bundle_type(), asset_class, asset_uuid)
+                    .map_err(|e| {
+                        io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{e}"))
+                    })?;
+            deltas
+                .insert(key, entry.bundle_variant(), value)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{e}")))?;
         }
         Ok(deltas)
     }
@@ -689,7 +615,7 @@ impl V7TransactionBodyBytes {
 
     /// Returns the raw ZEC value pool delta for the given bundle type, if
     /// present.
-    pub fn zec_value_pool_delta(&self, bundle_type: RawBundleType) -> Option<i64> {
+    pub fn zec_value_pool_delta(&self, bundle_type: BundleType) -> Option<i64> {
         self.value_pool_deltas
             .iter()
             .find(|entry| entry.bundle_type() == bundle_type && entry.asset_class().is_zec())
@@ -770,8 +696,8 @@ impl V7TransactionBodyBytes {
                     }
                 };
                 ValuePoolDeltaBytes::from_parts(
-                    RawBundleType::from_u64(entry.bundle_type()),
-                    RawBundleVariant::from_u64(entry.bundle_variant()),
+                    entry.bundle_type(),
+                    entry.bundle_variant(),
                     asset_class,
                     entry.value(),
                 )
@@ -829,7 +755,7 @@ impl V7TransactionBodyBytes {
     /// Checks the canonical ordering and cross-map variant consistency of this
     /// body.
     fn validate(&self) -> io::Result<()> {
-        let mut last_key: Option<(RawBundleType, AssetClass)> = None;
+        let mut last_key: Option<(BundleType, AssetClass)> = None;
         for entry in &self.value_pool_deltas {
             let key = (entry.bundle_type(), *entry.asset_class());
             if let Some(previous) = &last_key
@@ -844,7 +770,7 @@ impl V7TransactionBodyBytes {
             last_key = Some(key);
         }
 
-        let mut last_type: Option<RawBundleType> = None;
+        let mut last_type: Option<BundleType> = None;
         for bundle in &self.bundles {
             let bundle_type = bundle.bundle_type();
             if let Some(previous) = last_type
@@ -859,22 +785,19 @@ impl V7TransactionBodyBytes {
             check_raw_key(bundle_type, bundle.bundle_variant())?;
             match bundle {
                 V7BundleBytes::KnownOpaque(opaque)
-                    if opaque.bundle_type.known().is_none()
-                        || opaque.bundle_variant.known().is_none() =>
+                    if !opaque.bundle_type.is_known() || !opaque.bundle_variant.is_known() =>
                 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "a KnownOpaque bundle must have a recognized type and variant",
                     ));
                 }
-                V7BundleBytes::KnownOpaque(opaque) => match opaque.bundle_type.known() {
-                    Some(
-                        BundleType::Transparent
-                        | BundleType::Coinbase
-                        | BundleType::Sapling
-                        | BundleType::Orchard
-                        | BundleType::Ironwood,
-                    ) => {
+                V7BundleBytes::KnownOpaque(opaque) => match opaque.bundle_type {
+                    BundleType::TRANSPARENT
+                    | BundleType::COINBASE
+                    | BundleType::SAPLING
+                    | BundleType::ORCHARD
+                    | BundleType::IRONWOOD => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "a bundle type with a parsed representation must use it",
@@ -883,8 +806,7 @@ impl V7TransactionBodyBytes {
                     _ => {}
                 },
                 V7BundleBytes::KnownTypeUnknownVariant(opaque)
-                    if opaque.bundle_type.known().is_none()
-                        || opaque.bundle_variant.known().is_some() =>
+                    if !opaque.bundle_type.is_known() || opaque.bundle_variant.is_known() =>
                 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -892,7 +814,7 @@ impl V7TransactionBodyBytes {
                          and an unrecognized variant",
                     ));
                 }
-                V7BundleBytes::Unknown(opaque) if opaque.bundle_type.known().is_some() => {
+                V7BundleBytes::Unknown(opaque) if opaque.bundle_type.is_known() => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "an Unknown bundle must have an unrecognized type",
@@ -902,7 +824,7 @@ impl V7TransactionBodyBytes {
             }
         }
 
-        let mut variants: BTreeMap<RawBundleType, RawBundleVariant> = BTreeMap::new();
+        let mut variants: BTreeMap<BundleType, BundleVariant> = BTreeMap::new();
         for entry in &self.value_pool_deltas {
             match variants.get(&entry.bundle_type()) {
                 Some(&existing) if existing != entry.bundle_variant() => {
@@ -968,12 +890,12 @@ impl V7TransactionBodyBytes {
     /// Builds a body from the raw maps read from the wire.
     fn from_maps(
         value_pool_deltas: Vec<ValuePoolDeltaBytes>,
-        effect_bundles: BTreeMap<u64, (u64, Vec<u8>)>,
-        auth_bundles: BTreeMap<u64, (u64, Vec<u8>)>,
+        effect_bundles: BTreeMap<BundleType, (BundleVariant, Vec<u8>)>,
+        auth_bundles: BTreeMap<BundleType, (BundleVariant, Vec<u8>)>,
     ) -> io::Result<Self> {
         // Cross-map variant consistency: every entry for a bundle type across
         // all three maps must encode the same variant.
-        let mut variants: BTreeMap<RawBundleType, RawBundleVariant> = BTreeMap::new();
+        let mut variants: BTreeMap<BundleType, BundleVariant> = BTreeMap::new();
         for entry in &value_pool_deltas {
             match variants.get(&entry.bundle_type()) {
                 Some(&existing) if existing != entry.bundle_variant() => {
@@ -988,8 +910,6 @@ impl V7TransactionBodyBytes {
             }
         }
         for (&bundle_type, &(bundle_variant, _)) in &effect_bundles {
-            let bundle_type = RawBundleType::from_u64(bundle_type);
-            let bundle_variant = RawBundleVariant::from_u64(bundle_variant);
             match variants.get(&bundle_type) {
                 Some(&existing) if existing != bundle_variant => {
                     return Err(io::Error::new(
@@ -1003,8 +923,6 @@ impl V7TransactionBodyBytes {
             }
         }
         for (&bundle_type, &(bundle_variant, _)) in &auth_bundles {
-            let bundle_type = RawBundleType::from_u64(bundle_type);
-            let bundle_variant = RawBundleVariant::from_u64(bundle_variant);
             match variants.get(&bundle_type) {
                 Some(&existing) if existing != bundle_variant => {
                     return Err(io::Error::new(
@@ -1044,8 +962,8 @@ impl V7TransactionBodyBytes {
         for (bundle_type, (bundle_variant, effects)) in effect_bundles {
             let auth = auth_by_type.remove(&bundle_type).map(|(_, data)| data);
             bundles.push(parse_bundle(
-                RawBundleType::from_u64(bundle_type),
-                RawBundleVariant::from_u64(bundle_variant),
+                bundle_type,
+                bundle_variant,
                 &effects,
                 auth.as_deref(),
             )?);
@@ -1057,8 +975,8 @@ impl V7TransactionBodyBytes {
 
 /// Parses one effect/auth pair into a [`V7BundleBytes`].
 fn parse_bundle(
-    bundle_type: RawBundleType,
-    bundle_variant: RawBundleVariant,
+    bundle_type: BundleType,
+    bundle_variant: BundleVariant,
     effects: &[u8],
     auth: Option<&[u8]>,
 ) -> io::Result<V7BundleBytes> {
@@ -1071,11 +989,11 @@ fn parse_bundle(
         )?))
     };
 
-    match (bundle_type.known(), bundle_variant.known()) {
-        (Some(BundleType::Transparent), Some(BundleVariant::Default)) => Ok(
-            V7BundleBytes::Transparent(TransparentBundleBytes::read(effects, auth)?),
-        ),
-        (Some(BundleType::Coinbase), Some(BundleVariant::Default)) => {
+    match (bundle_type, bundle_variant) {
+        (BundleType::TRANSPARENT, BundleVariant::DEFAULT) => Ok(V7BundleBytes::Transparent(
+            TransparentBundleBytes::read(effects, auth)?,
+        )),
+        (BundleType::COINBASE, BundleVariant::DEFAULT) => {
             // The registry prohibits the coinbase authorizing column, but that
             // is a consensus rule rather than a structural one. Parse the
             // effecting data regardless, and retain any authorizing payload so
@@ -1093,23 +1011,25 @@ fn parse_bundle(
                 None => Ok(V7BundleBytes::Coinbase(bundle)),
             }
         }
-        (Some(BundleType::Sapling), Some(BundleVariant::Default)) => Ok(V7BundleBytes::Sapling(
+        (BundleType::SAPLING, BundleVariant::DEFAULT) => Ok(V7BundleBytes::Sapling(
             V7SaplingBundleBytes::read(effects, auth)?,
         )),
-        (Some(BundleType::Orchard), Some(BundleVariant::Default)) => Ok(V7BundleBytes::Orchard(
+        (BundleType::ORCHARD, BundleVariant::DEFAULT) => Ok(V7BundleBytes::Orchard(
             V7OrchardBundleBytes::read(effects, auth)?,
         )),
-        (Some(BundleType::Ironwood), Some(BundleVariant::Default)) => Ok(V7BundleBytes::Ironwood(
+        (BundleType::IRONWOOD, BundleVariant::DEFAULT) => Ok(V7BundleBytes::Ironwood(
             V7OrchardBundleBytes::read(effects, auth)?,
         )),
-        (Some(BundleType::Fee | BundleType::Zip233Nsm), Some(BundleVariant::Default)) => {
+        (BundleType::FEE | BundleType::ZIP233_NSM, BundleVariant::DEFAULT) => {
             // The registry marks these bundle types as value-only. That is a
             // registry rule, not a structural one, so the byte layer retains
             // any effect/auth payload opaquely.
             opaque()
         }
-        (Some(_), Some(_)) => opaque(),
-        (Some(_), None) => Ok(V7BundleBytes::KnownTypeUnknownVariant(
+        (bundle_type, bundle_variant) if bundle_type.is_known() && bundle_variant.is_known() => {
+            opaque()
+        }
+        (bundle_type, _) if bundle_type.is_known() => Ok(V7BundleBytes::KnownTypeUnknownVariant(
             OpaqueBundleBytes::from_parts(
                 bundle_type,
                 bundle_variant,
@@ -1117,7 +1037,7 @@ fn parse_bundle(
                 auth.map(|data| data.to_vec()),
             )?,
         )),
-        (None, _) => Ok(V7BundleBytes::Unknown(OpaqueBundleBytes::from_parts(
+        _ => Ok(V7BundleBytes::Unknown(OpaqueBundleBytes::from_parts(
             bundle_type,
             bundle_variant,
             effects.to_vec(),
@@ -1127,7 +1047,7 @@ fn parse_bundle(
 }
 
 /// Checks that a raw wire key can be `compactSize`-encoded.
-fn check_raw_key(bundle_type: RawBundleType, bundle_variant: RawBundleVariant) -> io::Result<()> {
+fn check_raw_key(bundle_type: BundleType, bundle_variant: BundleVariant) -> io::Result<()> {
     if bundle_type.to_u64() > u64::from(MAX_COMPACT_SIZE) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

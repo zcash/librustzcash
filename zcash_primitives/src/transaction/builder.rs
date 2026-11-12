@@ -370,7 +370,7 @@ pub enum BuildConfig {
     },
     /// Builds a coinbase transaction.
     ///
-    /// A coinbase transaction at [`TxVersion::V7`] must carry a ZIP 248 coinbase
+    /// A coinbase transaction at `TxVersion::V7` must carry a ZIP 248 coinbase
     /// bundle. The builder cannot yet populate a coinbase bundle (block height,
     /// subsidy, lockbox, miner data, and value pool deltas), so V7 coinbase
     /// builds are rejected rather than silently producing a non-coinbase
@@ -992,6 +992,8 @@ impl<P, U> Builder<P, U> {
                 BranchId::Nu7 => true,
                 #[cfg(zcash_unstable = "nu8")]
                 BranchId::Nu8 => true,
+                #[cfg(zcash_unstable = "nutachyon")]
+                BranchId::NuTachyon => true,
                 _ => false,
             };
             let ironwood_available = version.has_ironwood() && ironwood_branch;
@@ -1013,7 +1015,7 @@ impl<P, U> Builder<P, U> {
     /// the inputs and outputs already added to the builder. Returns
     /// [`Error::TargetIncompatible`] if validation fails.
     ///
-    /// A [`BuildConfig::Coinbase`] builder rejects [`TxVersion::V7`]: the
+    /// A [`BuildConfig::Coinbase`] builder rejects `TxVersion::V7`: the
     /// builder cannot yet populate the ZIP 248 coinbase bundle that a V7
     /// coinbase transaction requires. Coinbase builds remain available at
     /// [`TxVersion::V6`].
@@ -1666,21 +1668,31 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // for each asset to sum to zero, so every pool that moves value needs
         // an entry, the transparent pool included.
         let mut vp_deltas = zip248::ValuePoolDeltas::empty();
-        vp_deltas.set_zec_unchecked_for(zip248::BundleType::Transparent, transparent_value_balance);
+        vp_deltas
+            .set_transparent(transparent_value_balance)
+            .expect("fresh value pool delta map");
         if let Some(ref sb) = sapling_bundle {
-            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Sapling, *sb.value_balance());
+            vp_deltas
+                .set_sapling(*sb.value_balance())
+                .expect("fresh value pool delta map");
         }
         if let Some(ref ob) = orchard_bundle {
-            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Orchard, *ob.value_balance());
+            vp_deltas
+                .set_orchard(*ob.value_balance())
+                .expect("fresh value pool delta map");
         }
         if let Some(ref ib) = ironwood_bundle {
-            vp_deltas.set_zec_unchecked_for(zip248::BundleType::Ironwood, *ib.value_balance());
+            vp_deltas
+                .set_ironwood(*ib.value_balance())
+                .expect("fresh value pool delta map");
         }
         if let Some(fee) = fee {
-            vp_deltas.set_fee_unchecked(fee);
+            vp_deltas.set_fee(fee).expect("fresh value pool delta map");
         }
         #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-        vp_deltas.set_zip233_unchecked(self.zip233_amount);
+        vp_deltas
+            .set_zip233(self.zip233_amount)
+            .expect("fresh value pool delta map");
 
         // We don't support constructing Sprout bundles.
         //

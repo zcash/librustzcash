@@ -3,7 +3,6 @@
 use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 use zcash_encoding::{CompactSize, Vector};
-use zcash_protocol::value::ZatBalance;
 
 use crate::transaction::components::GROTH_PROOF_SIZE;
 
@@ -70,8 +69,8 @@ impl SproutProofBytes {
 /// A Sprout JoinSplit description in its wire representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SproutJoinSplitBytes {
-    vpub_old: ZatBalance,
-    vpub_new: ZatBalance,
+    vpub_old: u64,
+    vpub_new: u64,
     anchor: [u8; ANCHOR_SIZE],
     nullifiers: [[u8; NULLIFIER_SIZE]; ZC_NUM_JS_INPUTS],
     commitments: [[u8; COMMITMENT_SIZE]; ZC_NUM_JS_OUTPUTS],
@@ -86,8 +85,8 @@ impl SproutJoinSplitBytes {
     /// Constructs a JoinSplit description from its wire fields.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
-        vpub_old: ZatBalance,
-        vpub_new: ZatBalance,
+        vpub_old: u64,
+        vpub_new: u64,
         anchor: [u8; ANCHOR_SIZE],
         nullifiers: [[u8; NULLIFIER_SIZE]; ZC_NUM_JS_INPUTS],
         commitments: [[u8; COMMITMENT_SIZE]; ZC_NUM_JS_OUTPUTS],
@@ -112,12 +111,12 @@ impl SproutJoinSplitBytes {
     }
 
     /// Returns the value added to the Sprout pool by this JoinSplit.
-    pub fn vpub_old(&self) -> ZatBalance {
+    pub fn vpub_old(&self) -> u64 {
         self.vpub_old
     }
 
     /// Returns the value removed from the Sprout pool by this JoinSplit.
-    pub fn vpub_new(&self) -> ZatBalance {
+    pub fn vpub_new(&self) -> u64 {
         self.vpub_new
     }
 
@@ -166,8 +165,8 @@ impl SproutJoinSplitBytes {
     /// `use_groth` selects the proof encoding: Groth16 from version 4 onward,
     /// PHGR before it.
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
-        let vpub_old = read_balance(&mut reader, "vpub_old")?;
-        let vpub_new = read_balance(&mut reader, "vpub_new")?;
+        let vpub_old = read_amount(&mut reader)?;
+        let vpub_new = read_amount(&mut reader)?;
         let anchor = read_fixed::<ANCHOR_SIZE, _>(&mut reader)?;
         let nullifiers = [
             read_fixed::<NULLIFIER_SIZE, _>(&mut reader)?,
@@ -204,8 +203,8 @@ impl SproutJoinSplitBytes {
 
     /// Writes this JoinSplit description.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.vpub_old.to_i64_le_bytes())?;
-        writer.write_all(&self.vpub_new.to_i64_le_bytes())?;
+        writer.write_all(&self.vpub_old.to_le_bytes())?;
+        writer.write_all(&self.vpub_new.to_le_bytes())?;
         writer.write_all(&self.anchor)?;
         writer.write_all(&self.nullifiers[0])?;
         writer.write_all(&self.nullifiers[1])?;
@@ -324,14 +323,10 @@ impl SproutBundleBytes {
     }
 }
 
-/// Reads a signed 64-bit value that must be non-negative.
-fn read_balance<R: Read>(mut reader: R, field: &str) -> io::Result<ZatBalance> {
+/// Reads an unsigned 64-bit amount without narrowing it to the monetary
+/// domain.
+fn read_amount<R: Read>(mut reader: R) -> io::Result<u64> {
     let mut bytes = [0u8; 8];
     reader.read_exact(&mut bytes)?;
-    ZatBalance::from_u64_le_bytes(bytes).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            alloc::format!("{field} out of range"),
-        )
-    })
+    Ok(u64::from_le_bytes(bytes))
 }

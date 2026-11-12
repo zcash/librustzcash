@@ -74,8 +74,7 @@ pub use self::{
     orchard::{OrchardSignatureBytes, V7OrchardBundleBytes},
     sapling::{SaplingSignatureBytes, SighashInfoBytes, V7SaplingBundleBytes},
     v7::{
-        AssetClass, OpaqueBundleBytes, RawBundleType, RawBundleVariant, V7BundleBytes,
-        V7TransactionBodyBytes, ValuePoolDeltaBytes,
+        AssetClass, OpaqueBundleBytes, V7BundleBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
     },
 };
 pub use self::{
@@ -86,6 +85,8 @@ pub use self::{
     },
     sprout::{SproutBundleBytes, SproutJoinSplitBytes, SproutProofBytes},
 };
+#[cfg(zcash_unstable = "nu8")]
+pub use crate::transaction::zip248::{BundleType, BundleVariant};
 
 #[cfg(test)]
 mod tests;
@@ -494,10 +495,8 @@ impl TransactionBytes {
                 V7BundleBytes::KnownOpaque(_)
                 | V7BundleBytes::KnownTypeUnknownVariant(_)
                 | V7BundleBytes::Unknown(_) => {
-                    unknown_effect_digests.push((
-                        bundle.digest_key().wire_key(),
-                        bundle.effects_digest(provider)?,
-                    ));
+                    unknown_effect_digests
+                        .push((bundle.digest_key(), bundle.effects_digest(provider)?));
                 }
             }
         }

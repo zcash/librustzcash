@@ -2,12 +2,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use zcash_encoding::CompactSize;
+use zcash_protocol::consensus::{BlockHeight, BranchId};
 #[cfg(zcash_unstable = "nu8")]
 use zcash_protocol::constants::MAX_BLOCK_BYTES;
-use zcash_protocol::{
-    consensus::{BlockHeight, BranchId},
-    value::ZatBalance,
-};
 
 use crate::transaction::{
     TxVersion,
@@ -70,8 +67,8 @@ fn sprout_bundle(use_groth: bool) -> SproutBundleBytes {
     };
     SproutBundleBytes::from_parts(
         vec![SproutJoinSplitBytes::from_parts(
-            ZatBalance::from_i64(0).unwrap(),
-            ZatBalance::from_i64(0).unwrap(),
+            0,
+            0,
             [0u8; 32],
             [[0u8; 32]; 2],
             [[0u8; 32]; 2],
@@ -89,7 +86,7 @@ fn sprout_bundle(use_groth: bool) -> SproutBundleBytes {
 
 fn v4_sapling() -> V4SaplingBundleBytes {
     V4SaplingBundleBytes::from_parts(
-        ZatBalance::from_i64(0).unwrap(),
+        0,
         vec![SaplingSpendV4Bytes::from_parts(
             [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 192], [0u8; 64],
         )],
@@ -107,7 +104,7 @@ fn sapling_bundle() -> SaplingBundleBytes {
         vec![SaplingOutputBytes::from_parts(
             [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 580], [0u8; 80],
         )],
-        ZatBalance::from_i64(0).unwrap(),
+        0,
         Some([0u8; 32]),
         vec![[0u8; 192]],
         vec![[0u8; 64]],
@@ -123,7 +120,7 @@ fn orchard_bundle() -> OrchardBundleBytes {
             [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 580], [0u8; 80],
         )],
         0,
-        ZatBalance::from_i64(0).unwrap(),
+        0,
         [0u8; 32],
         vec![0u8; 32],
         vec![[0u8; 64]],
@@ -336,7 +333,7 @@ fn v5_sapling_outputs_only_round_trip() {
         vec![SaplingOutputBytes::from_parts(
             [0u8; 32], [0u8; 32], [0u8; 32], [0u8; 580], [0u8; 80],
         )],
-        ZatBalance::from_i64(0).unwrap(),
+        0,
         None,
         vec![],
         vec![],
@@ -618,8 +615,8 @@ mod v7 {
 
     fn zec_delta(bundle_type: u64, value: i64) -> ValuePoolDeltaBytes {
         ValuePoolDeltaBytes::from_parts(
-            RawBundleType::from_u64(bundle_type),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(bundle_type),
+            BundleVariant::from_u64(0),
             AssetClass::Zec,
             value,
         )
@@ -751,22 +748,22 @@ mod v7 {
     #[test]
     fn v7_round_trip_unknown() {
         let unknown = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(99),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(99),
+            BundleVariant::from_u64(0),
             vec![1, 2, 3],
             Some(vec![4, 5]),
         )
         .unwrap();
         let known_type_unknown_variant = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(1),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(1),
             vec![6, 7],
             None,
         )
         .unwrap();
         let known_opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(5),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(5),
+            BundleVariant::from_u64(0),
             vec![0x00],
             None,
         )
@@ -785,15 +782,15 @@ mod v7 {
     #[test]
     fn v7_known_type_unknown_variant_is_distinct_from_unknown_type() {
         let known_type_unknown_variant = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(1),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(1),
             vec![1],
             None,
         )
         .unwrap();
         let unknown = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(99),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(99),
+            BundleVariant::from_u64(0),
             vec![1],
             None,
         )
@@ -818,8 +815,8 @@ mod v7 {
     #[test]
     fn v7_value_pool_deltas_round_trip() {
         let other = ValuePoolDeltaBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(0),
             AssetClass::Other([7u8; 64]),
             5,
         )
@@ -1116,20 +1113,13 @@ mod v7 {
                 .finalize()
         }
 
+        // An empty transparent bundle digests the empty byte string, matching
+        // the ZIP 244 rule for a transaction with no transparent inputs or
+        // outputs.
         let transparent = v7_transparent_empty(false);
-        let prevouts = empty_hash(b"ZTxIdPrevoutHash");
-        let sequences = empty_hash(b"ZTxIdSequencHash");
-        let outputs = empty_hash(b"ZTxIdOutputsHash");
-        let mut transparent_state = blake2b_simd::Params::new()
-            .hash_length(32)
-            .personal(b"ZTxIdTranspaHash")
-            .to_state();
-        transparent_state.write(prevouts.as_bytes()).unwrap();
-        transparent_state.write(sequences.as_bytes()).unwrap();
-        transparent_state.write(outputs.as_bytes()).unwrap();
         assert_eq!(
             hash_v7_transparent_effects_bytes(&transparent),
-            transparent_state.finalize()
+            empty_hash(b"ZTxIdTranspaHash")
         );
 
         let sapling = v7_sapling_empty(false);
@@ -1256,8 +1246,8 @@ mod v7 {
     #[test]
     fn v7_rejects_known_opaque_for_parsed_type() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(0),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(0),
+            BundleVariant::from_u64(0),
             vec![0, 0],
             None,
         )
@@ -1271,8 +1261,8 @@ mod v7 {
     #[test]
     fn v7_rejects_known_type_unknown_variant_with_known_variant() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(0),
             vec![1],
             None,
         )
@@ -1289,8 +1279,8 @@ mod v7 {
     #[test]
     fn v7_rejects_unknown_with_known_type() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(2),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(2),
+            BundleVariant::from_u64(0),
             vec![1],
             None,
         )
@@ -1316,15 +1306,16 @@ mod v7 {
         let decoded = CoinbaseBundleBytes::read(&encoded[..]).unwrap();
         assert_eq!(decoded, coinbase);
 
-        assert!(
-            CoinbaseBundleBytes::from_parts(
-                BlockHeight::from(100u32),
-                1_000_000,
-                0,
-                vec![0x51; max + 1],
-            )
-            .is_err()
-        );
+        // The byte layer retains an over-long payload; the typed conversion
+        // enforces the ZIP 248 limit.
+        let over_long = CoinbaseBundleBytes::from_parts(
+            BlockHeight::from(100u32),
+            1_000_000,
+            0,
+            vec![0x51; max + 1],
+        )
+        .unwrap();
+        assert!(over_long.to_coinbase_bundle().is_err());
     }
 
     #[test]
@@ -1332,8 +1323,8 @@ mod v7 {
         let max_balance = zcash_protocol::value::MAX_MONEY as i64;
         for value in [i64::MIN, -max_balance - 1, max_balance + 1, i64::MAX] {
             let delta = ValuePoolDeltaBytes::from_parts(
-                RawBundleType::from_u64(99),
-                RawBundleVariant::from_u64(0),
+                BundleType::from_u64(99),
+                BundleVariant::from_u64(0),
                 AssetClass::Zec,
                 value,
             )
@@ -1381,8 +1372,8 @@ mod v7 {
     #[test]
     fn v7_opaque_payload_size_boundary() {
         let opaque = OpaqueBundleBytes::from_parts(
-            RawBundleType::from_u64(99),
-            RawBundleVariant::from_u64(0),
+            BundleType::from_u64(99),
+            BundleVariant::from_u64(0),
             vec![0u8; MAX_BLOCK_BYTES],
             None,
         )
@@ -1392,8 +1383,8 @@ mod v7 {
 
         assert!(
             OpaqueBundleBytes::from_parts(
-                RawBundleType::from_u64(99),
-                RawBundleVariant::from_u64(0),
+                BundleType::from_u64(99),
+                BundleVariant::from_u64(0),
                 vec![0u8; MAX_BLOCK_BYTES + 1],
                 None,
             )
@@ -1402,8 +1393,8 @@ mod v7 {
 
         assert!(
             OpaqueBundleBytes::from_parts(
-                RawBundleType::from_u64(99),
-                RawBundleVariant::from_u64(0),
+                BundleType::from_u64(99),
+                BundleVariant::from_u64(0),
                 vec![],
                 Some(vec![0u8; MAX_BLOCK_BYTES + 1]),
             )
@@ -1622,7 +1613,7 @@ mod v7 {
 
         // The identifier is unavailable until the caller supplies the opaque
         // bundle's digests.
-        let key = zip248::BundleDigestKey::new(99, 0);
+        let key = zip248::BundleId::new(BundleType::from_u64(99), BundleVariant::from_u64(0));
         let empty = zip248::SuppliedBundleDigests::new();
         assert_eq!(
             tx.v7_txid(&empty),
@@ -1697,18 +1688,17 @@ mod sapling_typed_conversion {
         use crate::transaction::{
             TxVersion,
             bytes::{
-                AssetClass, OrchardActionBytes, OrchardSignatureBytes, RawBundleType,
-                RawBundleVariant, SaplingOutputBytes, SaplingSignatureBytes, SaplingSpendBytes,
-                SighashInfoBytes, TransactionBodyBytes, TransactionBytes, V7BundleBytes,
-                V7OrchardBundleBytes, V7SaplingBundleBytes, V7TransactionBodyBytes,
-                ValuePoolDeltaBytes,
+                AssetClass, BundleType, BundleVariant, OrchardActionBytes, OrchardSignatureBytes,
+                SaplingOutputBytes, SaplingSignatureBytes, SaplingSpendBytes, SighashInfoBytes,
+                TransactionBodyBytes, TransactionBytes, V7BundleBytes, V7OrchardBundleBytes,
+                V7SaplingBundleBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
             },
         };
 
         fn zec_delta(bundle_type: u64, value: i64) -> ValuePoolDeltaBytes {
             ValuePoolDeltaBytes::from_parts(
-                RawBundleType::from_u64(bundle_type),
-                RawBundleVariant::from_u64(0),
+                BundleType::from_u64(bundle_type),
+                BundleVariant::from_u64(0),
                 AssetClass::Zec,
                 value,
             )
@@ -1838,14 +1828,11 @@ mod sapling_typed_conversion {
         // The Orchard bundle is retained as bytes and is not interpreted.
         assert!(body.orchard().is_some());
         assert_eq!(
-            body.zec_value_pool_delta(RawBundleType::from_u64(2)),
+            body.zec_value_pool_delta(BundleType::from_u64(2)),
             (sapling_value != ZatBalance::zero()).then_some(i64::from(sapling_value))
         );
-        assert_eq!(
-            body.zec_value_pool_delta(RawBundleType::from_u64(3)),
-            Some(1)
-        );
-        assert_eq!(body.zec_value_pool_delta(RawBundleType::from_u64(4)), None);
+        assert_eq!(body.zec_value_pool_delta(BundleType::from_u64(3)), Some(1));
+        assert_eq!(body.zec_value_pool_delta(BundleType::from_u64(4)), None);
 
         let mut reserialized = Vec::new();
         parsed.write(&mut reserialized).unwrap();
@@ -1908,18 +1895,17 @@ mod orchard_typed_conversion {
         use crate::transaction::{
             TxVersion,
             bytes::{
-                AssetClass, OrchardActionBytes, OrchardSignatureBytes, RawBundleType,
-                RawBundleVariant, SaplingOutputBytes, SaplingSignatureBytes, SaplingSpendBytes,
-                SighashInfoBytes, TransactionBodyBytes, TransactionBytes, V7BundleBytes,
-                V7OrchardBundleBytes, V7SaplingBundleBytes, V7TransactionBodyBytes,
-                ValuePoolDeltaBytes,
+                AssetClass, BundleType, BundleVariant, OrchardActionBytes, OrchardSignatureBytes,
+                SaplingOutputBytes, SaplingSignatureBytes, SaplingSpendBytes, SighashInfoBytes,
+                TransactionBodyBytes, TransactionBytes, V7BundleBytes, V7OrchardBundleBytes,
+                V7SaplingBundleBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
             },
         };
 
         fn zec_delta(bundle_type: u64, value: i64) -> ValuePoolDeltaBytes {
             ValuePoolDeltaBytes::from_parts(
-                RawBundleType::from_u64(bundle_type),
-                RawBundleVariant::from_u64(0),
+                BundleType::from_u64(bundle_type),
+                BundleVariant::from_u64(0),
                 AssetClass::Zec,
                 value,
             )
@@ -2047,15 +2033,12 @@ mod orchard_typed_conversion {
         assert_eq!(converted.actions().len(), orchard.actions().len());
         // The Sapling bundle is retained as bytes and is not interpreted.
         assert!(body.sapling().is_some());
+        assert_eq!(body.zec_value_pool_delta(BundleType::from_u64(2)), Some(1));
         assert_eq!(
-            body.zec_value_pool_delta(RawBundleType::from_u64(2)),
-            Some(1)
-        );
-        assert_eq!(
-            body.zec_value_pool_delta(RawBundleType::from_u64(3)),
+            body.zec_value_pool_delta(BundleType::from_u64(3)),
             (orchard_value != ZatBalance::zero()).then_some(i64::from(orchard_value))
         );
-        assert_eq!(body.zec_value_pool_delta(RawBundleType::from_u64(4)), None);
+        assert_eq!(body.zec_value_pool_delta(BundleType::from_u64(4)), None);
 
         let mut reserialized = Vec::new();
         parsed.write(&mut reserialized).unwrap();

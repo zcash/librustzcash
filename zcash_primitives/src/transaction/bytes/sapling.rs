@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 use zcash_encoding::{Array, CompactSize, Vector};
+#[cfg(feature = "sapling")]
 use zcash_protocol::value::ZatBalance;
 
 use crate::transaction::components::GROTH_PROOF_SIZE;
@@ -395,7 +396,7 @@ impl SaplingOutputV4Bytes {
 /// rather than here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct V4SaplingBundleBytes {
-    value_balance: ZatBalance,
+    value_balance: i64,
     spends: Vec<SaplingSpendV4Bytes>,
     outputs: Vec<SaplingOutputV4Bytes>,
 }
@@ -403,7 +404,7 @@ pub struct V4SaplingBundleBytes {
 impl V4SaplingBundleBytes {
     /// Constructs a version 4 Sapling bundle from its wire fields.
     pub fn from_parts(
-        value_balance: ZatBalance,
+        value_balance: i64,
         spends: Vec<SaplingSpendV4Bytes>,
         outputs: Vec<SaplingOutputV4Bytes>,
     ) -> Self {
@@ -415,7 +416,7 @@ impl V4SaplingBundleBytes {
     }
 
     /// Returns the value balance.
-    pub fn value_balance(&self) -> ZatBalance {
+    pub fn value_balance(&self) -> i64 {
         self.value_balance
     }
 
@@ -448,7 +449,7 @@ impl V4SaplingBundleBytes {
 
     /// Writes a version 4 Sapling bundle.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.value_balance.to_i64_le_bytes())?;
+        writer.write_all(&self.value_balance.to_le_bytes())?;
         Vector::write(&mut writer, &self.spends, |w, spend| spend.write(w))?;
         Vector::write(&mut writer, &self.outputs, |w, output| output.write(w))
     }
@@ -500,7 +501,7 @@ impl V4SaplingBundleBytes {
         Ok(::sapling::bundle::Bundle::from_parts(
             spends,
             outputs,
-            self.value_balance,
+            value_balance_from_raw(self.value_balance)?,
             ::sapling::bundle::Authorized {
                 binding_sig: redjubjub::Signature::from(binding_sig),
             },
@@ -518,7 +519,7 @@ impl V4SaplingBundleBytes {
 pub struct SaplingBundleBytes {
     spends: Vec<SaplingSpendBytes>,
     outputs: Vec<SaplingOutputBytes>,
-    value_balance: ZatBalance,
+    value_balance: i64,
     anchor: Option<[u8; ANCHOR_SIZE]>,
     spend_proofs: Vec<[u8; GROTH_PROOF_SIZE]>,
     spend_auth_sigs: Vec<[u8; SPEND_AUTH_SIG_SIZE]>,
@@ -535,7 +536,7 @@ impl SaplingBundleBytes {
     pub fn from_parts(
         spends: Vec<SaplingSpendBytes>,
         outputs: Vec<SaplingOutputBytes>,
-        value_balance: ZatBalance,
+        value_balance: i64,
         anchor: Option<[u8; ANCHOR_SIZE]>,
         spend_proofs: Vec<[u8; GROTH_PROOF_SIZE]>,
         spend_auth_sigs: Vec<[u8; SPEND_AUTH_SIG_SIZE]>,
@@ -593,7 +594,7 @@ impl SaplingBundleBytes {
     }
 
     /// Returns the value balance.
-    pub fn value_balance(&self) -> ZatBalance {
+    pub fn value_balance(&self) -> i64 {
         self.value_balance
     }
 
@@ -667,7 +668,7 @@ impl SaplingBundleBytes {
             Some(bundle) => {
                 Vector::write(&mut writer, &bundle.spends, |w, spend| spend.write(w))?;
                 Vector::write(&mut writer, &bundle.outputs, |w, output| output.write(w))?;
-                writer.write_all(&bundle.value_balance.to_i64_le_bytes())?;
+                writer.write_all(&bundle.value_balance.to_le_bytes())?;
                 if let Some(anchor) = &bundle.anchor {
                     writer.write_all(anchor)?;
                 }
@@ -758,7 +759,7 @@ impl SaplingBundleBytes {
         Ok(::sapling::bundle::Bundle::from_parts(
             spends,
             outputs,
-            self.value_balance,
+            value_balance_from_raw(self.value_balance)?,
             ::sapling::bundle::Authorized {
                 binding_sig: redjubjub::Signature::from(binding_sig),
             },
@@ -1239,10 +1240,16 @@ impl V7SaplingBundleBytes {
     }
 }
 
-/// Reads a signed 64-bit value balance.
-fn read_balance<R: Read>(mut reader: R) -> io::Result<ZatBalance> {
+/// Reads a signed 64-bit value balance without narrowing it to the monetary
+/// domain.
+fn read_balance<R: Read>(mut reader: R) -> io::Result<i64> {
     let mut bytes = [0u8; 8];
     reader.read_exact(&mut bytes)?;
-    ZatBalance::from_i64_le_bytes(bytes)
+    Ok(i64::from_le_bytes(bytes))
+}
+
+#[cfg(feature = "sapling")]
+fn value_balance_from_raw(value: i64) -> io::Result<ZatBalance> {
+    ZatBalance::from_i64(value)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
 }
