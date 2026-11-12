@@ -184,11 +184,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pczt]]
-version = "0.10.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.10.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.reddsa]]
 version = "0.6.1"
@@ -477,18 +477,18 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.14.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.14.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_backend]]
-version = "0.25.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.25.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_sqlite]]
 version = "0.23.0"
@@ -512,11 +512,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_keys]]
-version = "0.17.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.17.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_note_encryption]]
 version = "0.5.1"
@@ -526,32 +526,32 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.2.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.2.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_primitives]]
-version = "0.31.0-pre.2"
-when = "2026-10-14"
+version = "0.31.1"
+when = "2026-11-12"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.31.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.31.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_protocol]]
-version = "0.11.0-pre.1"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.11.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_script]]
 version = "0.6.0"
@@ -568,8 +568,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.11.0-pre.2"
-when = "2026-10-14"
+version = "0.11.1"
+when = "2026-11-12"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -589,11 +589,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.10.0-pre.2"
-when = "2026-10-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.10.0"
+when = "2026-10-21"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[audits.bytecode-alliance.wildcard-audits.bumpalo]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
