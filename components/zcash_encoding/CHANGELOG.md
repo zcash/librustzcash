@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-12
+
 ### Added
 - `zcash_encoding::Vector::{read_bytes, write_bytes}`
 
