@@ -57,16 +57,17 @@ impl PartialEq for Script {
 impl Eq for Script {}
 
 impl Script {
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let script = Vector::read(&mut reader, |r| {
-            let mut bytes = [0; 1];
-            r.read_exact(&mut bytes).map(|_| bytes[0])
-        })?;
+    /// Reads a CompactSize-prefixed script.
+    ///
+    /// Returns an error for an invalid length prefix or a reader failure, including
+    /// [`io::ErrorKind::UnexpectedEof`] if the prefix or script bytes are truncated.
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        let script = Vector::read_bytes(reader)?;
         Ok(Script(script::Code(script)))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
+        Vector::write_bytes(&mut writer, &self.0.0)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).

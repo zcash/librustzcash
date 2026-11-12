@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-12
+
+### Changed
+- `zcash_transparent::address::Script::{read, write}` now read and write the
+  script bytes in bulk, rather than making one call to the underlying reader or
+  writer per byte.
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
