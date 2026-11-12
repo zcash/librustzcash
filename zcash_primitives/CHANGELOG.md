@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-12
+
 ### Changed
 - `zcash_primitives::block::BlockHeader::{read, write}`, and
   `zcash_primitives::transaction::Transaction::{read, write}` for Orchard and
