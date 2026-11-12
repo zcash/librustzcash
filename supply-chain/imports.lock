@@ -17,6 +17,10 @@ audited_as = "0.25.0-pre.2"
 version = "0.23.0"
 audited_as = "0.23.0-pre.2"
 
+[[unpublished.zcash_encoding]]
+version = "0.5.1"
+audited_as = "0.5.0"
+
 [[unpublished.zcash_keys]]
 version = "0.17.0"
 audited_as = "0.17.0-pre.2"

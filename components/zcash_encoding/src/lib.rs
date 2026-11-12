@@ -22,8 +22,17 @@ use nonempty::NonEmpty;
 #[cfg(feature = "test-dependencies")]
 pub mod testing;
 
+#[cfg(test)]
+mod byte_vector_tests;
+
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
+
+/// The largest number of bytes that [`Vector::read_bytes`] requests from its reader at once.
+///
+/// This bounds the memory allocated ahead of the bytes actually read, because the
+/// declared length of a vector comes from untrusted input.
+const BYTE_VECTOR_READ_CHUNK_LEN: usize = 4096;
 
 /// Namespace for functions for compact encoding of integers.
 ///
@@ -171,6 +180,26 @@ impl Vector {
         Self::read_collected(reader, func)
     }
 
+    /// Reads a byte vector encoded as a [`CompactSize`] length followed by that many bytes.
+    ///
+    /// The allocation grows with the bytes actually read rather than the declared length, allowing
+    /// for spare capacity from amortized growth and a fixed-size read-ahead chunk.
+    ///
+    /// Returns an error if the length is non-canonical, exceeds [`MAX_COMPACT_SIZE`], or cannot
+    /// fit in a `usize`, or if the reader fails. A truncated prefix or payload returns
+    /// [`io::ErrorKind::UnexpectedEof`]. Interrupted reads are retried.
+    pub fn read_bytes<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
+        let count: usize = CompactSize::read_t(&mut reader)?;
+        let mut bytes = Vec::with_capacity(count.min(BYTE_VECTOR_READ_CHUNK_LEN));
+        while bytes.len() < count {
+            let filled = bytes.len();
+            let chunk_len = (count - filled).min(BYTE_VECTOR_READ_CHUNK_LEN);
+            bytes.resize(filled + chunk_len, 0);
+            reader.read_exact(&mut bytes[filled..])?;
+        }
+        Ok(bytes)
+    }
+
     /// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding
     /// written by [`Vector::write`], using the provided function to decode each element.
     pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(reader: R, func: F) -> io::Result<O>
@@ -230,6 +259,16 @@ impl Vector {
     {
         CompactSize::write(&mut writer, items.len())?;
         items.try_for_each(|e| func(&mut writer, e))
+    }
+
+    /// Writes a byte vector as a [`CompactSize`] length followed by the bytes.
+    ///
+    /// Returns an error without writing anything if the length exceeds
+    /// [`MAX_COMPACT_SIZE`]. Returns the writer's error if the writer fails; the bytes
+    /// written before the failure are unspecified.
+    pub fn write_bytes<W: Write>(mut writer: W, bytes: &[u8]) -> io::Result<()> {
+        CompactSize::write(&mut writer, bytes.len())?;
+        writer.write_all(bytes)
     }
 
     /// Returns the serialized size of a vector of `u8` as written by `[Vector::write]`.

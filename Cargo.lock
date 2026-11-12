@@ -7603,9 +7603,10 @@ dependencies = [
 
 [[package]]
 name = "zcash_encoding"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "corez",
+ "criterion",
  "hex",
  "nonempty",
  "proptest",
