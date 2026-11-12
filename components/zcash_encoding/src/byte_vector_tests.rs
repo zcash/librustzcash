@@ -1,5 +1,5 @@
 use alloc::{string::ToString, vec::Vec};
-use corez::io::{self, Read};
+use corez::io::{self, Read, Write};
 
 use crate::{BYTE_VECTOR_READ_CHUNK_LEN, CompactSize, MAX_COMPACT_SIZE, Vector};
 
@@ -192,4 +192,79 @@ fn byte_vectors_are_read_in_bulk() {
     assert_eq!(Vector::read_bytes(&mut reader).unwrap(), encoded[3..]);
     // Two reads for the CompactSize prefix, then three bounded payload reads.
     assert_eq!(reader.calls, 5);
+}
+
+/// Writes a byte vector one byte at a time through [`Vector::write`].
+fn write_bytes_per_byte<W: Write>(writer: W, bytes: &[u8]) -> io::Result<()> {
+    Vector::write(writer, bytes, |w, b| w.write_all(&[*b]))
+}
+
+#[test]
+fn write_bytes_matches_per_byte_encoding() {
+    /// The largest length that has a one-byte `CompactSize` encoding.
+    const MAX_ONE_BYTE_LEN: usize = 252;
+    /// The largest length that has a three-byte `CompactSize` encoding.
+    const MAX_THREE_BYTE_LEN: usize = 0xFFFF;
+    let max_len = usize::try_from(MAX_COMPACT_SIZE).unwrap();
+
+    for len in [
+        0,
+        1,
+        MAX_ONE_BYTE_LEN,
+        MAX_ONE_BYTE_LEN + 1,
+        MAX_THREE_BYTE_LEN,
+        MAX_THREE_BYTE_LEN + 1,
+        max_len,
+        max_len + 1,
+    ] {
+        let bytes: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+        let mut expected = vec![];
+        let expected_result = write_bytes_per_byte(&mut expected, &bytes).map_err(|e| e.kind());
+        let mut actual = vec![];
+        let actual_result = Vector::write_bytes(&mut actual, &bytes).map_err(|e| e.kind());
+        assert_eq!(actual_result, expected_result);
+        assert_eq!(actual, expected);
+        if len > max_len {
+            assert_eq!(actual_result, Err(io::ErrorKind::InvalidInput));
+            assert!(actual.is_empty());
+        } else {
+            assert_eq!(actual.len(), Vector::serialized_size_of_u8_vec(&bytes));
+        }
+    }
+}
+
+#[test]
+fn write_bytes_propagates_writer_errors() {
+    /// A writer that accepts at most two bytes per call, and fails once its
+    /// capacity is used up.
+    struct FailingWriter {
+        capacity: usize,
+    }
+
+    impl Write for FailingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            /// The largest number of bytes accepted by one call.
+            const MAX_WRITE_LEN: usize = 2;
+            if self.capacity == 0 {
+                return Err(io::ErrorKind::Other.into());
+            }
+            let len = bytes.len().min(MAX_WRITE_LEN).min(self.capacity);
+            self.capacity -= len;
+            Ok(len)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // The writer accepts the one-byte prefix and part of the payload, then fails.
+    let bytes = [0; 8];
+    let mut writer = FailingWriter {
+        capacity: bytes.len() / 2,
+    };
+    assert_eq!(
+        Vector::write_bytes(&mut writer, &bytes).unwrap_err().kind(),
+        io::ErrorKind::Other,
+    );
 }
