@@ -498,8 +498,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_encoding]]
-version = "0.5.0"
-when = "2026-07-24"
+version = "0.5.1"
+when = "2026-11-12"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -533,11 +533,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_primitives]]
-version = "0.31.0"
-when = "2026-10-21"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.31.1"
+when = "2026-11-12"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
 version = "0.31.0"
@@ -568,11 +568,11 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.11.0"
-when = "2026-10-21"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.11.1"
+when = "2026-11-12"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zewif]]
 version = "1.0.0-rc.3"
@@ -1137,6 +1137,17 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.2.15"
 notes = "no build.rs, no macros, no unsafe. It reads the filesystem and makes copies of DLLs into OUT_DIR."
+
+[[audits.bytecode-alliance.audits.want]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+version = "0.3.0"
+
+[[audits.bytecode-alliance.audits.want]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.3.2"
+notes = "Mostly idiom-related changes, nothing major."
 
 [[audits.bytecode-alliance.audits.webpki-roots]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -2854,12 +2865,12 @@ notes = "All code written or reviewed by Manish"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
 [[audits.mozilla.wildcard-audits.utf8_iter]]
-who = "Makoto Kato <m_kato@ga2.so-net.ne.jp>"
+who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
 user-id = 4484 # Henri Sivonen (hsivonen)
 start = "2022-04-19"
-end = "2024-06-16"
-notes = "Maintained by Henri Sivonen who works at Mozilla."
+end = "2027-10-30"
+notes = "I wrote this crate."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.android-tzdata]]

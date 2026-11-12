@@ -7,11 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-### Added
-- `zcash_encoding::Vector::{read_bytes, write_bytes}`
-
 ### Changed
 - MSRV is now 1.89
+
+## [0.5.1] - 2026-11-12
+
+### Added
+- `zcash_encoding::Vector::{read_bytes, write_bytes}`
 
 ## [0.5.0] - 2026-07-24
 
