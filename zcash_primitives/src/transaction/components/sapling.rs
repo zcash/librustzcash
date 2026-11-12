@@ -1,12 +1,25 @@
+#[cfg(feature = "temporary-zcashd")]
 use alloc::vec::Vec;
 use core::mem::size_of;
-use corez::io::{self, Read, Write};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use corez::io::Write;
+use corez::io::{self, Read};
 use ff::PrimeField;
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use ::sapling::bundle::Bundle;
 use ::sapling::{
     Nullifier,
     bundle::{
-        Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
+        Authorization, Authorized, GrothProofBytes, OutputDescription, OutputDescriptionV5,
         SpendDescription, SpendDescriptionV5,
     },
     note::ExtractedNoteCommitment,
@@ -14,15 +27,28 @@ use ::sapling::{
     value::ValueCommitment,
 };
 use redjubjub::SpendAuth;
-use zcash_encoding::{Array, CompactSize, Vector};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use zcash_encoding::Vector;
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
+use zcash_encoding::{Array, CompactSize};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
-use zcash_protocol::{
-    consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
-    value::ZatBalance,
-};
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD};
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
+use zcash_protocol::value::ZatBalance;
 
 use super::GROTH_PROOF_SIZE;
-use crate::transaction::Transaction;
+#[cfg(feature = "temporary-zcashd")]
+use crate::transaction::read_amount;
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+use crate::transaction::zip248::V7_SIGHASH_V0_INFO_WIRE;
 
 /// The size in bytes of a Sapling spend description in its v4 (pre-NU5) serialized form, as
 /// written by the internal `write_spend_v4` encoder.
@@ -96,9 +122,7 @@ pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip2
 
 /// A map from one bundle authorization to another.
 ///
-/// For use with [`TransactionData::map_authorization`].
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+/// For use with `TransactionData::map_authorization`.
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
     fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
@@ -108,10 +132,8 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 
 /// The identity map.
 ///
-/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// This can be used with `TransactionData::map_authorization` when you want to map the
 /// authorization of a subset of a transaction's bundles.
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_proof(
         &mut self,
@@ -207,7 +229,9 @@ fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<Spen
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<redjubjub::Signature<SpendAuth>> {
+pub(crate) fn read_spend_auth_sig<R: Read>(
+    mut reader: R,
+) -> io::Result<redjubjub::Signature<SpendAuth>> {
     let mut sig = [0; 64];
     reader.read_exact(&mut sig)?;
     Ok(redjubjub::Signature::from(sig))
@@ -220,7 +244,7 @@ pub fn temporary_zcashd_read_spend_v4<R: Read>(
     read_spend_v4(reader)
 }
 
-fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
+pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
     // Consensus rules (§4.4) & (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
@@ -244,6 +268,11 @@ fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authoriz
     ))
 }
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
 fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>) -> io::Result<()> {
     writer.write_all(&spend.cv().to_bytes())?;
     writer.write_all(spend.anchor().to_repr().as_ref())?;
@@ -253,6 +282,7 @@ fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>)
     writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
 }
 
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 fn write_spend_v5_without_witness_data<W: Write>(
     mut writer: W,
     spend: &SpendDescription<Authorized>,
@@ -262,7 +292,7 @@ fn write_spend_v5_without_witness_data<W: Write>(
     writer.write_all(&<[u8; 32]>::from(*spend.rk()))
 }
 
-fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
+pub(crate) fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
     let cv = read_value_commitment(&mut reader)?;
     let nullifier = read_nullifier(&mut reader)?;
     let rk = read_rk(&mut reader)?;
@@ -277,7 +307,9 @@ pub fn temporary_zcashd_read_output_v4<R: Read>(
     read_output_v4(&mut reader)
 }
 
-fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<GrothProofBytes>> {
+pub(crate) fn read_output_v4<R: Read>(
+    mut reader: &mut R,
+) -> io::Result<OutputDescription<GrothProofBytes>> {
     // Consensus rules (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::check_output()
@@ -318,6 +350,11 @@ pub fn temporary_zcashd_write_output_v4<W: Write>(
     write_output_v4(writer, output)
 }
 
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd",
+    test
+))]
 pub(crate) fn write_output_v4<W: Write>(
     mut writer: W,
     output: &OutputDescription<GrothProofBytes>,
@@ -330,6 +367,7 @@ pub(crate) fn write_output_v4<W: Write>(
     writer.write_all(output.zkproof())
 }
 
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 fn write_output_v5_without_proof<W: Write>(
     mut writer: W,
     output: &OutputDescription<GrothProofBytes>,
@@ -341,7 +379,7 @@ fn write_output_v5_without_proof<W: Write>(
     writer.write_all(output.out_ciphertext())
 }
 
-fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
+pub(crate) fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
     let cv = read_value_commitment(&mut reader)?;
     let cmu = read_cmu(&mut reader)?;
 
@@ -380,6 +418,7 @@ pub fn temporary_zcashd_read_v4_components<R: Read>(
 }
 
 /// Reads the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
 #[allow(clippy::type_complexity)]
 pub(crate) fn read_v4_components<R: Read>(
     mut reader: R,
@@ -390,7 +429,7 @@ pub(crate) fn read_v4_components<R: Read>(
     Vec<OutputDescription<GrothProofBytes>>,
 )> {
     if tx_has_sapling {
-        let vb = Transaction::read_amount(&mut reader)?;
+        let vb = read_amount(&mut reader)?;
         #[allow(clippy::redundant_closure)]
         let ss: Vec<SpendDescription<Authorized>> =
             Vector::read(&mut reader, |r| read_spend_v4(r))?;
@@ -414,6 +453,10 @@ pub fn temporary_zcashd_write_v4_components<W: Write>(
 }
 
 /// Writes the Sapling components of a v4 transaction.
+#[cfg(any(
+    all(feature = "sapling", feature = "orchard"),
+    feature = "temporary-zcashd"
+))]
 pub(crate) fn write_v4_components<W: Write>(
     mut writer: W,
     bundle: Option<&Bundle<Authorized, ZatBalance>>,
@@ -446,6 +489,7 @@ pub(crate) fn write_v4_components<W: Write>(
 }
 
 /// Reads a [`Bundle`] from a v5 transaction format.
+#[cfg(all(feature = "sapling", feature = "orchard", feature = "temporary-zcashd"))]
 #[allow(clippy::redundant_closure)]
 pub(crate) fn read_v5_bundle<R: Read>(
     mut reader: R,
@@ -455,7 +499,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
     let n_spends = sd_v5s.len();
     let n_outputs = od_v5s.len();
     let value_balance = if n_spends > 0 || n_outputs > 0 {
-        Transaction::read_amount(&mut reader)?
+        read_amount(&mut reader)?
     } else {
         ZatBalance::zero()
     };
@@ -504,6 +548,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 }
 
 /// Writes a [`Bundle`] in the v5 transaction format.
+#[cfg(any(all(feature = "sapling", feature = "orchard"), test))]
 pub(crate) fn write_v5_bundle<W: Write>(
     mut writer: W,
     sapling_bundle: Option<&Bundle<Authorized, ZatBalance>>,
@@ -547,6 +592,88 @@ pub(crate) fn write_v5_bundle<W: Write>(
     } else {
         CompactSize::write(&mut writer, 0)?;
         CompactSize::write(&mut writer, 0)?;
+    }
+
+    Ok(())
+}
+
+/// Writes the effecting data for a Sapling bundle in v7 format.
+/// [ZIP 248 §Sapling Effecting Data](https://zips.z.cash/zip-0248#sapling-effecting-data)
+///
+/// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
+///         nOutputs, SaplingOutput[nOutputs] (756 bytes each).
+///
+/// The anchor is not part of the effecting data; it is written by
+/// [`write_v7_auth`].
+#[cfg(zcash_unstable = "nu8")]
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+pub(crate) fn write_v7_effects<W: Write>(
+    mut writer: W,
+    bundle: &Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // nSpends + spend effecting data (cv + nullifier + rk = 96 bytes each)
+    Vector::write(&mut writer, bundle.shielded_spends(), |w, s| {
+        w.write_all(&s.cv().to_bytes())?;
+        w.write_all(s.nullifier().as_ref())?;
+        w.write_all(&<[u8; 32]>::from(*s.rk()))?;
+        Ok(())
+    })?;
+
+    // nOutputs + output data (same as V5: 756 bytes each)
+    Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
+        write_output_v5_without_proof(w, e)
+    })?;
+
+    Ok(())
+}
+
+/// Writes the authorizing data for a Sapling bundle in v7 format.
+/// [ZIP 248 §Sapling Authorizing Data](https://zips.z.cash/zip-0248#sapling-authorizing-data)
+///
+/// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
+/// (version 0: `[0x01, 0x00]`).
+///
+/// Layout: anchorSapling (32 bytes, present if nSpends > 0),
+///         vSpendProofsSapling (192*nSpends),
+///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
+///         vOutputProofsSapling (192*nOutputs),
+///         bindingSigSapling (SaplingSignature with sighashInfo).
+#[cfg(zcash_unstable = "nu8")]
+#[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+pub(crate) fn write_v7_auth<W: Write>(
+    mut writer: W,
+    bundle: &Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // anchorSapling (only if nSpends > 0): all spends in a bundle share one
+    // anchor, so it is written once here.
+    if let Some(spend) = bundle.shielded_spends().first() {
+        writer.write_all(spend.anchor().to_repr().as_ref())?;
+    }
+
+    // Spend proofs
+    Array::write(
+        &mut writer,
+        bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
+        |w, e| w.write_all(e),
+    )?;
+
+    // Spend auth sigs with sighashInfo prefix
+    for spend in bundle.shielded_spends() {
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
+        writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))?;
+    }
+
+    // Output proofs
+    Array::write(
+        &mut writer,
+        bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
+        |w, e| w.write_all(e),
+    )?;
+
+    // Binding sig with sighashInfo prefix (only if nSpends + nOutputs > 0)
+    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
+        writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
     }
 
     Ok(())

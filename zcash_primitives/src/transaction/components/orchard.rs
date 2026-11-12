@@ -21,7 +21,9 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
-use crate::transaction::Transaction;
+use crate::transaction::read_amount;
+#[cfg(zcash_unstable = "nu8")]
+use crate::transaction::zip248::V7_SIGHASH_V0_INFO_WIRE;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -83,10 +85,8 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 
 /// The identity map.
 ///
-/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// This can be used with `TransactionData::map_authorization` when you want to map the
 /// authorization of a subset of the transaction's bundles.
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_auth(
         &self,
@@ -117,7 +117,7 @@ fn read_bundle<R: Read>(
             )
         })?;
         let flags = read_flags(&mut reader, bundle_version)?;
-        let value_balance = Transaction::read_amount(&mut reader)?;
+        let value_balance = read_amount(&mut reader)?;
         let anchor = read_anchor(&mut reader)?;
         let proof_bytes = Vector::read_bytes(&mut reader)?;
         let actions = NonEmpty::from_vec(
@@ -230,6 +230,55 @@ pub fn read_v6_bundle<R: Read>(
     pool: ValuePool,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     read_bundle(reader, bundle_version_for_branch(consensus_branch_id, pool))
+}
+
+/// Writes the effecting data for an Orchard bundle in v7 format.
+/// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
+#[cfg(zcash_unstable = "nu8")]
+pub fn write_v7_effects<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // nActionsOrchard + actions (820 bytes each)
+    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
+        write_action_without_auth(w, a)
+    })?;
+    // flagsOrchard (only if nActions > 0, which is always true here). The
+    // anchor is not part of the effecting data; it is written by
+    // [`write_v7_auth`].
+    writer.write_all(&[bundle.flag_byte()])?;
+    Ok(())
+}
+
+/// Writes the authorizing data for an Orchard bundle in v7 format.
+/// [ZIP 248 §Orchard Authorizing Data](https://zips.z.cash/zip-0248#orchard-authorizing-data)
+///
+/// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
+/// (version 0: `[0x01, 0x00]`).
+#[cfg(zcash_unstable = "nu8")]
+pub fn write_v7_auth<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // anchorOrchard
+    writer.write_all(&bundle.anchor().to_bytes())?;
+    // sizeProofsOrchard + proofsOrchard
+    Vector::write(
+        &mut writer,
+        bundle.authorization().proof().as_ref(),
+        |w, b| w.write_all(&[*b]),
+    )?;
+    // vSpendAuthSigsOrchard with sighashInfo prefix
+    for auth in bundle.actions().iter().map(|a| a.authorization()) {
+        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
+        writer.write_all(&<[u8; 64]>::from(auth))?;
+    }
+    // bindingSigOrchard with sighashInfo prefix
+    writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
+    writer.write_all(&<[u8; 64]>::from(
+        bundle.authorization().binding_signature(),
+    ))?;
+    Ok(())
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -487,7 +536,7 @@ pub mod testing {
     fn orchard_bundle_version(v: TxVersion) -> BundleVersion {
         if match v {
             TxVersion::V6 => true,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             TxVersion::V7 => true,
             _ => false,
         } {

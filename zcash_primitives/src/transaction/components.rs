@@ -1,7 +1,10 @@
 //! Structs representing the components within Zcash transactions.
+#[cfg(feature = "orchard")]
 pub mod orchard;
+#[cfg(feature = "sapling")]
 pub mod sapling;
 pub mod sprout;
+pub mod transparent;
 
 pub use self::sprout::JsDescription;
 
