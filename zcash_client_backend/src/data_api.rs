@@ -3913,6 +3913,11 @@ pub trait WalletWrite:
     ///   that block was later un-mined in a chain reorg and the transaction was either invalidated
     ///   or was never re-mined.
     ///
+    /// If the deleted account had the earliest birthday in the wallet, scan queue entries with
+    /// priority [`ScanPriority::Scanned`] that end below the new wallet birthday are pruned as
+    /// by [`WalletWrite::prune_scan_queue_below`]. Other entries below the new wallet birthday
+    /// are left in place.
+    ///
     /// [`OvkPolicy::Discard`]: crate::wallet::OvkPolicy::Discard
     /// [`OvkPolicy::Custom`]: crate::wallet::OvkPolicy::Custom
     fn delete_account(
@@ -4092,12 +4097,13 @@ pub trait WalletWrite:
     /// If `retain_with_priority` is `None`, no entries below `height` are retained,
     /// irrespective of their priority. If it is `Some(priority)`, entries with that
     /// priority and greater are retained (left untouched, even where they straddle
-    /// `height`), as are entries with the bookkeeping priorities
-    /// [`ScanPriority::Scanned`] and [`ScanPriority::Ignored`] — those record which
-    /// regions of the chain the backend has already covered or deliberately skips, and
-    /// removing them would cause the backend to forget coverage state it maintains
-    /// itself (use the `None` form when that full reset is the intent). Entries with
-    /// priorities between the bookkeeping ones and the retained threshold are pruned.
+    /// `height`), as are [`ScanPriority::Ignored`] entries and [`ScanPriority::Scanned`]
+    /// entries that end at or above `height` — those record which regions of the chain the
+    /// backend has already covered or deliberately skips, and removing them would cause the
+    /// backend to forget coverage state it maintains itself (use the `None` form when that
+    /// full reset is the intent). A `Scanned` entry that ends below `height` covers only
+    /// history below the wallet birthday, and is pruned. Entries with priorities between
+    /// the bookkeeping ones and the retained threshold are pruned.
     ///
     /// Pruning must not leave a gap in the queue's coverage: implementations are required
     /// to preserve contiguity across whatever remains below `height`, which in general
@@ -4107,10 +4113,10 @@ pub trait WalletWrite:
     /// span of the queue is unchanged and that the pruned region is now `Ignored`.
     ///
     /// This is a queue-hygiene operation. The primary use case is discarding historic scan
-    /// ranges that no remaining account justifies: [`WalletWrite::delete_account`] does not
-    /// modify the scan queue, so the deep ranges queued for a since-deleted account's
-    /// birthday would otherwise still be scanned even though no remaining account can have
-    /// notes below its own birthday. In that case, pass the wallet birthday
+    /// ranges that no remaining account justifies: [`WalletWrite::delete_account`] prunes only
+    /// `Scanned` coverage below the new wallet birthday, so the deep ranges queued for a
+    /// since-deleted account's birthday would otherwise still be scanned even though no
+    /// remaining account can have notes below its own birthday. In that case, pass the wallet birthday
     /// ([`WalletRead::get_wallet_birthday`]) as `height` and retain
     /// [`ScanPriority::OpenAdjacent`] and greater — the priorities that may legitimately
     /// reach below the wallet birthday in service of note witnesses.

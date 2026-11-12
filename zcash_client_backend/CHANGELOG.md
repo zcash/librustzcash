@@ -45,7 +45,11 @@ workspace.
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
   `height` to be at or below the wallet birthday. An implementation returns an
   error, and leaves the scan queue unchanged, for a `height` above the wallet
-  birthday.
+  birthday. A `ScanPriority::Scanned` entry is retained only if it ends at or
+  above `height`; one that ends below `height` is pruned.
+- `zcash_client_backend::data_api::WalletWrite::delete_account` prunes
+  `ScanPriority::Scanned` scan queue entries that end below the new wallet
+  birthday when the deleted account had the earliest birthday in the wallet.
 - `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
   `Anchor`, ordered between `ChainTip` and `Verify`.
 - `zcash_client_backend::data_api::WalletWrite::{put_received_transparent_utxo,
