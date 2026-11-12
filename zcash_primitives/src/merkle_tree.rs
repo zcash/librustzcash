@@ -330,7 +330,7 @@ pub mod testing {
         }
 
         fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-            Vector::write(writer, self.as_bytes(), |w, b| w.write_all(&[*b]))
+            Vector::write_bytes(writer, self.as_bytes())
         }
     }
 }
