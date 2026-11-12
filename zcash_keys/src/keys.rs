@@ -361,18 +361,21 @@ impl UnifiedSpendingKey {
     /// Returns `true` if this key holds no key for any protocol.
     fn is_empty(&self) -> bool {
         #[cfg(feature = "transparent-inputs")]
-        if self.transparent.is_some() {
-            return false;
-        }
+        let has_transparent = self.transparent.is_some();
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_transparent = false;
+
         #[cfg(feature = "sapling")]
-        if self.sapling.is_some() {
-            return false;
-        }
+        let has_sapling = self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        let has_sapling = false;
+
         #[cfg(feature = "orchard")]
-        if self.orchard.is_some() {
-            return false;
-        }
-        true
+        let has_orchard = self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        !(has_transparent || has_sapling || has_orchard)
     }
 
     /// Returns the full viewing key for this key.
