@@ -21,6 +21,7 @@ hex.workspace = true
 nonempty.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 
 [features]
@@ -32,6 +33,10 @@ test-dependencies = []
 
 [lib]
 bench = false
+
+[[bench]]
+name = "byte_vector"
+harness = false
 
 [lints]
 workspace = true
