@@ -2045,7 +2045,7 @@ mod tests {
                 b >= funding,
                 "boundary {b} must be at/after funding {funding}"
             );
-            let age = (most_recent - b) / i.block_count().get();
+            let age = (most_recent - b) / i.block_count();
             assert!(
                 (1..=ANCHOR_AGE_CAP).contains(&age),
                 "age {age} out of [1, cap]"

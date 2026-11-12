@@ -3730,9 +3730,9 @@ mod tests {
         s.report_broadcast_failure(MigrationTransferId(99), tip);
 
         assert_eq!(s.transactions[0].broadcast_failure_at, Some(tip));
-        for i in 1..4 {
+        for t in &s.transactions[1..4] {
             assert_eq!(
-                s.transactions[i].broadcast_failure_at, None,
+                t.broadcast_failure_at, None,
                 "only a Proved transaction records a rejection",
             );
         }

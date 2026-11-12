@@ -867,7 +867,7 @@ mod tests {
             "one note more needs a second round"
         );
         assert!(
-            probes.len() <= usize::BITS as usize - ceiling.get().leading_zeros() as usize + 1,
+            probes.len() <= usize::BITS as usize - ceiling.leading_zeros() as usize + 1,
             "the search probes logarithmically, not linearly: {probes:?}"
         );
     }
