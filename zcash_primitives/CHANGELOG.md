@@ -12,7 +12,7 @@ workspace.
 
 ## [0.31.1] - 2026-11-12
 
-### Changed
+### Fixed
 - `zcash_primitives::block::BlockHeader::{read, write}`, and
   `zcash_primitives::transaction::Transaction::{read, write}` for Orchard and
   Ironwood bundles, now read and write the Equihash solution and the proof bytes
