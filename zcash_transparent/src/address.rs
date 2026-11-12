@@ -67,7 +67,7 @@ impl Script {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
+        Vector::write_bytes(&mut writer, &self.0.0)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
