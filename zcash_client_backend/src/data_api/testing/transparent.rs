@@ -1080,8 +1080,6 @@ where
     DSF: DataStoreFactory,
 {
     let dust_value = Zatoshis::const_from_u64(1000);
-    assert!(dust_value <= zip317::MARGINAL_FEE);
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
@@ -1089,6 +1087,7 @@ where
         .build();
 
     let account = st.test_account().cloned().unwrap();
+    assert!(dust_value <= zip317::marginal_fee(st.network(), account.birthday().height() + 1));
     let uaddr = st
         .wallet()
         .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
@@ -1158,6 +1157,137 @@ where
         balance.unshielded_coinbase_balance().spendable_value(),
         Zatoshis::ZERO
     );
+}
+
+/// The wallet classifies a transparent output as uneconomic by the ZIP 317 marginal fee in effect
+/// at the target height: an output worth the marginal fee before the fee reduction height of
+/// [ZIP 2009] is reported as uneconomic and left out of selection while the target height is
+/// below that height, and is spendable from it.
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub fn transparent_dust_threshold_follows_marginal_fee_at_target_height<DSF>(
+    ds_factory: DSF,
+    cache: impl TestCache,
+) where
+    DSF: DataStoreFactory,
+{
+    let network = super::pool::nu7_activating_network();
+    let reduction_height =
+        zip317::fee_reduction_height(&network).expect("the test network reduces the fee");
+    let value = zip317::marginal_fee(&network, reduction_height - 1);
+    assert!(value > zip317::marginal_fee(&network, reduction_height));
+
+    let mut st = TestBuilder::new()
+        .with_network(network)
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Receive the output in the first block, well below the reduction height.
+    let received_height = st.generate_and_scan_empty_blocks(1);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(value, taddr.script().into()),
+        Some(received_height),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Advance the tip to two blocks below the reduction, so that the next transaction targets the
+    // block before it.
+    let blocks_to_add = u32::from(reduction_height) - 2 - u32::from(received_height);
+    let tip = st.generate_and_scan_empty_blocks(
+        usize::try_from(blocks_to_add).expect("block count fits in a usize"),
+    );
+    assert_eq!(tip, reduction_height - 2);
+
+    macro_rules! assert_classified {
+        ($uneconomic:expr, $spendable:expr) => {{
+            let policy = ConfirmationsPolicy::MIN;
+            let tip = st.wallet().chain_height().unwrap().unwrap();
+            let target_height = TargetHeight::from(tip + 1);
+            let balance = get_account_balance::<DSF>(&st, &account, policy);
+            assert_eq!(
+                balance.unshielded_regular_balance().uneconomic_value(),
+                $uneconomic
+            );
+            assert_eq!(
+                balance.unshielded_regular_balance().spendable_value(),
+                $spendable
+            );
+            let address_balance = st
+                .wallet()
+                .get_transparent_balances(account.id(), target_height, policy)
+                .unwrap()
+                .get(taddr)
+                .cloned()
+                .map(|(_, balance)| balance);
+            assert_eq!(
+                address_balance.map_or(Zatoshis::ZERO, |b| b.uneconomic_value()),
+                $uneconomic
+            );
+            assert_eq!(
+                address_balance.map_or(Zatoshis::ZERO, |b| b.spendable_value()),
+                $spendable
+            );
+            assert_eq!(
+                st.wallet()
+                    .get_spendable_transparent_outputs(
+                        taddr,
+                        target_height,
+                        policy,
+                        CoinbaseFilter::AllTransparentOutputs,
+                        LockFilter::Policy(&LockedInputPolicy::Exclude),
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .map(|utxo| utxo.value())
+                    .sum::<Option<Zatoshis>>(),
+                Some($spendable),
+            );
+            assert_eq!(
+                st.wallet()
+                    .select_spendable_transparent_outputs(
+                        account.id(),
+                        target_height,
+                        policy,
+                        CoinbaseFilter::AllTransparentOutputs,
+                        None,
+                        TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+                        usize::MAX,
+                        &StandardFeeRule::Zip317,
+                        LockFilter::Policy(&LockedInputPolicy::Exclude),
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .map(|utxo| utxo.value())
+                    .sum::<Option<Zatoshis>>(),
+                Some($spendable),
+            );
+        }};
+    }
+
+    // Below the reduction height, the output is uneconomic.
+    assert_classified!(value, Zatoshis::ZERO);
+
+    // From the reduction height, it is spendable.
+    let tip = st.generate_and_scan_empty_blocks(1);
+    assert_eq!(tip, reduction_height - 1);
+    assert_classified!(Zatoshis::ZERO, value);
 }
 
 pub fn gap_limits<DSF>(ds_factory: DSF, cache: impl TestCache, gap_limits: GapLimits)
@@ -3406,8 +3536,9 @@ where
     // The gather stops at `CAP` inputs, whose value the error reports as available; the
     // request needs the payment plus one logical action per gathered input.
     let expected_available = Zatoshis::const_from_u64(DUST_VALUE * (CAP as u64));
-    let expected_required =
-        (payment_amount + (zip317::MARGINAL_FEE * (CAP as u64)).unwrap()).unwrap();
+    let expected_required = (payment_amount
+        + (zip317::marginal_fee(st.network(), height + 1) * (CAP as u64)).unwrap())
+    .unwrap();
     assert_matches!(
         result,
         Err(crate::data_api::error::Error::InsufficientFunds { available, required })

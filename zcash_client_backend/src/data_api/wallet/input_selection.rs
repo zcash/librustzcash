@@ -2960,6 +2960,9 @@ mod greedy_selection_tests {
 
     /// The scenario in which the change strategy names a selected Sapling note as dust.
     mod dust_exclusion {
+        // The fixture is pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+        #![allow(deprecated)]
+
         use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
         use zcash_protocol::value::COIN;
 

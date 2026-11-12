@@ -187,9 +187,10 @@ since Mermaid layout is hard to reason about in plain text.
 
 - **Never use magic numbers.** Do not inline a bare numeric (or string) literal
   whose meaning is not obvious from context. Give it a `const` with a
-  doc-commented rationale, and reuse the protocol's own named constants
-  (`COIN`, `MAX_MONEY`, the ZIP-317 `MARGINAL_FEE`, `PREP_TX_ACTIONS`,
-  `DENOM_CAP`, ...) rather than re-deriving their values. This applies to
+  doc-commented rationale, and reuse the protocol's own named constants and
+  accessors (`COIN`, `MAX_MONEY`, the ZIP-317 `zip317::marginal_fee(params,
+  target_height)`, `PREP_TX_ACTIONS`, `DENOM_CAP`, ...) rather than re-deriving
+  their values. This applies to
   production code, tests, and fixtures alike.
 
 - **Public APIs use semantic types, never bare primitives.** A `pub` function,
@@ -432,8 +433,8 @@ Type safety is paramount. This is a security-critical codebase.
 - When structured enum variants are needed, wrap an immutable type rather than using
   inline fields, to ensure safe construction. This can be relaxed for error enum types.
 - No magic numbers: give every literal a named `const` with a documented meaning. Prefer an
-  existing protocol constant (e.g. `zcash_protocol::value::COIN` / `MAX_MONEY`,
-  `zip317::MARGINAL_FEE`) over redefining one.
+  existing protocol constant or accessor (e.g. `zcash_protocol::value::COIN` / `MAX_MONEY`,
+  `zip317::marginal_fee(params, target_height)`) over redefining one.
 - Make a library `no_std` (with `extern crate alloc`) whenever its dependencies allow it, keeping
   `std` to `#[cfg(test)]` and dev-dependencies.
 

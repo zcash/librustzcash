@@ -8,6 +8,9 @@
 //!
 //! [`PreparationStrategy`]: crate::preparation::PreparationStrategy
 
+// Golden vectors captured at the pre-Revision-2 fee.
+#![allow(deprecated)]
+
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_protocol::value::{COIN, Zatoshis};
 

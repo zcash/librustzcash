@@ -149,13 +149,8 @@ pub(crate) fn account_index_sql() -> String {
     store::create_account_index_sql(&TABLES)
 }
 
-/// The Orchard -> Ironwood transactions-table DDL, from the store's one generator, for the
+/// The due-transactions index DDL, from the store's one generator, for the
 /// `orchard_ironwood_migration_txid_blob` schema migration's table rebuild.
-pub(crate) fn transactions_table_sql() -> String {
-    store::create_transactions_sql(&TABLES)
-}
-
-/// The due-transactions index DDL, from the store's one generator, recreated by the same rebuild.
 pub(crate) fn tx_due_index_sql() -> String {
     store::create_tx_due_index_sql(&TABLES)
 }
@@ -979,6 +974,7 @@ mod check_step_satisfiability {
             None,
             cache(nfs),
             None,
+            None,
         )
     }
 
@@ -1007,6 +1003,7 @@ mod check_step_satisfiability {
             None,
             None,
             Vec::new(),
+            None,
             None,
         )
     }
@@ -1068,6 +1065,7 @@ mod check_step_satisfiability {
             None,
             None,
             cache(nfs),
+            None,
             None,
         )
     }
@@ -2130,6 +2128,7 @@ mod truncation_follows_the_wallet {
             unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
             vec![[id as u8; 32]],
             None,
+            None,
         )
     }
 
@@ -2534,6 +2533,7 @@ mod tests {
                 None,
                 vec![[9; 32]],
                 None,
+                None,
             )],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -2733,6 +2733,7 @@ mod tests {
             None,
             txs[0].spend_nullifiers().to_vec(),
             None,
+            None,
         );
         txs.push(MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -2750,6 +2751,7 @@ mod tests {
             None,
             Vec::new(),
             None,
+            None,
         ));
         txs.push(MigrationTransaction::from_parts(
             MigrationTransferId::new(2),
@@ -2764,6 +2766,7 @@ mod tests {
             None,
             None,
             Vec::new(),
+            None,
             None,
         ));
         proved = MigrationState::from_parts(
@@ -2881,6 +2884,7 @@ mod tests {
             None,
             txs[0].spend_nullifiers().to_vec(),
             None,
+            None,
         );
         let failed =
             migration_with_transfer(MigrationStatus::Failed, 40_000, MigrationTxState::Proved);
@@ -2949,6 +2953,7 @@ mod tests {
             Some(MigrationLockOwner::from_bytes(owner)),
             None,
             txs[0].spend_nullifiers().to_vec(),
+            None,
             None,
         );
         let mut live = MigrationState::from_parts(
@@ -3106,6 +3111,7 @@ mod tests {
             unsatisfiable,
             spend_nullifiers.clone(),
             broadcast_failure_at,
+            None,
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -3121,6 +3127,7 @@ mod tests {
             unsatisfiable,
             spend_nullifiers,
             broadcast_failure_at,
+            None,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -3193,6 +3200,7 @@ mod tests {
                 lock_owner,
                 None,
                 Vec::new(),
+                None,
                 None,
             )
         };
@@ -3288,6 +3296,7 @@ mod tests {
                 None,
                 vec![[7u8; 32]],
                 None,
+                None,
             )],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -3378,6 +3387,7 @@ mod tests {
                 None,
                 None,
                 vec![[id as u8; 32]],
+                None,
                 None,
             )
         };
@@ -3671,6 +3681,36 @@ mod tests {
             second in arb_migration_state(),
         ) {
             assert_put_replaces(&mut fresh_store(), &first, &second);
+        }
+
+        /// An error returned from the closure `replace_migration_with` runs inside its transaction
+        /// rolls the whole replacement back: the previously stored migration reads back unchanged,
+        /// `orchard_change` included, and no row of the replacement survives.
+        #[test]
+        fn replace_migration_with_rolls_back_on_error(
+            first in arb_migration_state(),
+            second in arb_migration_state(),
+        ) {
+            // A terminal state is retained as history rather than read back as the account's
+            // migration, so only a pending `first` can be compared against.
+            prop_assume!(!first.is_terminal());
+            let mut s = fresh_store();
+            s.replace_migration(&first).expect("write first");
+            let result = s
+                .store
+                .replace_migration_with(&second, |_| Err(Error::Corrupt("injected")));
+            prop_assert!(matches!(result, Err(Error::Corrupt("injected"))));
+            prop_assert_eq!(s.get_migration().expect("read"), Some(first.clone()));
+            let rows: i64 = s
+                .store
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM orchard_ironwood_migration_transactions",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count");
+            prop_assert_eq!(rows, first.transactions().len() as i64);
         }
 
         /// Updating a stored transaction's lifecycle state persists (the shared update property),

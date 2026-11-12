@@ -10,12 +10,29 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::fees::zip317::{REVISION_2_MARGINAL_FEE,
+  MAINNET_FEE_REDUCTION_HEIGHT, TESTNET_FEE_REDUCTION_HEIGHT, fee_reduction_height,
+  marginal_fee, minimum_fee}`
+
 ### Changed
+- `zcash_primitives::transaction::fees::zip317::FeeRule::standard` now charges the ZIP 317
+  marginal fee in effect at the `target_height` passed to `fee_required`: 5000 zatoshis
+  per logical action below `FEE_REDUCTION_HEIGHT` (Mainnet 3590000, Testnet 4465026, the
+  NU7 activation height on regtest) and 1000 from it (ZIP 2009). Previously it always
+  charged 5000.
+- `zcash_primitives::transaction::fees::zip317::FeeRule::marginal_fee` takes
+  `params: &impl Parameters` and `target_height: BlockHeight` and returns the marginal fee
+  in effect at that height.
 - `zcash_primitives::block::BlockHeader::{read, write}`, and
   `zcash_primitives::transaction::Transaction::{read, write}` for Orchard and
   Ironwood bundles, now read and write the Equihash solution and the proof bytes
   in bulk, rather than making one call to the underlying reader or writer per
   byte.
+
+### Deprecated
+- `zcash_primitives::transaction::fees::zip317::{MARGINAL_FEE, MINIMUM_FEE}` (use
+  `marginal_fee` and `minimum_fee` instead).
 
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,

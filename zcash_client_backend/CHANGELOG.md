@@ -40,8 +40,28 @@ workspace.
   stabilized_note_rewind_un_mines_shard_completion,
   stabilized_note_settled_height_invalidated_by_reorg,
   stabilized_note_spendable_across_small_tip_advance}`
+- `zcash_client_backend::data_api::testing::pool::{canonical_crossing_fee_follows_fee_reduction_height,
+  dust_threshold_follows_marginal_fee_at_target_height,
+  proposal_fee_is_fixed_at_its_target_height_across_fee_reduction}`
+- `zcash_client_backend::data_api::testing::transparent::transparent_dust_threshold_follows_marginal_fee_at_target_height`
 
 ### Changed
+- Migrated to `zcash_primitives 0.32.0`.
+- `zcash_client_backend::fees::StandardFeeRule::Zip317` charges the ZIP 317 marginal fee
+  in effect at the target height (5000 zatoshis per logical action below
+  `FEE_REDUCTION_HEIGHT`, 1000 from it; ZIP 2009). Previously it always charged 5000.
+- `zcash_client_backend::fees::zip317::Zip317FeeRule::marginal_fee` takes
+  `params: &impl Parameters` and `target_height: BlockHeight` and returns the marginal fee
+  in effect at that height.
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy,
+  MultiOutputChangeStrategy}` use the marginal fee in effect at the target height as the
+  default dust threshold and the uneconomic-input boundary, and cap dust added to the fee
+  under `DustAction::AddDustToFee` at ten times the minimum fee in effect at that height.
+  Previously the threshold and boundary were fixed at 5000 zatoshis and the cap at 100000.
+- `zcash_client_backend::fees::canonical_crossing_fee` returns the canonical ZIP 318
+  crossing's fee under the ZIP 317 marginal fee in effect at `target_height` (15000
+  zatoshis below `FEE_REDUCTION_HEIGHT`, 3000 from it). Previously it always returned
+  15000.
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
   `height` to be at or below the wallet birthday. An implementation returns an
   error, and leaves the scan queue unchanged, for a `height` above the wallet

@@ -41,16 +41,25 @@ use {super::orchard as orchard_fees, zcash_primitives::transaction::builder::Bun
 /// An extension to the [`FeeRule`] trait that exposes methods required for
 /// ZIP 317 fee calculation.
 pub trait Zip317FeeRule: FeeRule {
-    /// Returns the ZIP 317 marginal fee.
-    fn marginal_fee(&self) -> Zatoshis;
+    /// Returns the ZIP 317 marginal fee in effect for a transaction expected to be mined at
+    /// `target_height`.
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis;
 
     /// Returns the ZIP 317 number of grace actions
     fn grace_actions(&self) -> usize;
 }
 
 impl Zip317FeeRule for prim_zip317::FeeRule {
-    fn marginal_fee(&self) -> Zatoshis {
-        self.marginal_fee()
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis {
+        prim_zip317::FeeRule::marginal_fee(self, params, target_height)
     }
 
     fn grace_actions(&self) -> usize {
@@ -59,8 +68,12 @@ impl Zip317FeeRule for prim_zip317::FeeRule {
 }
 
 impl Zip317FeeRule for StandardFeeRule {
-    fn marginal_fee(&self) -> Zatoshis {
-        prim_zip317::FeeRule::standard().marginal_fee()
+    fn marginal_fee<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+    ) -> Zatoshis {
+        prim_zip317::marginal_fee(params, target_height)
     }
 
     fn grace_actions(&self) -> usize {
@@ -161,16 +174,17 @@ where
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
+        let marginal_fee = self.fee_rule.marginal_fee(params, target_height.into());
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             &split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             self.fee_rule.grace_actions(),
         );
 
@@ -315,16 +329,17 @@ where
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let marginal_fee = self.fee_rule.marginal_fee(params, target_height.into());
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             &self.split_policy,
             self.fallback_change_pool,
             #[cfg(feature = "transparent-inputs")]
             self.transparent_change_policy,
-            self.fee_rule.marginal_fee(),
+            marginal_fee,
             self.fee_rule.grace_actions(),
         );
 
@@ -355,6 +370,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+    #![allow(deprecated)]
+
     use crate::fees::tests::all_change_receivers;
     // `sapling_fees` is named by both the orchard and the transparent-inputs tests.
     #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
@@ -374,7 +392,7 @@ mod tests {
     use {
         crate::{
             data_api::wallet::{TargetHeight, input_selection::OrchardPayment},
-            fees::{orchard as orchard_fees, tests::TestOrchardInput},
+            fees::{canonical_crossing_fee, orchard as orchard_fees, tests::TestOrchardInput},
         },
         zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
     };
@@ -388,6 +406,8 @@ mod tests {
         },
         fees::{
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
+            TransactionBalance,
+            common::DUST_TO_FEE_CAP_MINIMUM_FEES,
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
         },
@@ -400,7 +420,10 @@ mod tests {
     };
 
     use ::transparent::{address::Script, bundle::TxOut};
-    use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
+    use zcash_primitives::transaction::fees::zip317::{
+        FeeError as Zip317FeeError, FeeRule as Zip317FeeRule, MAINNET_FEE_REDUCTION_HEIGHT,
+        marginal_fee, minimum_fee,
+    };
 
     use super::SingleOutputChangeStrategy;
 
@@ -1024,6 +1047,95 @@ mod tests {
             recorded_for((MAX_RESIDUAL_VALUE + Zatoshis::const_from_u64(1)).unwrap()),
             1
         );
+    }
+
+    /// A canonical crossing whose note leaves dust over the canonical fee in effect at the target
+    /// height keeps the canonical shape and fee under `AllowDustChange`, with the dust as its one
+    /// Orchard change output; the default policy rejects that change.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn canonical_crossing_keeps_dust_change_under_allow_dust_change() {
+        /// Change below the marginal fee on both sides of the fee reduction height.
+        const DUST_CHANGE: Zatoshis = Zatoshis::const_from_u64(500);
+
+        let net = Network::MainNetwork;
+        let zip318 = PoolMigrationParams::new(
+            zcash_protocol::zip318::BlockSpacing::UNIFORM,
+            AnchorRetentionInterval::ZIP_318,
+        );
+        let sapling_view = (
+            sapling::builder::BundleType::DEFAULT,
+            &[] as &[Infallible],
+            &[] as &[Infallible],
+        );
+        let ironwood_outputs = [OrchardPayment::new(MAX_RESIDUAL_VALUE)];
+        let ironwood_view = (
+            ::orchard::bundle::BundleVersion::ironwood_v3(),
+            &[] as &[Infallible],
+            &ironwood_outputs[..],
+        );
+        let strategy = |dust_output_policy| {
+            SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+                Zip317FeeRule::standard(),
+                None,
+                ShieldedPool::Orchard,
+                dust_output_policy,
+            )
+        };
+
+        for target_height in [
+            MAINNET_FEE_REDUCTION_HEIGHT - 1,
+            MAINNET_FEE_REDUCTION_HEIGHT,
+        ] {
+            assert!(DUST_CHANGE < marginal_fee(&net, target_height));
+            let canonical_fee = canonical_crossing_fee(&net, target_height)
+                .expect("the canonical shape is a valid input to the ZIP 317 rule");
+            let anchor = zcash_protocol::zip318::AnchorGrid::new(
+                AnchorBucketInterval::ZIP_318,
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+            )
+            .boundary_at_or_below(target_height - 1);
+            let orchard_inputs = [TestOrchardInput {
+                note_id: 0,
+                value: (MAX_RESIDUAL_VALUE + canonical_fee)
+                    .and_then(|v| v + DUST_CHANGE)
+                    .unwrap(),
+            }];
+            let orchard_view = (
+                ::orchard::bundle::BundleVersion::orchard_v3(),
+                &orchard_inputs[..],
+                &[] as &[Infallible],
+            );
+            let balance_under = |dust_output_policy| {
+                strategy(dust_output_policy).compute_balance::<_, u32>(
+                    &net,
+                    target_height.into(),
+                    anchor,
+                    &zip318,
+                    &[] as &[TestTransparentInput],
+                    &[] as &[TxOut],
+                    &sapling_view,
+                    &orchard_view,
+                    &ironwood_view,
+                    None,
+                    &all_change_receivers(),
+                )
+            };
+
+            assert_matches!(
+                balance_under(DustOutputPolicy::default()),
+                Err(ChangeError::InsufficientFunds { .. }),
+                "change of {DUST_CHANGE:?} at {target_height:?} should be dust",
+            );
+            assert_matches!(
+                balance_under(DustOutputPolicy::new(DustAction::AllowDustChange, None)),
+                Ok(balance) if
+                    balance.proposed_change() == [ChangeValue::orchard(DUST_CHANGE, None)] &&
+                    balance.fee_required() == canonical_fee &&
+                    balance.dummy_outputs().is_some_and(|d| d.ironwood() == 0),
+                "at {target_height:?} the crossing should stay canonical with dust change",
+            );
+        }
     }
 
     #[test]
@@ -1838,6 +1950,231 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::DustInputs { sapling, .. }) if sapling == vec![2]
+        );
+    }
+
+    /// Computes the balance of a Sapling-only transaction under `change_strategy` at
+    /// `target_height` on Mainnet: `inputs` are the values of the notes spent, numbered in order,
+    /// and `payment` the single Sapling payment.
+    fn sapling_balance_at(
+        change_strategy: &SingleOutputChangeStrategy<Zip317FeeRule, MockWalletDb>,
+        target_height: BlockHeight,
+        inputs: &[Zatoshis],
+        payment: Zatoshis,
+    ) -> Result<TransactionBalance, ChangeError<Zip317FeeError, u32>> {
+        /// Sapling-only flows do not consult the anchor, so any height serves.
+        const ANCHOR_HEIGHT: BlockHeight = BlockHeight::from_u32(1);
+
+        let inputs: Vec<_> = inputs
+            .iter()
+            .enumerate()
+            .map(|(note_id, value)| TestSaplingInput {
+                note_id: u32::try_from(note_id).expect("a handful of notes"),
+                value: *value,
+            })
+            .collect();
+        change_strategy.compute_balance(
+            &Network::MainNetwork,
+            target_height.into(),
+            ANCHOR_HEIGHT,
+            &PoolMigrationParams::new(
+                zcash_protocol::zip318::BlockSpacing::UNIFORM,
+                AnchorRetentionInterval::ZIP_318,
+            ),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &inputs[..],
+                &[SaplingPayment::new(payment)][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &all_change_receivers(),
+        )
+    }
+
+    /// An input is uneconomic iff its value is at most the marginal fee in effect at the target
+    /// height, and change is dust iff it is below that fee; both boundaries follow the ZIP 317
+    /// schedule across `FEE_REDUCTION_HEIGHT`.
+    #[test]
+    fn uneconomic_inputs_and_dust_follow_marginal_fee_at_target_height() {
+        /// Two notes that are never dust and together cover `FUNDED_PAYMENT`, so a third note
+        /// is spent only if it is free to add.
+        const FUNDING_NOTES: [Zatoshis; 2] = [
+            Zatoshis::const_from_u64(29_000),
+            Zatoshis::const_from_u64(20_000),
+        ];
+        /// The payment made from `FUNDING_NOTES` plus a candidate note.
+        const FUNDED_PAYMENT: Zatoshis = Zatoshis::const_from_u64(30_000);
+        /// The payment made from a single note when probing the change dust boundary.
+        const SINGLE_NOTE_PAYMENT: Zatoshis = Zatoshis::const_from_u64(40_000);
+        /// The index of the candidate note in `FUNDING_NOTES ++ [candidate]`.
+        const CANDIDATE_NOTE_ID: u32 = 2;
+        /// Logical actions in the single-note case: one spend, and a payment plus a change
+        /// output; equal to the grace allowance, so the fee is the minimum fee.
+        const SINGLE_NOTE_ACTIONS: usize = 2;
+        /// Logical actions when the candidate note is spent alongside `FUNDING_NOTES`: three
+        /// spends against two outputs.
+        const THREE_NOTE_ACTIONS: usize = 3;
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+        let net = Network::MainNetwork;
+
+        // The schedule itself is pinned by `zip317_rule_charges_fee_in_effect_at_target_height`.
+        for target_height in [
+            MAINNET_FEE_REDUCTION_HEIGHT - 1,
+            MAINNET_FEE_REDUCTION_HEIGHT,
+        ] {
+            let marginal = marginal_fee(&net, target_height);
+            let one_above = (marginal + Zatoshis::const_from_u64(1)).unwrap();
+            let one_below = (marginal - Zatoshis::const_from_u64(1)).unwrap();
+
+            // A third note worth exactly the marginal fee is uneconomic: spending it adds a
+            // logical action that costs more than the note is worth.
+            let funding_plus = |candidate| [FUNDING_NOTES[0], FUNDING_NOTES[1], candidate];
+            assert_matches!(
+                sapling_balance_at(
+                    &change_strategy,
+                    target_height,
+                    &funding_plus(marginal),
+                    FUNDED_PAYMENT,
+                ),
+                Err(ChangeError::DustInputs { sapling, .. }) if sapling == vec![CANDIDATE_NOTE_ID],
+                "input of {marginal:?} at {target_height:?} should be uneconomic",
+            );
+
+            // One zatoshi more and it is spent, paying the marginal fee for its action.
+            let three_note_fee = (marginal * THREE_NOTE_ACTIONS).unwrap();
+            let three_note_in = (FUNDING_NOTES[0] + FUNDING_NOTES[1])
+                .and_then(|v| v + one_above)
+                .unwrap();
+            let three_note_change = (three_note_in - FUNDED_PAYMENT)
+                .and_then(|v| v - three_note_fee)
+                .unwrap();
+            assert_matches!(
+                sapling_balance_at(
+                    &change_strategy,
+                    target_height,
+                    &funding_plus(one_above),
+                    FUNDED_PAYMENT,
+                ),
+                Ok(balance) if
+                    balance.proposed_change() == [ChangeValue::sapling(three_note_change, None)] &&
+                    balance.fee_required() == three_note_fee,
+                "input of {one_above:?} at {target_height:?} should be economic",
+            );
+
+            // Change one zatoshi below the marginal fee is dust and rejected under the default
+            // policy; change of exactly the marginal fee is kept.
+            let single_note_fee = (marginal * SINGLE_NOTE_ACTIONS).unwrap();
+            assert_eq!(single_note_fee, minimum_fee(&net, target_height));
+            let note_leaving = |change| {
+                (SINGLE_NOTE_PAYMENT + single_note_fee)
+                    .and_then(|v| v + change)
+                    .unwrap()
+            };
+            assert_matches!(
+                sapling_balance_at(
+                    &change_strategy,
+                    target_height,
+                    &[note_leaving(one_below)],
+                    SINGLE_NOTE_PAYMENT,
+                ),
+                Err(ChangeError::InsufficientFunds { available, required })
+                    if available == note_leaving(one_below) && required == note_leaving(marginal),
+                "change of {one_below:?} at {target_height:?} should be dust",
+            );
+            assert_matches!(
+                sapling_balance_at(
+                    &change_strategy,
+                    target_height,
+                    &[note_leaving(marginal)],
+                    SINGLE_NOTE_PAYMENT,
+                ),
+                Ok(balance) if
+                    balance.proposed_change() == [ChangeValue::sapling(marginal, None)] &&
+                    balance.fee_required() == single_note_fee,
+                "change of {marginal:?} at {target_height:?} should be kept",
+            );
+        }
+    }
+
+    /// Under `DustAction::AddDustToFee`, dust is folded into the fee only up to ten times the
+    /// minimum fee in effect at the target height; above that it is kept as a change output.
+    #[test]
+    fn add_dust_to_fee_cap_follows_minimum_fee() {
+        /// The payment made from a single note.
+        const PAYMENT: Zatoshis = Zatoshis::const_from_u64(40_000);
+        /// A dust threshold above every change value probed, so that the cap alone decides.
+        const DUST_THRESHOLD: Zatoshis = Zatoshis::const_from_u64(30_000);
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::new(DustAction::AddDustToFee, Some(DUST_THRESHOLD)),
+        );
+        let net = Network::MainNetwork;
+        let target_height = MAINNET_FEE_REDUCTION_HEIGHT;
+        // One spend, a payment and a change output: the grace allowance, so the minimum fee.
+        let fee = minimum_fee(&net, target_height);
+        let cap = (fee * DUST_TO_FEE_CAP_MINIMUM_FEES).unwrap();
+        assert_eq!(u64::from(cap), 20_000);
+        let one_above_cap = (cap + Zatoshis::const_from_u64(1)).unwrap();
+        let note_leaving = |change| (PAYMENT + fee).and_then(|v| v + change).unwrap();
+
+        // Dust of exactly the cap is folded into the fee.
+        assert_matches!(
+            sapling_balance_at(
+                &change_strategy,
+                target_height,
+                &[note_leaving(cap)],
+                PAYMENT,
+            ),
+            Ok(balance) if
+                balance.proposed_change().is_empty() &&
+                balance.fee_required() == (fee + cap).unwrap()
+        );
+
+        // One zatoshi more and it is returned as change instead.
+        assert_matches!(
+            sapling_balance_at(
+                &change_strategy,
+                target_height,
+                &[note_leaving(one_above_cap)],
+                PAYMENT,
+            ),
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(one_above_cap, None)] &&
+                balance.fee_required() == fee
+        );
+
+        // Below `FEE_REDUCTION_HEIGHT` the cap is 100 000, so the same dust is still folded.
+        let before = MAINNET_FEE_REDUCTION_HEIGHT - 1;
+        let fee_before = minimum_fee(&net, before);
+        assert_eq!(
+            u64::from((fee_before * DUST_TO_FEE_CAP_MINIMUM_FEES).unwrap()),
+            100_000
+        );
+        assert_matches!(
+            sapling_balance_at(
+                &change_strategy,
+                before,
+                &[(PAYMENT + fee_before).and_then(|v| v + one_above_cap).unwrap()],
+                PAYMENT,
+            ),
+            Ok(balance) if
+                balance.proposed_change().is_empty() &&
+                balance.fee_required() == (fee_before + one_above_cap).unwrap()
         );
     }
 

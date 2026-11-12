@@ -727,7 +727,9 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 /// disagree is rejected as corrupt. `broadcast_failure_at` is the chain tip an application
 /// observed from a node that REJECTED a broadcast of this transaction, standing until the engine
 /// adjudicates that rejection against the wallet's own view, and independent of the
-/// unsatisfiability columns in both directions. Dependencies are edges in
+/// unsatisfiability columns in both directions. `orchard_change` is the zatoshi value the
+/// transaction returns to the Orchard pool as change, `NULL` when it produces none (which
+/// every row stored before the column existed reads as). Dependencies are edges in
 /// `orchard_ironwood_migration_transaction_deps`, and the real-spend nullifiers cached from the
 /// stored PCZT are rows of `orchard_ironwood_migration_spend_nullifiers`.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
@@ -749,6 +751,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     unsatisfiable_at INTEGER,
     unsatisfiable_kind TEXT,
     broadcast_failure_at INTEGER,
+    orchard_change INTEGER,
     PRIMARY KEY (migration_id, transfer_id)
 )";
 /// The dependency edges between migration transactions: `transfer_id` depends on

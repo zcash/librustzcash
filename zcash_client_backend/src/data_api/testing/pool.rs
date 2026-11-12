@@ -25,7 +25,7 @@ use zcash_primitives::{
         builder::{
             BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
         },
-        fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
+        fees::zip317::{FeeRule as Zip317FeeRule, fee_reduction_height, marginal_fee, minimum_fee},
     },
 };
 use zcash_protocol::{
@@ -33,7 +33,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::{MAX_MONEY, Zatoshis},
+    value::{COIN, MAX_MONEY, Zatoshis},
 };
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
@@ -125,7 +125,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_keys::keys::transparent::gap_limits::GapLimits,
-    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
+    zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize},
     zcash_protocol::{
         TxId,
         value::{BalanceError, ZatBalance},
@@ -1674,7 +1674,7 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
 
     // The proposed transaction carries one shielded spend (padded to two shielded
     // outputs) and one transparent output.
-    let expected_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_fee = (marginal_fee_at_tip(&st) * 3u64).unwrap();
     let expected_payment = (value - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
@@ -1799,7 +1799,7 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     // The proposed transaction spends one note in each pool and pays a single shielded
     // output; under ZIP 317, each of the two shielded bundles is padded to two logical
     // actions.
-    let expected_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_fee = (marginal_fee_at_tip(&st) * 4u64).unwrap();
     let expected_payment = (total - expected_fee).unwrap();
 
     let addy = to.to_zcash_address(st.network());
@@ -1868,13 +1868,41 @@ const DUST_SHORTFALL_P1_NOTE_COVERING_FEE: Zatoshis = Zatoshis::const_from_u64(2
 #[cfg(feature = "orchard")]
 const DUST_SHORTFALL_P1_NOTE_BELOW_FEE: Zatoshis = Zatoshis::const_from_u64(6_000);
 
+/// Returns the ZIP 317 marginal fee of a transaction proposed at the scanned tip of `st`.
+fn marginal_fee_at_tip<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
+    marginal_fee(st.network(), next_block_height(st))
+}
+
+/// Returns the ZIP 317 minimum conventional fee of a transaction proposed at the scanned tip of
+/// `st`.
+fn minimum_fee_at_tip<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
+    minimum_fee(st.network(), next_block_height(st))
+}
+
+/// Returns the target height of a transaction proposed once the latest generated block has been
+/// scanned: the height of the block following it.
+fn next_block_height<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> BlockHeight {
+    st.latest_cached_block()
+        .expect("a block has been generated")
+        .height()
+        + 1
+}
+
 /// The ZIP 317 fee of a transaction spending from two shielded pools, each bundle padded to
 /// two logical actions.
 #[cfg(feature = "orchard")]
-fn two_bundle_fee() -> Zatoshis {
+fn two_bundle_fee<C: TestCache, D: WalletTest + WalletWrite, P: Parameters>(
+    st: &TestState<C, D, P>,
+) -> Zatoshis {
     const BUNDLES: u64 = 2;
     const PADDED_ACTIONS_PER_BUNDLE: u64 = 2;
-    (MARGINAL_FEE * (BUNDLES * PADDED_ACTIONS_PER_BUNDLE)).unwrap()
+    (marginal_fee_at_tip(st) * (BUNDLES * PADDED_ACTIONS_PER_BUNDLE)).unwrap()
 }
 
 /// The across-pools dust shortfall scenario: an account holding a `P0` note and a smaller `P1`
@@ -1952,7 +1980,7 @@ pub fn transfer_grows_across_pools_at_a_dust_shortfall<
         DUST_SHORTFALL_P1_NOTE_COVERING_FEE,
     );
 
-    let expected_fee = two_bundle_fee();
+    let expected_fee = two_bundle_fee(&st);
     let expected_change = (total - amount - expected_fee).unwrap();
 
     let proposal = st.propose_transfer_to(&recipient, amount);
@@ -2012,7 +2040,7 @@ pub fn transfer_fails_across_pools_at_a_dust_shortfall<
         DUST_SHORTFALL_P1_NOTE_BELOW_FEE,
     );
 
-    let required = (amount + two_bundle_fee()).unwrap();
+    let required = (amount + two_bundle_fee(&st)).unwrap();
 
     st.expect_insufficient_funds(&recipient, amount, total, required);
 }
@@ -2086,7 +2114,7 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
 
     // The proposed transaction carries one Sapling spend and one requested Sapling
     // output (padded to two logical actions under ZIP 317).
-    let expected_fee = MINIMUM_FEE;
+    let expected_fee = minimum_fee_at_tip(&st);
     let expected_payment = (value - expected_fee).unwrap();
 
     let proposal = st
@@ -2167,10 +2195,10 @@ pub fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>(
 
     // Add funds equal to the exact fee of a send-max transaction spending a single note
     // to a same-pool recipient (two logical actions under ZIP 317).
-    let value = MINIMUM_FEE;
+    let account = st.test_account().cloned().unwrap();
+    let value = minimum_fee(st.network(), account.birthday().height() + 1);
     st.add_a_single_note_checking_balance(value);
 
-    let account = st.test_account().cloned().unwrap();
     let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -2428,8 +2456,8 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_tip(&st) * 3u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_tip(&st);
     let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
     let expected_step0_change = (value - expected_step0_fee).unwrap();
@@ -2581,8 +2609,8 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 4u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_tip(&st) * 4u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_tip(&st);
     let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
     let expected_step0_change = (value - expected_step0_fee).unwrap();
@@ -2717,7 +2745,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 
     for _ in 0..number_of_notes {
         st.add_a_single_note_checking_balance(note_value);
-        st.add_a_single_note_checking_balance(zip317::MARGINAL_FEE);
+        let marginal_fee = marginal_fee_at_tip(&st);
+        st.add_a_single_note_checking_balance(marginal_fee);
     }
 
     let account = st.test_account().cloned().unwrap();
@@ -2727,8 +2756,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
         non_marginal_notes_value
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * (number_of_notes + 1)).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_tip(&st) * (number_of_notes + 1)).unwrap();
+    let expected_step1_fee = minimum_fee_at_tip(&st);
     let expected_ephemeral_spend =
         (non_marginal_notes_value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (non_marginal_notes_value - expected_step0_fee).unwrap();
@@ -2899,7 +2928,7 @@ pub fn insufficient_funds_counts_transparent_inputs<T: ShieldedPoolTester>(
     // The transaction would spend the transparent input and the note, paying the recipient
     // and a change output in the note's pool: one transparent logical action plus two
     // shielded ones.
-    let expected_required = (amount + (MARGINAL_FEE * 3u64).unwrap()).unwrap();
+    let expected_required = (amount + (marginal_fee_at_tip(&st) * 3u64).unwrap()).unwrap();
     let expected_available = (note_value + utxo_value).unwrap();
 
     assert_matches!(
@@ -3122,8 +3151,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
             initial_balance.unwrap()
         );
 
-        let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-        let expected_step1_fee = zip317::MINIMUM_FEE;
+        let expected_step0_fee = (marginal_fee_at_tip(st) * 3u64).unwrap();
+        let expected_step1_fee = minimum_fee_at_tip(st);
         let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         let expected_step0_change =
             (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
@@ -3315,7 +3344,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     }
 
     let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
-    let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
+    let utxo_value = (value - minimum_fee_at_tip(&st)).unwrap();
     let to = Address::from(*colliding_addr);
     let proposal = st.propose_transfer_to(&to, utxo_value);
 
@@ -3590,8 +3619,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
         initial_balance
     );
 
-    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_step0_fee = (marginal_fee_at_tip(&st) * 3u64).unwrap();
+    let expected_step1_fee = minimum_fee_at_tip(&st);
     let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
     let expected_step0_change =
         (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
@@ -4203,7 +4232,7 @@ where
         )
         .unwrap()[0];
 
-    let bal_1 = (value - (bal_2 + MINIMUM_FEE).unwrap()).unwrap();
+    let bal_1 = (value - (bal_2 + minimum_fee_at_tip(&st)).unwrap()).unwrap();
     assert_eq!(st.get_total_balance(account1), bal_1);
 
     let (h, _) = st.generate_next_block_including(txid1);
@@ -4273,7 +4302,7 @@ where
         )
         .unwrap()[0];
 
-    let bal_2_final = (bal_2 - (bal_3 + MINIMUM_FEE).unwrap()).unwrap();
+    let bal_2_final = (bal_2 - (bal_3 + minimum_fee_at_tip(&st)).unwrap()).unwrap();
     assert_eq!(st.get_total_balance(account2), bal_2_final);
 
     let (h, _) = st.generate_next_block_including(txid2);
@@ -4525,7 +4554,9 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
         )
         .unwrap()[0];
 
-    let amount_left = (value - (amount_sent + MINIMUM_FEE + MARGINAL_FEE).unwrap()).unwrap();
+    let amount_left = (value
+        - (amount_sent + minimum_fee_at_tip(&st) + marginal_fee_at_tip(&st)).unwrap())
+    .unwrap();
     let pending_change = (amount_left - amount_legacy_change).unwrap();
 
     // The "legacy change" is not counted by get_pending_change().
@@ -9752,6 +9783,11 @@ pub fn proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
         Some(selected_anchor),
         "decoding must preserve the serialized anchor",
     );
+    assert_eq!(
+        decoded.min_target_height(),
+        proposal.min_target_height(),
+        "decoding must preserve the target height the proposal's fee was computed at",
+    );
 
     let usk = st.get_account().usk().clone();
     st.create_proposed_transactions::<Infallible, _, Infallible, _>(
@@ -12230,8 +12266,9 @@ pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
 const NU7_ACTIVATION_OFFSET: u32 = 10;
 
 /// Returns a test network on which every upgrade through NU6.3 activates at Sapling activation,
-/// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later.
-fn nu7_activating_network() -> LocalNetwork {
+/// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later. On a regtest network the ZIP 317
+/// fee reduction height ([`fee_reduction_height`]) is the NU7 activation height.
+pub(super) fn nu7_activating_network() -> LocalNetwork {
     let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
         .sapling
         .expect("the default test network activates Sapling");
@@ -12353,6 +12390,333 @@ pub fn create_pczt_uses_nu7_default_expiry<T: ShieldedPoolTester, Dsf>(
 
         st.add_empty_blocks(1);
     }
+}
+
+/// A proposal's fee is the ZIP 317 fee in effect at its target height, and the transaction built
+/// from it pays that fee even when the chain crosses the fee reduction height of [ZIP 2009]
+/// between proposal and build; a proposal made from that height onward pays the reduced fee.
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub fn proposal_fee_is_fixed_at_its_target_height_across_fee_reduction<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let (mut st, nu7_activation) = nu7_default_expiry_scenario::<T, _, _>(dsf, cache);
+    let reduction_height =
+        fee_reduction_height(st.network()).expect("the test network reduces the fee");
+    assert_eq!(reduction_height, nu7_activation);
+    let recipient = T::fvk_default_address(&T::sk_to_fvk(&T::sk(&[0xf5; 32])));
+    let payment_value = Zatoshis::const_from_u64(20_000);
+
+    // Proposed with the block before the reduction as its target: a whole number of the marginal
+    // fees in effect there. The number of logical actions charged depends on the pool's bundle
+    // shape, so it is read from this proposal; the proposal made after the reduction below has
+    // the same shape (one input, the payment and change).
+    let proposal = st.propose_transfer_to(&recipient, payment_value);
+    let target_height = BlockHeight::from(proposal.min_target_height());
+    assert_eq!(target_height, reduction_height - 1);
+    let pre_reduction_fee = proposal.steps().first().balance().fee_required();
+    let logical_actions =
+        u64::from(pre_reduction_fee) / u64::from(marginal_fee(st.network(), target_height));
+    assert_eq!(
+        (marginal_fee(st.network(), target_height) * logical_actions).unwrap(),
+        pre_reduction_fee
+    );
+
+    // The chain crosses the reduction height before the proposal is built. The built transaction
+    // pays the fee the proposal was priced at, not the fee in effect at the new tip.
+    let tip = st.add_empty_blocks(2);
+    assert!(tip >= reduction_height);
+    let txids = st.create_proposed_expecting(&proposal, 1);
+    let tx = st
+        .get_tx_from_history(txids[0])
+        .unwrap()
+        .expect("the built transaction is in the history");
+    assert_eq!(tx.fee_paid(), Some(pre_reduction_fee));
+
+    // A proposal of the same shape made from the reduction height onward charges the same
+    // logical actions at the reduced marginal fee.
+    let proposal = st.propose_transfer_to(&recipient, payment_value);
+    let target_height = BlockHeight::from(proposal.min_target_height());
+    assert!(target_height >= reduction_height);
+    let reduced_fee = proposal.steps().first().balance().fee_required();
+    assert_eq!(
+        reduced_fee,
+        (marginal_fee(st.network(), target_height) * logical_actions).unwrap()
+    );
+    assert!(reduced_fee < pre_reduction_fee);
+}
+
+/// The wallet classifies a note as uneconomic by the ZIP 317 marginal fee in effect at the target
+/// height: a note worth the marginal fee before the fee reduction height of [ZIP 2009] is reported
+/// as uneconomic and left out of selection and proposals while the target height is below that
+/// height, and is spendable and selected from it.
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+pub fn dust_threshold_follows_marginal_fee_at_target_height<T, Dsf>(dsf: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+{
+    let network = nu7_activating_network();
+    let reduction_height =
+        fee_reduction_height(&network).expect("the test network reduces the fee");
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(dsf)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>();
+    let account_id = st.get_account().id();
+    let recipient = T::fvk_default_address(&T::sk_to_fvk(&T::sk(&[0xf5; 32])));
+    let policy = ConfirmationsPolicy::MIN;
+
+    // A note worth one coin, then a note worth exactly the marginal fee before the reduction: at
+    // the threshold there, and above the reduced one. It is received second, so that accumulation
+    // draws on the large note first and reaches it only when the large note does not suffice.
+    let large_value = Zatoshis::const_from_u64(COIN);
+    let small_value = marginal_fee(st.network(), reduction_height - 1);
+    assert!(small_value > marginal_fee(st.network(), reduction_height));
+    st.add_notes_checking_balance([[large_value], [small_value]]);
+
+    // The summary buckets and both selection paths (every spendable note, and accumulation
+    // towards a value) at the target height of a transaction built at the current tip.
+    macro_rules! assert_classified {
+        ($uneconomic:expr, $spendable:expr) => {{
+            let tip = st
+                .wallet()
+                .chain_height()
+                .unwrap()
+                .expect("the chain tip is known");
+            let target_height = TargetHeight::from(tip + 1);
+            let balance = st
+                .get_account_balance(policy)
+                .expect("the wallet has scanned blocks");
+            assert_eq!(balance.uneconomic_value(), $uneconomic);
+            assert_eq!(balance.spendable_value(), $spendable);
+            for target_value in [
+                TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+                TargetValue::AtLeast(Zatoshis::const_from_u64(MAX_MONEY)),
+            ] {
+                let selected = T::select_spendable_notes(
+                    &st,
+                    account_id,
+                    target_value,
+                    target_height,
+                    policy,
+                    &[],
+                )
+                .unwrap()
+                .iter()
+                .map(|note| T::note_value(note.note()))
+                .try_fold(Zatoshis::ZERO, |sum, value| sum + value)
+                .expect("the selected value is in range");
+                assert_eq!(
+                    selected, $spendable,
+                    "{target_value:?} at {target_height:?}"
+                );
+            }
+        }};
+    }
+
+    // Advance the tip to two blocks below the reduction, so that the next transaction targets the
+    // block before it.
+    let tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("the chain tip is known");
+    let blocks_to_add = u32::from(reduction_height) - 2 - u32::from(tip);
+    let tip =
+        st.add_empty_blocks(usize::try_from(blocks_to_add).expect("block count fits in a usize"));
+    assert_eq!(tip, reduction_height - 2);
+
+    // Below the reduction, the small note is uneconomic: a payment of the large note's whole
+    // value, whose fee only the small note could cover, cannot be funded.
+    assert_classified!(small_value, large_value);
+    assert_matches!(
+        st.propose_standard_transfer::<Infallible>(
+            account_id,
+            StandardFeeRule::Zip317,
+            policy,
+            &recipient,
+            large_value,
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        ),
+        Err(Error::InsufficientFunds { available, .. }) if available == large_value
+    );
+
+    // From the reduction height, the small note is spendable, and that payment spends both notes.
+    st.add_empty_blocks(1);
+    assert_classified!(Zatoshis::ZERO, (large_value + small_value).unwrap());
+    let proposal = st.propose_transfer_to(&recipient, large_value);
+    assert_eq!(
+        BlockHeight::from(proposal.min_target_height()),
+        reduction_height
+    );
+    let mut input_values = proposal
+        .steps()
+        .first()
+        .shielded_inputs()
+        .expect("the payment is funded from shielded notes")
+        .notes()
+        .iter()
+        .map(|note| note.note().value())
+        .collect::<Vec<_>>();
+    input_values.sort();
+    assert_eq!(input_values, vec![small_value, large_value]);
+}
+
+/// A canonical ZIP 318 crossing pays the canonical fee in effect at its target height
+/// ([`fees::canonical_crossing_fee`]): the fee before the fee reduction height of [ZIP 2009]
+/// when it targets the block before it, even if built after the chain has crossed it, and the
+/// reduced fee from it.
+///
+/// [ZIP 2009]: https://zips.z.cash/zip-2009
+#[cfg(feature = "orchard")]
+pub fn canonical_crossing_fee_follows_fee_reduction_height<Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) {
+    // A short grid, so the test need not mine 144 blocks to cross a boundary.
+    let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+    let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .sapling
+        .expect("the default test network activates Sapling");
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    // The funding notes are received from Sapling activation onward, and the tip is then set well
+    // past the next grid boundary and deliberately OFF a boundary, as in
+    // `canonical_crossing_is_bucketed_and_unpadded`, so that a bucketed anchor exists. The grid
+    // is uniform below the fee reduction height, so it can be computed before that height is
+    // chosen: two blocks above this tip, so that the first proposal targets the block before it.
+    // On a regtest network the fee reduction height is the NU7 activation height.
+    let interval_blocks = interval.block_count().get();
+    let pre_reduction_tip = anchor_grid(&ironwood_active_network, interval)
+        .boundary_at_or_above(activation)
+        + (3 * interval_blocks + 5);
+    let reduction_height = pre_reduction_tip + 2;
+    let network = LocalNetwork {
+        nu7: Some(reduction_height),
+        ..ironwood_active_network
+    };
+    assert_eq!(fee_reduction_height(&network), Some(reduction_height));
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    let account = st.test_account().cloned().unwrap();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient = OrchardPoolTester::fvk_default_address(&fvk).to_zcash_address(st.network());
+    let zip318 = st.wallet().pool_migration_params(st.network());
+
+    let pre_reduction_fee = fees::canonical_crossing_fee(st.network(), reduction_height - 1)
+        .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    let reduced_fee = fees::canonical_crossing_fee(st.network(), reduction_height)
+        .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    assert!(reduced_fee < pre_reduction_fee);
+
+    // Two notes comfortably larger than a canonical denomination plus fees, one per crossing.
+    let note_value = Zatoshis::const_from_u64(10_000_000);
+    let funded = st.add_notes_checking_balance([[note_value], [note_value]]);
+    assert_eq!(funded.first_block_height(), Some(activation));
+    let funded_height = funded.block_height().expect("blocks were added");
+
+    // Fillers pay a non-wallet key, so each block adds a commitment (and thus a checkpoint)
+    // without changing the wallet's spendable set.
+    let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let filler_count = u32::from(pre_reduction_tip) - u32::from(funded_height);
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    st.scan_cached_blocks(funded_height + 1, filler_count as usize);
+    assert_eq!(st.wallet().chain_height().unwrap(), Some(pre_reduction_tip));
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let propose = |st: &mut TestState<_, _, _>| {
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            recipient.clone(),
+            MAX_RESIDUAL_VALUE,
+        )])
+        .unwrap();
+        st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("the wallet can fund this")
+    };
+    // The proposal is canonical at `$fee`, and the transaction built from it keeps the single
+    // unpadded Ironwood action of the canonical shape and pays `$fee`.
+    macro_rules! assert_canonical_built {
+        ($proposal:expr, $fee:expr) => {{
+            assert_eq!($proposal.steps().len(), 1);
+            let step = $proposal.steps().first();
+            assert_eq!(step.balance().fee_required(), $fee);
+            assert!(
+                step.is_canonical_crossing(&zip318, $fee),
+                "the payment must be recognized as a canonical crossing"
+            );
+            let txids = st.create_proposed_expecting(&$proposal, 1);
+            let built = st
+                .wallet()
+                .get_transaction(txids[0])
+                .unwrap()
+                .expect("the transaction was stored");
+            assert_eq!(
+                built
+                    .ironwood_bundle()
+                    .expect("a crossing carries an Ironwood bundle")
+                    .actions()
+                    .len(),
+                1,
+                "the BUILT Ironwood bundle must have the single action of the canonical shape"
+            );
+            let tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
+            assert_eq!(tx.fee_paid(), Some($fee));
+        }};
+    }
+
+    // Targeting the block before the reduction: the canonical fee in effect there, kept by the
+    // transaction built after the chain has crossed the reduction height.
+    let pre_reduction_proposal = propose(&mut st);
+    assert_eq!(
+        BlockHeight::from(pre_reduction_proposal.min_target_height()),
+        reduction_height - 1
+    );
+    let tip = st.add_empty_blocks(2);
+    assert_eq!(tip, reduction_height);
+    assert_canonical_built!(pre_reduction_proposal, pre_reduction_fee);
+
+    // Targeting a height from the reduction onward: the reduced canonical fee.
+    let reduced_proposal = propose(&mut st);
+    assert!(BlockHeight::from(reduced_proposal.min_target_height()) >= reduction_height);
+    assert_canonical_built!(reduced_proposal, reduced_fee);
 }
 
 /// A block downloaded for a height the wallet has already scanned, carrying a different hash,

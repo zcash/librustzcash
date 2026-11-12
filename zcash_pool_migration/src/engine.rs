@@ -46,7 +46,9 @@
 //! [`scheduling`]: crate::scheduling
 
 #[cfg(feature = "orchard")]
-use crate::build::{AccountDerivation, build_prep_tx, build_transfer_pczt};
+use crate::build::{
+    AccountDerivation, TransferChange, build_prep_tx, build_transfer_pczt_with_change,
+};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::{
@@ -563,6 +565,13 @@ pub struct MigrationTransaction {
     /// does one proved by a prover that models no lock state.
     #[getset(get_copy = "pub")]
     pub(crate) lock_owner: Option<MigrationLockOwner>,
+    /// The value this transaction returns to the Orchard pool as change, if any: a transfer's
+    /// funding-note surplus over its crossing plus the fee in effect at its build height. `None`
+    /// for a preparation transaction, whose Orchard outputs are all planned notes. A wallet MUST
+    /// synchronise to recover that change before spending it, separated in time from the next
+    /// migration broadcast (ZIP 318).
+    #[getset(get_copy = "pub")]
+    pub(crate) orchard_change: Option<Zatoshis>,
 }
 
 impl MigrationTransaction {
@@ -611,6 +620,7 @@ impl MigrationTransaction {
         unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
         spend_nullifiers: Vec<[u8; 32]>,
         broadcast_failure_at: Option<BlockHeight>,
+        orchard_change: Option<Zatoshis>,
     ) -> Self {
         Self {
             id,
@@ -626,6 +636,7 @@ impl MigrationTransaction {
             unsatisfiable,
             spend_nullifiers,
             broadcast_failure_at,
+            orchard_change,
         }
     }
 }
@@ -1516,10 +1527,29 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
     }
 }
 
+/// The fee of the canonical transfer — [`CROSSING_SOURCE_ACTIONS`] Orchard actions and
+/// [`CROSSING_DESTINATION_ACTIONS`] Ironwood actions — under the standard ZIP 317 rule for a
+/// transaction expected to be mined at `target_height`.
+pub(crate) fn canonical_transfer_fee<P: zcash_protocol::consensus::Parameters>(
+    params: &P,
+    target_height: BlockHeight,
+) -> Result<Zatoshis, zip317::FeeError> {
+    zip317::FeeRule::standard().fee_required(
+        params,
+        target_height,
+        core::iter::empty::<transparent::InputSize>(),
+        core::iter::empty::<usize>(),
+        0,
+        0,
+        CROSSING_SOURCE_ACTIONS,
+        CROSSING_DESTINATION_ACTIONS,
+    )
+}
+
 /// The two canonical ZIP-317 fees of a migration, computed from the canonical transaction shapes:
 /// the fee of one padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation
-/// transaction, and the transfer-fee buffer each prepared note carries (the fee of the canonical
-/// 2-Orchard + 1-Ironwood-action transfer: the Ironwood side is a single unpadded action).
+/// transaction, and the transfer-fee buffer each prepared note carries
+/// ([`canonical_transfer_fee`]: the Ironwood side is a single unpadded action).
 fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
     params: &P,
     height: BlockHeight,
@@ -1535,16 +1565,7 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
         PREP_TX_ACTIONS,
         0,
     )?;
-    let transfer_fee_buffer = fee_rule.fee_required(
-        params,
-        height,
-        core::iter::empty::<transparent::InputSize>(),
-        core::iter::empty::<usize>(),
-        0,
-        0,
-        CROSSING_SOURCE_ACTIONS,
-        CROSSING_DESTINATION_ACTIONS,
-    )?;
+    let transfer_fee_buffer = canonical_transfer_fee(params, height)?;
     Ok((prep_tx_fee, transfer_fee_buffer))
 }
 
@@ -1552,11 +1573,12 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
 /// canonical denominations, plan the preparation transactions that mint the self-funding notes, and
 /// schedule the phase-2 transfers. The canonical ZIP-317 fees are computed here, once, from the two
 /// canonical transaction shapes — the padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation transaction and
-/// the 2-Orchard + 1-Ironwood-action transfer — and reused throughout planning; the fee rule is fixed (ZIP 318 requires
-/// the canonical fee, since a nonstandard fee would partition the anonymity set), so it is not a
-/// parameter. The decomposition reserves the TRUE preparation cost at each step, consulting the
-/// preparation planner as it grows the split. `rng` must be a cryptographically secure RNG (the
-/// schedule's shuffle, delays, and the denomination plan's optional randomization draw from it).
+/// the 2-Orchard + 1-Ironwood-action transfer — at the height after the chain tip, and reused
+/// throughout planning; the fee rule is fixed (ZIP 318 requires the canonical fee, since a
+/// nonstandard fee would partition the anonymity set), so it is not a parameter. The decomposition
+/// reserves the TRUE preparation cost at each step, consulting the preparation planner as it grows
+/// the split. `rng` must be a cryptographically secure RNG (the schedule's shuffle, delays, and the
+/// denomination plan's optional randomization draw from it).
 ///
 /// This is pure orchestration of the denomination, preparation, and scheduling planners: no cryptography,
 /// and nothing is built, signed, or persisted. The result is the [`MigrationPlan`] preview to present
@@ -1840,9 +1862,10 @@ where
     let spacing = scheduling::BlockSpacing::for_network(params);
     let grid = scheduling::AnchorGrid::new(sched_params.anchor_bucket_interval(), spacing);
 
-    // The canonical fees, computed once from the canonical transaction shapes and reused throughout.
+    // The canonical fees, computed once from the canonical transaction shapes and reused throughout,
+    // at the height after the tip: the first a planned transaction can be mined at.
     let (prep_tx_fee, transfer_fee_buffer) =
-        canonical_fees(params, commit_height).map_err(MigrationError::Fee)?;
+        canonical_fees(params, commit_height + 1).map_err(MigrationError::Fee)?;
 
     // This run's note cap: the caller's, or the largest one an external signer of the given capacity
     // signs within its rounds, measured over this wallet's current notes.
@@ -2258,8 +2281,9 @@ where
     let height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
+    // Priced at the height after the tip, as `plan_migration` prices the plan it estimates.
     let (prep_tx_fee, transfer_fee_buffer) =
-        canonical_fees(params, height).map_err(MigrationError::Fee)?;
+        canonical_fees(params, height + 1).map_err(MigrationError::Fee)?;
     // The note structure the migration works on, evolving run by run: initially the wallet's own
     // spendable notes, then each run's unspent notes plus its preparation residuals.
     let mut notes = backend
@@ -2678,7 +2702,8 @@ pub enum CommitError<E> {
     /// The plan is stale and must be re-planned. Either a resolved wallet note's value no longer
     /// matches the value the plan recorded for it (the plan captures notes by their index into the
     /// spendable set at planning time, so any receipt or spend since planning shifts them), or the
-    /// build height has advanced past every candidate anchor boundary the schedule can prove
+    /// plan's transfer fee buffer is not the fee of the canonical crossing at `target_height`, or
+    /// the build height has advanced past every candidate anchor boundary the schedule can prove
     /// against.
     StalePlan,
     /// A non-terminal migration is already stored. A committed migration is resumed from the
@@ -2720,7 +2745,8 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
                 f.write_str("no committed migration is in progress")
             }
             CommitError::StalePlan => f.write_str(
-                "the plan no longer matches the wallet or the build height and must be re-planned",
+                "the plan no longer matches the wallet, the fee schedule or the build height and \
+                 must be re-planned",
             ),
             CommitError::MigrationInProgress => f.write_str(
                 "a non-terminal migration is already stored; resume or cancel it instead of \
@@ -3223,7 +3249,9 @@ pub enum RebuildError<E> {
     },
     /// Building the fresh transfer PCZT failed, INCLUDING signing it anew with the authority the
     /// caller passed (an expired transfer's signature hash covers its expiry, so the rebuild must
-    /// re-sign).
+    /// re-sign). [`BuildError::Balance`](crate::build::BuildError::Balance) when the funding note
+    /// does not cover the crossing plus the fee in effect at the replacement's scheduled height;
+    /// the remedy is to re-plan the migration.
     Build(crate::build::BuildError),
     /// The rebuilt transfer PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be refreshed from it.
@@ -3336,7 +3364,11 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// tip), derives the new canonical expiry, draws a fresh boundary anchor, builds
 /// a new transfer PCZT against the same funding note and crossing value, signs it anew, and
 /// replaces the stored PCZT. Anchors and witnesses stay DEFERRED (ZIP 374): the fresh anchor is
-/// installed at proving time, exactly as for an originally committed transfer.
+/// installed at proving time, exactly as for an originally committed transfer. The replacement
+/// pays the ZIP 317 fee in effect at its new scheduled height and returns the funding note's
+/// surplus over the crossing plus that fee as one Orchard change output, recorded in
+/// [`MigrationTransaction::orchard_change`]; a note that does not cover them is
+/// [`RebuildError::Build`] with [`BuildError::Balance`](crate::build::BuildError::Balance).
 ///
 /// Signing anew is what distinguishes this step from the other steps of driving a migration: of
 /// proving, broadcasting and advancing, none needs the account's SPEND AUTHORITY, and this one
@@ -3389,7 +3421,9 @@ where
 /// here takes a spend authority, so nothing here can sign. After the device signs, call
 /// [`MigrationState::apply_signature`] with the returned PCZT (matched by
 /// [`UnsignedMigrationTx::id`]) to move the transfer to [`Signed`](MigrationTxState::Signed), and
-/// persist with `replace_migration`.
+/// persist with `replace_migration`. A replacement that returns Orchard change
+/// ([`MigrationTransaction::orchard_change`]) presents TWO Orchard spends to sign — the real spend
+/// and the zero-valued one paired with the change output — where one without change presents one.
 #[cfg(feature = "orchard")]
 pub fn rebuild_expired_transfer_unsigned<P, B, R>(
     params: &P,
@@ -3600,15 +3634,18 @@ where
     // Build the entirely new transfer against the same funding note and crossing value; anchors
     // and witnesses stay deferred (installed at proving time, ZIP 374). The expired artifact
     // contributes nothing: the new expiry is covered by the signature hash, so the transaction is
-    // signed anew below (in-process) or by the external signer.
-    let pczt = crate::build::build_transfer_pczt(
+    // signed anew below (in-process) or by the external signer. It is priced at the height it is
+    // expected to be mined — its new scheduled height, which lies at or above the target — and
+    // the funding note's surplus over the crossing plus that fee returns to the Orchard pool.
+    let (pczt, orchard_change) = build_transfer_pczt_with_change(
         params,
-        u32::from(target_height),
-        u32::from(expiry_height),
+        scheduled_height,
+        expiry_height,
         &fvk,
         note,
         crossing_value,
         account_derivation.as_ref(),
+        TransferChange::ReturnToOrchard,
         &mut *rng,
     )
     .map_err(RebuildError::Build)?;
@@ -3659,6 +3696,7 @@ where
     tx.txid = txid;
     tx.state = new_state;
     tx.spend_nullifiers = spend_nullifiers;
+    tx.orchard_change = orchard_change;
     Ok(unsigned)
 }
 
@@ -3861,10 +3899,16 @@ struct MintedNote {
 /// ([`CommitError::MigrationInProgress`]): a committed migration is resumed from the store, or
 /// cancelled, never rebuilt over.
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
-/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
-/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
-/// a specific policy.
+/// `params` is the network, `rng` a cryptographically secure RNG, and `replan_threshold` the
+/// policy stamped on the committed migration (see [`MigrationState::replan_threshold`]) — pass
+/// [`ReplanThreshold::DEFAULT`] absent a specific policy. `target_height` MUST be
+/// `chain_tip_height() + 1` (post-NU6.3): it prices the preparation transactions and floors the
+/// transfers' pricing height, and a plan is priced at that same height, so with any other value a
+/// plan re-made at the same tip is reported stale again. Each transfer is built at the later of
+/// its scheduled height and `target_height`, paying the fee in effect there and returning the
+/// funding note's surplus as one Orchard change output ([`MigrationTransaction::orchard_change`]);
+/// a plan whose transfer fee buffer is not the canonical crossing fee at `target_height` is
+/// [`CommitError::StalePlan`].
 ///
 /// `sk` is the account's Orchard spending key, and every transaction of the run is signed with its
 /// spend authority before this returns. It is an argument rather than something `backend` holds so
@@ -3920,10 +3964,12 @@ where
 /// `replace_migration`, and drive the broadcasts through the normal state machine (proving remains a
 /// consumer responsibility, at broadcast time).
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
-/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
-/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
-/// a specific policy.
+/// `params`, `rng` and `replan_threshold` are as for [`commit_preparation`], and `target_height`
+/// carries the same contract: it MUST be `chain_tip_height() + 1`, and a plan whose transfer fee
+/// buffer is not the canonical crossing fee there is [`CommitError::StalePlan`]. A transfer that
+/// returns Orchard change ([`MigrationTransaction::orchard_change`]) presents TWO Orchard spends to
+/// sign — the real spend and the zero-valued one paired with the change output — where one without
+/// change presents one; its [`UnsignedMigrationTx::actions`] is unchanged.
 #[cfg(feature = "orchard")]
 pub fn build_preparation_unsigned<P, B, R>(
     params: &P,
@@ -3980,6 +4026,15 @@ where
     // committed is literally what was shown; the note assignment travels with them, so the note a
     // transaction spends here is the one the row's dependency was derived from.
     let planned = plan.planned_run().into_buildable()?;
+    // A plan buffered for a different fee schedule than the one in effect at `target_height` is
+    // refused whole, before anything is built or signed: its funding notes would under- or
+    // over-fund every transfer. Only the buffer is compared; the preparation fee follows the same
+    // schedule.
+    let transfer_fee_buffer = canonical_transfer_fee(params, target_height)
+        .map_err(|e| CommitError::Build(crate::build::BuildError::Build(format!("fee: {e}"))))?;
+    if plan.denominations().note_fee_buffer() != transfer_fee_buffer {
+        return Err(CommitError::StalePlan);
+    }
     let mut committer = Committer::start(params, target_height, backend, rng, signing)?;
     committer.build_preparation_layers(plan, &planned)?;
     committer.add_direct_funding(plan)?;
@@ -4346,6 +4401,8 @@ where
                 spend_nullifiers,
                 // Nor a rejected broadcast: it has not been broadcast at all.
                 broadcast_failure_at: None,
+                // Its outputs are all planned Orchard notes; only a transfer returns change.
+                orchard_change: None,
             });
         }
         Ok(())
@@ -4482,14 +4539,19 @@ where
                     ))
                 })?;
 
-            let pczt = build_transfer_pczt(
+            // Priced at the height the transfer is expected to be mined: its scheduled height, or
+            // the commit target when the tip has already passed it (the schedule was drawn above
+            // the planning tip, and nothing can be mined below the target). The funding note's
+            // surplus over the crossing plus that fee returns to the Orchard pool as change.
+            let (pczt, orchard_change) = build_transfer_pczt_with_change(
                 self.params,
-                u32::from(self.target_height),
-                u32::from(expiry_height),
+                scheduled_height.max(self.target_height),
+                expiry_height,
                 &self.fvk,
                 note,
                 crossing_value,
                 self.account_derivation.as_ref(),
+                TransferChange::ReturnToOrchard,
                 &mut *self.rng,
             )
             .map_err(CommitError::Build)?;
@@ -4535,6 +4597,7 @@ where
                 spend_nullifiers,
                 // Nor a rejected broadcast: it has not been broadcast at all.
                 broadcast_failure_at: None,
+                orchard_change,
             });
             self.transfer_funding.push((id, note));
         }
@@ -5485,8 +5548,10 @@ mod commit_tests {
     };
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
+    use zcash_primitives::transaction::fees::zip317::REVISION_2_MARGINAL_FEE;
     use zcash_protocol::{
         consensus::{NetworkUpgrade, Parameters as _},
+        local_consensus::LocalNetwork,
         value::COIN,
     };
 
@@ -6072,6 +6137,326 @@ mod commit_tests {
         );
     }
 
+    /// A regtest network with NU6.3 active and the ZIP 317 fee reduction (NU7 on regtest) at
+    /// `height`.
+    fn network_reducing_fees_at(height: BlockHeight) -> LocalNetwork {
+        LocalNetwork {
+            nu7: Some(height),
+            ..regtest_network(true)
+        }
+    }
+
+    /// The fee a built migration PCZT pays: the net value its Orchard and Ironwood bundles release.
+    fn pczt_fee(pczt: &pczt::Pczt) -> Zatoshis {
+        fn signed(&(magnitude, negative): &(u64, bool)) -> i128 {
+            let magnitude = i128::from(magnitude);
+            if negative { -magnitude } else { magnitude }
+        }
+        let fee = signed(pczt.orchard().value_sum()) + signed(pczt.ironwood().value_sum());
+        Zatoshis::from_u64(u64::try_from(fee).expect("a migration transaction releases a fee"))
+            .expect("a migration transaction's fee is a valid amount")
+    }
+
+    /// A plan is priced at the height after the tip it is planned at, and a commit refuses — before
+    /// anything is built or stored — a plan whose transfer fee buffer is not the canonical crossing
+    /// fee at the commit target: a plan made two blocks below the fee reduction carries the earlier
+    /// fees and is stale at the reduction height; re-planned one block below it, it carries the
+    /// reduced fees, commits there, and every transfer balances exactly, returning no change.
+    #[test]
+    fn commit_of_pre_reduction_plan_at_reduction_height_is_stale() {
+        let seed = 23u64;
+        let mut backend = CommitMock::new(seed, &[78 * COIN]);
+        let reduction = backend.tip;
+        let params = network_reducing_fees_at(reduction);
+        let (prep_fee_before, buffer_before) =
+            canonical_fees(&params, reduction - 1).expect("the fees compute");
+        let (prep_fee_after, buffer_after) =
+            canonical_fees(&params, reduction).expect("the fees compute");
+        assert!(
+            buffer_after < buffer_before,
+            "the fee is reduced at the reduction height"
+        );
+        let prep_count = |plan: &MigrationPlan| {
+            plan.preparation()
+                .layers()
+                .iter()
+                .map(|l| l.len())
+                .sum::<usize>()
+        };
+
+        // Planned two blocks below the reduction: priced at the height after the tip, where the
+        // earlier fees still apply.
+        backend.tip = reduction - 2;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        assert_eq!(plan.denominations().note_fee_buffer(), buffer_before);
+        assert_eq!(
+            plan.denominations().prep_fees(),
+            (prep_fee_before * prep_count(&plan)).expect("the fees are representable")
+        );
+
+        // Committed at the reduction height, its buffers no longer fund the canonical fee.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        assert!(matches!(
+            build_preparation_unsigned(
+                &params,
+                reduction,
+                &mut backend,
+                &plan,
+                &mut rng,
+                ReplanThreshold::DEFAULT,
+            ),
+            Err(CommitError::StalePlan)
+        ));
+        assert!(
+            backend.get_migration().unwrap().is_none(),
+            "a stale plan stores nothing"
+        );
+
+        // Re-planned one block below the reduction: priced at the reduction height.
+        backend.tip = reduction - 1;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        assert_eq!(plan.denominations().note_fee_buffer(), buffer_after);
+        assert_eq!(
+            buffer_after,
+            (REVISION_2_MARGINAL_FEE * (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS))
+                .expect("the fee is representable")
+        );
+        assert_eq!(
+            plan.denominations().prep_fees(),
+            (REVISION_2_MARGINAL_FEE * (PREP_TX_ACTIONS * prep_count(&plan)))
+                .expect("the fees are representable")
+        );
+        let state = commit_preparation(
+            &params,
+            reduction,
+            &mut backend,
+            &sk(seed),
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("a plan priced at the commit target commits");
+        for tx in state.transactions() {
+            let pczt = pczt::Pczt::parse(tx.pczt()).expect("the stored PCZT parses");
+            let fee = match tx.kind() {
+                MigrationTxKind::Preparation { .. } => prep_fee_after,
+                MigrationTxKind::Transfer { .. } => buffer_after,
+            };
+            assert_eq!(pczt_fee(&pczt), fee, "{:?} pays the reduced fee", tx.kind());
+            assert_eq!(
+                tx.orchard_change(),
+                None,
+                "an exact buffer leaves no change"
+            );
+        }
+    }
+
+    /// Each transfer is priced at the later of its scheduled height and the commit target: a plan
+    /// committed below the reduction whose schedule straddles it builds the transfers scheduled
+    /// before the reduction at the earlier fee with no change, and those scheduled from it at the
+    /// reduced fee, returning the buffer's surplus as ONE Orchard change output — paired with a
+    /// zero-valued spend, so two spends to sign — while the Orchard side stays at two actions, the
+    /// Ironwood side at one, and the nullifier cache holds the one real spend; preparations pay the
+    /// fee at the target. The scheduler places every transfer above the planning tip, so the floor
+    /// at the target cannot alter a fee the stale-plan check has pinned and is not exercised apart.
+    #[test]
+    fn commit_prices_each_transfer_at_the_later_of_scheduled_and_target_height() {
+        let seed = 29u64;
+
+        // (a) The reduction falls amid the drawn transfer schedule: probe the schedule the seed
+        // draws on an unreduced network, then plan on the network whose reduction is the median
+        // drawn height. Delays are drawn identically; only their conversion to blocks past the
+        // reduction differs, which keeps each transfer on its side of it.
+        let mut backend = CommitMock::new(seed, &[78 * COIN]);
+        let target = backend.tip + 1;
+        let probe = plan_migration(
+            &regtest_network(true),
+            &backend,
+            &mut ChaCha8Rng::seed_from_u64(seed),
+        )
+        .expect("a fundable balance plans");
+        let mut drawn: Vec<BlockHeight> = probe
+            .schedule()
+            .iter()
+            .map(scheduling::Schedule::broadcast_height)
+            .collect();
+        drawn.sort();
+        let reduction = drawn[drawn.len() / 2];
+        let params = network_reducing_fees_at(reduction);
+        let plan = plan_migration(&params, &backend, &mut ChaCha8Rng::seed_from_u64(seed))
+            .expect("a fundable balance plans");
+        let (prep_fee, buffer) = canonical_fees(&params, target).expect("the fees compute");
+        assert_eq!(plan.denominations().note_fee_buffer(), buffer);
+        let before = plan
+            .schedule()
+            .iter()
+            .filter(|s| s.broadcast_height() < reduction)
+            .count();
+        assert!(
+            before > 0 && before < plan.schedule().len(),
+            "the schedule straddles the reduction: {before} of {} transfers before it",
+            plan.schedule().len()
+        );
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let (state, _) = build_preparation_unsigned(
+            &params,
+            target,
+            &mut backend,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("a plan priced at the commit target commits");
+        let statuses = state.transaction_statuses(DuenessTargets::at(target));
+        let mut with_change = 0;
+        for tx in state.transactions() {
+            let pczt = pczt::Pczt::parse(tx.pczt()).expect("the stored PCZT parses");
+            let status = statuses
+                .iter()
+                .find(|s| s.id() == tx.id())
+                .expect("every transaction has a status");
+            assert_eq!(status.orchard_change(), tx.orchard_change());
+            match tx.kind() {
+                MigrationTxKind::Preparation { .. } => {
+                    assert_eq!(pczt_fee(&pczt), prep_fee, "priced at the commit target");
+                    assert_eq!(tx.orchard_change(), None);
+                }
+                MigrationTxKind::Transfer { .. } => {
+                    assert!(
+                        tx.scheduled_height() >= target,
+                        "drawn above the planning tip"
+                    );
+                    let fee = canonical_transfer_fee(&params, tx.scheduled_height())
+                        .expect("the fee computes");
+                    let surplus = (buffer - fee).expect("the buffer covers the fee");
+                    assert_eq!(pczt_fee(&pczt), fee, "priced at its scheduled height");
+                    assert_eq!(pczt.orchard().actions().len(), CROSSING_SOURCE_ACTIONS);
+                    assert_eq!(
+                        pczt.ironwood().actions().len(),
+                        CROSSING_DESTINATION_ACTIONS
+                    );
+                    assert_eq!(tx.spend_nullifiers().len(), 1, "one real spend");
+                    let spends_to_sign = assert_every_spend_is_identifiable(&pczt);
+                    if tx.scheduled_height() < reduction {
+                        assert_eq!(surplus, Zatoshis::ZERO);
+                        assert_eq!(tx.orchard_change(), None);
+                        assert_eq!(spends_to_sign, 1);
+                    } else {
+                        assert!(surplus > Zatoshis::ZERO);
+                        assert_eq!(tx.orchard_change(), Some(surplus));
+                        assert_eq!(spends_to_sign, 2, "the real spend and the change's pair");
+                        with_change += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            with_change,
+            plan.schedule().len() - before,
+            "every transfer scheduled from the reduction returns change"
+        );
+    }
+
+    /// A rebuilt transfer is priced at the replacement's new scheduled height. From the same
+    /// expired, pre-reduction transfer: (a) with the reduction far above any height the
+    /// replacement can be scheduled at, it pays the earlier fee the buffer was sized for and
+    /// returns no change; (b) with the reduction at the height after the tip — at or below the
+    /// replacement's schedule however the delay is drawn — it pays the reduced fee and returns the
+    /// buffer's surplus as one Orchard change output (two spends to sign, two Orchard actions, the
+    /// one real nullifier cached), under a new id and PCZT; expired again past the reduction, it
+    /// is rebuilt again the same way under another new id.
+    #[test]
+    fn rebuild_prices_the_replacement_at_its_scheduled_height() {
+        /// Blocks above the tip at which a reduction lies beyond any rescheduled replacement.
+        const FAR_ABOVE_THE_TIP: u32 = 1_000_000;
+
+        let seed = 99u64;
+        let params = regtest_network(true);
+        let buffer = commit_test_fees().1;
+        // One 1-ZEC crossing funded directly by a matching wallet note, plus the quantizer's
+        // preparation reserve (released as change, since no preparation runs).
+        let mut backend = CommitMock::new(seed, &[COIN + u64::from(buffer), u64::from(prep_fee())]);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &sk(seed),
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+        assert_eq!(state.transactions().len(), 1);
+        let committed = state.transactions()[0].clone();
+        let id = committed.id();
+        assert_eq!(committed.orchard_change(), None);
+
+        // Expired below the reduction.
+        backend.tip = committed.expiry_height() + 1;
+        let tip = backend.tip;
+
+        // (a) The reduction lies beyond the replacement's schedule: priced as the buffer was sized.
+        let far = network_reducing_fees_at(tip + FAR_ABOVE_THE_TIP);
+        let mut state_far = state.clone();
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let unsigned =
+            rebuild_expired_transfer_unsigned(&far, &backend, &mut state_far, id, &mut rng)
+                .expect("rebuilds the expired transfer");
+        let rebuilt = &state_far.transactions()[0];
+        let pczt = pczt::Pczt::parse(unsigned.pczt()).expect("the unsigned PCZT parses");
+        assert_eq!(
+            canonical_transfer_fee(&far, rebuilt.scheduled_height()).expect("the fee computes"),
+            buffer
+        );
+        assert_eq!(pczt_fee(&pczt), buffer);
+        assert_eq!(rebuilt.orchard_change(), None);
+        assert_eq!(assert_every_spend_is_identifiable(&pczt), 1);
+
+        // (b) The reduction is the height after the tip, below the replacement's schedule: the
+        // replacement pays the reduced fee and returns the surplus.
+        let next = network_reducing_fees_at(tip + 1);
+        let mut state_next = state;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let unsigned =
+            rebuild_expired_transfer_unsigned(&next, &backend, &mut state_next, id, &mut rng)
+                .expect("rebuilds the expired transfer");
+        let rebuilt = state_next.transactions()[0].clone();
+        assert!(rebuilt.scheduled_height() > tip);
+        let fee =
+            canonical_transfer_fee(&next, rebuilt.scheduled_height()).expect("the fee computes");
+        assert!(fee < buffer, "the replacement pays the reduced fee");
+        let pczt = pczt::Pczt::parse(unsigned.pczt()).expect("the unsigned PCZT parses");
+        assert_eq!(pczt_fee(&pczt), fee);
+        assert_eq!(rebuilt.orchard_change(), buffer - fee);
+        assert_eq!(pczt.orchard().actions().len(), CROSSING_SOURCE_ACTIONS);
+        assert_eq!(
+            unsigned.actions(),
+            CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS
+        );
+        assert_eq!(assert_every_spend_is_identifiable(&pczt), 2);
+        assert_eq!(
+            rebuilt.spend_nullifiers(),
+            committed.spend_nullifiers(),
+            "the same funding note yields the same one real-spend nullifier"
+        );
+        assert_ne!(rebuilt.txid(), committed.txid());
+        assert_ne!(rebuilt.pczt(), committed.pczt());
+
+        // Expired again, now past the reduction: rebuilt again the same way.
+        backend.tip = rebuilt.expiry_height() + 1;
+        rebuild_expired_transfer_unsigned(&next, &backend, &mut state_next, id, &mut rng)
+            .expect("rebuilds the replacement");
+        let again = &state_next.transactions()[0];
+        assert_eq!(again.orchard_change(), rebuilt.orchard_change());
+        assert_ne!(again.txid(), rebuilt.txid());
+    }
+
     /// Rebuilding a BATCH of expired transfers at one tip must extend the pending schedule as a
     /// running sum (ZIP 318 CUMULATIVE MUST): each fresh height chains one drawn delay past the
     /// previous rebuild's, rather than every fresh height being drawn independently from the tip.
@@ -6601,6 +6986,7 @@ mod commit_tests {
             None,
             Some((mark, UnsatisfiableKind::InputsSpent)),
             vec![[7u8; 32]],
+            None,
             None,
         ));
         assert!(matches!(

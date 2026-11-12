@@ -17,6 +17,22 @@ workspace.
   note commitment trees by other means.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.26.0`, `zcash_pool_migration 0.3.0`,
+  `zcash_primitives 0.32.0`.
+- The Orchard -> Ironwood migration store persists
+  `zcash_pool_migration::engine::MigrationTransaction::orchard_change`; rows stored
+  before this version read back as `None`. For a pending migration transfer,
+  `v_migration_transactions`' `value_received` and
+  `v_transactions_with_pending_migrations`' `total_received` include that change, `fee`
+  and `fee_paid` are the per-note fee buffer net of it, and `has_change` is `1` when it
+  is present. Previously the received value was the crossing value, the fee the whole
+  buffer, and `has_change` always `0`.
+- `WalletDb`'s note and transparent output selection, `get_wallet_summary`'s
+  uneconomic balance buckets, and `check_witnesses` classify a note or output as
+  uneconomic when its value is at or below the ZIP 317 marginal fee in effect at
+  the target height (`zcash_primitives::transaction::fees::zip317::marginal_fee`:
+  5000 zatoshis below `FEE_REDUCTION_HEIGHT`, 1000 from it). Previously the
+  threshold was always 5000.
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
   `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
   unchanged, when `height` is above the wallet birthday.

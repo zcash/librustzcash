@@ -1557,7 +1557,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     let addresses_ptr = Rc::new(address_values);
 
     let target_height_arg = u32::from(target_height);
-    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let min_value = u64::from(zip317::marginal_fee(params, target_height.into()));
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":addresses", &addresses_ptr),
@@ -1680,7 +1680,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
 
     let account_uuid = account.0;
     let target_height_arg = u32::from(target_height);
-    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let min_value = u64::from(zip317::marginal_fee(params, target_height.into()));
     let has_address_allow_list = address_allow_list.is_some();
     let overridable_owners = overridable_owners_rarray(lock_filter);
     let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
@@ -1770,6 +1770,10 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
+    // An output is uneconomic at or below the marginal fee of a transaction mined at the target
+    // height.
+    let uneconomic_threshold = zip317::marginal_fee(params, target_height.into());
+
     let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(&format!(
@@ -1803,7 +1807,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
 
         let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
-        if value <= zip317::MARGINAL_FEE {
+        if value <= uneconomic_threshold {
             entry.1.add_uneconomic_value(value)?;
         } else if is_locked_at(lock_expiry_height, target_height) {
             entry.1.add_locked_value(value)?;
@@ -1862,7 +1866,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
 
             let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
-            if value <= zip317::MARGINAL_FEE {
+            if value <= uneconomic_threshold {
                 entry.1.add_uneconomic_value(value)?;
             } else {
                 entry.1.add_spendable_value(value)?;
@@ -1888,6 +1892,10 @@ pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
     } else {
         u32::from(confirmations_policy.untrusted())
     };
+
+    // An output is uneconomic at or below the marginal fee of a transaction mined at the target
+    // height.
+    let uneconomic_threshold = zip317::marginal_fee(params, target_height.into());
 
     let mut stmt_account_spendable_balances = conn.prepare(&format!(
         "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
@@ -1927,7 +1935,7 @@ pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
             .or_insert(AccountBalance::ZERO);
         if is_coinbase {
             balance.with_unshielded_coinbase_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
+                if value <= uneconomic_threshold {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     // A locked coinbase output (selected by an in-flight shielding
@@ -1944,7 +1952,7 @@ pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
             })?;
         } else {
             balance.with_unshielded_regular_balance_mut(|bal| {
-                if value <= zip317::MARGINAL_FEE {
+                if value <= uneconomic_threshold {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
@@ -2001,7 +2009,7 @@ pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
             let is_coinbase: bool = row.get("is_coinbase")?;
 
             let add_pending = |bal: &mut Balance| {
-                if value <= zip317::MARGINAL_FEE {
+                if value <= uneconomic_threshold {
                     bal.add_uneconomic_value(value)
                 } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
@@ -3539,6 +3547,14 @@ mod tests {
     #[test]
     fn transparent_coinbase_balance_dust() {
         zcash_client_backend::data_api::testing::transparent::transparent_coinbase_balance_dust(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn transparent_dust_threshold_follows_marginal_fee_at_target_height() {
+        zcash_client_backend::data_api::testing::transparent::transparent_dust_threshold_follows_marginal_fee_at_target_height(
             TestDbFactory::default(),
             BlockCache::new(),
         );

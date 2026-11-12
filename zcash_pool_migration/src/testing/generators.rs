@@ -235,7 +235,9 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
         arb_unsatisfiability_mark(),
-        arb_broadcast_failure(),
+        // Paired only because `proptest` implements `Strategy` for tuples of at most twelve
+        // elements; the two are drawn independently.
+        (arb_broadcast_failure(), prop::option::of(arb_zatoshis())),
     )
         .prop_map(
             |(
@@ -250,7 +252,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 (drawn_state, spend_nullifiers),
                 lock_owner,
                 unsatisfiable,
-                broadcast_failure_at,
+                (broadcast_failure_at, orchard_change),
             )| {
                 // A lifecycle state that carries a txid carries THIS transaction's: the row's id
                 // and the copy the state holds are one value, written to one column, so a store is
@@ -277,6 +279,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     unsatisfiable,
                     spend_nullifiers,
                     broadcast_failure_at,
+                    orchard_change,
                 )
             },
         )
@@ -342,6 +345,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.unsatisfiable(),
                             tx.spend_nullifiers().clone(),
                             tx.broadcast_failure_at(),
+                            tx.orchard_change(),
                         )
                     })
                     .collect();
