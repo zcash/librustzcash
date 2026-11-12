@@ -40,9 +40,9 @@ use zip321::{Payment, TransactionRequest};
 
 use crate::{
     data_api::{
-        self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, SAPLING_SHARD_HEIGHT, TargetValue, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletTest, WalletWrite,
+        self, Account as _, AccountBirthday, AccountPurpose, BoundedU8, DecryptedTransaction,
+        InputSource, MaxSpendMode, NoteFilter, Ratio, SAPLING_SHARD_HEIGHT, TargetValue,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{AddressExpiryError, Error},
@@ -6489,6 +6489,104 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
         st.wallet().get_block_hash(birthday_height).unwrap(),
         None,
         "blocks at birthday height should be removed after truncating below birthday"
+    );
+}
+
+/// `truncate_to_chain_state` recovers a wallet whose history below its birthday is replaced by a
+/// chain reorg: truncating to the chain state at the fork point leaves no tree state of the old
+/// chain, so the new chain can be scanned to its tip.
+///
+/// The wallet's account has a birthday just below the chain tip, so the only tree state it holds
+/// below the birthday is the checkpoint for the birthday's prior chain state. The reorg replaces
+/// the block at that height, both with the same number of note commitments as the old chain (so
+/// the tree position at that height is unchanged) and with more.
+///
+/// `new_commitments` is the number of note commitments in the new chain's replacement block.
+pub fn truncate_to_chain_state_after_reorg_below_birthday<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+    new_commitments: u64,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .build();
+    let other_fvk = T::random_fvk(st.rng_mut());
+    let sapling_activation = st.sapling_activation_height();
+
+    // History shared by both chains: one note commitment, at `sapling_activation + 1`.
+    st.generate_empty_block();
+    st.generate_next_block(
+        &other_fvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(10000),
+    );
+    st.generate_empty_block();
+    let fork_point = st.latest_cached_block().unwrap().chain_state().clone();
+
+    // The old chain adds one note commitment in the block before the birthday.
+    st.generate_next_block(
+        &other_fvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(20000),
+    );
+    let birthday = AccountBirthday::from_parts(
+        st.latest_cached_block().unwrap().chain_state().clone(),
+        None,
+    );
+    let ufvk = UnifiedSpendingKey::from_seed(st.network(), &[7; 32], zip32::AccountId::ZERO)
+        .unwrap()
+        .to_unified_full_viewing_key();
+    st.wallet_mut()
+        .import_account_ufvk("restored", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+        .unwrap();
+    st.generate_empty_block();
+    st.generate_empty_block();
+    let old_tip = st.latest_cached_block().unwrap().height();
+    st.wallet_mut().update_chain_tip(old_tip).unwrap();
+    st.scan_cached_blocks(birthday.height(), 2);
+
+    // Reorg back to the fork point. The new chain replaces the block before the birthday
+    // with one carrying `new_commitments` note commitments.
+    st.truncate_cache_to_height(fork_point.block_height());
+    let outputs = (0..new_commitments)
+        .map(|i| {
+            FakeCompactOutput::new(
+                other_fvk.clone(),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(30000 + i),
+            )
+        })
+        .collect::<Vec<_>>();
+    st.generate_next_block_multi(&outputs);
+    for _ in 0..4 {
+        st.generate_empty_block();
+    }
+    let new_tip = st.latest_cached_block().unwrap().height();
+    assert_eq!(new_tip, sapling_activation + 7);
+
+    st.wallet_mut()
+        .truncate_to_chain_state(fork_point.clone())
+        .unwrap();
+
+    for _ in 0..8 {
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+        let ranges = st.wallet().suggest_scan_ranges().unwrap();
+        let Some(range) = ranges.first().cloned() else {
+            break;
+        };
+        st.scan_cached_blocks(range.block_range().start, range.len());
+    }
+    assert_eq!(
+        st.wallet()
+            .block_fully_scanned()
+            .unwrap()
+            .map(|meta| meta.block_height()),
+        Some(new_tip),
+        "new_commitments = {new_commitments}"
     );
 }
 
