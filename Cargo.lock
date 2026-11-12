@@ -7258,6 +7258,7 @@ name = "zcash_encoding"
 version = "0.5.0"
 dependencies = [
  "corez",
+ "criterion 0.5.1",
  "hex",
  "nonempty",
  "proptest",
