@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- The parser now matches the ZIP 321 ABNF: the `zcash:` scheme is accepted
+  case-insensitively, value-less and empty `otherparam` segments are permitted,
+  and parameter values containing malformed pct-escapes are rejected.
+
 ## [0.10.0] - 2026-10-21
 
 ### Changed
