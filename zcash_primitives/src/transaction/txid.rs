@@ -328,7 +328,12 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         &self,
         transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
     ) -> Self::TransparentDigest {
-        transparent_bundle.map(transparent_digests)
+        // An empty transparent bundle serializes identically to an absent bundle and
+        // parses back as absent, so it must also digest identically to an absent bundle
+        // (ZIP 244 section T.2), mirroring how an empty Sapling bundle is treated.
+        transparent_bundle
+            .filter(|b| !(b.vin.is_empty() && b.vout.is_empty()))
+            .map(transparent_digests)
     }
 
     fn digest_sapling(
