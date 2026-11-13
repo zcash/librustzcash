@@ -9,6 +9,15 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- External transparent gap-limit addresses are now generated for accounts
+  that hold a UIVK but no UFVK (for example, a view-only account imported
+  from a Unified Incoming Viewing Key with a transparent component). The
+  external scope previously gated on the UFVK's transparent key even though
+  external addresses derive from the UIVK, so such accounts silently
+  generated no addresses and `get_next_available_address` failed with a
+  misleading `ReachedGapLimit` error.
+
 ### Added
 - `zcash_keys::keys::UnifiedSpendingKey::from_parts`
 - `zcash_keys::keys::DerivationError::Empty`
