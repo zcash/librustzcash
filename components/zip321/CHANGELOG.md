@@ -10,6 +10,19 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Parameters with omitted values are now accepted, as allowed by the ZIP 321
+  grammar (`otherparam = paramname [ paramindex ] [ "=" *qchar ]`). A URI
+  such as `zcash:<address>?amount=1&myflag` was previously rejected with a
+  parse error; the valueless parameter is now parsed as an extension parameter
+  with an empty value. Valueless `req-` parameters are still rejected, and a
+  valueless parameter named `address` is an extension parameter, not the
+  payment's recipient address (and, since every payment requires an `address`
+  parameter at its own index, a valueless `address` is always rejected as a
+  duplicate of it). Parameters are now checked for duplicates by name across
+  kinds, so that (for example) `amount=1&amount` is rejected, and rendering
+  preserves the omitted value of extension parameters that have reserved names.
+
 ## [0.10.0] - 2026-10-21
 
 ### Changed
