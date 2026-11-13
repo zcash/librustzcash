@@ -3023,7 +3023,7 @@ mod tests {
     use zcash_keys::{
         address::{Address, UnifiedAddress},
         encoding::AddressCodec,
-        keys::{ReceiverRequirement, UnifiedAddressRequest},
+        keys::{AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest},
     };
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
@@ -3587,6 +3587,10 @@ mod tests {
         assert!(!rows.is_empty());
         for (address, cached_taddr, flags) in rows {
             let ua = UnifiedAddress::decode(&network, &address).unwrap();
+            // Orchard yields a shielded receiver at every diversifier. Without that feature a
+            // diversifier that is not a valid Sapling diversifier is stored as a transparent-only
+            // unified address, which still has to cache its transparent receiver.
+            #[cfg(feature = "orchard")]
             assert!(ua.has_orchard() || ua.has_sapling());
             assert_eq!(
                 ua.transparent().map(|taddr| taddr.encode(&network)),
@@ -3644,10 +3648,19 @@ mod tests {
         let (index, ua) = unexposed
             .into_iter()
             .find_map(|i| {
-                st.wallet_mut()
-                    .get_address_for_index(account_uuid, DiversifierIndex::from(i), shielded_only)
-                    .unwrap()
-                    .map(|ua| (DiversifierIndex::from(i), ua))
+                // An invalid Sapling diversifier with no Orchard receiver cannot satisfy a
+                // shielded-only request. That is "no address at this index", not a test failure.
+                match st.wallet_mut().get_address_for_index(
+                    account_uuid,
+                    DiversifierIndex::from(i),
+                    shielded_only,
+                ) {
+                    Ok(address) => address.map(|ua| (DiversifierIndex::from(i), ua)),
+                    Err(SqliteClientError::AddressGeneration(
+                        AddressGenerationError::NoSatisfiableReceiver,
+                    )) => None,
+                    Err(e) => panic!("address generation failed: {e}"),
+                }
             })
             .expect("some unexposed index is a valid Sapling diversifier index");
         assert!(!ua.has_transparent());

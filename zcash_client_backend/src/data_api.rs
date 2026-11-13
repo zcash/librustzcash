@@ -16,7 +16,9 @@
 //!   [`UnifiedFullViewingKey`]s; the wallet backend provides no facilities for the storage
 //!   of spending keys, and spending keys must be provided by the caller (or delegated to external
 //!   devices via the provided [`pczt`] functionality) in order to perform transaction creation
-//!   operations.
+//!   operations. An account may instead be imported from a [`UnifiedIncomingViewingKey`]. Such an
+//!   account can detect notes sent to its external addresses, but it cannot derive nullifiers,
+//!   detect spends or change, or recover outgoing ciphertexts, so it cannot maintain a balance.
 //! * Blockchain Scanning: A Zcash wallet must download and trial-decrypt each transaction on the
 //!   Zcash blockchain using one or more Viewing Keys in order to find new shielded transaction
 //!   outputs (generally termed "notes") belonging to the wallet. The primary entrypoint for this
@@ -89,7 +91,7 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{DiversifierIndex, Scope, fingerprint::SeedFingerprint};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -102,7 +104,7 @@ use crate::{
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
-    scanning::ScanError,
+    scanning::{AccountScanningKeys, ScanError},
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
@@ -2154,6 +2156,29 @@ pub trait InputSource {
     }
 }
 
+/// Incoming viewing keys for accounts that have no entry in `full_viewing_keys`.
+///
+/// An account whose stored viewing key is a full viewing key is omitted, even when that key
+/// is absent from `full_viewing_keys`: its external incoming viewing key is derived from the
+/// full viewing key, which also supplies the internal scope and nullifier-deriving keys.
+fn ivk_only_unified_incoming_viewing_keys<D: WalletRead + ?Sized>(
+    data: &D,
+    full_viewing_keys: &HashMap<D::AccountId, UnifiedFullViewingKey>,
+) -> Result<HashMap<D::AccountId, UnifiedIncomingViewingKey>, D::Error> {
+    let mut keys = HashMap::new();
+    for account_id in data.get_account_ids()? {
+        if full_viewing_keys.contains_key(&account_id) {
+            continue;
+        }
+        if let Some(account) = data.get_account(account_id)?
+            && account.ufvk().is_none()
+        {
+            keys.insert(account_id, account.uivk());
+        }
+    }
+    Ok(keys)
+}
+
 /// Read-only operations required for light wallet functions.
 ///
 /// This trait defines the read-only portion of the storage interface atop which
@@ -2443,6 +2468,36 @@ pub trait WalletRead {
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
+
+    /// Returns the [`AccountScanningKeys`] to use when trial-decrypting blocks for this wallet,
+    /// limited to `scopes`.
+    ///
+    /// An account with a unified full viewing key contributes each requested scope for which
+    /// that key has a shielded item, including the nullifier-deriving key for the scope. An
+    /// account that has only a unified incoming viewing key contributes its external incoming
+    /// viewing key when [`Scope::External`] is requested, and nothing otherwise: an incoming
+    /// viewing key has no internal scope and no nullifier-deriving key. Such an account is not
+    /// also represented by a key derived from a full viewing key.
+    ///
+    /// The default implementation reads [`Self::get_unified_full_viewing_keys`] and each
+    /// remaining account with [`Self::get_account`]. A backend can override this with a single
+    /// query that fetches both kinds of account.
+    ///
+    /// [`AccountScanningKeys`]: crate::scanning::AccountScanningKeys
+    /// [`Scope::External`]: Scope::External
+    fn get_scanning_keys(
+        &self,
+        scopes: &HashSet<Scope>,
+    ) -> Result<AccountScanningKeys<Self::AccountId>, Self::Error>
+    where
+        Self::AccountId: Send + Sync + 'static,
+    {
+        let ufvks = self.get_unified_full_viewing_keys()?;
+        let uivks = ivk_only_unified_incoming_viewing_keys(self, &ufvks)?;
+        Ok(AccountScanningKeys::from_ufvk_and_uivk_accounts(
+            ufvks, uivks, scopes,
+        ))
+    }
 
     /// Returns the memo for a note.
     ///
@@ -3684,6 +3739,7 @@ impl<E: std::error::Error + 'static> std::error::Error for PutBlocksError<E> {
 /// - [`WalletWrite::create_account`]
 /// - [`WalletWrite::import_account_hd`]
 /// - [`WalletWrite::import_account_ufvk`]
+/// - [`WalletWrite::import_account_uivk`]
 ///
 /// All of these methods take an [`AccountBirthday`]. The birthday height is defined as
 /// the minimum block height that will be scanned for funds belonging to the wallet. If
@@ -3895,6 +3951,42 @@ pub trait WalletWrite:
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
+        key_source: Option<&str>,
+    ) -> Result<Self::Account, <Self as WalletRead>::Error>;
+
+    /// Tells the wallet to track an account using a unified incoming viewing key.
+    ///
+    /// Returns details about the imported account, including the unique account identifier for
+    /// the newly-created wallet database entry. No spending key is returned because an incoming
+    /// viewing key provides no spend authority. The account is recorded as
+    /// [`AccountPurpose::ViewOnly`].
+    ///
+    /// The account can detect notes sent to its external addresses. It cannot detect spends of
+    /// those notes, notes sent to an internal (change) address, or outputs it funded, and it
+    /// cannot compute nullifiers. Callers must treat balance and spend APIs as unsupported for
+    /// the account: a note detected this way stays in the wallet even after it has been spent.
+    ///
+    /// If an account already exists whose UIVK components are a subset of `unified_key`, this
+    /// method may upgrade that account in place by adding the additional UIVK items. Importing a
+    /// UIVK over an account that already has a UFVK is not permitted. An upgrade does not requeue
+    /// blocks that have already been scanned, so notes made visible only by the added items in
+    /// that history stay undiscovered until the caller queues a rescan.
+    ///
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
+    ///
+    /// # Arguments
+    /// - `account_name`: A human-readable name for the account.
+    /// - `unified_key`: The UIVK used to detect transactions involving the account.
+    /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
+    ///   for the account.
+    /// - `key_source`: A string identifier or other metadata describing the source of the key.
+    ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
+    ///   applications which need to track additional identifying information for an account.
+    fn import_account_uivk(
+        &mut self,
+        account_name: &str,
+        unified_key: &UnifiedIncomingViewingKey,
+        birthday: &AccountBirthday,
         key_source: Option<&str>,
     ) -> Result<Self::Account, <Self as WalletRead>::Error>;
 

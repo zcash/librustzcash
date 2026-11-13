@@ -151,18 +151,20 @@
 //! # }
 //! ```
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::{self, BlockHeight};
+use zip32::Scope;
 
 use crate::{
     data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
-        ScanBlockError, ScanningKeys, SpendIdentifiers,
+        ScanBlockError, SpendIdentifiers,
         compact::{BatchRunners, scan_block_with_runners},
     },
 };
@@ -598,6 +600,11 @@ impl ChainState {
 /// Scans at most `limit` blocks from the provided block source in order to find transactions
 /// received by the accounts tracked in the provided wallet database.
 ///
+/// Accounts that have a unified full viewing key are scanned in both the external and internal
+/// scopes, and spends of their notes are detected. Accounts that have only a unified incoming
+/// viewing key are scanned for external-scope receives. Spends and change notes of those accounts
+/// are not detected.
+///
 /// This function will return after scanning at most `limit` new blocks, to enable the caller to
 /// update their UI with scanning progress.
 ///
@@ -634,11 +641,11 @@ where
 {
     assert_eq!(from_height, from_state.block_height + 1);
 
-    // Fetch the UnifiedFullViewingKeys we are tracking
-    let account_ufvks = data_db
-        .get_unified_full_viewing_keys()
+    // Full viewing keys cover both scopes and carry nullifier-deriving keys. Incoming
+    // viewing keys contribute the external scope only.
+    let scanning_keys = data_db
+        .get_scanning_keys(&HashSet::from([Scope::External, Scope::Internal]))
         .map_err(Error::Wallet)?;
-    let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, <DbT as WalletRead>::Error>(

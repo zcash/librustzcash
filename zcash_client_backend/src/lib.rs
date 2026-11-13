@@ -81,7 +81,9 @@ mod task;
 #[cfg(feature = "tor")]
 pub mod tor;
 
-pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
+pub use decrypt::{
+    DecryptedOutput, TransferType, decrypt_transaction, decrypt_transaction_with_ivks,
+};
 
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {
