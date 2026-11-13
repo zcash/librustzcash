@@ -576,6 +576,16 @@ pub(crate) fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn truncate_to_chain_state_after_reorg_below_birthday<T: ShieldedPoolTester>() {
+    for new_commitments in [1, 2] {
+        zcash_client_backend::data_api::testing::pool::truncate_to_chain_state_after_reorg_below_birthday::<T, _>(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            new_commitments,
+        )
+    }
+}
+
 pub(crate) fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::truncate_to_chain_state_above_scanned::<T, _>(
         TestDbFactory::default(),

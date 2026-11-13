@@ -72,6 +72,10 @@ workspace.
   that depth.
 
 ### Fixed
+- `WalletDb`'s implementation of `WalletWrite::truncate_to_chain_state` no longer
+  leaves note commitment tree checkpoints above the target height in place when no
+  scanned block above the target remains after its initial truncation, as happens when
+  truncating below a recent account birthday.
 - `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,
   `WalletWrite::set_transaction_status`, and
   `WalletWrite::put_received_transparent_utxo` now extend the scan queue when
