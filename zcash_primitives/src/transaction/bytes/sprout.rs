@@ -43,6 +43,9 @@ pub enum SproutProofBytes {
 }
 
 impl SproutProofBytes {
+    /// The size in bytes of a PHGR proof.
+    pub(crate) const PHGR_PROOF_SIZE: usize = PHGR_PROOF_SIZE;
+
     /// Returns the proof bytes.
     pub fn as_bytes(&self) -> &[u8] {
         match self {
@@ -82,6 +85,25 @@ pub struct SproutJoinSplitBytes {
 }
 
 impl SproutJoinSplitBytes {
+    /// The number of JoinSplit inputs.
+    pub(crate) const ZC_NUM_JS_INPUTS: usize = ZC_NUM_JS_INPUTS;
+    /// The number of JoinSplit outputs.
+    pub(crate) const ZC_NUM_JS_OUTPUTS: usize = ZC_NUM_JS_OUTPUTS;
+    /// The size in bytes of a JoinSplit ciphertext.
+    pub(crate) const CIPHERTEXT_SIZE: usize = CIPHERTEXT_SIZE;
+    /// The size in bytes of a JoinSplit anchor.
+    pub(crate) const ANCHOR_SIZE: usize = ANCHOR_SIZE;
+    /// The size in bytes of a JoinSplit nullifier.
+    pub(crate) const NULLIFIER_SIZE: usize = NULLIFIER_SIZE;
+    /// The size in bytes of a JoinSplit note commitment.
+    pub(crate) const COMMITMENT_SIZE: usize = COMMITMENT_SIZE;
+    /// The size in bytes of a JoinSplit ephemeral key.
+    pub(crate) const EPHEMERAL_KEY_SIZE: usize = EPHEMERAL_KEY_SIZE;
+    /// The size in bytes of a JoinSplit random seed.
+    pub(crate) const RANDOM_SEED_SIZE: usize = RANDOM_SEED_SIZE;
+    /// The size in bytes of a JoinSplit MAC.
+    pub(crate) const MAC_SIZE: usize = MAC_SIZE;
+
     /// Constructs a JoinSplit description from its wire fields.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -233,6 +255,11 @@ pub struct SproutBundleBytes {
 }
 
 impl SproutBundleBytes {
+    /// The size in bytes of a JoinSplit public key.
+    pub(crate) const JOINSPLIT_PUBKEY_SIZE: usize = JOINSPLIT_PUBKEY_SIZE;
+    /// The size in bytes of a JoinSplit signature.
+    pub(crate) const JOINSPLIT_SIG_SIZE: usize = JOINSPLIT_SIG_SIZE;
+
     /// Constructs a Sprout bundle from its wire fields.
     ///
     /// Returns an error if the JoinSplit vector is empty, since an empty bundle
@@ -299,27 +326,15 @@ impl SproutBundleBytes {
 
     /// Interprets this bundle as a Sprout bundle.
     ///
-    /// Each JoinSplit is decoded by the same decoder used for the legacy wire
-    /// format, with the proof encoding selected by the proof variant.
+    /// Each JoinSplit is converted from its wire representation, with the proof
+    /// encoding selected by the proof variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a JoinSplit's `vpub_old` or `vpub_new` is outside
+    /// the monetary range.
     pub fn to_bundle(&self) -> io::Result<crate::transaction::components::sprout::Bundle> {
-        use crate::transaction::components::sprout::JsDescription;
-
-        let joinsplits = self
-            .joinsplits
-            .iter()
-            .map(|js| {
-                let use_groth = matches!(js.proof(), SproutProofBytes::Groth(_));
-                let mut bytes = Vec::new();
-                js.write(&mut bytes)?;
-                JsDescription::read(&mut &bytes[..], use_groth)
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-
-        Ok(crate::transaction::components::sprout::Bundle {
-            joinsplits,
-            joinsplit_pubkey: self.joinsplit_pubkey,
-            joinsplit_sig: self.joinsplit_sig,
-        })
+        crate::transaction::components::sprout::Bundle::from_bytes(self.clone())
     }
 }
 

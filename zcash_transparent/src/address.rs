@@ -10,6 +10,8 @@ use zcash_script::{
     solver,
 };
 
+use crate::bundle::bytes::{TransparentScriptBytes, write_script_bytes};
+
 #[cfg(feature = "transparent-inputs")]
 use crate::util::hash160;
 
@@ -62,12 +64,11 @@ impl Script {
     /// Returns an error for an invalid length prefix or a reader failure, including
     /// [`io::ErrorKind::UnexpectedEof`] if the prefix or script bytes are truncated.
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        let script = Vector::read_bytes(reader)?;
-        Ok(Script(script::Code(script)))
+        Ok(TransparentScriptBytes::read(reader)?.into())
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write_bytes(&mut writer, &self.0.0)
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        write_script_bytes(writer, &self.0.0)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).

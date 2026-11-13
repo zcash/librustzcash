@@ -23,6 +23,10 @@ use crate::{
     sighash::TransparentAuthorizingContext,
 };
 
+pub mod bytes;
+
+use self::bytes::{LegacyTransparentInputBytes, TransparentOutPointBytes, TransparentOutputBytes};
+
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
 }
@@ -185,19 +189,14 @@ impl OutPoint {
 
     /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
     /// followed by the output index as a little-endian `u32`.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
-        let mut n = [0; 4];
-        reader.read_exact(&mut n)?;
-        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        Ok(TransparentOutPointBytes::read(reader)?.into())
     }
 
     /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
     /// followed by the output index as a little-endian `u32`.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.hash.as_ref())?;
-        writer.write_all(&self.n.to_le_bytes())
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        TransparentOutPointBytes::from(self).write(writer)
     }
 
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
@@ -260,22 +259,12 @@ impl<A: Authorization> TxIn<A> {
 }
 
 impl TxIn<Authorized> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let prevout = OutPoint::read(&mut reader)?;
-        let script_sig = Script::read(&mut reader)?;
-        let sequence = {
-            let mut sequence = [0; 4];
-            reader.read_exact(&mut sequence)?;
-            u32::from_le_bytes(sequence)
-        };
-
-        Ok(TxIn::from_parts(prevout, script_sig, sequence))
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        Ok(LegacyTransparentInputBytes::read(reader)?.into())
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout().write(&mut writer)?;
-        self.script_sig().write(&mut writer)?;
-        writer.write_all(&self.sequence().to_le_bytes())
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        LegacyTransparentInputBytes::from(self).write(writer)
     }
 }
 
@@ -382,24 +371,12 @@ impl TxOut {
         }
     }
 
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = {
-            let mut tmp = [0u8; 8];
-            reader.read_exact(&mut tmp)?;
-            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
-        }
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = Script::read(&mut reader)?;
-
-        Ok(TxOut {
-            value,
-            script_pubkey,
-        })
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        TransparentOutputBytes::read(reader)?.try_into()
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.script_pubkey.write(&mut writer)
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        TransparentOutputBytes::from(self).write(writer)
     }
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.

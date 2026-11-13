@@ -6,12 +6,11 @@ use corez::io::{self, Read, Write};
 use zcash_encoding::{CompactSize, MAX_COMPACT_SIZE};
 use zcash_protocol::{constants::MAX_BLOCK_BYTES, value::ZatBalance};
 
-use crate::transaction::{
-    components::transparent::TransparentBundleBytes,
-    zip248::{self, BundleType, BundleVariant},
+use super::{
+    CoinbaseBundleBytes, TransparentBundleBytes, V7OrchardBundleBytes, V7SaplingBundleBytes,
+    read_fixed,
 };
-
-use super::{CoinbaseBundleBytes, V7OrchardBundleBytes, V7SaplingBundleBytes, read_fixed};
+use crate::transaction::zip248::{self, BundleType, BundleVariant};
 
 /// The size in bytes of an asset UUID.
 const ASSET_UUID_SIZE: usize = 64;
@@ -158,6 +157,24 @@ impl ValuePoolDeltaBytes {
         CompactSize::write(&mut writer, self.bundle_variant.to_u64() as usize)?;
         self.asset_class.write(&mut writer)?;
         writer.write_all(&self.value.to_le_bytes())
+    }
+}
+
+#[cfg(zcash_unstable = "nu8")]
+impl TryFrom<&zip248::ValuePoolDeltaEntry> for ValuePoolDeltaBytes {
+    type Error = io::Error;
+
+    fn try_from(entry: &zip248::ValuePoolDeltaEntry) -> io::Result<Self> {
+        let asset_class = match entry.asset_uuid() {
+            Some(uuid) => AssetClass::Other(*uuid),
+            None => AssetClass::Zec,
+        };
+        Self::from_parts(
+            entry.bundle_type(),
+            entry.bundle_variant(),
+            asset_class,
+            i64::from(entry.value()),
+        )
     }
 }
 

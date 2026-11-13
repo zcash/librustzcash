@@ -34,11 +34,11 @@ use super::{TransparentDigests, TxId, TxVersion, Zip244Digests};
 use super::zip248::{BundleId, BundleType, BundleVariant};
 #[cfg(zcash_unstable = "nu8")]
 use super::{
+    bytes::transparent::TransparentBundleBytes,
     bytes::{
         CoinbaseBundleBytes, OrchardActionBytes, V7OrchardBundleBytes, V7SaplingBundleBytes,
         ValuePoolDeltaBytes,
     },
-    components::transparent::TransparentBundleBytes,
     zip248::V7DigestError,
 };
 

@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::bundle::bytes`, the byte-level representation of legacy
+  and version 7 transparent bundles, including conversions to and from the
+  transparent domain types.
+
 ### Changed
 - `zcash_transparent::address::Script::{read, write}` now read and write the
   script bytes in bulk, rather than making one call to the underlying reader or

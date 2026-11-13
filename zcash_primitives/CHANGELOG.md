@@ -16,10 +16,9 @@ workspace.
   `ValuePoolDeltas`, `ValuePoolDeltaKey`, `ValuePoolDeltaEntry`,
   `ASSET_CLASS_ZEC`, `ASSET_CLASS_OTHER`, `MAX_COINBASE_DATA_LEN`,
   `read_bundle_data_framing` and `write_bundle_data_framing`.
-- `zcash_primitives::transaction::zip248::{BundleDigestKey,
-  BundleDigestProvider, SuppliedBundleDigests, V7DigestError}` (require
-  `zcash_unstable="nu8"`), the explicit per-bundle digest resolution API for
-  version 7 transactions.
+- `zcash_primitives::transaction::zip248::{BundleDigestProvider,
+  SuppliedBundleDigests, V7DigestError}` (require `zcash_unstable="nu8"`), the
+  explicit per-bundle digest resolution API for version 7 transactions.
 - `zcash_primitives::transaction::bytes::{TransactionBytes::{v7_txid_digests,
   v7_txid, v7_auth_commitment}, V7TransactionBodyBytes::{value_pool_deltas_digest,
   effects_bundles_digest, auth_bundles_digest}, V7BundleBytes::{digest_key,
@@ -43,16 +42,6 @@ workspace.
   typed consensus rules.
 - `zcash_primitives::transaction::components::orchard::{write_v7_effects,
   write_v7_auth}` (require `zcash_unstable="nu8"`)
-- `zcash_primitives::transaction::components::transparent`, a byte-level codec
-  for the transparent bundle's wire structures:
-  `TransparentOutPointBytes`, `TransparentOutputBytes`,
-  `TransparentOutputValueBytes`, `TransparentScriptBytes`,
-  `LegacyTransparentInputBytes` and `LegacyTransparentBundleBytes`, plus
-  `TransparentInputEffectingBytes`, `TransparentSighashInfoBytes`,
-  `TransparentInputAuthBytes`, `TransparentEffectsBytes`,
-  `TransparentAuthBytes` and `TransparentBundleBytes` (the last six require
-  `zcash_unstable="nu8"`). The v7 types retain effecting and authorizing data
-  separately and convert to and from `transparent::bundle` domain types.
 - `zcash_primitives::transaction::bytes`, a byte-oriented representation of
   whole transactions for versions 1 through 7: `TransactionDataBytes` (also
   exported as `TransactionBytes`), `TransactionBodyBytes`,
@@ -64,8 +53,10 @@ workspace.
   `IronwoodBundleBytes`, plus (requiring `zcash_unstable="nu8"`)
   `V7TransactionBodyBytes`, `V7BundleBytes`, `V7SaplingBundleBytes`,
   `V7OrchardBundleBytes`, `CoinbaseBundleBytes`, `ValuePoolDeltaBytes`,
-  `AssetClass`, `RawBundleType`, `RawBundleVariant`, `OpaqueBundleBytes`,
-  `SighashInfoBytes`, `SaplingSignatureBytes` and `OrchardSignatureBytes`.
+  `AssetClass`, `OpaqueBundleBytes`, `SighashInfoBytes`,
+  `SaplingSignatureBytes` and `OrchardSignatureBytes`. The module also exports
+  the transparent byte representations from `zcash_transparent::bundle::bytes`,
+  including `LegacyTransparentBundleBytes` and `TransparentBundleBytes`.
   The v7 types retain value pool deltas and the effect/auth bundle maps
   separately, distinguish a known bundle type with an unknown variant from an
   entirely unknown bundle type, and can represent recognized bundles whose

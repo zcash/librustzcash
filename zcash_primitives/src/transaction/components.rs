@@ -4,7 +4,6 @@ pub mod orchard;
 #[cfg(feature = "sapling")]
 pub mod sapling;
 pub mod sprout;
-pub mod transparent;
 
 pub use self::sprout::JsDescription;
 

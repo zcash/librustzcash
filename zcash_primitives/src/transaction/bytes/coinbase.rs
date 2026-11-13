@@ -131,3 +131,15 @@ impl CoinbaseBundleBytes {
         })
     }
 }
+
+#[cfg(zcash_unstable = "nu8")]
+impl From<&CoinbaseBundle> for CoinbaseBundleBytes {
+    fn from(bundle: &CoinbaseBundle) -> Self {
+        Self {
+            block_height: bundle.block_height(),
+            block_subsidy: u64::from(bundle.block_subsidy()),
+            lockbox_value: u64::from(bundle.lockbox_value()),
+            coinbase_data: bundle.coinbase_data().to_vec(),
+        }
+    }
+}

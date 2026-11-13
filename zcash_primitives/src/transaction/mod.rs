@@ -53,28 +53,30 @@ use {
     blake2b_simd::Hash as Blake2bHash,
     core::convert::TryFrom,
     core::ops::Deref,
-    zcash_encoding::{CompactSize, Vector},
     zcash_protocol::value::{BalanceError, Zatoshis},
 };
 
 #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
-#[cfg(any(
-    all(feature = "sapling", feature = "temporary-zcashd"),
-    feature = "orchard"
-))]
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::value::ZatBalance;
 
 #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 use self::{
-    bytes::{CoinbaseBundleBytes, V7TransactionBodyBytes},
-    components::transparent::TransparentBundleBytes,
-    zip248::{BundleType, BundleVariant},
+    bytes::transparent::TransparentBundleBytes,
+    bytes::{
+        CoinbaseBundleBytes, V7BundleBytes, V7SaplingBundleBytes, V7TransactionBodyBytes,
+        ValuePoolDeltaBytes,
+    },
+    zip248::BundleType,
 };
 #[cfg(all(feature = "sapling", feature = "orchard"))]
 use self::{
-    bytes::{SaplingBundleBytes, SproutBundleBytes, TransactionBodyBytes, TransactionBytes},
+    bytes::{
+        LegacyTransparentBundleBytes, SaplingBundleBytes, SproutBundleBytes, TransactionBodyBytes,
+        TransactionBytes, V4SaplingBundleBytes,
+    },
     components::{orchard as orchard_serialization, sapling as sapling_serialization, sprout},
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
 };
@@ -1260,18 +1262,6 @@ impl TransactionData<Authorized> {
     }
 }
 
-/// Reads a little-endian `i64` value balance.
-#[cfg(any(
-    all(feature = "sapling", feature = "temporary-zcashd"),
-    feature = "orchard"
-))]
-pub(crate) fn read_amount<R: Read>(mut reader: R) -> io::Result<ZatBalance> {
-    let mut tmp = [0; 8];
-    reader.read_exact(&mut tmp)?;
-    ZatBalance::from_i64_le_bytes(tmp)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
-}
-
 #[cfg(all(feature = "sapling", feature = "orchard"))]
 impl Transaction {
     fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
@@ -1618,19 +1608,145 @@ impl Transaction {
         Ok(Self::from_data_v7(data))
     }
 
-    /// Buffers one bundle's payload and tags it with its ZIP 248 registry key.
+    /// Converts this authorized transaction to its canonical wire representation.
     ///
-    /// The TLV framing needs the payload's length before the payload reaches
-    /// the writer, so each bundle is serialized into a `Vec<u8>` first.
-    #[cfg(zcash_unstable = "nu8")]
-    fn tag_v7_bundle<F>(id: zip248::BundleId, write: F) -> io::Result<(u64, u64, Vec<u8>)>
-    where
-        F: FnOnce(&mut Vec<u8>) -> io::Result<()>,
-    {
-        let mut data = Vec::new();
-        write(&mut data)?;
-        let (bundle_type, bundle_variant) = id.wire_key();
-        Ok((bundle_type, bundle_variant, data))
+    /// `body_version` selects the format of the body independently of the
+    /// version header, as required by the version-specific `write_v*` methods.
+    fn to_bytes(&self, body_version: TxVersion) -> io::Result<TransactionBytes> {
+        let transparent = self
+            .transparent_bundle
+            .as_ref()
+            .map(LegacyTransparentBundleBytes::from)
+            .unwrap_or_default();
+        let consensus_branch_id = match body_version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
+            TxVersion::V5 | TxVersion::V6 => Some(u32::from(self.consensus_branch_id)),
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => Some(u32::from(self.consensus_branch_id)),
+        };
+        let body = match body_version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                let sapling = match &self.sapling_bundle {
+                    Some(bundle) if self.version.has_sapling() => {
+                        Some(V4SaplingBundleBytes::from_bundle(bundle))
+                    }
+                    Some(_) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "Sapling components may not be present if Sapling is not active.",
+                        ));
+                    }
+                    None if self.version.has_sapling() => {
+                        Some(V4SaplingBundleBytes::from_parts(0, vec![], vec![]))
+                    }
+                    None => None,
+                };
+                let sprout = self
+                    .sprout_bundle
+                    .as_ref()
+                    .map(sprout::Bundle::to_bytes)
+                    .transpose()?;
+                let sapling_binding_sig = self
+                    .sapling_bundle
+                    .as_ref()
+                    .map(|bundle| <[u8; 64]>::from(bundle.authorization().binding_sig));
+                TransactionBodyBytes::Legacy(bytes::LegacyTransactionBodyBytes::from_parts(
+                    transparent,
+                    sapling,
+                    sprout,
+                    sapling_binding_sig,
+                )?)
+            }
+            TxVersion::V5 => {
+                let sapling = self
+                    .sapling_bundle
+                    .as_ref()
+                    .map(SaplingBundleBytes::from_bundle);
+                let orchard = self
+                    .orchard_bundle
+                    .as_ref()
+                    .map(orchard_serialization::bundle_to_bytes)
+                    .transpose()?;
+                TransactionBodyBytes::V5(bytes::V5TransactionBodyBytes::from_parts(
+                    transparent,
+                    sapling,
+                    orchard,
+                ))
+            }
+            TxVersion::V6 => {
+                if let Some(bundle) = &self.orchard_bundle {
+                    orchard_serialization::check_v6_bundle_version(bundle.bundle_version())?;
+                }
+                if let Some(bundle) = &self.ironwood_bundle {
+                    orchard_serialization::check_v6_bundle_version(bundle.bundle_version())?;
+                }
+                let sapling = self
+                    .sapling_bundle
+                    .as_ref()
+                    .map(SaplingBundleBytes::from_bundle);
+                let orchard = self
+                    .orchard_bundle
+                    .as_ref()
+                    .map(orchard_serialization::bundle_to_bytes)
+                    .transpose()?;
+                let ironwood = self
+                    .ironwood_bundle
+                    .as_ref()
+                    .map(orchard_serialization::bundle_to_bytes)
+                    .transpose()?;
+                TransactionBodyBytes::V6(bytes::V6TransactionBodyBytes::from_parts(
+                    transparent,
+                    sapling,
+                    orchard,
+                    ironwood,
+                ))
+            }
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => {
+                let value_pool_deltas = self
+                    .value_pool_deltas
+                    .to_wire_entries()
+                    .iter()
+                    .map(ValuePoolDeltaBytes::try_from)
+                    .collect::<io::Result<Vec<_>>>()?;
+                let mut bundles = Vec::new();
+                if let Some(bundle) = &self.transparent_bundle {
+                    bundles.push(V7BundleBytes::Transparent(TransparentBundleBytes::from(
+                        bundle,
+                    )));
+                }
+                if let Some(bundle) = &self.coinbase_bundle {
+                    bundles.push(V7BundleBytes::Coinbase(CoinbaseBundleBytes::from(bundle)));
+                }
+                if let Some(bundle) = &self.sapling_bundle {
+                    bundles.push(V7BundleBytes::Sapling(V7SaplingBundleBytes::from_bundle(
+                        bundle,
+                    )));
+                }
+                if let Some(bundle) = &self.orchard_bundle {
+                    bundles.push(V7BundleBytes::Orchard(
+                        orchard_serialization::v7_bundle_to_bytes(bundle)?,
+                    ));
+                }
+                if let Some(bundle) = &self.ironwood_bundle {
+                    bundles.push(V7BundleBytes::Ironwood(
+                        orchard_serialization::v7_bundle_to_bytes(bundle)?,
+                    ));
+                }
+                TransactionBodyBytes::V7(V7TransactionBodyBytes::from_parts(
+                    value_pool_deltas,
+                    bundles,
+                )?)
+            }
+        };
+
+        Ok(TransactionBytes::from_parts_unchecked(
+            self.version,
+            consensus_branch_id,
+            self.lock_time,
+            self.expiry_height,
+            body,
+        ))
     }
 
     #[cfg(feature = "temporary-zcashd")]
@@ -1650,7 +1766,7 @@ impl Transaction {
         }
     }
 
-    pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_v4<W: Write>(&self, writer: W) -> io::Result<()> {
         if self.orchard_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1658,93 +1774,42 @@ impl Transaction {
             ));
         }
 
-        self.version.write(&mut writer)?;
-
-        self.write_transparent(&mut writer)?;
-        writer.write_u32_le(self.lock_time)?;
-        if self.version.has_overwinter() {
-            writer.write_u32_le(u32::from(self.expiry_height))?;
-        }
-
-        sapling_serialization::write_v4_components(
-            &mut writer,
-            self.sapling_bundle.as_ref(),
-            self.version.has_sapling(),
-        )?;
-
-        if self.version.has_sprout() {
-            if let Some(bundle) = self.sprout_bundle.as_ref() {
-                Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
-                writer.write_all(&bundle.joinsplit_pubkey)?;
-                writer.write_all(&bundle.joinsplit_sig)?;
-            } else {
-                CompactSize::write(&mut writer, 0)?;
-            }
-        }
-
-        if self.version.has_sapling()
-            && let Some(bundle) = self.sapling_bundle.as_ref()
-        {
-            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
-        }
-
-        Ok(())
+        self.to_bytes(TxVersion::V4)?.write(writer)
     }
 
-    pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = self.transparent_bundle.as_ref() {
-            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
-        } else {
-            CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
+    pub fn write_transparent<W: Write>(&self, writer: W) -> io::Result<()> {
+        self.transparent_bundle
+            .as_ref()
+            .map(LegacyTransparentBundleBytes::from)
+            .unwrap_or_default()
+            .write(writer)
     }
 
-    pub fn write_v5<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_v5<W: Write>(&self, writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Sprout components cannot be present when serializing to the V5 transaction format.",
             ));
         }
-        self.write_v5_header(&mut writer)?;
-        self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-
-        Ok(())
+        self.to_bytes(TxVersion::V5)?.write(writer)
     }
 
-    pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_v6<W: Write>(&self, writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Sprout components cannot be present when serializing to V6 or later transaction formats.",
             ));
         }
-        self.write_v6_header(&mut writer)?;
-
-        self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
-
-        Ok(())
+        self.to_bytes(TxVersion::V6)?.write(writer)
     }
 
     /// Serializes this transaction in v7 (ZIP 248) wire format.
     ///
     /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
-    ///
-    /// The value pool deltas come from `to_wire_entries`, which merges the
-    /// typed and opaque entries into the one sorted sequence the spec requires;
-    /// the two bundle maps are assembled per bundle and written by
-    /// `zip248::write_bundle_data_map`.
     #[cfg(zcash_unstable = "nu8")]
-    pub fn write_v7<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_v7<W: Write>(&self, writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1752,98 +1817,21 @@ impl Transaction {
             ));
         }
 
-        // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
-        self.write_v7_header(&mut writer)?;
-
-        // 2. Value pool deltas map -- to_wire_entries() merges known + unknown
-        // entries in canonical (bundleType, assetClass, assetUuid) order.
-        let vp_entries = self.value_pool_deltas.to_wire_entries();
-        CompactSize::write(&mut writer, vp_entries.len())?;
-        for entry in &vp_entries {
-            entry.write(&mut writer)?;
-        }
-
-        // 3. Effect bundles map.
-        let mut effect_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
-        if let Some(tb) = self.transparent_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::TRANSPARENT, BundleVariant::DEFAULT),
-                |buf| zip248::write_v7_transparent_effects(buf, tb),
-            )?);
-        }
-        if let Some(cb) = self.coinbase_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::COINBASE, BundleVariant::DEFAULT),
-                |buf| cb.write(buf),
-            )?);
-        }
-        if let Some(sb) = self.sapling_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::SAPLING, BundleVariant::DEFAULT),
-                |buf| sapling_serialization::write_v7_effects(buf, sb),
-            )?);
-        }
-        if let Some(ob) = self.orchard_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::ORCHARD, BundleVariant::DEFAULT),
-                |buf| orchard_serialization::write_v7_effects(buf, ob),
-            )?);
-        }
-        if let Some(ib) = self.ironwood_bundle.as_ref() {
-            effect_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::IRONWOOD, BundleVariant::DEFAULT),
-                |buf| orchard_serialization::write_v7_effects(buf, ib),
-            )?);
-        }
-        zip248::write_bundle_data_map(&mut writer, effect_bundles)?;
-
-        // 4. Auth bundles map. A bundle appears here only if it has
-        // authorizing data; see `v7_transparent_auth`.
-        let mut auth_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
-        if let Some(tb) = self.v7_transparent_auth() {
-            auth_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::TRANSPARENT, BundleVariant::DEFAULT),
-                |buf| zip248::write_v7_transparent_auth(buf, tb),
-            )?);
-        }
-        if let Some(sb) = self.sapling_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::SAPLING, BundleVariant::DEFAULT),
-                |buf| sapling_serialization::write_v7_auth(buf, sb),
-            )?);
-        }
-        if let Some(ob) = self.orchard_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::ORCHARD, BundleVariant::DEFAULT),
-                |buf| orchard_serialization::write_v7_auth(buf, ob),
-            )?);
-        }
-        if let Some(ib) = self.ironwood_bundle.as_ref() {
-            auth_bundles.push(Self::tag_v7_bundle(
-                zip248::BundleId::new(BundleType::IRONWOOD, BundleVariant::DEFAULT),
-                |buf| orchard_serialization::write_v7_auth(buf, ib),
-            )?);
-        }
-        zip248::write_bundle_data_map(&mut writer, auth_bundles)?;
-
-        Ok(())
+        self.to_bytes(TxVersion::V7)?.write(writer)
     }
 
     pub fn write_v5_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
-        writer.write_u32_le(u32::from(self.consensus_branch_id))?;
-        writer.write_u32_le(self.lock_time)?;
-        writer.write_u32_le(u32::from(self.expiry_height))?;
-        Ok(())
+        bytes::write_header_fragment(
+            writer,
+            Some(u32::from(self.consensus_branch_id)),
+            self.lock_time,
+            self.expiry_height,
+        )
     }
 
-    pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.version.write(&mut writer)?;
-        writer.write_u32_le(u32::from(self.consensus_branch_id))?;
-        writer.write_u32_le(self.lock_time)?;
-        writer.write_u32_le(u32::from(self.expiry_height))?;
-
-        Ok(())
+    pub fn write_v6_header<W: Write>(&self, writer: W) -> io::Result<()> {
+        self.write_v5_header(writer)
     }
 
     /// Writes the v7 (ZIP 248) common transaction header: header, nVersionGroupId,
@@ -1851,12 +1839,8 @@ impl Transaction {
     /// amount is not included here; it lives in `mValuePoolDeltas` under
     /// `bundleType = 6`.
     #[cfg(zcash_unstable = "nu8")]
-    pub fn write_v7_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.version.write(&mut writer)?;
-        writer.write_u32_le(u32::from(self.consensus_branch_id))?;
-        writer.write_u32_le(self.lock_time)?;
-        writer.write_u32_le(u32::from(self.expiry_height))?;
-        Ok(())
+    pub fn write_v7_header<W: Write>(&self, writer: W) -> io::Result<()> {
+        self.write_v5_header(writer)
     }
 
     #[cfg(feature = "temporary-zcashd")]

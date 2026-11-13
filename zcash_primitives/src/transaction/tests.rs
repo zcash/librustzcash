@@ -322,7 +322,7 @@ fn v7_empty_transaction_matches_zip248_digests() {
 
     assert_eq!(
         hex::encode(tx.txid().as_ref()),
-        "7d0e9f1bc9f2a1d34760306861a89a2886059ab3e5b31967b4c1d006338f42eb",
+        "739ba1464de22b6d533a4c362c756d972fbfda9997871f19005f6855080f681a",
     );
     assert_eq!(
         hex::encode(tx.auth_commitment().as_bytes()),
@@ -362,7 +362,7 @@ fn v7_fee_delta_matches_zip248_digests() {
 
     assert_eq!(
         hex::encode(tx.txid().as_ref()),
-        "0c4f2e403c749ce18dcb26051e713ef6be72bc3ceda790029700e48c584fbda6",
+        "527cdd8eb4dc8a2e2c5bd7529496d7ede711af5834cd5f730452597d759f0299",
     );
 }
 
@@ -3750,7 +3750,7 @@ mod zip248_tests {
         #[test]
         fn not_v7_is_rejected() {
             let body = V5TransactionBodyBytes::from_parts(
-                crate::transaction::components::transparent::LegacyTransparentBundleBytes::from_parts(
+                crate::transaction::bytes::transparent::LegacyTransparentBundleBytes::from_parts(
                     vec![],
                     vec![],
                 ),
@@ -4329,10 +4329,11 @@ mod v7_byte_digests {
             .unwrap()
             .to_authorized(vp.sapling_value().unwrap())
             .unwrap();
+        let sapling_bytes = crate::transaction::bytes::V7SaplingBundleBytes::from_bundle(&sapling);
         let mut effects = Vec::new();
-        crate::transaction::components::sapling::write_v7_effects(&mut effects, &sapling).unwrap();
+        sapling_bytes.write_effects(&mut effects).unwrap();
         let mut auth = Vec::new();
-        crate::transaction::components::sapling::write_v7_auth(&mut auth, &sapling).unwrap();
+        sapling_bytes.write_auth(&mut auth).unwrap();
         let mut expected_effects = Vec::new();
         body.sapling()
             .unwrap()

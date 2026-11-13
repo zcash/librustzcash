@@ -14,16 +14,15 @@ use orchard::{
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
 };
-use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
 use zcash_protocol::{
     consensus::{BranchId, OrchardProtocolRevision},
     value::ZatBalance,
 };
 
-use crate::transaction::read_amount;
+use crate::transaction::bytes::{OrchardActionBytes, OrchardBundleBytes};
 #[cfg(zcash_unstable = "nu8")]
-use crate::transaction::zip248::V7_SIGHASH_V0_INFO_WIRE;
+use crate::transaction::bytes::{OrchardSignatureBytes, SighashInfoBytes, V7OrchardBundleBytes};
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -101,54 +100,251 @@ impl MapAuth<Authorized, Authorized> for () {
 }
 
 fn read_bundle<R: Read>(
-    mut reader: R,
+    reader: R,
     bundle_version: Option<BundleVersion>,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    #[allow(clippy::redundant_closure)]
-    let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
-    if actions_without_auth.is_empty() {
-        Ok(None)
-    } else {
-        let bundle_version = bundle_version.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Orchard-protocol bundles may not be present in this transaction version \
-                 under the transaction's consensus branch ID",
-            )
-        })?;
-        let flags = read_flags(&mut reader, bundle_version)?;
-        let value_balance = read_amount(&mut reader)?;
-        let anchor = read_anchor(&mut reader)?;
-        let proof_bytes = Vector::read_bytes(&mut reader)?;
-        let actions = NonEmpty::from_vec(
-            actions_without_auth
-                .into_iter()
-                .map(|act| act.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut reader)))
-                .collect::<Result<Vec<_>, _>>()?,
-        )
-        .expect("A nonzero number of actions was read from the transaction data.");
-        let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
+    OrchardBundleBytes::read(reader)?
+        .map(|bytes| bundle_from_bytes(&bytes, bundle_version))
+        .transpose()
+}
 
-        let authorization = orchard::bundle::Authorized::from_parts(
-            orchard::Proof::new(proof_bytes),
-            binding_signature,
-        );
+/// Converts an Orchard-protocol action from its wire representation to its typed form.
+fn action_from_bytes(action: &OrchardActionBytes) -> io::Result<Action<()>> {
+    let cv_net = read_value_commitment(&mut &action.cv()[..])?;
+    let nf_old = read_nullifier(&mut &action.nullifier()[..])?;
+    let rk = read_verification_key(&mut &action.rk()[..])?;
+    let cmx = read_cmx(&mut &action.cmx()[..])?;
+    let encrypted_note = TransmittedNoteCiphertext {
+        epk_bytes: *action.ephemeral_key(),
+        enc_ciphertext: NoteBytesData(*action.enc_ciphertext()),
+        out_ciphertext: *action.out_ciphertext(),
+    };
 
-        // `try_from_parts` rejects a proof whose length is not the canonical size for the number
-        // of actions, preventing a proof padded with arbitrary data (GHSA-2x4w-pxqw-58v9). Proof
-        // size is enforced for every version except the historical pre-NU6.2 Orchard pool
-        // ([`BundleVersion::orchard_insecure_v1`]); see the `bundle_version` chosen by the caller.
-        orchard::Bundle::try_from_parts(
-            actions,
-            flags,
-            value_balance,
-            anchor,
-            authorization,
-            bundle_version,
-        )
-        .map(Some)
+    Action::from_parts(nf_old, rk, cmx, encrypted_note, cv_net, ())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Converts an Orchard-protocol action from its typed form to its wire representation.
+fn action_to_bytes(
+    action: &Action<<Authorized as Authorization>::SpendAuth>,
+) -> OrchardActionBytes {
+    let note = action.encrypted_note();
+    OrchardActionBytes::from_parts(
+        action.cv_net().to_bytes(),
+        action.nullifier().to_bytes(),
+        <[u8; 32]>::from(action.rk()),
+        action.cmx().to_bytes(),
+        note.epk_bytes,
+        note.enc_ciphertext.0,
+        note.out_ciphertext,
+    )
+}
+
+/// Converts a version 5 or 6 Orchard-protocol bundle from its wire representation to its typed
+/// form.
+///
+/// `bundle_version` fixes the flag-byte grammar and circuit generation for the consensus branch
+/// the transaction is in. It is `None` when the pool is not supported under that branch, in which
+/// case a non-empty bundle is rejected.
+///
+/// # Errors
+///
+/// Returns an error if the bundle is empty, if the pool is not supported under the supplied
+/// bundle version, or if a field is invalid.
+pub(crate) fn bundle_from_bytes(
+    bytes: &OrchardBundleBytes,
+    bundle_version: Option<BundleVersion>,
+) -> io::Result<orchard::Bundle<Authorized, ZatBalance>> {
+    if bytes.actions().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "an empty Orchard-protocol bundle has no typed representation",
+        ));
     }
+
+    let bundle_version = bundle_version.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Orchard-protocol bundles may not be present in this transaction version \
+             under the transaction's consensus branch ID",
+        )
+    })?;
+    let flags = read_flags(&mut &[bytes.flags()][..], bundle_version)?;
+    let anchor = read_anchor(&mut &bytes.anchor()[..])?;
+
+    let actions = bytes
+        .actions()
+        .iter()
+        .zip(bytes.spend_auth_sigs().iter())
+        .map(|(action, sig)| {
+            let action = action_from_bytes(action)?;
+            action.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut &sig[..]))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let actions =
+        NonEmpty::from_vec(actions).expect("a non-empty action list has a typed representation");
+
+    let binding_signature = read_signature::<_, redpallas::Binding>(&mut &bytes.binding_sig()[..])?;
+    let authorization = Authorized::from_parts(
+        orchard::Proof::new(bytes.proof().to_vec()),
+        binding_signature,
+    );
+
+    // `try_from_parts` rejects a proof whose length is not the canonical size for the number of
+    // actions, preventing a proof padded with arbitrary data (GHSA-2x4w-pxqw-58v9). Proof size is
+    // enforced for every version except the historical pre-NU6.2 Orchard pool
+    // ([`BundleVersion::orchard_insecure_v1`]); see the `bundle_version` chosen by the caller.
+    orchard::Bundle::try_from_parts(
+        actions,
+        flags,
+        value_balance_from_raw(bytes.value_balance())?,
+        anchor,
+        authorization,
+        bundle_version,
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Converts a version 5 or 6 Orchard-protocol bundle from its typed form to its wire
+/// representation.
+pub(crate) fn bundle_to_bytes(
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<OrchardBundleBytes> {
+    OrchardBundleBytes::from_parts(
+        bundle.actions().iter().map(action_to_bytes).collect(),
+        bundle.flag_byte(),
+        i64::from_le_bytes(bundle.value_balance().to_i64_le_bytes()),
+        bundle.anchor().to_bytes(),
+        bundle.authorization().proof().as_ref().to_vec(),
+        bundle
+            .actions()
+            .iter()
+            .map(|action| <[u8; 64]>::from(action.authorization()))
+            .collect(),
+        <[u8; 64]>::from(bundle.authorization().binding_signature()),
+    )
+}
+
+/// Converts a version 7 Orchard-protocol bundle from its wire representation to its typed form.
+///
+/// The value balance is not part of the v7 bundle encoding; it lives in `mValuePoolDeltas` and is
+/// supplied by the caller. `bundle_version` fixes the flag-byte grammar and circuit generation for
+/// the consensus branch the transaction is in.
+///
+/// # Errors
+///
+/// Returns an error if the bundle has no authorizing data, if a signature uses a sighash version
+/// other than 0, if the pool is not supported under the supplied bundle version, or if a field is
+/// invalid.
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) fn v7_bundle_from_bytes(
+    bytes: &V7OrchardBundleBytes,
+    value_balance: ZatBalance,
+    bundle_version: Option<BundleVersion>,
+) -> io::Result<orchard::Bundle<Authorized, ZatBalance>> {
+    if bytes.actions().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "an empty Orchard-protocol bundle has no typed representation",
+        ));
+    }
+
+    let binding_sig = bytes.binding_sig().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "v7 Orchard-protocol effecting data has no authorizing data",
+        )
+    })?;
+    if !binding_sig.sighash_info().is_v0() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported Orchard binding signature sighash version",
+        ));
+    }
+
+    let bundle_version = bundle_version.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Orchard-protocol bundles may not be present in this transaction version \
+             under the transaction's consensus branch ID",
+        )
+    })?;
+    let flags = read_flags(&mut &[bytes.flags()][..], bundle_version)?;
+    let anchor = bytes.anchor().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "v7 Orchard-protocol authorizing data has no anchor",
+        )
+    })?;
+    let anchor = read_anchor(&mut &anchor[..])?;
+
+    let actions = bytes
+        .actions()
+        .iter()
+        .zip(bytes.spend_auth_sigs().iter())
+        .map(|(action, sig)| {
+            if !sig.sighash_info().is_v0() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported Orchard spend authorization sighash version",
+                ));
+            }
+            let action = action_from_bytes(action)?;
+            action.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut &sig.signature()[..]))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let actions =
+        NonEmpty::from_vec(actions).expect("a non-empty action list has a typed representation");
+
+    let binding_signature =
+        read_signature::<_, redpallas::Binding>(&mut &binding_sig.signature()[..])?;
+    let authorization = Authorized::from_parts(
+        orchard::Proof::new(bytes.proof().to_vec()),
+        binding_signature,
+    );
+
+    orchard::Bundle::try_from_parts(
+        actions,
+        flags,
+        value_balance,
+        anchor,
+        authorization,
+        bundle_version,
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Converts a version 7 Orchard-protocol bundle from its typed form to its wire representation.
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) fn v7_bundle_to_bytes(
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<V7OrchardBundleBytes> {
+    V7OrchardBundleBytes::from_parts(
+        bundle.actions().iter().map(action_to_bytes).collect(),
+        bundle.flag_byte(),
+        Some(bundle.anchor().to_bytes()),
+        bundle.authorization().proof().as_ref().to_vec(),
+        bundle
+            .actions()
+            .iter()
+            .map(|action| {
+                OrchardSignatureBytes::from_parts(
+                    SighashInfoBytes::v0(),
+                    <[u8; 64]>::from(action.authorization()),
+                )
+            })
+            .collect(),
+        Some(OrchardSignatureBytes::from_parts(
+            SighashInfoBytes::v0(),
+            <[u8; 64]>::from(bundle.authorization().binding_signature()),
+        )),
+    )
+}
+
+/// Converts a raw signed 64-bit value balance into the monetary domain.
+fn value_balance_from_raw(value: i64) -> io::Result<ZatBalance> {
+    ZatBalance::from_i64(value)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
 }
 
 /// Returns the [`BundleVersion`] in effect for the given Orchard-protocol value pool
@@ -204,7 +400,7 @@ pub fn read_v5_bundle<R: Read>(
 /// two Orchard-bundle slots: the Orchard slot ([`BundleVersion::orchard_v3`]) and the Ironwood
 /// slot ([`BundleVersion::ironwood_v3`]). A pre-NU6.3 version would (de)serialize the flag byte
 /// with the wrong cross-address (bit 2) semantics.
-fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
+pub(crate) fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
     if bundle_version == BundleVersion::orchard_v3()
         || bundle_version == BundleVersion::ironwood_v3()
     {
@@ -236,18 +432,10 @@ pub fn read_v6_bundle<R: Read>(
 /// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
 #[cfg(zcash_unstable = "nu8")]
 pub fn write_v7_effects<W: Write>(
-    mut writer: W,
+    writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
-    // nActionsOrchard + actions (820 bytes each)
-    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-        write_action_without_auth(w, a)
-    })?;
-    // flagsOrchard (only if nActions > 0, which is always true here). The
-    // anchor is not part of the effecting data; it is written by
-    // [`write_v7_auth`].
-    writer.write_all(&[bundle.flag_byte()])?;
-    Ok(())
+    v7_bundle_to_bytes(bundle)?.write_effects(writer)
 }
 
 /// Writes the authorizing data for an Orchard bundle in v7 format.
@@ -257,28 +445,10 @@ pub fn write_v7_effects<W: Write>(
 /// (version 0: `[0x01, 0x00]`).
 #[cfg(zcash_unstable = "nu8")]
 pub fn write_v7_auth<W: Write>(
-    mut writer: W,
+    writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
 ) -> io::Result<()> {
-    // anchorOrchard
-    writer.write_all(&bundle.anchor().to_bytes())?;
-    // sizeProofsOrchard + proofsOrchard
-    Vector::write(
-        &mut writer,
-        bundle.authorization().proof().as_ref(),
-        |w, b| w.write_all(&[*b]),
-    )?;
-    // vSpendAuthSigsOrchard with sighashInfo prefix
-    for auth in bundle.actions().iter().map(|a| a.authorization()) {
-        writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
-        writer.write_all(&<[u8; 64]>::from(auth))?;
-    }
-    // bindingSigOrchard with sighashInfo prefix
-    writer.write_all(V7_SIGHASH_V0_INFO_WIRE)?;
-    writer.write_all(&<[u8; 64]>::from(
-        bundle.authorization().binding_signature(),
-    ))?;
-    Ok(())
+    v7_bundle_to_bytes(bundle)?.write_auth(writer)
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -374,36 +544,6 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
     Ok(Signature::from(bytes))
 }
 
-fn write_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
-    mut writer: W,
-) -> io::Result<()> {
-    if let Some(bundle) = &bundle {
-        Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-            write_action_without_auth(w, a)
-        })?;
-
-        // The flag byte is encoded under the bundle's own `BundleVersion`, which is infallible:
-        // a `Bundle` is only ever constructed with flags representable under its version.
-        writer.write_all(&[bundle.flag_byte()])?;
-        writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-        writer.write_all(&bundle.anchor().to_bytes())?;
-        Vector::write_bytes(&mut writer, bundle.authorization().proof().as_ref())?;
-        Array::write(
-            &mut writer,
-            bundle.actions().iter().map(|a| a.authorization()),
-            |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-        )?;
-        writer.write_all(&<[u8; 64]>::from(
-            bundle.authorization().binding_signature(),
-        ))?;
-    } else {
-        CompactSize::write(&mut writer, 0)?;
-    }
-
-    Ok(())
-}
-
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
 ///
 /// The Orchard flag byte is encoded under the bundle's own [`BundleVersion`]; an Orchard bundle
@@ -412,7 +552,8 @@ pub fn write_v5_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,
 ) -> io::Result<()> {
-    write_bundle(bundle, writer)
+    let bytes = bundle.map(bundle_to_bytes).transpose()?;
+    OrchardBundleBytes::write_opt(writer, bytes.as_ref())
 }
 
 /// Writes an [`orchard::Bundle`] in the v6 transaction format. The bundle's own
@@ -425,7 +566,8 @@ pub fn write_v6_bundle<W: Write>(
     if let Some(bundle) = bundle {
         check_v6_bundle_version(bundle.bundle_version())?;
     }
-    write_bundle(bundle, writer)
+    let bytes = bundle.map(bundle_to_bytes).transpose()?;
+    OrchardBundleBytes::write_opt(writer, bytes.as_ref())
 }
 
 pub fn write_value_commitment<W: Write>(mut writer: W, cv: &ValueCommitment) -> io::Result<()> {

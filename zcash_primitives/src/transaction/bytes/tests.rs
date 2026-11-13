@@ -8,15 +8,15 @@ use zcash_protocol::constants::MAX_BLOCK_BYTES;
 
 use crate::transaction::{
     TxVersion,
-    bytes::*,
-    components::transparent::{
+    bytes::transparent::{
         LegacyTransparentBundleBytes, LegacyTransparentInputBytes, TransparentOutPointBytes,
         TransparentOutputBytes, TransparentOutputValueBytes, TransparentScriptBytes,
     },
+    bytes::*,
 };
 #[cfg(zcash_unstable = "nu8")]
 use crate::transaction::{
-    components::transparent::{
+    bytes::transparent::{
         TransparentAuthBytes, TransparentBundleBytes, TransparentEffectsBytes,
         TransparentInputAuthBytes, TransparentInputEffectingBytes, TransparentSighashInfoBytes,
     },
@@ -1546,7 +1546,7 @@ mod v7 {
 
         assert_eq!(
             hex::encode(tx.v7_txid(&empty).unwrap().as_ref()),
-            "7d0e9f1bc9f2a1d34760306861a89a2886059ab3e5b31967b4c1d006338f42eb",
+            "739ba1464de22b6d533a4c362c756d972fbfda9997871f19005f6855080f681a",
         );
         assert_eq!(
             hex::encode(tx.v7_auth_commitment(&empty).unwrap().as_bytes()),
@@ -1563,7 +1563,7 @@ mod v7 {
 
         assert_eq!(
             hex::encode(tx.v7_txid(&empty).unwrap().as_ref()),
-            "0c4f2e403c749ce18dcb26051e713ef6be72bc3ceda790029700e48c584fbda6",
+            "527cdd8eb4dc8a2e2c5bd7529496d7ede711af5834cd5f730452597d759f0299",
         );
     }
 
@@ -1576,11 +1576,11 @@ mod v7 {
     /// opaque bundle.
     #[test]
     fn v7_indexer_round_trips_unknown_bundle_without_typed_conversion() {
-        const WIRE: &str = "0700008068636174fbffffff0000000064000000\
+        const WIRE: &str = "0700008000000000fbffffff0000000064000000\
                             01630000f401000000000000\
                             01630003010203\
                             016300020405";
-        const TXID: &str = "8f2f99e69230d175327fc966d551c4ebbaa34dc84cc194a46dee93577088c5e9";
+        const TXID: &str = "df613cb9d6217ef1c3b72ddf418909563125957731cd2978fcb8bb3718a7c3f9";
         const AUTH_COMMITMENT: &str =
             "63ffe5f3ffdecda1785d62fbcb0095b59c250c2916747f7bea373e0e9c4ea24e";
 

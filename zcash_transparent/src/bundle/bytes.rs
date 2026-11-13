@@ -1,20 +1,18 @@
-//! Functions for parsing & serialization of transparent transaction components.
+//! Byte-level codecs for transparent transaction components.
 //!
-//! The types in this module are a byte-level codec for the transparent bundle's
-//! wire structures. They deliberately do not construct
-//! [`transparent::bundle`] domain values while parsing: a transparent bundle can
-//! be read, retained, and re-serialized without interpreting its scripts or
-//! checking any consensus rule. Explicit conversions to and from the domain
-//! types are provided at the end of the module.
+//! The types in this module are the wire representation of a transparent
+//! bundle. They deliberately do not construct [`crate::bundle`] domain values
+//! while parsing: a transparent bundle can be read, retained, and re-serialized
+//! without interpreting its scripts or checking any consensus rule. Explicit
+//! conversions to and from the domain types are provided alongside each type.
 //!
 //! Two wire layouts are covered:
 //!
 //! - The legacy layout used by transaction versions before v7, in which each
 //!   input carries its `scriptSig` inline ([`LegacyTransparentBundleBytes`]).
-//! - The [ZIP 248] v7 layout, which splits the bundle into effecting data
-//!   (`TransparentEffectsBytes`) and authorizing data (`TransparentAuthBytes`)
-//!   that are carried in separate bundle maps (`TransparentBundleBytes`). The
-//!   v7 types require `zcash_unstable="nu8"`.
+//! - The [ZIP 248] v7 layout, which splits the bundle into `TransparentEffectsBytes`
+//!   and `TransparentAuthBytes`, carried in separate bundle maps in a
+//!   `TransparentBundleBytes`. The v7 types require `zcash_unstable="nu8"`.
 //!
 //! [ZIP 248]: https://zips.z.cash/zip-0248#transparent-bundle
 
@@ -22,6 +20,12 @@ use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{TxId, value::Zatoshis};
+use zcash_script::script;
+
+use crate::{
+    address::Script,
+    bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
+};
 
 /// The size in bytes of a transparent prevout index.
 const PREVOUT_INDEX_BYTE_SIZE: usize = 4;
@@ -56,6 +60,11 @@ where
     read_array(reader, count, func)
 }
 
+/// Writes raw script bytes with their CompactSize length prefix.
+pub(crate) fn write_script_bytes<W: Write>(mut writer: W, bytes: &[u8]) -> io::Result<()> {
+    Vector::write_bytes(&mut writer, bytes)
+}
+
 /// Opaque script bytes from a transparent input or output.
 ///
 /// The bytes are retained verbatim. Interpreting them as a script, or checking
@@ -88,16 +97,28 @@ impl TransparentScriptBytes {
     }
 
     /// Writes this script with its CompactSize length prefix.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write_bytes(&mut writer, &self.bytes)
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        write_script_bytes(writer, &self.bytes)
+    }
+}
+
+impl From<&Script> for TransparentScriptBytes {
+    fn from(script: &Script) -> Self {
+        Self::from_bytes(script.0.0.clone())
+    }
+}
+
+impl From<TransparentScriptBytes> for Script {
+    fn from(bytes: TransparentScriptBytes) -> Self {
+        Script(script::Code(bytes.into_bytes()))
     }
 }
 
 /// A transparent output's value as it appears on the wire.
 ///
 /// The value is a signed 64-bit integer. The monetary range check is a
-/// consensus rule, so it is applied when converting to
-/// [`transparent::bundle::TxOut`] rather than while parsing.
+/// consensus rule, so it is applied when converting to [`TxOut`] rather than
+/// while parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransparentOutputValueBytes {
     value: i64,
@@ -169,6 +190,18 @@ impl TransparentOutPointBytes {
     }
 }
 
+impl From<&OutPoint> for TransparentOutPointBytes {
+    fn from(outpoint: &OutPoint) -> Self {
+        Self::from_parts(*outpoint.txid(), outpoint.n())
+    }
+}
+
+impl From<TransparentOutPointBytes> for OutPoint {
+    fn from(outpoint: TransparentOutPointBytes) -> Self {
+        OutPoint::new(*outpoint.hash().as_ref(), outpoint.index())
+    }
+}
+
 /// A transparent output in its wire representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransparentOutputBytes {
@@ -210,6 +243,28 @@ impl TransparentOutputBytes {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.value.write(&mut writer)?;
         self.script_pubkey.write(&mut writer)
+    }
+}
+
+impl From<&TxOut> for TransparentOutputBytes {
+    fn from(txout: &TxOut) -> Self {
+        Self::from_parts(
+            TransparentOutputValueBytes::from_i64(
+                i64::try_from(u64::from(txout.value())).expect("Zatoshis fits in i64"),
+            ),
+            TransparentScriptBytes::from(txout.script_pubkey()),
+        )
+    }
+}
+
+impl TryFrom<TransparentOutputBytes> for TxOut {
+    type Error = io::Error;
+
+    fn try_from(output: TransparentOutputBytes) -> io::Result<Self> {
+        Ok(TxOut::new(
+            output_value_from_bytes(output.value())?,
+            Script::from(output.script_pubkey),
+        ))
     }
 }
 
@@ -274,6 +329,26 @@ impl LegacyTransparentInputBytes {
     }
 }
 
+impl From<&TxIn<Authorized>> for LegacyTransparentInputBytes {
+    fn from(txin: &TxIn<Authorized>) -> Self {
+        Self::from_parts(
+            TransparentOutPointBytes::from(txin.prevout()),
+            TransparentScriptBytes::from(txin.script_sig()),
+            txin.sequence(),
+        )
+    }
+}
+
+impl From<LegacyTransparentInputBytes> for TxIn<Authorized> {
+    fn from(input: LegacyTransparentInputBytes) -> Self {
+        TxIn::from_parts(
+            OutPoint::from(*input.prevout()),
+            Script::from(input.script_sig),
+            input.sequence,
+        )
+    }
+}
+
 /// A transparent bundle in the legacy (pre-v7) wire representation.
 ///
 /// The legacy layout is `vin` followed by `vout`, each a CompactSize-prefixed
@@ -322,6 +397,48 @@ impl LegacyTransparentBundleBytes {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         Vector::write(&mut writer, &self.inputs, |w, input| input.write(w))?;
         Vector::write(&mut writer, &self.outputs, |w, output| output.write(w))
+    }
+
+    /// Converts this byte representation to the transparent domain type.
+    ///
+    /// Returns `None` for an empty bundle, matching the representation used by
+    /// `TransactionData`. Returns an error if an output value is outside the
+    /// monetary range.
+    pub fn to_authorized(&self) -> io::Result<Option<Bundle<Authorized>>> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+
+        let vin = self.inputs.iter().cloned().map(TxIn::from).collect();
+        let vout = self
+            .outputs
+            .iter()
+            .cloned()
+            .map(TxOut::try_from)
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Some(Bundle {
+            vin,
+            vout,
+            authorization: Authorized,
+        }))
+    }
+}
+
+impl From<&Bundle<Authorized>> for LegacyTransparentBundleBytes {
+    fn from(bundle: &Bundle<Authorized>) -> Self {
+        Self::from_parts(
+            bundle
+                .vin
+                .iter()
+                .map(LegacyTransparentInputBytes::from)
+                .collect(),
+            bundle
+                .vout
+                .iter()
+                .map(TransparentOutputBytes::from)
+                .collect(),
+        )
     }
 }
 
@@ -679,188 +796,15 @@ impl TransparentBundleBytes {
             None => Ok(()),
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Domain adaptation
-// ---------------------------------------------------------------------------
-
-/// Returns the raw bytes of a transparent script.
-///
-/// [`transparent::address::Script`] exposes its bytes through its public tuple
-/// representation; this helper keeps that detail in one place.
-fn script_bytes(script: &::transparent::address::Script) -> TransparentScriptBytes {
-    TransparentScriptBytes::from_bytes(script.0.0.clone())
-}
-
-/// Parses a raw script from its bytes.
-fn script_from_bytes(bytes: &TransparentScriptBytes) -> io::Result<::transparent::address::Script> {
-    // `Script::read` expects the CompactSize-prefixed encoding, so add the
-    // prefix that the byte representation omits.
-    let mut encoded = Vec::new();
-    Vector::write_bytes(&mut encoded, bytes.as_bytes())?;
-    let mut reader = &encoded[..];
-    let script = ::transparent::address::Script::read(&mut reader)?;
-    debug_assert!(reader.is_empty());
-    Ok(script)
-}
-
-/// Converts a raw output value to the domain type, applying the monetary range
-/// check that the byte layer deliberately does not enforce.
-fn output_value_from_bytes(value: TransparentOutputValueBytes) -> io::Result<Zatoshis> {
-    Zatoshis::from_nonnegative_i64_le_bytes(value.to_i64().to_le_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "output value out of range"))
-}
-
-impl From<&transparent::bundle::Bundle<transparent::bundle::Authorized>>
-    for LegacyTransparentBundleBytes
-{
-    fn from(bundle: &transparent::bundle::Bundle<transparent::bundle::Authorized>) -> Self {
-        Self {
-            inputs: bundle
-                .vin
-                .iter()
-                .map(|txin| {
-                    LegacyTransparentInputBytes::from_parts(
-                        TransparentOutPointBytes::from_parts(
-                            *txin.prevout().txid(),
-                            txin.prevout().n(),
-                        ),
-                        script_bytes(txin.script_sig()),
-                        txin.sequence(),
-                    )
-                })
-                .collect(),
-            outputs: bundle
-                .vout
-                .iter()
-                .map(|txout| {
-                    TransparentOutputBytes::from_parts(
-                        TransparentOutputValueBytes::from_i64(
-                            i64::try_from(u64::from(txout.value())).expect("Zatoshis fits in i64"),
-                        ),
-                        script_bytes(txout.script_pubkey()),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-impl LegacyTransparentBundleBytes {
-    /// Converts this byte representation to the transparent domain type.
-    ///
-    /// Returns `None` for an empty bundle, matching the representation used by
-    /// `TransactionData`. Returns an error if an output value is outside the
-    /// monetary range or a script is malformed.
-    pub fn to_authorized(
-        &self,
-    ) -> io::Result<Option<transparent::bundle::Bundle<transparent::bundle::Authorized>>> {
-        if self.is_empty() {
-            return Ok(None);
-        }
-
-        let vin = self
-            .inputs
-            .iter()
-            .map(|input| {
-                Ok(transparent::bundle::TxIn::from_parts(
-                    transparent::bundle::OutPoint::new(
-                        *input.prevout.hash().as_ref(),
-                        input.prevout.index(),
-                    ),
-                    script_from_bytes(input.script_sig())?,
-                    input.sequence,
-                ))
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-
-        let vout = self
-            .outputs
-            .iter()
-            .map(|output| {
-                Ok(transparent::bundle::TxOut::new(
-                    output_value_from_bytes(output.value())?,
-                    script_from_bytes(output.script_pubkey())?,
-                ))
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-
-        Ok(Some(transparent::bundle::Bundle {
-            vin,
-            vout,
-            authorization: transparent::bundle::Authorized,
-        }))
-    }
-}
-
-#[cfg(zcash_unstable = "nu8")]
-impl From<&transparent::bundle::Bundle<transparent::bundle::Authorized>>
-    for TransparentBundleBytes
-{
-    fn from(bundle: &transparent::bundle::Bundle<transparent::bundle::Authorized>) -> Self {
-        let effects = TransparentEffectsBytes::from_parts(
-            bundle
-                .vin
-                .iter()
-                .map(|txin| {
-                    TransparentInputEffectingBytes::from_parts(
-                        TransparentOutPointBytes::from_parts(
-                            *txin.prevout().txid(),
-                            txin.prevout().n(),
-                        ),
-                        txin.sequence(),
-                    )
-                })
-                .collect(),
-            bundle
-                .vout
-                .iter()
-                .map(|txout| {
-                    TransparentOutputBytes::from_parts(
-                        TransparentOutputValueBytes::from_i64(
-                            i64::try_from(u64::from(txout.value())).expect("Zatoshis fits in i64"),
-                        ),
-                        script_bytes(txout.script_pubkey()),
-                    )
-                })
-                .collect(),
-        );
-
-        let auth = if bundle.vin.is_empty() {
-            None
-        } else {
-            Some(TransparentAuthBytes::from_parts(
-                bundle
-                    .vin
-                    .iter()
-                    .map(|txin| {
-                        TransparentInputAuthBytes::from_parts(
-                            TransparentSighashInfoBytes::v0(),
-                            script_bytes(txin.script_sig()),
-                        )
-                    })
-                    .collect(),
-            ))
-        };
-
-        Self { effects, auth }
-    }
-}
-
-#[cfg(zcash_unstable = "nu8")]
-impl TransparentBundleBytes {
     /// Converts this byte representation to the transparent domain type.
     ///
     /// Returns an error for an empty bundle or for a present authorizing entry
     /// with no inputs: the domain type has no representation for either map
     /// presence, so accepting them would silently drop information that the
     /// digests commit to. Returns an error if an input's sighash info is not
-    /// version 0, an output value is outside the monetary range, or a script is
-    /// malformed.
-    pub fn to_authorized(
-        &self,
-    ) -> io::Result<Option<transparent::bundle::Bundle<transparent::bundle::Authorized>>> {
+    /// version 0 or an output value is outside the monetary range.
+    pub fn to_authorized(&self) -> io::Result<Option<Bundle<Authorized>>> {
         if self.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -905,12 +849,9 @@ impl TransparentBundleBytes {
                         "unsupported transparent sighash version",
                     ));
                 }
-                Ok(transparent::bundle::TxIn::from_parts(
-                    transparent::bundle::OutPoint::new(
-                        *input.prevout.hash().as_ref(),
-                        input.prevout.index(),
-                    ),
-                    script_from_bytes(auth.script_sig())?,
+                Ok(TxIn::from_parts(
+                    OutPoint::from(*input.prevout()),
+                    Script::from(auth.script_sig.clone()),
                     input.sequence,
                 ))
             })
@@ -920,27 +861,76 @@ impl TransparentBundleBytes {
             .effects
             .outputs
             .iter()
-            .map(|output| {
-                Ok(transparent::bundle::TxOut::new(
-                    output_value_from_bytes(output.value())?,
-                    script_from_bytes(output.script_pubkey())?,
-                ))
-            })
+            .cloned()
+            .map(TxOut::try_from)
             .collect::<io::Result<Vec<_>>>()?;
 
-        Ok(Some(transparent::bundle::Bundle {
+        Ok(Some(Bundle {
             vin,
             vout,
-            authorization: transparent::bundle::Authorized,
+            authorization: Authorized,
         }))
     }
 }
 
+#[cfg(zcash_unstable = "nu8")]
+impl From<&Bundle<Authorized>> for TransparentBundleBytes {
+    fn from(bundle: &Bundle<Authorized>) -> Self {
+        let effects = TransparentEffectsBytes::from_parts(
+            bundle
+                .vin
+                .iter()
+                .map(|txin| {
+                    TransparentInputEffectingBytes::from_parts(
+                        TransparentOutPointBytes::from(txin.prevout()),
+                        txin.sequence(),
+                    )
+                })
+                .collect(),
+            bundle
+                .vout
+                .iter()
+                .map(TransparentOutputBytes::from)
+                .collect(),
+        );
+
+        let auth = if bundle.vin.is_empty() {
+            None
+        } else {
+            Some(TransparentAuthBytes::from_parts(
+                bundle
+                    .vin
+                    .iter()
+                    .map(|txin| {
+                        TransparentInputAuthBytes::from_parts(
+                            TransparentSighashInfoBytes::v0(),
+                            TransparentScriptBytes::from(txin.script_sig()),
+                        )
+                    })
+                    .collect(),
+            ))
+        };
+
+        Self { effects, auth }
+    }
+}
+
+/// Converts a raw output value to the domain type, applying the monetary range
+/// check that the byte layer deliberately does not enforce.
+fn output_value_from_bytes(value: TransparentOutputValueBytes) -> io::Result<Zatoshis> {
+    Zatoshis::from_nonnegative_i64_le_bytes(value.to_i64().to_le_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "output value out of range"))
+}
+
 #[cfg(test)]
 mod tests {
-    use ::transparent::address::Script;
-    use ::transparent::bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut};
     use zcash_protocol::value::Zatoshis;
+    use zcash_script::script;
+
+    use crate::{
+        address::Script,
+        bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
+    };
 
     use super::*;
 
@@ -1368,5 +1358,42 @@ mod tests {
     fn domain_conversion_rejects_out_of_range_output_value() {
         let bundle = LegacyTransparentBundleBytes::from_parts(vec![], vec![output(-1, &[])]);
         assert!(bundle.to_authorized().is_err());
+    }
+
+    #[test]
+    fn domain_codecs_match_raw_encoding() {
+        let script = Script(script::Code(vec![0x51, 0x52]));
+        let txin = TxIn::from_parts(OutPoint::new([7; 32], 9), script.clone(), 42);
+        let txout = TxOut::new(Zatoshis::from_u64(1234).unwrap(), script);
+
+        let mut raw = Vec::new();
+        LegacyTransparentInputBytes::from(&txin)
+            .write(&mut raw)
+            .unwrap();
+        let mut domain = Vec::new();
+        txin.write(&mut domain).unwrap();
+        assert_eq!(raw, domain);
+        assert_eq!(TxIn::read(&mut &domain[..]).unwrap(), txin);
+
+        let mut raw = Vec::new();
+        TransparentOutputBytes::from(&txout)
+            .write(&mut raw)
+            .unwrap();
+        let mut domain = Vec::new();
+        txout.write(&mut domain).unwrap();
+        assert_eq!(raw, domain);
+        assert_eq!(TxOut::read(&mut &domain[..]).unwrap(), txout);
+    }
+
+    #[test]
+    fn txout_read_rejects_out_of_range_value() {
+        let mut encoded = Vec::new();
+        TransparentOutputValueBytes::from_i64(-1)
+            .write(&mut encoded)
+            .unwrap();
+        TransparentScriptBytes::from_bytes(vec![])
+            .write(&mut encoded)
+            .unwrap();
+        assert!(TxOut::read(&mut &encoded[..]).is_err());
     }
 }

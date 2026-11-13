@@ -47,7 +47,7 @@ use zcash_protocol::consensus::{BlockHeight, BranchId};
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 
-use super::{TxVersion, components::transparent::LegacyTransparentBundleBytes};
+use super::TxVersion;
 
 #[cfg(zcash_unstable = "nu8")]
 use {
@@ -63,6 +63,7 @@ mod coinbase;
 mod orchard;
 mod sapling;
 mod sprout;
+pub mod transparent;
 #[cfg(zcash_unstable = "nu8")]
 mod v7;
 #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
@@ -73,6 +74,10 @@ pub use self::{
     coinbase::CoinbaseBundleBytes,
     orchard::{OrchardSignatureBytes, V7OrchardBundleBytes},
     sapling::{SaplingSignatureBytes, SighashInfoBytes, V7SaplingBundleBytes},
+    transparent::{
+        TransparentAuthBytes, TransparentBundleBytes, TransparentEffectsBytes,
+        TransparentInputAuthBytes, TransparentInputEffectingBytes, TransparentSighashInfoBytes,
+    },
     v7::{
         AssetClass, OpaqueBundleBytes, V7BundleBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
     },
@@ -84,6 +89,10 @@ pub use self::{
         SaplingSpendV4Bytes, V4SaplingBundleBytes,
     },
     sprout::{SproutBundleBytes, SproutJoinSplitBytes, SproutProofBytes},
+    transparent::{
+        LegacyTransparentBundleBytes, LegacyTransparentInputBytes, TransparentOutPointBytes,
+        TransparentOutputBytes, TransparentOutputValueBytes, TransparentScriptBytes,
+    },
 };
 #[cfg(zcash_unstable = "nu8")]
 pub use crate::transaction::zip248::{BundleType, BundleVariant};
@@ -239,6 +248,28 @@ impl TransactionBytes {
             expiry_height,
             body,
         })
+    }
+
+    /// Constructs a transaction without checking consistency between its
+    /// version, header, and body.
+    ///
+    /// Version-specific typed writers use this when the requested body format
+    /// intentionally differs from the transaction's version field.
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    pub(crate) fn from_parts_unchecked(
+        version: TxVersion,
+        consensus_branch_id: Option<u32>,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        body: TransactionBodyBytes,
+    ) -> Self {
+        Self {
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            body,
+        }
     }
 
     /// Returns the transaction format version.
@@ -852,7 +883,7 @@ fn read_header_fragment<R: Read>(mut reader: R) -> io::Result<(u32, u32, BlockHe
 }
 
 /// Writes the header fields common to version 5 and later transactions.
-fn write_header_fragment<W: Write>(
+pub(crate) fn write_header_fragment<W: Write>(
     mut writer: W,
     consensus_branch_id: Option<u32>,
     lock_time: u32,
