@@ -305,6 +305,19 @@ pub(crate) struct Zip32Derivation {
 /// Implemented following the specification in [BIP 370], with the rationale that this
 /// makes integration of PCZTs simpler for codebases that already support PSBTs.
 ///
+/// Matches the algorithm of Bitcoin Core's reference implementation
+/// (`PartiallySignedTransaction::ComputeTimeLock`): an input that specifies only one
+/// of the two lock time types disables the other type for the transaction, while an
+/// input that specifies both (or neither) disables neither. If both types end up
+/// disabled, the inputs' requirements are incompatible and `None` is returned;
+/// otherwise the height lock time is preferred over the time lock time ([BIP 370]:
+/// "If a PSBT has both types of locktimes possible because one or more inputs specify
+/// both `required_time_locktime` and `required_height_locktime`, then a locktime
+/// determined by looking at the `required_height_locktime` fields of the inputs must
+/// be chosen"), and the result is the maximum of the chosen type, with a maximum of
+/// zero treated as no requirement. If no input specifies a lock time,
+/// `Global.fallback_lock_time` is used (0 if absent).
+///
 /// [BIP 370]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki#determining-lock-time
 pub fn determine_lock_time<L: LockTimeInput>(
     global: &crate::common::Global,
@@ -313,53 +326,54 @@ pub fn determine_lock_time<L: LockTimeInput>(
     // The nLockTime field of a transaction is determined by inspecting the
     // `Global.fallback_lock_time` and each input's `required_time_lock_time` and
     // `required_height_lock_time` fields.
-
-    // If one or more inputs have a `required_time_lock_time` or `required_height_lock_time`,
-    let have_required_lock_time = inputs.iter().any(|input| {
-        input.required_time_lock_time().is_some() || input.required_height_lock_time().is_some()
-    });
-    // then the field chosen is the one which is supported by all of the inputs. This can
-    // be determined by looking at all of the inputs which specify a locktime in either of
-    // those fields, and choosing the field which is present in all of those inputs.
-    // Inputs not specifying a lock time field can take both types of lock times, as can
-    // those that specify both.
-    let time_lock_time_unsupported = inputs
-        .iter()
-        .any(|input| input.required_height_lock_time().is_some());
-    let height_lock_time_unsupported = inputs
-        .iter()
-        .any(|input| input.required_time_lock_time().is_some());
-
-    // The lock time chosen is then the maximum value of the chosen type of lock time.
-    match (
-        have_required_lock_time,
-        time_lock_time_unsupported,
-        height_lock_time_unsupported,
-    ) {
-        (true, true, true) => None,
-        (true, false, true) => Some(
-            inputs
-                .iter()
-                .filter_map(|input| input.required_time_lock_time())
-                .max()
-                .expect("iterator is non-empty because have_required_lock_time is true"),
-        ),
-        // If a PSBT has both types of locktimes possible because one or more inputs
-        // specify both `required_time_lock_time` and `required_height_lock_time`, then a
-        // locktime determined by looking at the `required_height_lock_time` fields of the
-        // inputs must be chosen.
-        (true, _, false) => Some(
-            inputs
-                .iter()
-                .filter_map(|input| input.required_height_lock_time())
-                .max()
-                .expect("iterator is non-empty because have_required_lock_time is true"),
-        ),
-        // If none of the inputs have a `required_time_lock_time` and
-        // `required_height_lock_time`, then `Global.fallback_lock_time` must be used. If
-        // `Global.fallback_lock_time` is not provided, then it is assumed to be 0.
-        (false, _, _) => Some(global.fallback_lock_time.unwrap_or(0)),
+    let mut time_lock: Option<u32> = Some(0);
+    let mut height_lock: Option<u32> = Some(0);
+    for input in inputs {
+        let required_time = input.required_time_lock_time();
+        let required_height = input.required_height_lock_time();
+        match (required_time, required_height) {
+            // This input can only take a time lock time, so the transaction can no
+            // longer have a height lock time.
+            (Some(_), None) => {
+                height_lock = None;
+                time_lock?;
+            }
+            // This input can only take a height lock time, so the transaction can no
+            // longer have a time lock time.
+            (None, Some(_)) => {
+                time_lock = None;
+                height_lock?;
+            }
+            // An input that specifies both lock time types, or neither, can take
+            // both, so neither type is disabled.
+            _ => {}
+        }
+        if let Some(t) = required_time
+            && let Some(lock) = time_lock.as_mut()
+        {
+            *lock = (*lock).max(t);
+        }
+        if let Some(h) = required_height
+            && let Some(lock) = height_lock.as_mut()
+        {
+            *lock = (*lock).max(h);
+        }
     }
+
+    if let Some(h) = height_lock
+        && h > 0
+    {
+        return Some(h);
+    }
+    if let Some(t) = time_lock
+        && t > 0
+    {
+        return Some(t);
+    }
+    // If none of the inputs have a `required_time_lock_time` and
+    // `required_height_lock_time`, then `Global.fallback_lock_time` must be used. If
+    // `Global.fallback_lock_time` is not provided, then it is assumed to be 0.
+    Some(global.fallback_lock_time.unwrap_or(0))
 }
 
 pub trait LockTimeInput {
@@ -560,6 +574,117 @@ mod tests {
                 expected
             );
             assert_eq!(b.merge(a).map(|global| global.tx_modifiable), expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod determine_lock_time_tests {
+    use alloc::vec::Vec;
+
+    use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
+
+    use super::{Global, LockTimeInput, determine_lock_time};
+
+    #[derive(Default)]
+    struct TestInput {
+        time: Option<u32>,
+        height: Option<u32>,
+    }
+
+    impl LockTimeInput for TestInput {
+        fn required_time_lock_time(&self) -> Option<u32> {
+            self.time
+        }
+
+        fn required_height_lock_time(&self) -> Option<u32> {
+            self.height
+        }
+    }
+
+    fn global(fallback_lock_time: Option<u32>) -> Global {
+        Global {
+            tx_version: V5_TX_VERSION,
+            version_group_id: V5_VERSION_GROUP_ID,
+            consensus_branch_id: 0,
+            fallback_lock_time,
+            expiry_height: 0,
+            coin_type: 0,
+            tx_modifiable: 0,
+            proprietary: Default::default(),
+        }
+    }
+
+    /// The full truth table of BIP 370's lock time determination, matching Bitcoin
+    /// Core's `PartiallySignedTransaction::ComputeTimeLock`. The "input specifies
+    /// both" rows are the regression this guards: they used to be reported as
+    /// incompatible (`None`) even though BIP 370 requires the height lock time.
+    #[test]
+    fn follows_bip_370() {
+        let t = |time, height| TestInput { time, height };
+
+        // Each case is (inputs, fallback_lock_time, expected).
+        for (inputs, fallback, expected) in [
+            // No input specifies a lock time: the fallback is used.
+            (vec![t(None, None)], None, Some(0)),
+            (vec![t(None, None)], Some(42), Some(42)),
+            // Only time lock times are required: the maximum is used.
+            (
+                vec![t(Some(100), None), t(Some(200), None)],
+                Some(42),
+                Some(200),
+            ),
+            // Only height lock times are required: the maximum is used.
+            (
+                vec![t(None, Some(50)), t(None, Some(75))],
+                Some(42),
+                Some(75),
+            ),
+            // A time-only input and a height-only input are incompatible.
+            (vec![t(Some(100), None), t(None, Some(50))], Some(42), None),
+            (vec![t(None, Some(50)), t(Some(100), None)], Some(42), None),
+            // An input that specifies both types can take either (BIP 370:
+            // "Inputs not specifying a lock time field can take both types of
+            // lock times, as can those that specify both."), so on its own the
+            // height lock time is chosen (BIP 370's final rule).
+            (vec![t(Some(100), Some(50))], Some(42), Some(50)),
+            // Both-specifying plus time-only: time is the only type supported by
+            // every input.
+            (
+                vec![t(Some(100), Some(50)), t(Some(200), None)],
+                Some(42),
+                Some(200),
+            ),
+            // Both-specifying plus height-only: height is the only type supported
+            // by every input.
+            (
+                vec![t(Some(100), Some(50)), t(None, Some(75))],
+                Some(42),
+                Some(75),
+            ),
+            // Both-specifying plus an input that specifies neither.
+            (
+                vec![t(Some(100), Some(50)), t(None, None)],
+                Some(42),
+                Some(50),
+            ),
+            // A zero requirement does not force a zero lock time (matching
+            // Bitcoin Core, which treats a maximum of zero as no requirement),
+            // so the fallback is consulted; a nonzero fallback must be returned
+            // here, not the zero that an implementation returning the explicit
+            // maximum would produce.
+            (vec![t(None, Some(0))], Some(42), Some(42)),
+        ] {
+            assert_eq!(
+                determine_lock_time(&global(fallback), &inputs),
+                expected,
+                "inputs: {:?}, fallback: {:?}",
+                inputs
+                    .iter()
+                    .map(|i| (i.time, i.height))
+                    .collect::<Vec<_>>(),
+                fallback,
+            );
         }
     }
 }

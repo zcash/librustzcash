@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `determine_lock_time` now follows BIP 370 (and Bitcoin Core's reference
+  implementation) for inputs that specify both `required_time_lock_time` and
+  `required_height_lock_time`: such an input supports both lock time types, so
+  the transaction's lock time is determined normally (preferring the height lock
+  time) instead of being reported as an incompatibility. Transaction extraction
+  no longer fails with `ExtractError::IncompatibleLockTimes` for PCZTs whose
+  inputs specify both lock time fields.
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet
