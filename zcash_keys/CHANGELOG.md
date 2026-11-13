@@ -16,6 +16,9 @@ workspace.
   `unstable` feature)
 - `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
   `test-dependencies` feature)
+- `zcash_keys::keys::BirthdayHeightError`
+- `zcash_keys::keys::UnifiedFullViewingKey::{birthday_height, with_birthday_height}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::{birthday_height, with_birthday_height}`
 
 ### Changed
 - `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
@@ -30,6 +33,14 @@ workspace.
     present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
     non-empty subset of the components. `from_bytes` now reads the entire
     input, and returns an error for trailing data or a repeated typecode.
+- `zcash_keys::address::UnifiedAddress` decoding omits a metadata item with typecode
+  `0xC0` (ZIP 316 Viewing Key Birthday Height), so the decoded address no longer
+  holds it and does not re-encode it.
+- `zcash_keys::keys::UnifiedFullViewingKey` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey` decode a metadata item with typecode
+  `0xC0` as the key's birthday height instead of as unknown metadata, and
+  `UnifiedFullViewingKey::to_unified_incoming_viewing_key` keeps the birthday
+  height in the derived key.
 
 ## [0.17.0-keystone.0] - 2026-11-10
 

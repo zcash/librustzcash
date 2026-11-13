@@ -3883,7 +3883,10 @@ pub trait WalletWrite:
     /// - `account_name`: A human-readable name for the account.
     /// - `unified_key`: The UFVK used to detect transactions involving the account.
     /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
-    ///   for the account.
+    ///   for the account. The wallet uses this value as the account's birthday, and ignores any
+    ///   birthday height that `unified_key` holds (see [`UnifiedFullViewingKey::birthday_height`]).
+    ///   To use the key's birthday height, construct this value from the tree state for the block
+    ///   immediately before that height, for example with [`AccountBirthday::from_treestate`].
     /// - `purpose`: Metadata describing whether or not data required for spending should be
     ///   tracked by the wallet.
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.

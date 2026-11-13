@@ -247,11 +247,14 @@ mod tests {
         fn arb_unified_ivk()(
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
+            birthday_height in prop::option::of(any::<u32>()),
         ) -> Uivk {
+            // Revision 0 permits a birthday height, because it is not MUST-understand.
             let mut items: Vec<Uitem<Ivk>> = transparent
                 .into_iter()
                 .chain(shielded)
                 .map(Uitem::Data)
+                .chain(birthday_height.map(|h| Uitem::Metadata(MetadataItem::BirthdayHeight(h))))
                 .collect();
             items.sort_unstable_by(Uitem::encoding_order);
             Uivk {
@@ -263,16 +266,27 @@ mod tests {
 
     use crate::kind::unified::MetadataItem;
 
+    /// Generates metadata items in which a birthday height, if present together with an
+    /// expiry height, is not greater than that expiry height.
     fn arb_metadata_items() -> impl Strategy<Value = Vec<Uitem<Ivk>>> {
         (
-            prop::option::of(
-                any::<u32>().prop_map(|h| Uitem::Metadata(MetadataItem::ExpiryHeight(h))),
-            ),
-            prop::option::of(
-                any::<u64>().prop_map(|t| Uitem::Metadata(MetadataItem::ExpiryTime(t))),
-            ),
+            prop::option::of(any::<u32>()),
+            prop::option::of(any::<u32>()),
+            prop::option::of(any::<u64>()),
         )
-            .prop_map(|(h, t)| h.into_iter().chain(t).collect())
+            .prop_map(|(birthday, expiry, time)| {
+                let (birthday, expiry) = match (birthday, expiry) {
+                    (Some(b), Some(e)) => (Some(b.min(e)), Some(b.max(e))),
+                    other => other,
+                };
+                birthday
+                    .map(MetadataItem::BirthdayHeight)
+                    .into_iter()
+                    .chain(expiry.map(MetadataItem::ExpiryHeight))
+                    .chain(time.map(MetadataItem::ExpiryTime))
+                    .map(Uitem::Metadata)
+                    .collect()
+            })
     }
 
     prop_compose! {

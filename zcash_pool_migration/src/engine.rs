@@ -1551,7 +1551,7 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
 /// Plan a migration for the account the `backend` represents: decompose its spendable balance into
 /// canonical denominations, plan the preparation transactions that mint the self-funding notes, and
 /// schedule the phase-2 transfers. The canonical ZIP-317 fees are computed here, once, from the two
-/// canonical transaction shapes — the padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation transaction and
+/// canonical transaction shapes — the padded [`PREP_TX_ACTIONS`]-action preparation transaction and
 /// the 2-Orchard + 1-Ironwood-action transfer — and reused throughout planning; the fee rule is fixed (ZIP 318 requires
 /// the canonical fee, since a nonstandard fee would partition the anonymity set), so it is not a
 /// parameter. The decomposition reserves the TRUE preparation cost at each step, consulting the
@@ -2855,8 +2855,7 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// # The proving-time boundary re-draw
 ///
 /// The persisted boundary is PROVISIONAL for a dependency-funded transfer: the schedule drew it
-/// before the funding preparation mined, from an estimate of when it would
-/// ([`EST_PREP_LAYER_MINING_BLOCKS`]), and preparations routinely out-mine that estimate — a
+/// before the funding preparation mined, from an estimate of when it would, and preparations routinely out-mine that estimate — a
 /// wallet asleep through one broadcast window delays every layer behind it. A funding note mined
 /// PAST the drawn boundary does not exist in the boundary's tree state, so no witness can ever be
 /// computed there: proving against it defers forever rather than failing. ZIP 318 makes anchor
@@ -2864,8 +2863,7 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// prover this function re-validates it against the funding preparations' REAL mined heights
 /// (from the migration's own state) and, when the funding note postdates it, re-draws the
 /// boundary from the note's actual creation height and `scanned_tip` — the chain tip the wallet
-/// has observed and can witness at — persisting the fresh draw on the row
-/// ([`MigrationState::set_transfer_anchor_boundary`]). The re-draw is sound for a `Signed`
+/// has observed and can witness at — persisting the fresh draw on the row. The re-draw is sound for a `Signed`
 /// transfer by construction: the PCZT's anchor and witnesses are deferred to proving (ZIP 374),
 /// so nothing about the stored artifact pins the old boundary. When no grid boundary at or past
 /// the funding note's creation has settled within `scanned_tip` yet, there is nothing valid to
