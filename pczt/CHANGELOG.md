@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `pczt::sapling::v1`: decoding a v1-encoded Sapling bundle now restores the
+  logical `anchor: None` where the v1 encoder had substituted its placeholder,
+  instead of materializing the placeholder as a real anchor. This mirrors the
+  v1 anchor normalization that the Orchard decoder already applies, restoring
+  the invariant that all decode paths produce exactly the canonical empty
+  bundle, so that copies of a PCZT that take different serialization paths
+  continue to merge and compare equal.
+- Parsing a Sapling bundle with no spends no longer requires the bundle's
+  anchor to be set. A spend-less bundle does not carry an anchor in the v5
+  transaction format, and nothing in it depends on the anchor's value, so
+  roles that require the anchor for spends (the Prover, the Signer, the IO
+  Finalizer, and the Transaction Extractor) now parse spend-less bundles with
+  an absent anchor, substituting a placeholder. Parsing a spend-carrying
+  bundle without an anchor still fails with `MissingAnchor`.
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet

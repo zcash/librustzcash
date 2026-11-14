@@ -79,12 +79,14 @@ impl AnchorRequirement {
     }
 
     /// Resolves a shielded bundle's wire `anchor` to the anchor that should be used
-    /// when parsing it, given whether the bundle has no transaction items (no Sapling
-    /// spends or outputs, or no Orchard-protocol actions).
+    /// when parsing it, given whether the bundle has no transaction items that
+    /// depend on the anchor (no Sapling spends, or no Orchard-protocol actions;
+    /// shielded outputs never depend on the anchor).
     ///
     /// Returns `None` to mean "the anchor is absent and required"; callers should map
-    /// that case to their own missing-anchor error. An absent anchor on an empty bundle
-    /// resolves to [`PLACEHOLDER_ANCHOR`], since there is nothing to prove or extract.
+    /// that case to their own missing-anchor error. An absent anchor on such a
+    /// spend-less bundle resolves to [`PLACEHOLDER_ANCHOR`], since the anchor's
+    /// value is never used.
     pub(crate) fn resolve(
         self,
         anchor: Option<[u8; 32]>,
