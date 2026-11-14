@@ -341,7 +341,6 @@ mod tests {
         Creator::new(BranchId::Nu6_3.into(), expiry_height, 133, None, None)
             .unwrap()
             .build()
-            .unwrap()
     }
 
     fn v5_pczt(expiry_height: u32) -> Pczt {
@@ -354,7 +353,6 @@ mod tests {
         )
         .unwrap()
         .build()
-        .unwrap()
     }
 
     #[test]

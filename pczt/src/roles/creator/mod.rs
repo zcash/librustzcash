@@ -38,10 +38,6 @@ const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
 /// Errors that can occur when creating a PCZT.
 #[derive(Debug)]
 pub enum Error {
-    /// A v5 transaction's shielded bundle anchors must be set by the Creator,
-    /// because they are transaction effecting data and cannot subsequently
-    /// change.
-    AnchorRequiredForV5,
     /// The transaction version implied by the consensus branch ID does not carry an
     /// Ironwood bundle.
     IronwoodNotSupported,
@@ -89,9 +85,17 @@ impl Creator {
     ///
     /// The transaction version is implied by the consensus branch ID: the v6
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
-    /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
-    /// [`Option::Some`]. For V6 and later transactions, either anchor may be
-    /// [`Option::None`] and restored later.
+    ///
+    /// For v5 transactions, an anchor may be [`Option::None`] while the
+    /// corresponding bundle is empty (a v5 transaction only carries an anchor for
+    /// a bundle with spends), but must be set by the time the bundle gains spends
+    /// or actions: the v5 signature hash commits to the anchor via the spends
+    /// digest, and it cannot subsequently change. For V6 and later transactions,
+    /// either anchor may be [`Option::None`] and restored later.
+    ///
+    /// `Creator::build` starts from empty bundles, so [`Option::None`] is
+    /// accepted here; the requirement is enforced once the bundle has data, by the
+    /// anchor requirement of the role consuming the PCZT.
     ///
     /// # Errors
     ///
@@ -227,12 +231,10 @@ impl Creator {
 
     /// Builds the initial PCZT.
     ///
-    /// # Errors
-    ///
-    /// Returns [`Error::AnchorRequiredForV5`] if this Creator describes a v5
-    /// transaction and either the Sapling anchor is missing from a bundle with
-    /// spends, or the Orchard anchor is missing from a bundle with actions.
-    pub fn build(self) -> Result<Pczt, Error> {
+    /// The bundles start empty, so the PCZT's anchors may be absent here (a v5
+    /// transaction only carries an anchor for a bundle with spends); see
+    /// [`Creator::new`] for when they must be set.
+    pub fn build(self) -> Pczt {
         let sapling = crate::sapling::Bundle {
             spends: vec![],
             outputs: vec![],
@@ -257,14 +259,12 @@ impl Creator {
             bsk: None,
         };
 
-        if self.tx_version == V5_TX_VERSION
-            && ((sapling.anchor.is_none() && !sapling.spends.is_empty())
-                || (orchard.anchor.is_none() && !orchard.actions.is_empty()))
-        {
-            return Err(Error::AnchorRequiredForV5);
-        }
+        // A v5 transaction only carries an anchor for a bundle with spends, so a
+        // v5 PCZT may be created with absent anchors while its bundles are empty;
+        // the requirement that they be set by the time spends or actions are added
+        // is enforced by the anchor requirement of the role consuming the PCZT.
 
-        Ok(Pczt {
+        Pczt {
             global: crate::common::Global {
                 tx_version: self.tx_version,
                 version_group_id: self.version_group_id,
@@ -286,7 +286,7 @@ impl Creator {
                 anchor: self.ironwood_anchor,
                 ..crate::orchard::EMPTY_IRONWOOD
             },
-        })
+        }
     }
 
     /// Builds a PCZT from the output of a [`Builder`].
@@ -371,8 +371,7 @@ mod tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         assert_eq!(pczt.global.tx_version, V5_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V5_VERSION_GROUP_ID);
 
@@ -384,8 +383,7 @@ mod tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V6_VERSION_GROUP_ID);
 
@@ -399,8 +397,7 @@ mod tests {
                 Some([0; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
             assert_eq!(pczt.global.tx_version, V7_TX_VERSION);
             assert_eq!(pczt.global.version_group_id, V7_VERSION_GROUP_ID);
         }
@@ -410,22 +407,19 @@ mod tests {
     fn optional_anchors_are_supported_for_empty_bundles() {
         let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, None, Some([0; 32]))
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         assert!(pczt.sapling.anchor.is_none());
         assert_eq!(pczt.orchard.anchor, Some([0; 32]));
 
         let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, Some([0; 32]), None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         assert_eq!(pczt.sapling.anchor, Some([0; 32]));
         assert!(pczt.orchard.anchor.is_none());
 
         let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
 
         assert!(pczt.sapling.anchor.is_none());
         assert!(pczt.orchard.anchor.is_none());
@@ -456,8 +450,7 @@ mod tests {
         .unwrap()
         .with_ironwood_anchor([1; 32])
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         assert_eq!(pczt.ironwood.anchor, Some([1; 32]));
     }
 }

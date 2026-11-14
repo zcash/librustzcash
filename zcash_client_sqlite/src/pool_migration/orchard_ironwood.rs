@@ -1028,7 +1028,6 @@ mod check_step_satisfiability {
         )
         .expect("NU6.3 is a supported branch")
         .build()
-        .expect("a v6 PCZT may carry an Orchard anchor with no actions")
         .serialize()
         .expect("the PCZT serializes")
     }

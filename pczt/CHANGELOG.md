@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `pczt::roles::creator::Creator::build` now returns `Pczt` directly instead
+  of `Result<Pczt, Error>`: the v5 anchor validation it existed for never
+  fired, because it checked the anchor against the empty bundles that `build`
+  itself constructs, so the method could not fail.
+
+### Removed
+- `pczt::roles::creator::Error::AnchorRequiredForV5`, which was unreachable
+  since its introduction. `Creator::new`'s documentation now matches the
+  tested behavior: for v5 transactions an anchor may be absent while the
+  corresponding bundle is empty (a v5 transaction only carries an anchor for
+  a bundle with spends); it must be set by the time the bundle gains spends
+  or actions, which the anchor requirement of the role consuming the PCZT
+  enforces.
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet

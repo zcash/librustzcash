@@ -61,8 +61,7 @@ mod tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
 
         // Extraction fails because we haven't run the IO Finalizer.
         // Extraction fails in Sapling because we happen to extract it before Orchard.
@@ -87,8 +86,7 @@ mod tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
 
         // IO finalization fails on spends because we happen to check them first.
         assert!(matches!(

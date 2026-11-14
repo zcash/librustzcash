@@ -74,8 +74,7 @@ mod tests {
     fn create_sapling_proofs_fails_when_anchor_absent() {
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         // A non-empty bundle whose anchor is absent MUST be rejected with a typed
         // error before proving is attempted, rather than panicking.
         pczt.sapling.spends.push(Spend {
@@ -115,8 +114,7 @@ mod tests {
     fn create_sapling_proofs_preserves_absent_anchor_for_untouched_bundle() {
         let pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
 
         let prover = LocalTxProver::bundled();
         let pczt = Prover::new(pczt)
