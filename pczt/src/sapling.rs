@@ -498,13 +498,149 @@ pub(crate) mod v1 {
 
     impl From<Bundle> for super::Bundle {
         fn from(bundle: Bundle) -> Self {
+            // The v1 encoding has no placeholder for a missing anchor, so the v1
+            // encoder substitutes `DEFAULT_ANCHOR` wherever the bundle has no
+            // spends (an empty bundle, or an output-only bundle whose anchor is
+            // absent from the transaction itself: the v5 transaction format only
+            // carries `anchorSapling` when it has Sapling spends). Undo that
+            // substitution here so that decoding reproduces the logical original
+            // exactly, mirroring the normalization the Orchard decoder applies
+            // for the same case, and the `is_default_empty` treatment the v2
+            // encoder applies.
+            //
+            // This is unambiguous: a real anchor is a root of the Sapling note
+            // commitment tree, and the empty-tree root (the only root a spend-less
+            // bundle could plausibly carry) is non-zero, so an all-zero anchor is
+            // only ever the encoder's placeholder.
+            let anchor = if bundle.spends.is_empty() && bundle.anchor == super::DEFAULT_ANCHOR {
+                None
+            } else {
+                Some(bundle.anchor)
+            };
+
             Self {
                 spends: bundle.spends,
                 outputs: bundle.outputs,
                 value_sum: bundle.value_sum,
-                anchor: Some(bundle.anchor),
+                anchor,
                 bsk: bundle.bsk,
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{Bundle as LogicalBundle, Output, Spend};
+        use super::Bundle;
+        use alloc::{collections::BTreeMap, vec::Vec};
+
+        /// A minimal logical Sapling bundle with the given anchor, spend, and
+        /// output. The spend's and output's required fields are filler bytes: the
+        /// v1 conversions under test move them without validating, so they are
+        /// never parsed as Sapling types.
+        fn logical_bundle(
+            anchor: Option<[u8; 32]>,
+            with_spend: bool,
+            with_output: bool,
+        ) -> LogicalBundle {
+            LogicalBundle {
+                spends: if with_spend {
+                    vec![Spend {
+                        cv: [0; 32],
+                        nullifier: [1; 32],
+                        rk: [2; 32],
+                        zkproof: None,
+                        spend_auth_sig: None,
+                        recipient: None,
+                        value: None,
+                        rcm: None,
+                        rseed: None,
+                        rcv: None,
+                        proof_generation_key: None,
+                        witness: None,
+                        alpha: None,
+                        zip32_derivation: None,
+                        dummy_ask: None,
+                        proprietary: BTreeMap::new(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                outputs: if with_output {
+                    vec![Output {
+                        cv: [3; 32],
+                        cmu: [4; 32],
+                        ephemeral_key: [5; 32],
+                        enc_ciphertext: Vec::new(),
+                        out_ciphertext: Vec::new(),
+                        zkproof: None,
+                        recipient: None,
+                        value: None,
+                        rseed: None,
+                        rcv: None,
+                        ock: None,
+                        zip32_derivation: None,
+                        user_address: None,
+                        proprietary: BTreeMap::new(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                value_sum: 0,
+                anchor,
+                bsk: None,
+            }
+        }
+
+        /// A v1-encoded empty bundle carries the encoder's placeholder anchor, and
+        /// decoding must undo that substitution, reproducing the canonical empty
+        /// bundle exactly (whose anchor is `None`) so that copies of a PCZT that
+        /// take different serialization paths continue to merge and compare equal.
+        #[test]
+        fn v1_empty_bundle_anchor_round_trips_as_none() {
+            let bundle = logical_bundle(None, false, false);
+
+            let encoded = Bundle::try_from(bundle.clone())
+                .expect("an empty bundle's anchor falls back to DEFAULT_ANCHOR");
+            assert_eq!(encoded.anchor, super::super::DEFAULT_ANCHOR);
+
+            let decoded = LogicalBundle::from(encoded);
+            assert_eq!(decoded, bundle);
+            assert!(decoded.anchor.is_none());
+        }
+
+        /// An output-only bundle has no anchor in the v5 transaction format
+        /// (`anchorSapling` is present only when the bundle has Sapling spends),
+        /// so the v1 encoder substitutes the placeholder for its absent anchor
+        /// too; decoding must likewise restore `None`.
+        #[test]
+        fn v1_output_only_bundle_anchor_round_trips_as_none() {
+            let bundle = logical_bundle(None, false, true);
+
+            let encoded = Bundle::try_from(bundle.clone())
+                .expect("an output-only bundle's absent anchor falls back to DEFAULT_ANCHOR");
+            assert_eq!(encoded.anchor, super::super::DEFAULT_ANCHOR);
+
+            let decoded = LogicalBundle::from(encoded);
+            assert_eq!(decoded, bundle);
+            assert!(decoded.anchor.is_none());
+        }
+
+        /// A bundle with spends requires its anchor to be representable in the v1
+        /// encoding, and a present anchor round-trips unchanged: the placeholder
+        /// substitution only ever applies to spend-less bundles.
+        #[test]
+        fn v1_spending_bundle_requires_and_preserves_anchor() {
+            // An absent anchor with spends present cannot be encoded as v1.
+            assert!(matches!(
+                Bundle::try_from(logical_bundle(None, true, false)),
+                Err(crate::EncodingError::RequiresV2)
+            ));
+
+            let bundle = logical_bundle(Some([7; 32]), true, false);
+            let encoded = Bundle::try_from(bundle.clone()).unwrap();
+            assert_eq!(encoded.anchor, [7; 32]);
+            assert_eq!(LogicalBundle::from(encoded), bundle);
         }
     }
 }

@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `pczt::sapling::v1`: decoding a v1-encoded Sapling bundle now restores the
+  logical `anchor: None` where the v1 encoder had substituted its placeholder,
+  instead of materializing the placeholder as a real anchor. This mirrors the
+  v1 anchor normalization that the Orchard decoder already applies, restoring
+  the invariant that all decode paths produce exactly the canonical empty
+  bundle, so that copies of a PCZT that take different serialization paths
+  continue to merge and compare equal.
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet
