@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `pczt::roles::creator::Creator::build` now returns `Pczt` directly instead
+  of `Result<Pczt, Error>`: the v5 anchor validation it existed for never
+  fired, because it checked the anchor against the empty bundles that `build`
+  itself constructs, so the method could not fail.
+
+### Removed
+- `pczt::roles::creator::Error::AnchorRequiredForV5`, which was unreachable
+  since its introduction; the v5 anchor contract is documented on
+  `Creator::new`.
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet
