@@ -440,8 +440,9 @@ mod param_bounds_tests {
     /// `minimal`'s u32 accumulator permits.
     #[test]
     fn supported_params_are_still_accepted() {
-        // (64, 8) has the narrowest collision bit width (8) that the leaf
-        // expansion accepts; it exercises the lower boundary of the check.
+        // (64, 7) has the narrowest collision bit width (n / (k + 1) = 8)
+        // that the leaf expansion accepts; it exercises the lower boundary of
+        // the check.
         for (n, k) in [
             (200, 9),
             (144, 5),
