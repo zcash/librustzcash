@@ -18,12 +18,8 @@ workspace.
 
 ### Removed
 - `pczt::roles::creator::Error::AnchorRequiredForV5`, which was unreachable
-  since its introduction. `Creator::new`'s documentation now matches the
-  tested behavior: for v5 transactions an anchor may be absent while the
-  corresponding bundle is empty (a v5 transaction only carries an anchor for
-  a bundle with spends); it must be set by the time the bundle gains spends
-  or actions, which the anchor requirement of the role consuming the PCZT
-  enforces.
+  since its introduction; the v5 anchor contract is documented on
+  `Creator::new`.
 
 ## [0.10.0-keystone.0] - 2026-11-10
 

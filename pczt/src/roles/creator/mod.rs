@@ -87,15 +87,20 @@ impl Creator {
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
     ///
     /// For v5 transactions, an anchor may be [`Option::None`] while the
-    /// corresponding bundle is empty (a v5 transaction only carries an anchor for
-    /// a bundle with spends), but must be set by the time the bundle gains spends
-    /// or actions: the v5 signature hash commits to the anchor via the spends
-    /// digest, and it cannot subsequently change. For V6 and later transactions,
-    /// either anchor may be [`Option::None`] and restored later.
+    /// corresponding bundle is empty, and must be set by the time the bundle
+    /// carries data that requires it. What data requires it differs per pool,
+    /// per the v5 transaction format:
+    /// - Sapling: `anchorSapling` is only carried when the bundle has spends.
+    /// - Orchard: `anchorOrchard` is carried whenever the bundle has any
+    ///   actions, including actions with spends disabled.
+    ///
+    /// The v5 signature hash commits to these anchors, so they cannot
+    /// subsequently change. For V6 and later transactions, either anchor may
+    /// be [`Option::None`] and restored later.
     ///
     /// `Creator::build` starts from empty bundles, so [`Option::None`] is
-    /// accepted here; the requirement is enforced once the bundle has data, by the
-    /// anchor requirement of the role consuming the PCZT.
+    /// accepted here; the requirement is enforced once the bundle has data, by
+    /// the anchor requirement of the role consuming the PCZT.
     ///
     /// # Errors
     ///
@@ -231,8 +236,7 @@ impl Creator {
 
     /// Builds the initial PCZT.
     ///
-    /// The bundles start empty, so the PCZT's anchors may be absent here (a v5
-    /// transaction only carries an anchor for a bundle with spends); see
+    /// The bundles start empty, so the PCZT's anchors may be absent here; see
     /// [`Creator::new`] for when they must be set.
     pub fn build(self) -> Pczt {
         let sapling = crate::sapling::Bundle {
@@ -259,10 +263,11 @@ impl Creator {
             bsk: None,
         };
 
-        // A v5 transaction only carries an anchor for a bundle with spends, so a
-        // v5 PCZT may be created with absent anchors while its bundles are empty;
-        // the requirement that they be set by the time spends or actions are added
-        // is enforced by the anchor requirement of the role consuming the PCZT.
+        // A v5 transaction carries a shielded bundle's anchor only once the bundle
+        // has the data that requires it (Sapling spends, or any Orchard
+        // actions), so a v5 PCZT may be created with absent anchors while its
+        // bundles are empty; the requirement is enforced by the anchor
+        // requirement of the role consuming the PCZT.
 
         Pczt {
             global: crate::common::Global {
