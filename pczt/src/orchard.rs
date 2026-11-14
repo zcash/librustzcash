@@ -1533,8 +1533,7 @@ pub(crate) mod v2 {
                 Some([0; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
             pczt.orchard
                 .actions
                 .push(decryptable_action_with_memo(memo));

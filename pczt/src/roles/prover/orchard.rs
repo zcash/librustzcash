@@ -134,8 +134,7 @@ mod tests {
     fn create_orchard_proof_fails_when_anchor_absent() {
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         pczt.orchard.actions.push(dummy_action());
 
         assert!(matches!(
@@ -150,8 +149,7 @@ mod tests {
     fn create_ironwood_proof_fails_when_anchor_absent() {
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         pczt.ironwood.actions.push(dummy_action());
 
         assert!(matches!(
@@ -169,8 +167,7 @@ mod tests {
     fn create_orchard_proof_preserves_absent_anchor_for_untouched_bundle() {
         let pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
 
         let pczt = Prover::new(pczt)
             .create_orchard_proof(UnwrapErr(SysRng), proving_key())
@@ -191,8 +188,7 @@ mod tests {
     fn create_ironwood_proof_preserves_absent_anchor_for_untouched_bundle() {
         let pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
 
         let pczt = Prover::new(pczt)
             .create_ironwood_proof(UnwrapErr(SysRng), proving_key())

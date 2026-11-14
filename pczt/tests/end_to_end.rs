@@ -1094,8 +1094,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
     }
 
     if matches!(pool, ShieldedPool::Orchard) {
@@ -1107,8 +1106,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             Some([9; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
     }
 
     let transparent_account_sk =
@@ -2083,8 +2081,7 @@ fn anchor_setters_reject_unsupported_transaction_formats() {
         Some(orchard_anchor.to_bytes()),
     )
     .unwrap()
-    .build()
-    .unwrap();
+    .build();
 
     assert!(matches!(
         Updater::new(pczt.clone()).set_sapling_anchor(sapling_anchor),
@@ -2377,8 +2374,7 @@ fn redacted_anchor_is_not_resolved() {
         Some([9; 32]),
     )
     .unwrap()
-    .build()
-    .unwrap();
+    .build();
 
     let mut redacted = Redactor::new(pczt)
         .redact_orchard_with(|mut r| {
