@@ -672,8 +672,9 @@ impl Bundle {
     ///
     /// If the bundle's `anchor` is absent and `anchor_requirement` is
     /// [`AnchorRequirement::Required`], returns [`ParseError::MissingAnchor`] unless the
-    /// bundle has no spends or outputs (in which case there is nothing to prove or
-    /// extract).
+    /// bundle has no spends (a bundle without spends does not carry an anchor in the
+    /// v5 transaction format, and nothing in a spend-less bundle depends on the
+    /// anchor's value).
     ///
     /// [`AnchorRequirement::Required`]: crate::common::AnchorRequirement::Required
     pub(crate) fn into_parsed(
@@ -682,10 +683,7 @@ impl Bundle {
     ) -> Result<Parsed, ParseError> {
         let wire_anchor = self.anchor;
         let anchor = anchor_requirement
-            .resolve(
-                wire_anchor,
-                self.spends.is_empty() && self.outputs.is_empty(),
-            )
+            .resolve(wire_anchor, self.spends.is_empty())
             .ok_or(ParseError::MissingAnchor)?;
 
         let spends = self
@@ -963,7 +961,7 @@ impl Parsed {
 mod tests {
     use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-    use super::{Bundle, ParseError};
+    use super::{Bundle, ParseError, Spend};
     use crate::common::AnchorRequirement;
 
     fn output_only_bundle() -> Bundle {
@@ -993,12 +991,84 @@ mod tests {
         bundle
     }
 
+    /// A bundle with spends still requires its anchor: parsing a spend-carrying
+    /// bundle without one fails with a typed error rather than proceeding (the
+    /// anchor check happens before the spends are validated, so filler bytes
+    /// suffice here).
     #[test]
-    fn output_only_bundle_requires_anchor_when_required() {
+    fn spending_bundle_requires_anchor_when_required() {
+        use alloc::collections::BTreeMap;
+
+        let mut bundle = output_only_bundle();
+        bundle.spends.push(Spend {
+            cv: [1; 32],
+            nullifier: [2; 32],
+            rk: [3; 32],
+            zkproof: None,
+            spend_auth_sig: None,
+            recipient: None,
+            value: None,
+            rcm: None,
+            rseed: None,
+            rcv: None,
+            proof_generation_key: None,
+            witness: None,
+            alpha: None,
+            zip32_derivation: None,
+            dummy_ask: None,
+            proprietary: BTreeMap::new(),
+        });
+
         assert!(matches!(
-            output_only_bundle().into_parsed(AnchorRequirement::Required),
+            bundle.into_parsed(AnchorRequirement::Required),
             Err(ParseError::MissingAnchor)
         ));
+    }
+
+    /// A bundle without spends does not carry an anchor in the v5 transaction
+    /// format, so an absent anchor parses with a placeholder even under
+    /// [`AnchorRequirement::Required`], and the absent wire anchor survives a
+    /// round trip through the parsed form.
+    #[test]
+    fn output_only_bundle_parses_without_anchor_when_required() {
+        let bundle = output_only_bundle();
+        let output_count = bundle.outputs.len();
+
+        let parsed = bundle.into_parsed(AnchorRequirement::Required).unwrap();
+        assert!(parsed.bundle.spends().is_empty());
+        assert_eq!(parsed.bundle.outputs().len(), output_count);
+        assert_eq!(
+            parsed.bundle.anchor().to_bytes(),
+            crate::common::PLACEHOLDER_ANCHOR
+        );
+
+        let reserialized = parsed.reserialize();
+        assert!(reserialized.anchor.is_none());
+        assert_eq!(reserialized.outputs.len(), output_count);
+    }
+
+    /// A v1-encoded output-only bundle round-trips through a parsed role with its
+    /// absent anchor intact: decoding restores `None`, parsing under
+    /// [`AnchorRequirement::Required`] substitutes the placeholder, and
+    /// reserializing restores `None` again.
+    #[test]
+    fn v1_output_only_bundle_parses_when_anchor_required() {
+        let bundle = output_only_bundle();
+        let output_count = bundle.outputs.len();
+
+        let encoded = super::v1::Bundle::try_from(bundle)
+            .expect("an output-only bundle's absent anchor falls back to DEFAULT_ANCHOR");
+        let decoded = Bundle::from(encoded);
+        assert!(decoded.anchor.is_none());
+
+        let parsed = decoded
+            .into_parsed(AnchorRequirement::Required)
+            .expect("a bundle without spends does not require an anchor");
+        assert_eq!(parsed.bundle.outputs().len(), output_count);
+
+        let reserialized = parsed.reserialize();
+        assert!(reserialized.anchor.is_none());
+        assert_eq!(reserialized.outputs.len(), output_count);
     }
 
     #[test]
