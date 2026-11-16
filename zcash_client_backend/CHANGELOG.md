@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `arti-client 0.44`, `fs-mistrust 0.15`, and `tor-rtcompat 0.44`.
+- MSRV is now 1.91
+
 ## [0.25.0] - 2026-10-21
 
 ### Added
