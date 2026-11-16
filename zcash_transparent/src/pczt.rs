@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use getset::Getters;
-use zcash_protocol::{TxId, value::Zatoshis};
+use zcash_protocol::value::Zatoshis;
 use zcash_script::script;
 
 use crate::sighash::SighashType;
@@ -73,8 +73,8 @@ impl Bundle {
 #[getset(get = "pub")]
 pub struct Input {
     /// The ID of the previous transaction containing the transparent coin being spent by
-    /// this input.
-    pub(crate) prevout_txid: TxId,
+    /// this input, in internal byte order. That is the reverse of its displayed hex form.
+    pub(crate) prevout_txid: [u8; 32],
 
     /// The index of the entry in the `vout` field of the previous transaction containing
     /// the transparent coin being spent by this input.
@@ -239,7 +239,7 @@ pub(crate) mod testing {
     use alloc::collections::BTreeMap;
     use alloc::vec::Vec;
 
-    use zcash_protocol::{TxId, value::Zatoshis};
+    use zcash_protocol::value::Zatoshis;
     use zcash_script::{
         pattern,
         script::{self, Evaluable},
@@ -286,7 +286,7 @@ pub(crate) mod testing {
         sighash_type: SighashType,
     ) -> Input {
         Input {
-            prevout_txid: TxId::from_bytes([0; 32]),
+            prevout_txid: [0; 32],
             prevout_index: 0,
             sequence: None,
             required_time_lock_time: None,

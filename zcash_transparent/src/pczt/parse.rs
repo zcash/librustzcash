@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use bip32::ChildNumber;
-use zcash_protocol::{TxId, value::Zatoshis};
+use zcash_protocol::value::Zatoshis;
 use zcash_script::script;
 
 use crate::sighash::SighashType;
@@ -44,8 +44,6 @@ impl Input {
         hash256_preimages: BTreeMap<[u8; 32], Vec<u8>>,
         proprietary: BTreeMap<String, Vec<u8>>,
     ) -> Result<Self, ParseError> {
-        let prevout_txid = TxId::from_bytes(prevout_txid);
-
         match required_time_lock_time {
             None | Some(500000000..) => Ok(()),
             Some(_) => Err(ParseError::InvalidRequiredTimeLocktime),

@@ -388,7 +388,7 @@ impl Bundle {
             .inputs()
             .iter()
             .map(|input| Input {
-                prevout_txid: (*input.prevout_txid()).into(),
+                prevout_txid: *input.prevout_txid(),
                 prevout_index: *input.prevout_index(),
                 sequence: *input.sequence(),
                 required_time_lock_time: *input.required_time_lock_time(),

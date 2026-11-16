@@ -18,6 +18,9 @@ workspace.
   feature of `bip32`, and `zcash_transparent` no longer enables the
   `descriptor` feature of `zcash_script`. A crate that relied on either being
   enabled through `zcash_transparent` must now enable it directly.
+- `zcash_transparent::pczt::Input::prevout_txid` now returns `&[u8; 32]`
+  instead of `&zcash_protocol::TxId`. Wrap it with
+  `zcash_protocol::TxId::from_bytes` where a `TxId` is needed.
 
 ### Removed
 - The transaction wire codecs. Use the functions in
@@ -84,6 +87,8 @@ workspace.
   `TransparentBuilder::add_script_output`.
 - `zcash_transparent::builder::Error::NullDataTooLong`. The error is now
   `zcash_primitives::transaction::builder::Error::NullDataTooLong`.
+- `zcash_transparent::bundle::OutPoint::txid`. Use
+  `zcash_protocol::TxId::from_bytes(*outpoint.hash())`.
 
 ## [0.11.1] - 2026-11-12
 

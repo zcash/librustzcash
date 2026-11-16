@@ -54,7 +54,7 @@ impl super::Bundle {
             .inputs
             .iter()
             .map(|input| {
-                let prevout = OutPoint::new(input.prevout_txid.into(), input.prevout_index);
+                let prevout = OutPoint::new(input.prevout_txid, input.prevout_index);
 
                 Ok(TxIn::from_parts(
                     prevout,

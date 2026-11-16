@@ -1,10 +1,10 @@
 //! Structs representing the components within Zcash transactions.
 
 use alloc::vec::Vec;
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
 use zcash_script::{script, solver};
 
-use zcash_protocol::{TxId, value::Zatoshis};
+use zcash_protocol::value::Zatoshis;
 
 use crate::{
     address::{Script, TransparentAddress},
@@ -94,37 +94,51 @@ impl<A: Authorization> Bundle<A> {
 }
 
 /// A pointer to a transparent Zcash transaction output.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutPoint {
     /// The txid of the transaction containing the output being pointed to.
-    pub(crate) hash: TxId,
+    pub(crate) hash: [u8; 32],
     /// The index of the output being pointed to within its transaction.
     pub(crate) n: u32,
 }
 
+impl fmt::Debug for OutPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The txid is shown as byte-reversed hex, which is the form that RPC methods and
+        // block explorers use.
+        let mut txid = self.hash;
+        txid.reverse();
+        f.debug_struct("OutPoint")
+            .field("hash", &hex::encode(txid))
+            .field("n", &self.n)
+            .finish()
+    }
+}
+
 impl OutPoint {
     /// Returns the null [`OutPoint`] in the Bitcoin sense:
-    /// - [`TxId`] is set to all-zeroes, and
-    /// - output index is set to [`u32::MAX`].
+    /// - the txid is set to all-zeroes, and
+    /// - the output index is set to [`u32::MAX`].
     pub const NULL: OutPoint = OutPoint {
-        hash: TxId::NULL,
+        hash: [0u8; 32],
         n: u32::MAX,
     };
 
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
+    ///
+    /// `hash` is the txid in its internal byte order, as it appears in the transaction
+    /// encoding. That is the reverse of the hex form that RPC methods and block explorers
+    /// show.
     pub const fn new(hash: [u8; 32], n: u32) -> Self {
-        OutPoint {
-            hash: TxId::from_bytes(hash),
-            n,
-        }
+        OutPoint { hash, n }
     }
 
     /// Constructs a fake `OutPoint` for use in tests.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const fn fake() -> Self {
         OutPoint {
-            hash: TxId::from_bytes([1u8; 32]),
+            hash: [1u8; 32],
             n: 1,
         }
     }
@@ -134,13 +148,9 @@ impl OutPoint {
         self.n
     }
 
-    /// Returns the byte representation of the txid of the transaction containing this `OutPoint`.
+    /// Returns the txid of the transaction containing this `OutPoint`, in internal byte
+    /// order. That is the reverse of its displayed hex form.
     pub fn hash(&self) -> &[u8; 32] {
-        self.hash.as_ref()
-    }
-
-    /// Returns the txid of the transaction containing this `OutPoint`.
-    pub fn txid(&self) -> &TxId {
         &self.hash
     }
 }
@@ -292,5 +302,40 @@ pub mod testing {
                 Some(Bundle { vin, vout, authorization: Authorized })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutPoint;
+
+    /// The first byte of the txid in the test below. It is the last byte of the txid as
+    /// displayed.
+    const FIRST_TXID_BYTE: u8 = 0x01;
+
+    /// The last byte of the txid in the test below. It is the first byte of the txid as
+    /// displayed.
+    const LAST_TXID_BYTE: u8 = 0xff;
+
+    /// The output index in the test below.
+    const OUTPUT_INDEX: u32 = 7;
+
+    /// The number of zero bytes between the first and last bytes of the 32-byte txid.
+    const MIDDLE_TXID_BYTES: usize = 30;
+
+    #[test]
+    fn outpoint_debug_shows_the_txid_as_byte_reversed_hex() {
+        let mut hash = [0u8; 32];
+        hash[0] = FIRST_TXID_BYTE;
+        hash[hash.len() - 1] = LAST_TXID_BYTE;
+        let outpoint = OutPoint::new(hash, OUTPUT_INDEX);
+
+        assert_eq!(
+            format!("{outpoint:?}"),
+            format!(
+                "OutPoint {{ hash: \"ff{}01\", n: {OUTPUT_INDEX} }}",
+                "00".repeat(MIDDLE_TXID_BYTES)
+            )
+        );
     }
 }

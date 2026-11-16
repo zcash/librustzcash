@@ -2933,7 +2933,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              AND ts.prevout_output_index = :prevout_idx
              ORDER BY t.mined_height NULLS LAST LIMIT 1",
             named_params![
-                ":prevout_txid": output.outpoint().txid().as_ref(),
+                ":prevout_txid": output.outpoint().hash().as_slice(),
                 ":prevout_idx": output.outpoint().n()
             ],
             |row| row.get::<_, i64>(0).map(TxRef),
@@ -2954,7 +2954,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         conn,
         params,
         gap_limits,
-        *output.outpoint().txid(),
+        TxId::from_bytes(*output.outpoint().hash()),
         output_height.map_or(observation_height, BlockHeight::from),
     )?;
 
