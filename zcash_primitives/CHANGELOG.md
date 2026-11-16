@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_primitives::transaction::{Transaction, TransactionData}` now store their
+  Sprout, Sapling, Orchard, and Ironwood bundles on the heap, so a bundle that is
+  absent no longer occupies space inline. On 64-bit targets this reduces
+  `size_of::<Transaction>()` from 2,760 bytes to 136 bytes. Public signatures are
+  unchanged.
+
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,
   and the `Display` output of `sighash::Zip244Error`, now say that they also

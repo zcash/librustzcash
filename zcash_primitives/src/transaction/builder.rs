@@ -36,7 +36,7 @@ use {
     },
     ::sapling::prover::{OutputProver, SpendProver},
     ::transparent::builder::TransparentSigningSet,
-    alloc::vec::Vec,
+    alloc::{boxed::Box, vec::Vec},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1645,9 +1645,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             //
             // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
             sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
+            ironwood_bundle: ironwood_bundle.map(Box::new),
         };
 
         //
@@ -1755,9 +1755,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             zip233_amount: unauthed_tx.zip233_amount,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
+            ironwood_bundle: ironwood_bundle.map(Box::new),
         };
 
         // The unwrap() here is safe because the txid hashing
