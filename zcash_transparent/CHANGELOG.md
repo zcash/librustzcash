@@ -21,6 +21,15 @@ workspace.
     `read_txout` and `write_txout`.
   - `zcash_transparent::address::Script::{read, write, serialized_size}` are
     replaced by `read_script`, `write_script` and `script_serialized_size`.
+- `zcash_transparent::builder::p2sh_input_serialized_len`. Use
+  `zcash_primitives::transaction::fees::transparent::p2sh_input_serialized_len`.
+- `zcash_transparent::builder::TransparentInputInfo::serialized_len`. For fee
+  computation, use
+  `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`.
+  It returns an `InputSize` instead of an `Option<usize>`, with
+  `InputSize::Unknown` in place of `None`. For a P2PKH input it returns the
+  ZIP 317 standard size of 150 bytes, where `serialized_len` returned an upper
+  bound of 149 bytes.
 
 ## [0.11.1] - 2026-11-12
 

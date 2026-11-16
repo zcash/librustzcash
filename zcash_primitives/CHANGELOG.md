@@ -14,6 +14,8 @@ workspace.
 - `zcash_primitives::transaction::components::transparent::{read_outpoint,
   write_outpoint, read_script, write_script, script_serialized_size, read_txin,
   write_txin, read_txout, write_txout}`
+- `zcash_primitives::transaction::fees::transparent::p2sh_input_serialized_len`
+  (under the `transparent-inputs` feature)
 
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their

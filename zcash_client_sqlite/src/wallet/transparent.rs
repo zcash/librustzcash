@@ -43,7 +43,7 @@ use zcash_keys::{
 };
 use zcash_primitives::transaction::fees::{
     FeeRule,
-    transparent::{InputSize, InputView},
+    transparent::{InputSize, InputView, p2sh_input_serialized_len},
     zip317,
 };
 use zcash_protocol::{
@@ -1578,7 +1578,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         if let Ok(Some(rs_bytes)) =
             row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
             && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
-            && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
+            && let Some(input_size) = p2sh_input_serialized_len(&from_chain)
         {
             output = output.with_known_input_size(input_size);
         }

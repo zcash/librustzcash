@@ -28,22 +28,8 @@ use {
         bundle::OutPoint,
         sighash::{SIGHASH_ALL, SighashType},
     },
-    core::iter,
-    zcash_encoding::CompactSize,
     zcash_script::{pattern::push_script, pv, solver},
 };
-
-/// Maximum size of a DER-encoded ECDSA signature (72 bytes) plus one SIGHASH type byte.
-#[cfg(feature = "transparent-inputs")]
-const MAX_SIG_SIZE: usize = 72 + 1;
-
-/// Size of a serialized outpoint: transaction hash (32 bytes) + output index (4 bytes).
-#[cfg(feature = "transparent-inputs")]
-const PREVOUT_SIZE: usize = 32 + 4;
-
-/// Size of a serialized sequence number (u32).
-#[cfg(feature = "transparent-inputs")]
-const SEQUENCE_SIZE: usize = 4;
 
 #[cfg(not(feature = "transparent-inputs"))]
 use zcash_script::Opcode;
@@ -242,56 +228,6 @@ impl TransparentInputInfo {
     pub fn spend_info(&self) -> &SpendInfo {
         &self.spend_info
     }
-
-    /// The size of this transparent input in a transaction, as used in [ZIP 317].
-    ///
-    /// Returns `None` if we cannot determine the size. (TODO: Remove this case)
-    ///
-    /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
-    pub fn serialized_len(&self) -> Option<usize> {
-        match &self.spend_info {
-            SpendInfo::P2pkh { .. } => {
-                let fake_sig = pv::push_value(&[0; MAX_SIG_SIZE]).expect("short enough");
-                let fake_pubkey = pv::push_value(&[0; secp256k1::constants::PUBLIC_KEY_SIZE])
-                    .expect("short enough");
-                let script_len = script::Component(vec![fake_sig, fake_pubkey]).byte_len();
-                let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
-                Some(PREVOUT_SIZE + script_sig_len + SEQUENCE_SIZE)
-            }
-            SpendInfo::P2sh { redeem_script } => p2sh_input_serialized_len(redeem_script),
-        }
-    }
-}
-
-/// Computes the serialized input size for a P2SH input given the redeem script.
-///
-/// Returns `None` if the redeem script is not a recognized P2SH script kind (currently
-/// only P2MS-in-P2SH is supported).
-#[cfg(feature = "transparent-inputs")]
-pub fn p2sh_input_serialized_len(redeem_script: &script::FromChain) -> Option<usize> {
-    let fake_sig = pv::push_value(&[0; MAX_SIG_SIZE]).expect("short enough");
-
-    let script_len = redeem_script
-        .refine()
-        .ok()
-        .as_ref()
-        .and_then(solver::standard)
-        .and_then(|spend_info| match spend_info {
-            solver::ScriptKind::MultiSig { required, .. } => Some(
-                script::Component(
-                    iter::empty()
-                        .chain(Some(pv::_0))
-                        .chain(core::iter::repeat_n(fake_sig, usize::from(required)))
-                        .chain(push_script(redeem_script))
-                        .collect(),
-                )
-                .byte_len(),
-            ),
-            _ => None,
-        })?;
-
-    let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
-    Some(PREVOUT_SIZE + script_sig_len + SEQUENCE_SIZE)
 }
 
 pub struct TransparentBuilder {
