@@ -5,7 +5,9 @@ use core::fmt;
 
 use ::transparent::{
     address::Script,
-    bundle::{Authorization as TransparentAuthorization, Authorized, MapAuth, OutPoint, TxIn},
+    bundle::{
+        Authorization as TransparentAuthorization, Authorized, Bundle, MapAuth, OutPoint, TxIn,
+    },
     sighash::TransparentAuthorizingContext,
 };
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
@@ -16,8 +18,10 @@ use zcash_script::{
     script::{self, Evaluable as _},
 };
 
+use crate::transaction::{Authorization, TransactionData};
+
 #[cfg(feature = "circuits")]
-use ::transparent::{builder::TransparentBuilder, bundle::Bundle};
+use ::transparent::builder::TransparentBuilder;
 
 /// The minimum length of the coinbase transaction script.
 ///
@@ -200,6 +204,27 @@ pub fn coinbase_input(
     Ok(TxIn::from_parts(OutPoint::NULL, script_sig, u32::MAX))
 }
 
+/// Returns `true` if `tx` is a coinbase transaction.
+///
+/// A transaction is a coinbase transaction if it has a transparent bundle with exactly
+/// one input, and that input's `prevout` is [`OutPoint::NULL`]. A transaction with no
+/// transparent bundle is not a coinbase transaction. The consensus rules place further
+/// requirements on the shielded parts of a coinbase transaction; this function does not
+/// check them.
+pub fn is_coinbase<A: Authorization>(tx: &TransactionData<A>) -> bool {
+    tx.transparent_bundle()
+        .is_some_and(transparent_bundle_is_coinbase)
+}
+
+/// Returns `true` if `bundle` is the transparent part of a coinbase transaction.
+pub(crate) fn transparent_bundle_is_coinbase<A: TransparentAuthorization>(
+    bundle: &Bundle<A>,
+) -> bool {
+    // From `CTransaction::IsCoinBase()` in zcashd:
+    //   return (vin.size() == 1 && vin[0].prevout.IsNull());
+    matches!(&bundle.vin[..], [input] if input.prevout() == &OutPoint::NULL)
+}
+
 /// Builds the transparent bundle of a coinbase transaction from the outputs added to
 /// `builder`.
 ///
@@ -225,12 +250,21 @@ pub(crate) fn build_transparent_bundle(
 
 #[cfg(test)]
 mod tests {
-    use ::transparent::bundle::OutPoint;
+    use alloc::vec::Vec;
+
+    use ::transparent::{
+        address::Script,
+        bundle::{Authorized, Bundle, OutPoint, TxIn},
+    };
     use assert_matches::assert_matches;
-    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::consensus::{BlockHeight, BranchId};
     use zcash_script::{pv, script::Evaluable as _};
 
-    use super::{Error, MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN, coinbase_input};
+    use super::{
+        Error, MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN, coinbase_input, is_coinbase,
+        transparent_bundle_is_coinbase,
+    };
+    use crate::transaction::{TransactionData, TxVersion};
 
     /// `OP_1`. Heights 1 to 16 are encoded as the single byte `0x50 + height`.
     const OP_1: u8 = 0x51;
@@ -346,5 +380,65 @@ mod tests {
             coinbase_input(BlockHeight::from_u32(1), Some(data)),
             Err(Error::OversizedScript)
         );
+    }
+
+    fn bundle(vin: Vec<TxIn<Authorized>>) -> Bundle<Authorized> {
+        Bundle {
+            vin,
+            vout: vec![],
+            authorization: Authorized,
+        }
+    }
+
+    fn input(prevout: OutPoint) -> TxIn<Authorized> {
+        TxIn::from_parts(prevout, Script::default(), u32::MAX)
+    }
+
+    #[test]
+    fn coinbase_bundle_has_exactly_one_null_prevout() {
+        assert!(transparent_bundle_is_coinbase(&bundle(vec![input(
+            OutPoint::NULL
+        )])));
+        assert!(!transparent_bundle_is_coinbase(&bundle(vec![input(
+            OutPoint::fake()
+        )])));
+        assert!(!transparent_bundle_is_coinbase(&bundle(vec![
+            input(OutPoint::NULL),
+            input(OutPoint::NULL)
+        ])));
+        assert!(!transparent_bundle_is_coinbase(&bundle(vec![])));
+    }
+
+    /// A lock time of zero, which places no restriction on when a transaction is mined.
+    const NO_LOCK_TIME: u32 = 0;
+
+    /// An expiry height of zero, which means that a transaction does not expire.
+    const NO_EXPIRY_HEIGHT: u32 = 0;
+
+    /// Returns a transaction that has only the given transparent bundle.
+    fn transaction(
+        transparent_bundle: Option<Bundle<Authorized>>,
+    ) -> TransactionData<crate::transaction::Authorized> {
+        TransactionData::from_parts(
+            TxVersion::V5,
+            BranchId::Nu5,
+            NO_LOCK_TIME,
+            BlockHeight::from_u32(NO_EXPIRY_HEIGHT),
+            transparent_bundle,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn transaction_is_coinbase_exactly_when_its_transparent_bundle_is() {
+        assert!(is_coinbase(&transaction(Some(bundle(vec![input(
+            OutPoint::NULL
+        )])))));
+        assert!(!is_coinbase(&transaction(Some(bundle(vec![input(
+            OutPoint::fake()
+        )])))));
+        assert!(!is_coinbase(&transaction(None)));
     }
 }

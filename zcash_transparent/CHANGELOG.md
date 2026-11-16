@@ -64,6 +64,9 @@ workspace.
     construct the transparent bundle directly from
     `zcash_primitives::transaction::coinbase::coinbase_input` and
     `TransparentBuilder::outputs`.
+  - `zcash_transparent::bundle::Bundle::is_coinbase` is replaced by
+    `zcash_primitives::transaction::coinbase::is_coinbase`, which takes the
+    transaction rather than its transparent bundle.
 
 ## [0.11.1] - 2026-11-12
 

@@ -14,6 +14,7 @@ use crate::{
     encoding::StateWrite,
     transaction::{
         Authorization, TransactionData, TransparentDigests, Zip244Digests,
+        coinbase::transparent_bundle_is_coinbase,
         components::transparent::{write_outpoint, write_script},
         sighash::SignableInput,
         txid::{
@@ -76,7 +77,8 @@ impl TransparentInputsDigests {
     pub(crate) fn for_bundle<A: TransparentAuthorizingContext>(
         bundle: &transparent::Bundle<A>,
     ) -> Option<Self> {
-        (!bundle.is_coinbase() && !bundle.vin.is_empty()).then(|| Self::new(bundle))
+        (!transparent_bundle_is_coinbase(bundle) && !bundle.vin.is_empty())
+            .then(|| Self::new(bundle))
     }
 }
 
@@ -94,7 +96,9 @@ pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
         // No transparent inputs or outputs.
         None => hash_transparent_txid_data(None),
         // No transparent inputs, or coinbase.
-        Some((bundle, txid_digests)) if bundle.is_coinbase() || bundle.vin.is_empty() => {
+        Some((bundle, txid_digests))
+            if transparent_bundle_is_coinbase(bundle) || bundle.vin.is_empty() =>
+        {
             hash_transparent_txid_data(Some(txid_digests))
         }
         // Some transparent inputs, and not coinbase.

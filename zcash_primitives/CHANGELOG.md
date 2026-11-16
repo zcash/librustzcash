@@ -17,7 +17,8 @@ workspace.
 - `zcash_primitives::transaction::fees::transparent::p2sh_input_serialized_len`
   (under the `transparent-inputs` feature)
 - `zcash_primitives::transaction::coinbase::{Coinbase, Error, coinbase_input,
-  MIN_COINBASE_SCRIPT_LEN, MAX_COINBASE_SCRIPT_LEN, MAX_COINBASE_HEIGHT_LEN}`
+  is_coinbase, MIN_COINBASE_SCRIPT_LEN, MAX_COINBASE_SCRIPT_LEN,
+  MAX_COINBASE_HEIGHT_LEN}`
 
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their

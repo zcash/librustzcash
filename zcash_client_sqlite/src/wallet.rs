@@ -127,7 +127,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::{HashSer, read_commitment_tree},
-    transaction::{Transaction, TransactionData, fees::zip317},
+    transaction::{Transaction, TransactionData, coinbase::is_coinbase, fees::zip317},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool, TxId,
@@ -5417,9 +5417,7 @@ pub(crate) fn put_tx_data(
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
-    let tx_index = tx
-        .transparent_bundle()
-        .and_then(|bundle| bundle.is_coinbase().then_some(0i64));
+    let tx_index = is_coinbase(tx).then_some(0i64);
 
     let tx_params = named_params![
         ":txid": &txid.as_ref()[..],
@@ -5500,7 +5498,7 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
     if let Some(b) = d_tx.tx().transparent_bundle()
-        && !b.is_coinbase()
+        && !is_coinbase(d_tx.tx())
     {
         // queue the transparent inputs for enhancement
         queue_tx_retrieval(

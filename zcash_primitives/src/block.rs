@@ -22,7 +22,7 @@ use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     encoding::{ReadBytesExt, WriteBytesExt},
-    transaction::{Transaction, TxVersion},
+    transaction::{Transaction, TxVersion, coinbase::is_coinbase},
 };
 
 pub use equihash;
@@ -208,7 +208,7 @@ impl Block {
         let claimed_height = {
             let coinbase_transparent = coinbase
                 .transparent_bundle()
-                .filter(|b| b.is_coinbase())
+                .filter(|_| is_coinbase(&coinbase))
                 .ok_or_else(|| {
                     corez::io::Error::new(ErrorKind::Other, "first tx of block is not coinbase")
                 })?;
