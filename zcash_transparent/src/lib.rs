@@ -12,7 +12,6 @@ extern crate std;
 pub mod address;
 pub mod builder;
 pub mod bundle;
-pub mod coinbase;
 pub mod pczt;
 pub mod sighash;
 pub mod util;

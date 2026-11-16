@@ -5,9 +5,7 @@ use core::{cmp::Ordering, fmt};
 use rand_core::{CryptoRng, Rng};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut, coinbase,
-};
+use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
     PoolType,
     consensus::{self, BlockHeight, BranchId, NU7_POW_TARGET_SPACING_RATIO, Parameters},
@@ -17,7 +15,7 @@ use zcash_protocol::{
 use zcash_script::opcode::PushValue;
 
 use crate::transaction::{
-    Transaction, TxVersion,
+    Transaction, TxVersion, coinbase,
     components::orchard::bundle_version_for_branch,
     fees::{
         FeeRule,
@@ -1471,11 +1469,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
                 self.build_internal::<Coinbase, _, _, _, _>(
                     |b| {
-                        b.build_coinbase(target_height, miner_data)
+                        coinbase::build_transparent_bundle(b, target_height, miner_data)
                             .map(Some)
                             .map_err(Error::Coinbase)
                     },
-                    |b, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
+                    |b, _| Ok(b.clone().map_authorization(coinbase::Coinbase)),
                     &[],
                     &[],
                     rng,

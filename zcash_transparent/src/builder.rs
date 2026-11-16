@@ -4,21 +4,14 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::{
-    consensus::BlockHeight,
-    value::{BalanceError, ZatBalance, Zatoshis},
-};
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
-use zcash_script::{
-    op,
-    opcode::PushValue,
-    script::{self, Code, Evaluable},
-};
+use zcash_script::{op, script};
 
 use crate::{
     address::{Script, TransparentAddress},
-    bundle::{Authorization, Authorized, Bundle, MapAuth, TxIn, TxOut},
-    coinbase, pczt,
+    bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
+    pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
@@ -28,7 +21,7 @@ use {
         bundle::OutPoint,
         sighash::{SIGHASH_ALL, SighashType},
     },
-    zcash_script::{pattern::push_script, pv, solver},
+    zcash_script::{pattern::push_script, pv, script::Evaluable, solver},
 };
 
 #[cfg(not(feature = "transparent-inputs"))]
@@ -260,37 +253,6 @@ pub struct TransparentSignatureContext {
     final_script_sigs: Vec<Option<script::Sig>>,
 }
 
-/// [`Authorization`] marker type for coinbase transactions without authorization data.
-#[derive(Debug, Clone)]
-pub struct Coinbase;
-
-impl Authorization for Coinbase {
-    type ScriptSig = script::Sig;
-}
-
-impl TransparentAuthorizingContext for Coinbase {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
-        vec![]
-    }
-
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
-        vec![]
-    }
-}
-
-impl MapAuth<Coinbase, Authorized> for Coinbase {
-    fn map_script_sig(
-        &self,
-        s: <Coinbase as Authorization>::ScriptSig,
-    ) -> <Authorized as Authorization>::ScriptSig {
-        Script(Code(s.to_bytes()))
-    }
-
-    fn map_authorization(&self, _: Coinbase) -> Authorized {
-        Authorized
-    }
-}
-
 impl TransparentBuilder {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
@@ -399,29 +361,6 @@ impl TransparentBuilder {
                 },
             })
         }
-    }
-
-    /// Builds a coinbase bundle.
-    ///
-    /// Returns an error if:
-    ///
-    /// - any inputs were added to the builder, or if
-    /// - `miner_data` makes the tx input oversized, vid. [`TxIn::coinbase`].
-    pub fn build_coinbase(
-        self,
-        height: BlockHeight,
-        miner_data: Option<PushValue>,
-    ) -> Result<Bundle<Coinbase>, coinbase::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        if !self.inputs.is_empty() {
-            return Err(coinbase::Error::UnexpectedInputs);
-        }
-
-        Ok(Bundle {
-            vin: vec![TxIn::coinbase(height, miner_data)?],
-            vout: self.vout,
-            authorization: Coinbase,
-        })
     }
 
     /// Builds a bundle containing the given inputs and outputs, for inclusion in a PCZT.

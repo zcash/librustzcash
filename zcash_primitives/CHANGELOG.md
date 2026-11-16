@@ -16,6 +16,8 @@ workspace.
   write_txin, read_txout, write_txout}`
 - `zcash_primitives::transaction::fees::transparent::p2sh_input_serialized_len`
   (under the `transparent-inputs` feature)
+- `zcash_primitives::transaction::coinbase::{Coinbase, Error, coinbase_input,
+  MIN_COINBASE_SCRIPT_LEN, MAX_COINBASE_SCRIPT_LEN, MAX_COINBASE_HEIGHT_LEN}`
 
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their
@@ -23,6 +25,9 @@ workspace.
   absent no longer occupies space inline. On 64-bit targets this reduces
   `size_of::<Transaction>()` from 2,760 bytes to 136 bytes. Public signatures are
   unchanged.
+- `zcash_primitives::transaction::builder::Error::Coinbase` now wraps
+  `zcash_primitives::transaction::coinbase::Error` instead of
+  `zcash_transparent::coinbase::Error`. The variants are unchanged.
 
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,

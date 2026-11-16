@@ -51,6 +51,19 @@ workspace.
   extract_zip_48_fields}`, which take the derivation as their first argument.
   They require any one of the `orchard`, `sapling` or `transparent-inputs`
   features of `zcash_keys`.
+- Coinbase transaction support. Use `zcash_primitives::transaction::coinbase`:
+  - `zcash_transparent::coinbase` (the module, its constants and `Error`) is
+    now `zcash_primitives::transaction::coinbase`.
+  - `zcash_transparent::builder::Coinbase` is now
+    `zcash_primitives::transaction::coinbase::Coinbase`.
+  - `zcash_transparent::bundle::TxIn::<Coinbase>::coinbase` is replaced by
+    `zcash_primitives::transaction::coinbase::coinbase_input`.
+  - `zcash_transparent::builder::TransparentBuilder::build_coinbase` is
+    removed; build coinbase transactions with
+    `zcash_primitives::transaction::builder::BuildConfig::Coinbase`, or
+    construct the transparent bundle directly from
+    `zcash_primitives::transaction::coinbase::coinbase_input` and
+    `TransparentBuilder::outputs`.
 
 ## [0.11.1] - 2026-11-12
 

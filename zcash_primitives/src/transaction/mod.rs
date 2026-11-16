@@ -1,5 +1,6 @@
 //! Structs and methods for handling Zcash transactions.
 pub mod builder;
+pub mod coinbase;
 pub mod components;
 pub mod fees;
 pub mod sighash;
@@ -308,7 +309,7 @@ struct Coinbase;
 
 #[cfg(feature = "circuits")]
 impl Authorization for Coinbase {
-    type TransparentAuth = ::transparent::builder::Coinbase;
+    type TransparentAuth = coinbase::Coinbase;
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
