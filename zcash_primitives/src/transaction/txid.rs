@@ -20,6 +20,7 @@ use zcash_protocol::{
 use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxId, TxVersion,
     Zip244Digests,
+    components::transparent::{write_outpoint, write_script, write_txout},
 };
 
 /// TxId tree root personalization
@@ -115,7 +116,7 @@ pub(crate) fn transparent_prevout_hash<TransparentAuth: transparent::Authorizati
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_PREVOUTS_HASH_PERSONALIZATION);
     for t_in in vin {
-        t_in.prevout().write(&mut h).unwrap();
+        write_outpoint(&mut h, t_in.prevout()).unwrap();
     }
     h.finalize()
 }
@@ -139,7 +140,7 @@ pub(crate) fn transparent_sequence_hash<TransparentAuth: transparent::Authorizat
 pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bHash {
     let mut h = hasher(ZCASH_OUTPUTS_HASH_PERSONALIZATION);
     for t_out in vout {
-        t_out.borrow().write(&mut h).unwrap();
+        write_txout(&mut h, t_out.borrow()).unwrap();
     }
     h.finalize()
 }
@@ -548,7 +549,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
-                txin.script_sig().write(&mut h).unwrap();
+                write_script(&mut h, txin.script_sig()).unwrap();
             }
         }
         h.finalize()

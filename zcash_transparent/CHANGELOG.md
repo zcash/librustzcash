@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Removed
+- The transaction wire codecs. Use the functions in
+  `zcash_primitives::transaction::components::transparent` instead:
+  - `zcash_transparent::bundle::OutPoint::{read, write}` are replaced by
+    `read_outpoint` and `write_outpoint`.
+  - `zcash_transparent::bundle::TxIn::<Authorized>::{read, write}` are replaced
+    by `read_txin` and `write_txin`.
+  - `zcash_transparent::bundle::TxOut::{read, write}` are replaced by
+    `read_txout` and `write_txout`.
+  - `zcash_transparent::address::Script::{read, write, serialized_size}` are
+    replaced by `read_script`, `write_script` and `script_serialized_size`.
+
 ## [0.11.1] - 2026-11-12
 
 ### Changed

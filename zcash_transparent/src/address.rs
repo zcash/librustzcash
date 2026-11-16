@@ -1,9 +1,7 @@
 //! Support for legacy transparent addresses and scripts.
 
 use core::fmt;
-use corez::io::{self, Read, Write};
 
-use zcash_encoding::Vector;
 use zcash_script::{
     op,
     script::{self, Evaluable},
@@ -55,26 +53,6 @@ impl PartialEq for Script {
 }
 
 impl Eq for Script {}
-
-impl Script {
-    /// Reads a CompactSize-prefixed script.
-    ///
-    /// Returns an error for an invalid length prefix or a reader failure, including
-    /// [`io::ErrorKind::UnexpectedEof`] if the prefix or script bytes are truncated.
-    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        let script = Vector::read_bytes(reader)?;
-        Ok(Script(script::Code(script)))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write_bytes(&mut writer, &self.0.0)
-    }
-
-    /// Returns the length of this script as encoded (including the initial CompactSize).
-    pub fn serialized_size(&self) -> usize {
-        Vector::serialized_size_of_u8_vec(&self.0.0)
-    }
-}
 
 impl From<script::FromChain> for Script {
     fn from(value: script::FromChain) -> Self {

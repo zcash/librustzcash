@@ -2,7 +2,6 @@
 
 use alloc::vec::Vec;
 use core::fmt::Debug;
-use corez::io::{self, Read, Write};
 use zcash_script::{
     opcode::{Evaluable as _, PushValue},
     pattern::push_num,
@@ -183,23 +182,6 @@ impl OutPoint {
         }
     }
 
-    /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
-    /// followed by the output index as a little-endian `u32`.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
-        let mut n = [0; 4];
-        reader.read_exact(&mut n)?;
-        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
-    }
-
-    /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
-    /// followed by the output index as a little-endian `u32`.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.hash.as_ref())?;
-        writer.write_all(&self.n.to_le_bytes())
-    }
-
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
@@ -256,26 +238,6 @@ impl<A: Authorization> TxIn<A> {
     /// The sequence number of the input (no Zcash protocol use as of NU6).
     pub fn sequence(&self) -> u32 {
         self.sequence
-    }
-}
-
-impl TxIn<Authorized> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let prevout = OutPoint::read(&mut reader)?;
-        let script_sig = Script::read(&mut reader)?;
-        let sequence = {
-            let mut sequence = [0; 4];
-            reader.read_exact(&mut sequence)?;
-            u32::from_le_bytes(sequence)
-        };
-
-        Ok(TxIn::from_parts(prevout, script_sig, sequence))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout().write(&mut writer)?;
-        self.script_sig().write(&mut writer)?;
-        writer.write_all(&self.sequence().to_le_bytes())
     }
 }
 
@@ -380,26 +342,6 @@ impl TxOut {
             value,
             script_pubkey,
         }
-    }
-
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = {
-            let mut tmp = [0u8; 8];
-            reader.read_exact(&mut tmp)?;
-            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
-        }
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = Script::read(&mut reader)?;
-
-        Ok(TxOut {
-            value,
-            script_pubkey,
-        })
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.script_pubkey.write(&mut writer)
     }
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.

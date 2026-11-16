@@ -11,7 +11,11 @@ use zcash_protocol::consensus::BranchId;
 
 use super::{
     Authorization, TransactionData, TransparentDigests, Zip143Digests,
-    components::{sapling as sapling_serialization, sprout::JsDescription},
+    components::{
+        sapling as sapling_serialization,
+        sprout::JsDescription,
+        transparent::{write_outpoint, write_script, write_txout},
+    },
     sighash::SignableInput,
 };
 
@@ -36,7 +40,7 @@ macro_rules! update_hash {
 fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 36);
     for t_in in vin {
-        t_in.prevout().write(&mut data).unwrap();
+        write_outpoint(&mut data, t_in.prevout()).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -58,7 +62,7 @@ fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHas
 fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vout.len() * (4 + 1));
     for t_out in vout {
-        t_out.write(&mut data).unwrap();
+        write_txout(&mut data, t_out).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -68,7 +72,7 @@ fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
 
 fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
     let mut data = vec![];
-    tx_out.write(&mut data).unwrap();
+    write_txout(&mut data, tx_out).unwrap();
     Blake2bParams::new()
         .hash_length(32)
         .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
@@ -260,11 +264,8 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
             SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-                    bundle.vin[*input.index()]
-                        .prevout()
-                        .write(&mut data)
-                        .unwrap();
-                    input.script_code().write(&mut data).unwrap();
+                    write_outpoint(&mut data, bundle.vin[*input.index()].prevout()).unwrap();
+                    write_script(&mut data, input.script_code()).unwrap();
                     data.extend_from_slice(&input.value().to_i64_le_bytes());
                     data.extend_from_slice(&bundle.vin[*input.index()].sequence().to_le_bytes());
                     h.update(&data);

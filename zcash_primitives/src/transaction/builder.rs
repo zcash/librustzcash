@@ -2015,10 +2015,13 @@ mod tests {
     #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
         crate::transaction::{
-            OutPoint, TxOut, TxVersion,
+            TxVersion,
             builder::{self, TransparentBuilder, default_tx_expiry_delta},
         },
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        ::transparent::{
+            bundle::{OutPoint, TxOut},
+            keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        },
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };

@@ -20,7 +20,7 @@ use core::fmt::Debug;
 use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
-use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
+use ::transparent::bundle::{self as transparent, OutPoint};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -33,6 +33,7 @@ use self::{
     components::{
         orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
+        transparent::{read_txin, read_txout, write_txin, write_txout},
     },
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
 };
@@ -1069,8 +1070,8 @@ impl Transaction {
     fn read_transparent<R: Read>(
         mut reader: R,
     ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
-        let vin = Vector::read(&mut reader, TxIn::read)?;
-        let vout = Vector::read(&mut reader, TxOut::read)?;
+        let vin = Vector::read(&mut reader, |r| read_txin(r))?;
+        let vout = Vector::read(&mut reader, |r| read_txout(r))?;
         Ok(if vin.is_empty() && vout.is_empty() {
             None
         } else {
@@ -1245,8 +1246,8 @@ impl Transaction {
 
     pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.transparent_bundle {
-            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &bundle.vin, |w, e| write_txin(w, e))?;
+            Vector::write(&mut writer, &bundle.vout, |w, e| write_txout(w, e))?;
         } else {
             CompactSize::write(&mut writer, 0)?;
             CompactSize::write(&mut writer, 0)?;

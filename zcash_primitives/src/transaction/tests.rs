@@ -3,8 +3,8 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxIn,
-        TxVersion, Zip244Digests,
+        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxVersion,
+        Zip244Digests,
         sighash::{PrecomputedSighashData, SignableInput},
         sighash_v4::{v4_signature_hash, zip143_digests},
         sighash_v5::v5_signature_hash,
@@ -15,6 +15,7 @@ use {
     },
     ::transparent::{
         address::Script,
+        bundle::TxIn,
         sighash::{SighashType, TransparentAuthorizingContext},
     },
     alloc::vec::Vec,

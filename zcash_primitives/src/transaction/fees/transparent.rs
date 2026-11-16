@@ -3,7 +3,9 @@
 
 use core::convert::Infallible;
 
-use crate::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
+use crate::transaction::{
+    components::transparent::script_serialized_size, fees::zip317::P2PKH_STANDARD_INPUT_SIZE,
+};
 use transparent::{
     address::Script,
     bundle::{OutPoint, TxOut},
@@ -102,7 +104,7 @@ pub trait OutputView: core::fmt::Debug {
     fn serialized_size(&self) -> usize {
         // The serialized size of a transparent `TxOut` is the serialized size of an amount
         // plus the serialized size of the script pubkey.
-        8 + self.script_pubkey().serialized_size()
+        8 + script_serialized_size(self.script_pubkey())
     }
 }
 
