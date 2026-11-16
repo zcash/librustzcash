@@ -4,6 +4,7 @@ use core::fmt::{self, Display};
 use nonempty::NonEmpty;
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::keys::transparent::zip48::{P2shFullViewingKey, P2shIncomingViewingKey},
     ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
     core::convert::TryInto,
 };
@@ -30,8 +31,6 @@ use zcash_protocol::consensus::NetworkConstants;
     any(test, feature = "test-dependencies")
 ))]
 use ::transparent::address::TransparentAddress;
-#[cfg(feature = "transparent-inputs")]
-use ::transparent::zip48::{P2shFullViewingKey, P2shIncomingViewingKey};
 
 #[cfg(feature = "unstable")]
 use {
@@ -3557,7 +3556,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn ufvk_from_p2sh_round_trips_and_is_transparent_only() {
         use super::{UnifiedAddressRequest, UnifiedFullViewingKey};
-        use ::transparent::zip48::{P2shFullViewingKey, P2shKey};
+        use crate::keys::transparent::zip48::{P2shFullViewingKey, P2shKey};
         use core::num::NonZeroU8;
         use secp256k1::{PublicKey, SecretKey};
 

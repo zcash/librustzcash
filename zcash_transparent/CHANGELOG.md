@@ -30,6 +30,9 @@ workspace.
   `InputSize::Unknown` in place of `None`. For a P2PKH input it returns the
   ZIP 317 standard size of 150 bytes, where `serialized_len` returned an upper
   bound of 149 bytes.
+- `zcash_transparent::zip48`. The module is now
+  `zcash_keys::keys::transparent::zip48`, with the same items. It requires the
+  `transparent-inputs` feature of `zcash_keys`.
 
 ## [0.11.1] - 2026-11-12
 

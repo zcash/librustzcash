@@ -1,8 +1,16 @@
+//! Keys for [ZIP 48] transparent multisig accounts.
+//!
+//! [ZIP 48]: https://zips.z.cash/zip-0048
+
 use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::num::NonZeroU8;
 
+use ::transparent::{
+    address::TransparentAddress,
+    keys::{NonHardenedChildIndex, TransparentKeyScope},
+};
 use bip32::{ChildNumber, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix};
 use nonempty::NonEmpty;
 use secp256k1::{PublicKey, SecretKey};
@@ -13,11 +21,6 @@ use zcash_script::{
     script,
 };
 use zip32::AccountId;
-
-use crate::{
-    address::TransparentAddress,
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
-};
 
 const BIP_48_PURPOSE: fn() -> ChildNumber = || ChildNumber::new(48, true).expect("valid");
 const ZCASH_P2SH_SCRIPT_TYPE: fn() -> ChildNumber =
@@ -788,20 +791,19 @@ pub enum FullViewingKeyError {
 }
 
 #[cfg(test)]
+mod test_vectors;
+
+#[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
     use core::num::NonZeroU8;
 
+    use ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex};
     use bip32::Prefix;
     use zcash_protocol::consensus::{MainNetwork, Network};
     use zip32::AccountId;
 
-    use crate::{
-        address::TransparentAddress,
-        keys::NonHardenedChildIndex,
-        test_vectors::zip_0048::TEST_VECTORS,
-        zip48::{AccountPrivKey, AccountPubKey, FullViewingKey},
-    };
+    use super::{AccountPrivKey, AccountPubKey, FullViewingKey, test_vectors::TEST_VECTORS};
 
     /// The length of the version prefix of a Base58Check-encoded transparent address.
     const B58_ADDRESS_PREFIX_LEN: usize = 2;

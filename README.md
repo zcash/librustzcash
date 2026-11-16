@@ -76,6 +76,8 @@ graph TB
     %% zcash_client_sqlite --> zcash_keys
     zcash_client_backend --> zcash_keys
     %% zcash_pool_migration --> zcash_keys
+    %% `pczt` depends on `zcash_keys` only under its test-only `internal-tests` feature.
+    pczt -.-> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 

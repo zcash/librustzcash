@@ -40,6 +40,7 @@ regex = { workspace = true, optional = true }
 bip32 = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, default-features = false }
 transparent.workspace = true
+zcash_script = { workspace = true, features = ["descriptor"], optional = true }
 zeroize = { workspace = true, optional = true }
 
 # - Logging and metrics
@@ -95,13 +96,18 @@ std = [
     "dep:document-features",
     "orchard?/std",
     "sapling?/std",
+    "secp256k1?/std",
     "transparent/std",
     "zcash_address/std",
+    "zcash_script?/std",
 ]
 
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
     "dep:bip32",
+    "bip32/secp256k1-ffi",
+    "dep:secp256k1",
+    "dep:zcash_script",
     "transparent/transparent-inputs",
 ]
 

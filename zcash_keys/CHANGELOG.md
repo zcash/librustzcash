@@ -16,6 +16,8 @@ workspace.
   `unstable` feature)
 - `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
   `test-dependencies` feature)
+- `zcash_keys::keys::transparent::zip48` (under the `transparent-inputs`
+  feature)
 
 ### Changed
 - `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
@@ -30,6 +32,13 @@ workspace.
     present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
     non-empty subset of the components. `from_bytes` now reads the entire
     input, and returns an error for trailing data or a repeated typecode.
+- The P2SH viewing key items of unified viewing keys are now the types in
+  `zcash_keys::keys::transparent::zip48` instead of those in
+  `zcash_transparent::zip48`. This affects
+  `zcash_keys::keys::UnifiedFullViewingKey::{from_p2sh, p2sh}` and
+  `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`. Import
+  `P2shFullViewingKey`, `P2shIncomingViewingKey` and `P2shKey` from the new
+  module.
 
 ## [0.17.0-keystone.0] - 2026-11-10
 

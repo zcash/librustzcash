@@ -6,6 +6,9 @@
 #[cfg(feature = "transparent-inputs")]
 pub mod gap_limits;
 
+#[cfg(feature = "transparent-inputs")]
+pub mod zip48;
+
 #[cfg(feature = "transparent-key-encoding")]
 use {
     bip32::{PrivateKey, PrivateKeyBytes},
