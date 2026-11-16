@@ -1217,7 +1217,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 #[cfg(test)]
-impl TransparentAuthorizingContext for TestTransparentAuth {
+impl TransparentAuthorizingContext<Zatoshis> for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         self.reads.set(self.reads.get() + 1);
         self.input_amounts.clone()

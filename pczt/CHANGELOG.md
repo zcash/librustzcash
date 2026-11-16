@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The transparent types in the following items are now written with the value
+  parameter of `zcash_transparent` set to `Zatoshis` (for example
+  `transparent::pczt::Bundle<Zatoshis>` and
+  `transparent::bundle::EffectsOnly<Zatoshis>`), and denote the same values as
+  before:
+  - `pczt::EffectsOnly`
+  - `pczt::common::LockTimeInput`
+  - `pczt::roles::low_level_signer::Signer::sign_transparent_with`
+  - `pczt::roles::updater::Updater::update_transparent_with`
+  - `pczt::roles::verifier::Verifier::with_transparent`
+
 ## [0.10.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet

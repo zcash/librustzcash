@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 use core::fmt;
 use getset::Getters;
-use zcash_protocol::value::Zatoshis;
 
 use crate::{
     address::Script,
@@ -123,12 +122,12 @@ impl SighashPolicy {
 
 /// Additional context that is needed to compute signature hashes
 /// for transactions that include transparent inputs or outputs.
-pub trait TransparentAuthorizingContext: Authorization {
+pub trait TransparentAuthorizingContext<V>: Authorization {
     /// Returns the list of all transparent input amounts, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
-    fn input_amounts(&self) -> Vec<Zatoshis>;
+    fn input_amounts(&self) -> Vec<V>;
     /// Returns the list of all transparent input scriptPubKeys, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
@@ -157,23 +156,23 @@ impl core::error::Error for InvalidInputIndex {}
 /// A transparent input that is signable because we know its value and `script_pubkey`.
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct SignableInput<'a> {
+pub struct SignableInput<'a, V> {
     pub(crate) hash_type: SighashType,
     pub(crate) index: usize,
     pub(crate) script_code: &'a Script,
     pub(crate) script_pubkey: &'a Script,
-    pub(crate) value: Zatoshis,
+    pub(crate) value: V,
 }
 
-impl<'a> SignableInput<'a> {
+impl<'a, V> SignableInput<'a, V> {
     /// Constructs a signable input from its parts.
     pub fn from_parts<A: Authorization>(
-        bundle: &Bundle<A>,
+        bundle: &Bundle<A, V>,
         hash_type: SighashType,
         index: usize,
         script_code: &'a Script,
         script_pubkey: &'a Script,
-        value: Zatoshis,
+        value: V,
     ) -> Result<Self, InvalidInputIndex> {
         if index >= bundle.vin.len() {
             return Err(InvalidInputIndex {
@@ -194,32 +193,27 @@ impl<'a> SignableInput<'a> {
 
 #[cfg(test)]
 mod tests {
-    use zcash_protocol::value::Zatoshis;
-
     use super::{InvalidInputIndex, SighashPolicy, SighashType, SignableInput};
     use crate::{
         address::Script,
         bundle::{Bundle, EffectsOnly, OutPoint, TxIn},
     };
 
+    /// The value of the input in the test below. The test does not depend on it.
+    const INPUT_VALUE: u64 = 0;
+
     #[test]
     fn signable_input_rejects_out_of_range_index() {
-        let bundle = Bundle {
+        let bundle: Bundle<EffectsOnly<u64>, u64> = Bundle {
             vin: vec![TxIn::from_parts(OutPoint::fake(), (), u32::MAX)],
             vout: vec![],
             authorization: EffectsOnly { inputs: vec![] },
         };
         let script = Script::default();
 
-        let err = SignableInput::from_parts(
-            &bundle,
-            SighashType::ALL,
-            1,
-            &script,
-            &script,
-            Zatoshis::ZERO,
-        )
-        .unwrap_err();
+        let err =
+            SignableInput::from_parts(&bundle, SighashType::ALL, 1, &script, &script, INPUT_VALUE)
+                .unwrap_err();
 
         assert_eq!(
             err,

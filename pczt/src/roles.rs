@@ -148,7 +148,7 @@ mod tests {
         }
 
         /// The coin the victim is being asked to spend.
-        fn victim_coin() -> (OutPoint, TxOut) {
+        fn victim_coin() -> (OutPoint, TxOut<Zatoshis>) {
             let addr = TransparentAddress::from_pubkey(&public_key(&secret_key()));
             (
                 OutPoint::new([1; 32], 1),
@@ -386,7 +386,7 @@ mod tests {
         }
 
         /// The attacker's own coin, which they contribute to their own transaction.
-        fn attacker_coin() -> (secp256k1::PublicKey, OutPoint, TxOut) {
+        fn attacker_coin() -> (secp256k1::PublicKey, OutPoint, TxOut<Zatoshis>) {
             let pubkey =
                 public_key(&secp256k1::SecretKey::from_secret_bytes([2; 32]).expect("valid"));
             let addr = TransparentAddress::from_pubkey(&pubkey);

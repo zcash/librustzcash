@@ -246,7 +246,7 @@ impl compact_formats::TxOut {
     /// # Errors
     /// Returns [`CompactFormatError::InvalidValue`] if the value is not a valid amount of
     /// zatoshis.
-    pub fn to_txout(&self) -> Result<transparent::bundle::TxOut, CompactFormatError> {
+    pub fn to_txout(&self) -> Result<transparent::bundle::TxOut<Zatoshis>, CompactFormatError> {
         Ok(transparent::bundle::TxOut::new(
             Zatoshis::from_u64(self.value).map_err(|_| CompactFormatError::InvalidValue)?,
             transparent::address::Script(zcash_script::script::Code(self.script_pub_key.clone())),

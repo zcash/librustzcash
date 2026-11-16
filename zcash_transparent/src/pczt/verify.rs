@@ -2,7 +2,7 @@ use zcash_script::script::Evaluable;
 
 use crate::address::TransparentAddress;
 
-impl super::Input {
+impl<V> super::Input<V> {
     /// Verifies the consistency of this transparent input.
     ///
     /// If the `redeem_script` field is set, its validity will be checked.
@@ -27,7 +27,7 @@ impl super::Input {
     }
 }
 
-impl super::Output {
+impl<V> super::Output<V> {
     /// Verifies the consistency of this transparent output.
     ///
     /// If the `redeem_script` field is set, its validity will be checked.

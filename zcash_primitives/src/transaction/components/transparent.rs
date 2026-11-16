@@ -89,7 +89,7 @@ pub fn write_txin<W: Write>(mut writer: W, txin: &TxIn<Authorized>) -> io::Resul
 /// Returns [`io::ErrorKind::InvalidData`] if the value is negative or exceeds the
 /// maximum money supply. Returns an error if the reader fails, the input is truncated,
 /// or the `scriptPubKey` has an invalid length prefix.
-pub fn read_txout<R: Read>(mut reader: R) -> io::Result<TxOut> {
+pub fn read_txout<R: Read>(mut reader: R) -> io::Result<TxOut<Zatoshis>> {
     let mut value = [0u8; size_of::<i64>()];
     reader.read_exact(&mut value)?;
     let value = Zatoshis::from_nonnegative_i64_le_bytes(value)
@@ -102,7 +102,7 @@ pub fn read_txout<R: Read>(mut reader: R) -> io::Result<TxOut> {
 /// `scriptPubKey`.
 ///
 /// Returns an error only if `writer` fails.
-pub fn write_txout<W: Write>(mut writer: W, txout: &TxOut) -> io::Result<()> {
+pub fn write_txout<W: Write>(mut writer: W, txout: &TxOut<Zatoshis>) -> io::Result<()> {
     writer.write_all(&txout.value().to_i64_le_bytes())?;
     write_script(&mut writer, txout.script_pubkey())
 }
@@ -120,7 +120,7 @@ pub fn write_txout<W: Write>(mut writer: W, txout: &TxOut) -> io::Result<()> {
 ///
 /// Returns an error if a sum overflows or underflows, or if `get_prevout_value` fails.
 pub fn value_balance<A, E, F>(
-    bundle: &Bundle<A>,
+    bundle: &Bundle<A, Zatoshis>,
     mut get_prevout_value: F,
 ) -> Result<Option<ZatBalance>, E>
 where
@@ -160,7 +160,9 @@ mod tests {
             testing::{arb_outpoint, arb_script_pubkey, arb_txin, arb_txout},
         },
     };
-    use zcash_protocol::value::{BalanceError, MAX_MONEY, ZatBalance, Zatoshis};
+    use zcash_protocol::value::{
+        BalanceError, MAX_MONEY, ZatBalance, Zatoshis, testing::arb_zatoshis,
+    };
     use zcash_script::script;
 
     use super::{
@@ -206,7 +208,7 @@ mod tests {
     }
 
     /// Returns a bundle with one input and one output of the given value.
-    fn spend_one_create(created: Zatoshis) -> Bundle<Authorized> {
+    fn spend_one_create(created: Zatoshis) -> Bundle<Authorized, Zatoshis> {
         Bundle {
             vin: vec![fake_input()],
             vout: vec![TxOut::new(created, Script::default())],
@@ -338,7 +340,7 @@ mod tests {
         }
 
         #[test]
-        fn txout_round_trips(txout in arb_txout()) {
+        fn txout_round_trips(txout in arb_txout(arb_zatoshis())) {
             let mut bytes = vec![];
             write_txout(&mut bytes, &txout).unwrap();
             prop_assert_eq!(read_txout(&bytes[..]).unwrap(), txout);

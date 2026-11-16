@@ -8,22 +8,22 @@ use crate::address::TransparentAddress;
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 
-impl Bundle {
+impl<V> Bundle<V> {
     /// Updates the bundle with information provided in the given closure.
     pub fn update_with<F>(&mut self, f: F) -> Result<(), UpdaterError>
     where
-        F: FnOnce(Updater<'_>) -> Result<(), UpdaterError>,
+        F: FnOnce(Updater<'_, V>) -> Result<(), UpdaterError>,
     {
         f(Updater(self))
     }
 }
 
 /// An updater for a transparent PCZT bundle.
-pub struct Updater<'a>(&'a mut Bundle);
+pub struct Updater<'a, V>(&'a mut Bundle<V>);
 
-impl Updater<'_> {
+impl<V> Updater<'_, V> {
     /// Provides read access to the bundle being updated.
-    pub fn bundle(&self) -> &Bundle {
+    pub fn bundle(&self) -> &Bundle<V> {
         self.0
     }
 
@@ -31,7 +31,7 @@ impl Updater<'_> {
     /// closure.
     pub fn update_input_with<F>(&mut self, index: usize, f: F) -> Result<(), UpdaterError>
     where
-        F: FnOnce(InputUpdater<'_>) -> Result<(), UpdaterError>,
+        F: FnOnce(InputUpdater<'_, V>) -> Result<(), UpdaterError>,
     {
         f(InputUpdater(
             self.0
@@ -45,7 +45,7 @@ impl Updater<'_> {
     /// closure.
     pub fn update_output_with<F>(&mut self, index: usize, f: F) -> Result<(), UpdaterError>
     where
-        F: FnOnce(OutputUpdater<'_>) -> Result<(), UpdaterError>,
+        F: FnOnce(OutputUpdater<'_, V>) -> Result<(), UpdaterError>,
     {
         f(OutputUpdater(
             self.0
@@ -57,9 +57,9 @@ impl Updater<'_> {
 }
 
 /// An updater for a transparent PCZT input.
-pub struct InputUpdater<'a>(&'a mut Input);
+pub struct InputUpdater<'a, V>(&'a mut Input<V>);
 
-impl InputUpdater<'_> {
+impl<V> InputUpdater<'_, V> {
     /// Sets the redeem script for this input.
     ///
     /// Returns an error if the input is not P2SH, or the given `redeem_script` does not
@@ -118,9 +118,9 @@ impl InputUpdater<'_> {
 }
 
 /// An updater for a transparent PCZT output.
-pub struct OutputUpdater<'a>(&'a mut Output);
+pub struct OutputUpdater<'a, V>(&'a mut Output<V>);
 
-impl OutputUpdater<'_> {
+impl<V> OutputUpdater<'_, V> {
     /// Sets the redeem script for this output.
     ///
     /// Returns an error if the output is not P2SH, or the given `redeem_script` does not

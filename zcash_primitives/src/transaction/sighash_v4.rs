@@ -7,7 +7,7 @@ use ::transparent::{
     bundle::{self as transparent, TxIn, TxOut},
     sighash::{SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
 };
-use zcash_protocol::consensus::BranchId;
+use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
 use super::{
     Authorization, TransactionData, TransparentDigests, Zip143Digests,
@@ -59,7 +59,7 @@ fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHas
         .hash(&data)
 }
 
-fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
+fn outputs_hash(vout: &[TxOut<Zatoshis>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vout.len() * (4 + 1));
     for t_out in vout {
         write_txout(&mut data, t_out).unwrap();
@@ -70,7 +70,7 @@ fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
         .hash(&data)
 }
 
-fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
+fn single_output_hash(tx_out: &TxOut<Zatoshis>) -> Blake2bHash {
     let mut data = vec![];
     write_txout(&mut data, tx_out).unwrap();
     Blake2bParams::new()

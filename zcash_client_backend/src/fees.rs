@@ -822,14 +822,14 @@ pub(crate) mod tests {
     #[derive(Debug)]
     pub(crate) struct TestTransparentInput {
         pub outpoint: OutPoint,
-        pub coin: TxOut,
+        pub coin: TxOut<Zatoshis>,
     }
 
     impl transparent::InputView for TestTransparentInput {
         fn outpoint(&self) -> &OutPoint {
             &self.outpoint
         }
-        fn coin(&self) -> &TxOut {
+        fn coin(&self) -> &TxOut<Zatoshis> {
             &self.coin
         }
     }

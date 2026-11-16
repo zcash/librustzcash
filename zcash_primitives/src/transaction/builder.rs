@@ -848,7 +848,7 @@ pub struct PcztParts<P: Parameters> {
     pub consensus_branch_id: BranchId,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
-    pub transparent: Option<transparent::pczt::Bundle>,
+    pub transparent: Option<transparent::pczt::Bundle<Zatoshis>>,
     pub sapling: Option<sapling::pczt::Bundle>,
     pub orchard: Option<orchard::pczt::Bundle>,
     pub ironwood: Option<orchard::pczt::Bundle>,
@@ -864,7 +864,7 @@ pub struct Builder<P, U> {
     expiry_height: BlockHeight,
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
-    transparent_builder: TransparentBuilder,
+    transparent_builder: TransparentBuilder<Zatoshis>,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     orchard_bundle_version: Option<orchard::bundle::BundleVersion>,
@@ -893,13 +893,13 @@ impl<P, U> Builder<P, U> {
     /// Returns the set of transparent inputs currently committed to be consumed
     /// by the transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent_inputs(&self) -> &[TransparentInputInfo] {
+    pub fn transparent_inputs(&self) -> &[TransparentInputInfo<Zatoshis>] {
         self.transparent_builder.inputs()
     }
 
     /// Returns the set of transparent outputs currently set to be produced by
     /// the transaction.
-    pub fn transparent_outputs(&self) -> &[TxOut] {
+    pub fn transparent_outputs(&self) -> &[TxOut<Zatoshis>] {
         self.transparent_builder.outputs()
     }
 
@@ -1303,7 +1303,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
 
     /// Adds a transparent coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn add_transparent_input(&mut self, input: TransparentInputInfo) {
+    pub fn add_transparent_input(&mut self, input: TransparentInputInfo<Zatoshis>) {
         self.transparent_builder.add_input(input)
     }
 
@@ -1313,7 +1313,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         &mut self,
         pubkey: secp256k1::PublicKey,
         utxo: transparent::bundle::OutPoint,
-        coin: TxOut,
+        coin: TxOut<Zatoshis>,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_p2pkh_input(pubkey, utxo, coin)
     }
@@ -1324,7 +1324,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         &mut self,
         redeem_script: script::FromChain,
         utxo: transparent::bundle::OutPoint,
-        coin: TxOut,
+        coin: TxOut<Zatoshis>,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder
             .add_p2sh_input(redeem_script, utxo, coin)
@@ -1469,7 +1469,9 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
 
 /// Returns the value of the transparent inputs added to `builder`, minus the value of
 /// its transparent outputs.
-fn transparent_value_balance(builder: &TransparentBuilder) -> Result<ZatBalance, BalanceError> {
+fn transparent_value_balance(
+    builder: &TransparentBuilder<Zatoshis>,
+) -> Result<ZatBalance, BalanceError> {
     #[cfg(feature = "transparent-inputs")]
     let input_sum = builder
         .inputs()
@@ -1561,16 +1563,16 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
     fn build_internal<A, R, SP, OP, FE>(
         self,
         build_transparent: impl FnOnce(
-            TransparentBuilder,
+            TransparentBuilder<Zatoshis>,
         ) -> Result<
-            Option<transparent::bundle::Bundle<A::TransparentAuth>>,
+            Option<transparent::bundle::Bundle<A::TransparentAuth, Zatoshis>>,
             Error<FE>,
         >,
         authorize_transparent: impl FnOnce(
-            &transparent::bundle::Bundle<A::TransparentAuth>,
+            &transparent::bundle::Bundle<A::TransparentAuth, Zatoshis>,
             &PrecomputedSighashData<A>,
         ) -> Result<
-            transparent::bundle::Bundle<transparent::bundle::Authorized>,
+            transparent::bundle::Bundle<transparent::bundle::Authorized, Zatoshis>,
             transparent::builder::Error,
         >,
         sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
@@ -1591,7 +1593,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
                     orchard::builder::Unauthorized,
                 >,
             >,
-        A::TransparentAuth: transparent::sighash::TransparentAuthorizingContext,
+        A::TransparentAuth: transparent::sighash::TransparentAuthorizingContext<Zatoshis>,
         R: Rng + CryptoRng,
         SP: SpendProver,
         OP: OutputProver,
@@ -1964,11 +1966,13 @@ pub fn cached_orchard_proving_key(
 
 #[cfg(feature = "circuits")]
 fn authorize_transparent(
-    b: &transparent::bundle::Bundle<transparent::builder::Unauthorized>,
+    b: &transparent::bundle::Bundle<transparent::builder::Unauthorized<Zatoshis>, Zatoshis>,
     sighash_data: &PrecomputedSighashData<Unauthorized>,
     transparent_signing_set: &TransparentSigningSet,
-) -> Result<transparent::bundle::Bundle<transparent::bundle::Authorized>, transparent::builder::Error>
-{
+) -> Result<
+    transparent::bundle::Bundle<transparent::bundle::Authorized, Zatoshis>,
+    transparent::builder::Error,
+> {
     b.clone().apply_signatures(
         |input| {
             *sighash_data

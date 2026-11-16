@@ -9,6 +9,7 @@ use ::transparent::{
     },
 };
 use zcash_encoding::Array;
+use zcash_protocol::value::Zatoshis;
 
 use crate::{
     encoding::StateWrite,
@@ -45,7 +46,9 @@ pub(crate) struct TransparentInputsDigests {
 impl TransparentInputsDigests {
     /// Computes the digests for the inputs of `bundle`, in time linear in the number of
     /// inputs.
-    fn new<A: TransparentAuthorizingContext>(bundle: &transparent::Bundle<A>) -> Self {
+    fn new<A: TransparentAuthorizingContext<Zatoshis>>(
+        bundle: &transparent::Bundle<A, Zatoshis>,
+    ) -> Self {
         let mut amounts = hasher(ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION);
         Array::write(
             &mut amounts,
@@ -74,8 +77,8 @@ impl TransparentInputsDigests {
     /// Returns `None` if `bundle` is a coinbase bundle or has no inputs.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2-transparent-sig-digest
-    pub(crate) fn for_bundle<A: TransparentAuthorizingContext>(
-        bundle: &transparent::Bundle<A>,
+    pub(crate) fn for_bundle<A: TransparentAuthorizingContext<Zatoshis>>(
+        bundle: &transparent::Bundle<A, Zatoshis>,
     ) -> Option<Self> {
         (!transparent_bundle_is_coinbase(bundle) && !bundle.vin.is_empty())
             .then(|| Self::new(bundle))
@@ -87,8 +90,11 @@ impl TransparentInputsDigests {
 /// `inputs_digests` are the digests of the inputs of the bundle in `tx_data`, as computed
 /// by [`TransparentInputsDigests::for_bundle`]. If they are `None` while the bundle has
 /// non-coinbase inputs, this function computes them, in time linear in the number of inputs.
-pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
-    tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
+pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext<Zatoshis>>(
+    tx_data: Option<(
+        &transparent::Bundle<A, Zatoshis>,
+        &TransparentDigests<Blake2bHash>,
+    )>,
     inputs_digests: Option<&TransparentInputsDigests>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
@@ -140,10 +146,10 @@ pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                     if *input.index() < bundle.vout.len() {
                         transparent_outputs_hash(&[&bundle.vout[*input.index()]])
                     } else {
-                        transparent_outputs_hash::<TxOut>(&[])
+                        transparent_outputs_hash::<TxOut<Zatoshis>>(&[])
                     }
                 } else if flag_none {
-                    transparent_outputs_hash::<TxOut>(&[])
+                    transparent_outputs_hash::<TxOut<Zatoshis>>(&[])
                 } else {
                     txid_digests.outputs_digest
                 }
@@ -181,7 +187,7 @@ pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
 /// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest),
 /// using the `txid_parts` and transparent `inputs_digests` of `tx`.
 pub(crate) fn v5_signature_hash<
-    TA: TransparentAuthorizingContext,
+    TA: TransparentAuthorizingContext<Zatoshis>,
     A: Authorization<TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,

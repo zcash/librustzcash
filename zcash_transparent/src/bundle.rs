@@ -4,8 +4,6 @@ use alloc::vec::Vec;
 use core::fmt::{self, Debug};
 use zcash_script::{script, solver};
 
-use zcash_protocol::value::Zatoshis;
-
 use crate::{
     address::{Script, TransparentAddress},
     sighash::TransparentAuthorizingContext,
@@ -18,16 +16,16 @@ pub trait Authorization: Debug {
 /// Marker type for a bundle that contains no authorizing data, and the necessary input
 /// information for creating sighashes.
 #[derive(Debug)]
-pub struct EffectsOnly {
-    pub(crate) inputs: Vec<TxOut>,
+pub struct EffectsOnly<V> {
+    pub(crate) inputs: Vec<TxOut<V>>,
 }
 
-impl Authorization for EffectsOnly {
+impl<V: Debug> Authorization for EffectsOnly<V> {
     type ScriptSig = ();
 }
 
-impl TransparentAuthorizingContext for EffectsOnly {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
+impl<V: Copy + Debug> TransparentAuthorizingContext<V> for EffectsOnly<V> {
+    fn input_amounts(&self) -> Vec<V> {
         self.inputs.iter().map(|input| input.value()).collect()
     }
 
@@ -65,16 +63,20 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
+/// The transparent part of a transaction: its inputs, its outputs, and the authorizing
+/// data `A`.
+///
+/// `V` is the type of the value of each output; see [`TxOut`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct Bundle<A: Authorization> {
+pub struct Bundle<A: Authorization, V> {
     pub vin: Vec<TxIn<A>>,
-    pub vout: Vec<TxOut>,
+    pub vout: Vec<TxOut<V>>,
     pub authorization: A,
 }
 
-impl<A: Authorization> Bundle<A> {
+impl<A: Authorization, V> Bundle<A, V> {
     #[allow(deprecated)]
-    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B, V> {
         Bundle {
             vin: self
                 .vin
@@ -192,18 +194,23 @@ impl<A: Authorization> TxIn<A> {
     }
 }
 
+/// A transparent transaction output.
+///
+/// `V` is the type of the output's value. This crate stores and returns the value
+/// without interpreting it. A Zcash consumer instantiates `V` with a type that represents
+/// a non-negative amount of zatoshis, such as `zcash_protocol::value::Zatoshis`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TxOut {
+pub struct TxOut<V> {
     #[deprecated(since = "0.4.1", note = "use the value() accessor instead.")]
-    pub value: Zatoshis,
+    pub value: V,
     #[deprecated(since = "0.4.1", note = "use the script_pubkey() accessor instead.")]
     pub script_pubkey: Script,
 }
 
 #[allow(deprecated)]
-impl TxOut {
+impl<V> TxOut<V> {
     // Constructs a new `TxOut` from its constituent parts.
-    pub fn new(value: Zatoshis, script_pubkey: Script) -> Self {
+    pub fn new(value: V, script_pubkey: Script) -> Self {
         Self {
             value,
             script_pubkey,
@@ -215,10 +222,6 @@ impl TxOut {
         self.script_kind()
             .as_ref()
             .and_then(TransparentAddress::from_script_kind)
-    }
-
-    pub fn value(&self) -> Zatoshis {
-        self.value
     }
 
     pub fn script_pubkey(&self) -> &Script {
@@ -234,12 +237,19 @@ impl TxOut {
     }
 }
 
+#[allow(deprecated)]
+impl<V: Copy> TxOut<V> {
+    /// Returns the value of this output.
+    pub fn value(&self) -> V {
+        self.value
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
-    use zcash_protocol::value::testing::arb_zatoshis;
     use zcash_script::script;
 
     use crate::address::Script;
@@ -285,29 +295,55 @@ pub mod testing {
         }
     }
 
-    prop_compose! {
-        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script_pubkey()) -> TxOut {
-            TxOut::new(value, script_pubkey)
-        }
+    /// Generates an arbitrary [`TxOut`] whose value is drawn from `arb_value`.
+    pub fn arb_txout<V: core::fmt::Debug>(
+        arb_value: impl Strategy<Value = V>,
+    ) -> impl Strategy<Value = TxOut<V>> {
+        (arb_value, arb_script_pubkey())
+            .prop_map(|(value, script_pubkey)| TxOut::new(value, script_pubkey))
     }
 
-    prop_compose! {
-        pub fn arb_bundle()(
-            vin in vec(arb_txin(), 0..10),
-            vout in vec(arb_txout(), 0..10),
-        ) -> Option<Bundle<Authorized>> {
+    /// Generates an arbitrary authorized bundle whose output values are drawn from
+    /// `arb_value`, or `None` if the generated bundle would be empty.
+    pub fn arb_bundle<V: core::fmt::Debug>(
+        arb_value: impl Strategy<Value = V>,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, V>>> {
+        (vec(arb_txin(), 0..10), vec(arb_txout(arb_value), 0..10)).prop_map(|(vin, vout)| {
             if vin.is_empty() && vout.is_empty() {
                 None
             } else {
-                Some(Bundle { vin, vout, authorization: Authorized })
+                Some(Bundle {
+                    vin,
+                    vout,
+                    authorization: Authorized,
+                })
             }
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::OutPoint;
+    use crate::{address::TransparentAddress, builder::TransparentBuilder};
+
+    /// A value type that implements nothing but `Debug`.
+    #[derive(Debug)]
+    struct OpaqueValue;
+
+    /// An arbitrary public key hash for a recipient address.
+    const RECIPIENT_PUBKEY_HASH: [u8; 20] = [7; 20];
+
+    #[test]
+    fn building_a_bundle_does_not_copy_the_value() {
+        let recipient = TransparentAddress::PublicKeyHash(RECIPIENT_PUBKEY_HASH);
+        let mut builder = TransparentBuilder::<OpaqueValue>::empty();
+        builder.add_output(&recipient, OpaqueValue).unwrap();
+
+        let bundle = builder.build().unwrap();
+        assert_eq!(bundle.vout.len(), 1);
+        assert_eq!(bundle.vout[0].recipient_address(), Some(recipient));
+    }
 
     /// The first byte of the txid in the test below. It is the last byte of the txid as
     /// displayed.

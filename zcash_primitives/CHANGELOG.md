@@ -35,6 +35,17 @@ workspace.
   `Error::TransparentBuild(zcash_transparent::builder::Error::NullDataTooLong)`.
   `zcash_primitives::transaction::builder::Error` gained the `NullDataTooLong`
   variant, which exhaustive matches must now handle.
+- The transparent types in the following items are now written with the value
+  parameter of `zcash_transparent` set to `Zatoshis` (for example
+  `TxOut<Zatoshis>`, `transparent::bundle::Bundle<A, Zatoshis>` and
+  `TransparentAuthorizingContext<Zatoshis>`), and denote the same values as
+  before:
+  - `zcash_primitives::transaction::{TransactionData, TransactionDigest,
+    Unauthorized}`
+  - `zcash_primitives::transaction::builder::{Builder, PcztParts}`
+  - `zcash_primitives::transaction::sighash::{SignableInput,
+    PrecomputedSighashData}`
+  - `zcash_primitives::transaction::fees::transparent::{InputView, OutputView}`
 
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,

@@ -515,9 +515,11 @@ impl Pczt {
         self,
         anchor_requirement: common::AnchorRequirement,
         extract_transparent: impl FnOnce(
-            &::transparent::pczt::Bundle,
+            &::transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
         ) -> Result<
-            Option<::transparent::bundle::Bundle<A::TransparentAuth>>,
+            Option<
+                ::transparent::bundle::Bundle<A::TransparentAuth, zcash_protocol::value::Zatoshis>,
+            >,
             E,
         >,
         extract_sapling: impl FnOnce(
@@ -688,7 +690,7 @@ impl Pczt {
 )]
 pub(crate) struct ParsedPczt<A: Authorization> {
     pub(crate) global: Global,
-    pub(crate) transparent: ::transparent::pczt::Bundle,
+    pub(crate) transparent: ::transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
     pub(crate) sapling: crate::sapling::Parsed,
     pub(crate) orchard: crate::orchard::Parsed,
     pub(crate) ironwood: crate::orchard::Parsed,
@@ -700,7 +702,7 @@ pub struct EffectsOnly;
 
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
 impl Authorization for EffectsOnly {
-    type TransparentAuth = ::transparent::bundle::EffectsOnly;
+    type TransparentAuth = ::transparent::bundle::EffectsOnly<zcash_protocol::value::Zatoshis>;
     type SaplingAuth = ::sapling::bundle::EffectsOnly;
     type OrchardAuth = ::orchard::bundle::EffectsOnly;
 }

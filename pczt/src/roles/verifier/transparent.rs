@@ -4,7 +4,9 @@ impl super::Verifier {
     /// Parses the Transparent bundle and then verifies it in the given closure.
     pub fn with_transparent<E, F>(self, f: F) -> Result<Self, TransparentError<E>>
     where
-        F: FnOnce(&transparent::pczt::Bundle) -> Result<(), TransparentError<E>>,
+        F: FnOnce(
+            &transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
+        ) -> Result<(), TransparentError<E>>,
     {
         let Pczt {
             global,

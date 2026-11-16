@@ -1,5 +1,8 @@
 //! # Zcash transparent protocol
 //!
+//! The value of a transparent output has a type `V` that the caller chooses; see
+//! [`bundle::TxOut`].
+//!
 #![cfg_attr(feature = "std", doc = "## Feature flags")]
 #![cfg_attr(feature = "std", doc = document_features::document_features!())]
 //!

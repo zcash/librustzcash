@@ -94,7 +94,7 @@ impl TransparentAuthorization for Coinbase {
     type ScriptSig = script::Sig;
 }
 
-impl TransparentAuthorizingContext for Coinbase {
+impl TransparentAuthorizingContext<Zatoshis> for Coinbase {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         vec![]
     }
@@ -218,7 +218,7 @@ pub fn is_coinbase<A: Authorization>(tx: &TransactionData<A>) -> bool {
 
 /// Returns `true` if `bundle` is the transparent part of a coinbase transaction.
 pub(crate) fn transparent_bundle_is_coinbase<A: TransparentAuthorization>(
-    bundle: &Bundle<A>,
+    bundle: &Bundle<A, Zatoshis>,
 ) -> bool {
     // From `CTransaction::IsCoinBase()` in zcashd:
     //   return (vin.size() == 1 && vin[0].prevout.IsNull());
@@ -232,10 +232,10 @@ pub(crate) fn transparent_bundle_is_coinbase<A: TransparentAuthorization>(
 /// otherwise any error of [`coinbase_input`].
 #[cfg(feature = "circuits")]
 pub(crate) fn build_transparent_bundle(
-    builder: TransparentBuilder,
+    builder: TransparentBuilder<Zatoshis>,
     height: BlockHeight,
     miner_data: Option<PushValue>,
-) -> Result<Bundle<Coinbase>, Error> {
+) -> Result<Bundle<Coinbase, Zatoshis>, Error> {
     #[cfg(feature = "transparent-inputs")]
     if !builder.inputs().is_empty() {
         return Err(Error::UnexpectedInputs);
@@ -257,7 +257,10 @@ mod tests {
         bundle::{Authorized, Bundle, OutPoint, TxIn},
     };
     use assert_matches::assert_matches;
-    use zcash_protocol::consensus::{BlockHeight, BranchId};
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        value::Zatoshis,
+    };
     use zcash_script::{pv, script::Evaluable as _};
 
     use super::{
@@ -382,7 +385,7 @@ mod tests {
         );
     }
 
-    fn bundle(vin: Vec<TxIn<Authorized>>) -> Bundle<Authorized> {
+    fn bundle(vin: Vec<TxIn<Authorized>>) -> Bundle<Authorized, Zatoshis> {
         Bundle {
             vin,
             vout: vec![],
@@ -417,7 +420,7 @@ mod tests {
 
     /// Returns a transaction that has only the given transparent bundle.
     fn transaction(
-        transparent_bundle: Option<Bundle<Authorized>>,
+        transparent_bundle: Option<Bundle<Authorized, Zatoshis>>,
     ) -> TransactionData<crate::transaction::Authorized> {
         TransactionData::from_parts(
             TxVersion::V5,

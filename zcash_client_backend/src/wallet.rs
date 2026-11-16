@@ -295,7 +295,7 @@ impl<AccountId> WalletTx<AccountId> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
-    txout: TxOut,
+    txout: TxOut<Zatoshis>,
     mined_height: Option<BlockHeight>,
     recipient_account: Option<AccountId>,
     recipient_key_scope: Option<TransparentKeyScope>,
@@ -313,7 +313,7 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     /// determined based on the set of output script patterns understood by this wallet.
     pub fn from_parts(
         outpoint: OutPoint,
-        txout: TxOut,
+        txout: TxOut<Zatoshis>,
         mined_height: Option<BlockHeight>,
         recipient_account: Option<AccountId>,
         recipient_key_scope: Option<TransparentKeyScope>,
@@ -383,7 +383,7 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     }
 
     /// Returns the transaction output itself.
-    pub fn txout(&self) -> &TxOut {
+    pub fn txout(&self) -> &TxOut<Zatoshis> {
         &self.txout
     }
 
@@ -471,7 +471,7 @@ impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<A
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }
-    fn coin(&self) -> &TxOut {
+    fn coin(&self) -> &TxOut<Zatoshis> {
         &self.txout
     }
     fn serialized_size(&self) -> transparent_fees::InputSize {

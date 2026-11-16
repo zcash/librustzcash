@@ -2693,7 +2693,7 @@ where
         anchor_height,
         zip318,
         transparent_inputs,
-        &[] as &[TxOut],
+        &[] as &[TxOut<Zatoshis>],
         &sapling::EmptyBundleView,
         #[cfg(feature = "orchard")]
         &empty_orchard_view,

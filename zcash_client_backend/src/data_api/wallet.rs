@@ -2140,7 +2140,7 @@ where
              utxos_spent: &mut Vec<_>,
              recipient_address: &TransparentAddress,
              outpoint: OutPoint,
-             txout: TxOut|
+             txout: TxOut<Zatoshis>|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
                 let metadata = metadata_from_address(recipient_address)?;
                 match metadata.source() {

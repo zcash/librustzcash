@@ -6,7 +6,6 @@ use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use getset::Getters;
-use zcash_protocol::value::Zatoshis;
 use zcash_script::script;
 
 use crate::sighash::SighashType;
@@ -40,25 +39,25 @@ pub use tx_extractor::{TxExtractorError, Unbound};
 /// [the regular `Bundle` struct]: crate::bundle::Bundle
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Bundle {
+pub struct Bundle<V> {
     /// The transparent inputs in this bundle.
     ///
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
-    pub(crate) inputs: Vec<Input>,
+    pub(crate) inputs: Vec<Input<V>>,
 
     /// The transparent outputs in this bundle.
     ///
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
-    pub(crate) outputs: Vec<Output>,
+    pub(crate) outputs: Vec<Output<V>>,
 }
 
-impl Bundle {
+impl<V> Bundle<V> {
     /// Returns a mutable reference to the inputs in this bundle.
     ///
     /// This is used by Signers to apply signatures with [`Input::sign`].
-    pub fn inputs_mut(&mut self) -> &mut [Input] {
+    pub fn inputs_mut(&mut self) -> &mut [Input<V>] {
         &mut self.inputs
     }
 }
@@ -71,7 +70,7 @@ impl Bundle {
 /// [the regular `TxIn` struct]: crate::bundle::TxIn
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Input {
+pub struct Input<V> {
     /// The ID of the previous transaction containing the transparent coin being spent by
     /// this input, in internal byte order. That is the reverse of its displayed hex form.
     pub(crate) prevout_txid: [u8; 32],
@@ -111,7 +110,7 @@ pub struct Input {
     /// - This is set by the Constructor.
     /// - This is required by the IO Finalizer and Transaction Extractor, to derive the
     ///   shielded sighash needed for computing the binding signatures.
-    pub(crate) value: Zatoshis,
+    pub(crate) value: V,
 
     /// The `script_pubkey` of the input being spent.
     ///
@@ -188,9 +187,9 @@ pub struct Input {
 /// [the regular `TxOut` struct]: crate::bundle::TxOut
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Output {
+pub struct Output<V> {
     /// The value of the output.
-    pub(crate) value: Zatoshis,
+    pub(crate) value: V,
 
     /// The script constraining how spending of this output must be authorized.
     pub(crate) script_pubkey: script::PubKey,
@@ -239,7 +238,6 @@ pub(crate) mod testing {
     use alloc::collections::BTreeMap;
     use alloc::vec::Vec;
 
-    use zcash_protocol::value::Zatoshis;
     use zcash_script::{
         pattern,
         script::{self, Evaluable},
@@ -248,6 +246,9 @@ pub(crate) mod testing {
     use crate::{address::TransparentAddress, sighash::SighashType, util::hash160};
 
     use super::Input;
+
+    /// The value of the coin that [`input`] spends. Its value is arbitrary.
+    pub(crate) const INPUT_VALUE: u64 = 1_000_000;
 
     /// The P2PKH `script_pubkey` paying to `pubkey`.
     pub(crate) fn p2pkh(pubkey: &[u8; 33]) -> script::FromChain {
@@ -284,7 +285,7 @@ pub(crate) mod testing {
         script_pubkey: script::FromChain,
         redeem_script: Option<script::FromChain>,
         sighash_type: SighashType,
-    ) -> Input {
+    ) -> Input<u64> {
         Input {
             prevout_txid: [0; 32],
             prevout_index: 0,
@@ -292,7 +293,7 @@ pub(crate) mod testing {
             required_time_lock_time: None,
             required_height_lock_time: None,
             script_sig: None,
-            value: Zatoshis::const_from_u64(1_000_000),
+            value: INPUT_VALUE,
             script_pubkey,
             redeem_script,
             partial_signatures: BTreeMap::new(),

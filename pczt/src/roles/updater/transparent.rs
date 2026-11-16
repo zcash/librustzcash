@@ -1,4 +1,5 @@
 use transparent::pczt::{ParseError, Updater, UpdaterError};
+use zcash_protocol::value::Zatoshis;
 
 use crate::Pczt;
 
@@ -6,7 +7,7 @@ impl super::Updater {
     /// Updates the transparent bundle with information in the given closure.
     pub fn update_transparent_with<F>(self, f: F) -> Result<Self, TransparentError>
     where
-        F: FnOnce(Updater<'_>) -> Result<(), UpdaterError>,
+        F: FnOnce(Updater<'_, Zatoshis>) -> Result<(), UpdaterError>,
     {
         let Pczt {
             global,

@@ -21,6 +21,22 @@ workspace.
 - `zcash_transparent::pczt::Input::prevout_txid` now returns `&[u8; 32]`
   instead of `&zcash_protocol::TxId`. Wrap it with
   `zcash_protocol::TxId::from_bytes` where a `TxId` is needed.
+- The value of a transparent output is now a type parameter `V` instead of
+  `zcash_protocol::value::Zatoshis`. Callers that used `Zatoshis` write it as
+  the parameter, for example `TxOut<Zatoshis>` and `Bundle<A, Zatoshis>`. The
+  following items gained the parameter:
+  - `zcash_transparent::bundle::{TxOut, Bundle, EffectsOnly}`
+  - `zcash_transparent::builder::{TransparentBuilder, TransparentInputInfo,
+    Unauthorized, TransparentSignatureContext}`
+  - `zcash_transparent::sighash::{SignableInput, TransparentAuthorizingContext}`
+  - `zcash_transparent::pczt::{Bundle, Input, Output, Unbound, Updater,
+    InputUpdater, OutputUpdater}`
+- A value type `V` that implements `Copy` and `core::fmt::Debug` can be used
+  with every item in the crate. `zcash_transparent::pczt::{Input, Output}::parse`
+  additionally require `V: TryFrom<u64>`. `zcash_protocol::value::Zatoshis`
+  satisfies all three.
+- `zcash_transparent::bundle::testing::{arb_txout, arb_bundle}` take a strategy
+  for the output value as an argument.
 
 ### Removed
 - The transaction wire codecs. Use the functions in

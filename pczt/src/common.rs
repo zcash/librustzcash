@@ -378,7 +378,7 @@ impl LockTimeInput for crate::transparent::Input {
 }
 
 #[cfg(feature = "transparent")]
-impl LockTimeInput for ::transparent::pczt::Input {
+impl LockTimeInput for ::transparent::pczt::Input<zcash_protocol::value::Zatoshis> {
     fn required_time_lock_time(&self) -> Option<u32> {
         *self.required_time_lock_time()
     }

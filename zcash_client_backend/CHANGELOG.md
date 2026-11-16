@@ -114,6 +114,10 @@ workspace.
   types now use the types in `zcash_keys::keys::transparent` instead of the
   types of the same names in `zcash_transparent::keys`. Update imports from
   `zcash_transparent::keys::X` to `zcash_keys::keys::transparent::X`.
+- `zcash_client_backend::wallet::WalletTransparentOutput::{from_parts, txout}`
+  and `zcash_client_backend::proto::compact_formats::TxOut::to_txout` now
+  write the transparent output type as `TxOut<Zatoshis>`, and denote the same
+  values as before.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,

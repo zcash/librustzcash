@@ -88,7 +88,7 @@ pub trait InputView: core::fmt::Debug {
     fn outpoint(&self) -> &OutPoint;
 
     /// The previous output being spent.
-    fn coin(&self) -> &TxOut;
+    fn coin(&self) -> &TxOut<Zatoshis>;
 
     /// The size of this transparent input in a transaction, as used in [ZIP 317].
     ///
@@ -106,12 +106,12 @@ pub trait InputView: core::fmt::Debug {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl InputView for TransparentInputInfo {
+impl InputView for TransparentInputInfo<Zatoshis> {
     fn outpoint(&self) -> &OutPoint {
         self.outpoint()
     }
 
-    fn coin(&self) -> &TxOut {
+    fn coin(&self) -> &TxOut<Zatoshis> {
         self.coin()
     }
 
@@ -135,7 +135,7 @@ impl InputView for Infallible {
     fn outpoint(&self) -> &OutPoint {
         unreachable!()
     }
-    fn coin(&self) -> &TxOut {
+    fn coin(&self) -> &TxOut<Zatoshis> {
         unreachable!()
     }
 }
@@ -157,7 +157,7 @@ pub trait OutputView: core::fmt::Debug {
     }
 }
 
-impl OutputView for TxOut {
+impl OutputView for TxOut<Zatoshis> {
     fn value(&self) -> Zatoshis {
         self.value()
     }
