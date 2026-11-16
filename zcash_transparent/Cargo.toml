@@ -18,8 +18,6 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-zcash_protocol.workspace = true
-
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Encodings
@@ -59,7 +57,6 @@ ripemd.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["std"]
@@ -73,10 +70,7 @@ std = [
 transparent-inputs = ["dep:secp256k1"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
-test-dependencies = [
-    "dep:proptest",
-    "zcash_protocol/test-dependencies",
-]
+test-dependencies = ["dep:proptest"]
 
 [lints]
 workspace = true

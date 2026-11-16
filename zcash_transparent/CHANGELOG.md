@@ -37,6 +37,9 @@ workspace.
   satisfies all three.
 - `zcash_transparent::bundle::testing::{arb_txout, arb_bundle}` take a strategy
   for the output value as an argument.
+- The `test-dependencies` feature no longer enables the `test-dependencies`
+  feature of `zcash_protocol`. A crate that relied on it being enabled through
+  `zcash_transparent` must now enable it directly.
 
 ### Removed
 - The transaction wire codecs. Use the functions in
