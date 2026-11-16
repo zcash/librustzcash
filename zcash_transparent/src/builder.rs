@@ -6,7 +6,7 @@ use core::fmt;
 
 use zcash_protocol::value::Zatoshis;
 
-use zcash_script::{op, script};
+use zcash_script::script;
 
 use crate::{
     address::{Script, TransparentAddress},
@@ -36,11 +36,6 @@ pub enum Error {
     /// A bundle could not be built because a required signing key was missing, or
     /// insufficient keys were provided to meet a multisig threshold.
     MissingSigningKey,
-    /// Provided null data is longer than the maximum supported length.
-    NullDataTooLong {
-        actual: usize,
-        limit: usize,
-    },
     /// The number of inputs does not match number of sighashes.
     InputCountMismatch, // Use this for prepare_transparent_signatures
     /// A provided external signature was not valid for any transparent input.
@@ -64,10 +59,6 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::NullDataTooLong { actual, limit } => write!(
-                f,
-                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
-            ),
             Error::InputCountMismatch => write!(
                 f,
                 "The number of inputs does not match the number of sighashes"
@@ -310,8 +301,16 @@ impl TransparentBuilder {
         Ok(())
     }
 
+    /// Adds an output with the given `scriptPubKey` and value.
+    ///
+    /// No standardness or relay-policy check is applied to `script_pubkey`.
+    pub fn add_script_output(&mut self, script_pubkey: &script::PubKey, value: Zatoshis) {
+        self.vout.push(TxOut::new(value, script_pubkey.into()));
+    }
+
+    /// Adds an output that pays `value` to the address `to`.
     pub fn add_output(&mut self, to: &TransparentAddress, value: Zatoshis) -> Result<(), Error> {
-        self.vout.push(TxOut::new(value, to.script().into()));
+        self.add_script_output(&to.script(), value);
 
         Ok(())
     }
@@ -397,26 +396,6 @@ impl TransparentBuilder {
 
             Some(pczt::Bundle { inputs, outputs })
         }
-    }
-
-    /// Adds a zero-value "null data" (OP_RETURN) output containing the given data.
-    pub fn add_null_data_output(&mut self, data: &[u8]) -> Result<(), Error> {
-        // Check 80 bytes limit.
-        const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
-        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
-            return Err(Error::NullDataTooLong {
-                actual: data.len(),
-                limit: MAX_OP_RETURN_RELAY_BYTES,
-            });
-        }
-
-        let script = script::Component(vec![
-            op::RETURN,
-            op::push_value(data).expect("length checked"),
-        ]);
-
-        self.vout.push(TxOut::new(Zatoshis::ZERO, script.into()));
-        Ok(())
     }
 }
 

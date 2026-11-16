@@ -12,7 +12,7 @@ use zcash_protocol::{
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
-use zcash_script::opcode::PushValue;
+use zcash_script::{op, opcode::PushValue, script};
 
 use crate::transaction::{
     Transaction, TxVersion, coinbase,
@@ -38,7 +38,7 @@ use {
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::builder::TransparentInputInfo, zcash_script::script};
+use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
 use core::convert::Infallible;
@@ -65,6 +65,10 @@ pub const BLOSSOM_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 /// [ZIP 218]: https://zips.z.cash/zip-0218#default-expiry-delta
 pub const NU7_DEFAULT_TX_EXPIRY_DELTA: u32 =
     NU7_POW_TARGET_SPACING_RATIO * BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
+
+/// The maximum length, in bytes, of the data in a transparent null-data (`OP_RETURN`)
+/// output that nodes relay.
+const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
 
 /// Returns the default expiry delta, in blocks, for a transaction built under the rules of the
 /// given consensus branch.
@@ -124,6 +128,14 @@ pub enum Error<FE> {
     Balance(BalanceError),
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
+    /// The data for a transparent null-data output is longer than the maximum length
+    /// that is relayed.
+    NullDataTooLong {
+        /// The length of the data provided.
+        actual: usize,
+        /// The maximum length.
+        limit: usize,
+    },
     /// An error occurred in constructing the Sapling parts of a transaction.
     SaplingBuild(sapling::builder::Error),
     /// An error occurred in constructing the Orchard parts of a transaction.
@@ -185,6 +197,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::Balance(e) => write!(f, "Invalid amount {e:?}"),
             Error::Fee(e) => write!(f, "An error occurred in fee calculation: {e}"),
             Error::TransparentBuild(err) => err.fmt(f),
+            Error::NullDataTooLong { actual, limit } => write!(
+                f,
+                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
+            ),
             Error::SaplingBuild(err) => err.fmt(f),
             Error::OrchardBuild(err) => write!(f, "{err:?}"),
             Error::IronwoodBuild(err) => write!(f, "{err:?}"),
@@ -1323,11 +1339,26 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         self.transparent_builder.add_output(to, value)
     }
 
-    /// Adds a transparent "null data" (OP_RETURN) output with the given data payload.
+    /// Adds a zero-value transparent "null data" (`OP_RETURN`) output that carries
+    /// `data`.
+    ///
+    /// Returns [`Error::NullDataTooLong`] if `data` is longer than 80 bytes.
     pub fn add_transparent_null_data_output<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
+        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
+            return Err(Error::NullDataTooLong {
+                actual: data.len(),
+                limit: MAX_OP_RETURN_RELAY_BYTES,
+            });
+        }
+
+        let script = script::Component(vec![
+            op::RETURN,
+            op::push_value(data).expect("length checked"),
+        ]);
+
         self.transparent_builder
-            .add_null_data_output(data)
-            .map_err(Error::TransparentBuild)
+            .add_script_output(&script, Zatoshis::ZERO);
+        Ok(())
     }
 
     /// Returns the sum of the transparent, Sapling, Orchard, Ironwood, and any
@@ -2013,7 +2044,7 @@ mod tests {
     use {
         super::{
             BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, Builder, DeferredPcztBuilder, Error,
-            NU7_DEFAULT_TX_EXPIRY_DELTA,
+            MAX_OP_RETURN_RELAY_BYTES, NU7_DEFAULT_TX_EXPIRY_DELTA,
         },
         crate::transaction::{
             builder::{BuildConfig, BundlePadding},
@@ -2166,6 +2197,76 @@ mod tests {
             BuildConfig::Coinbase { miner_data: None },
         );
         assert_eq!(builder.expiry_height(), nu7_activation);
+    }
+
+    /// `OP_RETURN`.
+    #[cfg(feature = "circuits")]
+    const OP_RETURN: u8 = 0x6a;
+
+    /// `OP_PUSHDATA1`, which precedes a one-byte length and 76 to 255 bytes of data.
+    #[cfg(feature = "circuits")]
+    const OP_PUSHDATA1: u8 = 0x4c;
+
+    /// An arbitrary byte that fills the data of a null-data output in tests.
+    #[cfg(feature = "circuits")]
+    const NULL_DATA_FILL: u8 = 0xab;
+
+    /// Returns a standard builder at NU7 activation with no shielded components.
+    #[cfg(feature = "circuits")]
+    fn unshielded_test_builder() -> Builder<zcash_protocol::local_consensus::LocalNetwork, ()> {
+        let params = nu7_test_network();
+        let nu7_activation = params.activation_height(NetworkUpgrade::Nu7).unwrap();
+        Builder::new(params, nu7_activation, standard_build_config())
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_is_op_return_with_zero_value() {
+        let mut builder = unshielded_test_builder();
+        builder
+            .add_transparent_null_data_output::<Infallible>(&[0xde, 0xad])
+            .unwrap();
+
+        let outputs = builder.transparent_outputs();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].value(), Zatoshis::ZERO);
+        // `OP_RETURN`, then a push of two bytes.
+        assert_eq!(
+            outputs[0].script_pubkey().0.0,
+            [OP_RETURN, 0x02, 0xde, 0xad]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_accepts_the_maximum_length() {
+        let mut builder = unshielded_test_builder();
+        builder
+            .add_transparent_null_data_output::<Infallible>(
+                &[NULL_DATA_FILL; MAX_OP_RETURN_RELAY_BYTES],
+            )
+            .unwrap();
+
+        let outputs = builder.transparent_outputs();
+        assert_eq!(outputs.len(), 1);
+        // `OP_RETURN`, then `OP_PUSHDATA1` with a one-byte length, then the data.
+        let mut expected = vec![OP_RETURN, OP_PUSHDATA1, MAX_OP_RETURN_RELAY_BYTES as u8];
+        expected.extend_from_slice(&[NULL_DATA_FILL; MAX_OP_RETURN_RELAY_BYTES]);
+        assert_eq!(outputs[0].script_pubkey().0.0, expected);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_rejects_data_over_the_maximum_length() {
+        let mut builder = unshielded_test_builder();
+        assert_matches!(
+            builder.add_transparent_null_data_output::<Infallible>(
+                &[0u8; MAX_OP_RETURN_RELAY_BYTES + 1]
+            ),
+            Err(Error::NullDataTooLong { actual, limit })
+                if actual == MAX_OP_RETURN_RELAY_BYTES + 1 && limit == MAX_OP_RETURN_RELAY_BYTES
+        );
+        assert!(builder.transparent_outputs().is_empty());
     }
 
     #[test]

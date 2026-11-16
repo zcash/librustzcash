@@ -30,6 +30,11 @@ workspace.
 - `zcash_primitives::transaction::builder::Error::Coinbase` now wraps
   `zcash_primitives::transaction::coinbase::Error` instead of
   `zcash_transparent::coinbase::Error`. The variants are unchanged.
+- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
+  now reports data that is too long as `Error::NullDataTooLong` instead of
+  `Error::TransparentBuild(zcash_transparent::builder::Error::NullDataTooLong)`.
+  `zcash_primitives::transaction::builder::Error` gained the `NullDataTooLong`
+  variant, which exhaustive matches must now handle.
 
 ### Fixed
 - The documentation of the following items in `zcash_primitives::transaction`,

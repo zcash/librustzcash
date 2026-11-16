@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::builder::TransparentBuilder::add_script_output`
+
 ### Changed
 - The `transparent-inputs` feature no longer enables the `secp256k1-ffi`
   feature of `bip32`, and `zcash_transparent` no longer enables the
@@ -75,6 +78,12 @@ workspace.
   `TransparentBuilder::inputs`, minus the sum of `TxOut::value` over
   `TransparentBuilder::outputs`. `inputs` exists only with the
   `transparent-inputs` feature; without it the builder has no inputs.
+- `zcash_transparent::builder::TransparentBuilder::add_null_data_output`. Use
+  `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`,
+  or build the `OP_RETURN` script and pass it to
+  `TransparentBuilder::add_script_output`.
+- `zcash_transparent::builder::Error::NullDataTooLong`. The error is now
+  `zcash_primitives::transaction::builder::Error::NullDataTooLong`.
 
 ## [0.11.1] - 2026-11-12
 
