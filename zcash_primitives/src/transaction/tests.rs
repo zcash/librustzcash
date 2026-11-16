@@ -226,6 +226,17 @@ fn tx_read_write() {
 }
 
 #[test]
+#[cfg(target_pointer_width = "64")]
+fn transaction_size_excludes_absent_shielded_bundles() {
+    /// Upper bound on the in-memory size of a [`Transaction`] on 64-bit targets. Shielded
+    /// bundles are boxed, so an absent bundle costs one pointer; storing any of them
+    /// inline would exceed this bound.
+    const MAX_TRANSACTION_SIZE: usize = 192;
+
+    assert!(core::mem::size_of::<Transaction>() <= MAX_TRANSACTION_SIZE);
+}
+
+#[test]
 fn suggested_version_for_v5_branches_is_not_v6() {
     assert_eq!(
         TxVersion::suggested_for_branch(BranchId::Nu5),

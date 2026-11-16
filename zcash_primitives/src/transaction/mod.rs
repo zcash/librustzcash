@@ -13,6 +13,7 @@ pub mod txid;
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+use alloc::boxed::Box;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -344,10 +345,10 @@ pub struct TransactionData<A: Authorization> {
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-    sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-    ironwood_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+    sprout_bundle: Option<Box<sprout::Bundle>>,
+    sapling_bundle: Option<Box<sapling::Bundle<A::SaplingAuth, ZatBalance>>>,
+    orchard_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
+    ironwood_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -401,9 +402,9 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_bundle,
-            sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
+            sprout_bundle: sprout_bundle.map(Box::new),
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
             ironwood_bundle: None,
         }
     }
@@ -432,9 +433,9 @@ impl<A: Authorization> TransactionData<A> {
             expiry_height,
             zip233_amount,
             transparent_bundle,
-            sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
+            sprout_bundle: sprout_bundle.map(Box::new),
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
             ironwood_bundle: None,
         }
     }
@@ -585,9 +586,9 @@ impl<A: Authorization> TransactionData<A> {
             zip233_amount: Zatoshis::ZERO,
             transparent_bundle,
             sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
+            ironwood_bundle: ironwood_bundle.map(Box::new),
         }
     }
 
@@ -618,9 +619,9 @@ impl<A: Authorization> TransactionData<A> {
             zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
+            ironwood_bundle: ironwood_bundle.map(Box::new),
         }
     }
 
@@ -647,19 +648,19 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
-        self.sprout_bundle.as_ref()
+        self.sprout_bundle.as_deref()
     }
 
     pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
-        self.sapling_bundle.as_ref()
+        self.sapling_bundle.as_deref()
     }
 
     pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
-        self.orchard_bundle.as_ref()
+        self.orchard_bundle.as_deref()
     }
 
     pub fn ironwood_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
-        self.ironwood_bundle.as_ref()
+        self.ironwood_bundle.as_deref()
     }
 
     /// Returns the configured experimental ZIP 233 amount, in zatoshis.
@@ -732,9 +733,9 @@ impl<A: Authorization> TransactionData<A> {
         digester.combine(
             header_digest,
             digester.digest_transparent(self.transparent_bundle.as_ref()),
-            digester.digest_sapling(self.version, self.sapling_bundle.as_ref()),
-            digester.digest_orchard(self.version, self.orchard_bundle.as_ref()),
-            digester.digest_ironwood(self.ironwood_bundle.as_ref()),
+            digester.digest_sapling(self.version, self.sapling_bundle.as_deref()),
+            digester.digest_orchard(self.version, self.orchard_bundle.as_deref()),
+            digester.digest_ironwood(self.ironwood_bundle.as_deref()),
         )
     }
 
@@ -783,9 +784,9 @@ impl<A: Authorization> TransactionData<A> {
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle),
             sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle),
-            orchard_bundle: f_orchard(self.orchard_bundle),
-            ironwood_bundle: f_orchard(self.ironwood_bundle),
+            sapling_bundle: f_sapling(self.sapling_bundle.map(|b| *b)).map(Box::new),
+            orchard_bundle: f_orchard(self.orchard_bundle.map(|b| *b)).map(Box::new),
+            ironwood_bundle: f_orchard(self.ironwood_bundle.map(|b| *b)).map(Box::new),
         }
     }
 
@@ -822,9 +823,9 @@ impl<A: Authorization> TransactionData<A> {
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle)?,
             sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle)?,
-            orchard_bundle: f_orchard(self.orchard_bundle)?,
-            ironwood_bundle: f_orchard(self.ironwood_bundle)?,
+            sapling_bundle: f_sapling(self.sapling_bundle.map(|b| *b))?.map(Box::new),
+            orchard_bundle: f_orchard(self.orchard_bundle.map(|b| *b))?.map(Box::new),
+            ironwood_bundle: f_orchard(self.ironwood_bundle.map(|b| *b))?.map(Box::new),
         })
     }
 
@@ -846,27 +847,27 @@ impl<A: Authorization> TransactionData<A> {
                 .map(|b| b.map_authorization(f_transparent)),
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: self.sapling_bundle.map(|b| {
-                b.map_authorization(
+                Box::new(b.map_authorization(
                     &mut f_sapling,
                     |f, p| f.map_spend_proof(p),
                     |f, p| f.map_output_proof(p),
                     |f, s| f.map_auth_sig(s),
                     |f, a| f.map_authorization(a),
-                )
+                ))
             }),
             orchard_bundle: self.orchard_bundle.map(|b| {
-                b.map_authorization(
+                Box::new(b.map_authorization(
                     &mut f_orchard,
                     |f, _, s| f.map_spend_auth(s),
                     |f, a| f.map_authorization(a),
-                )
+                ))
             }),
             ironwood_bundle: self.ironwood_bundle.map(|b| {
-                b.map_authorization(
+                Box::new(b.map_authorization(
                     &mut f_orchard,
                     |f, _, s| f.map_spend_auth(s),
                     |f, a| f.map_authorization(a),
-                )
+                ))
             }),
         }
     }
@@ -1048,15 +1049,17 @@ impl Transaction {
                 #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
                 zip233_amount: Zatoshis::ZERO,
                 transparent_bundle,
-                sprout_bundle,
-                sapling_bundle: binding_sig.and_then(|binding_sig| {
-                    sapling::Bundle::from_parts(
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        sapling::bundle::Authorized { binding_sig },
-                    )
-                }),
+                sprout_bundle: sprout_bundle.map(Box::new),
+                sapling_bundle: binding_sig
+                    .and_then(|binding_sig| {
+                        sapling::Bundle::from_parts(
+                            shielded_spends,
+                            shielded_outputs,
+                            value_balance,
+                            sapling::bundle::Authorized { binding_sig },
+                        )
+                    })
+                    .map(Box::new),
                 orchard_bundle: None,
                 ironwood_bundle: None,
             },
@@ -1107,8 +1110,8 @@ impl Transaction {
             zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
             ironwood_bundle: None,
         };
 
@@ -1140,9 +1143,9 @@ impl Transaction {
             zip233_amount: header_fragment.zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            sapling_bundle: sapling_bundle.map(Box::new),
+            orchard_bundle: orchard_bundle.map(Box::new),
+            ironwood_bundle: ironwood_bundle.map(Box::new),
         };
 
         Ok(Self::from_data_v6(data))
@@ -1217,7 +1220,7 @@ impl Transaction {
 
         sapling_serialization::write_v4_components(
             &mut writer,
-            self.sapling_bundle.as_ref(),
+            self.sapling_bundle.as_deref(),
             self.version.has_sapling(),
         )?;
 
@@ -1262,7 +1265,7 @@ impl Transaction {
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_deref(), &mut writer)?;
 
         Ok(())
     }
@@ -1278,8 +1281,8 @@ impl Transaction {
 
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_deref(), &mut writer)?;
+        orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_deref(), &mut writer)?;
 
         Ok(())
     }
@@ -1310,7 +1313,7 @@ impl Transaction {
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
+        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_deref())
     }
 
     // TODO: should this be moved to `from_data` and stored?
@@ -1481,6 +1484,8 @@ pub enum DigestError {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
+    use alloc::boxed::Box;
+
     use proptest::prelude::*;
 
     use ::transparent::bundle::testing::{self as transparent};
@@ -1539,9 +1544,9 @@ pub mod testing {
                 expiry_height: expiry_height.into(),
                 transparent_bundle,
                 sprout_bundle: None,
-                sapling_bundle,
-                orchard_bundle,
-                ironwood_bundle,
+                sapling_bundle: sapling_bundle.map(Box::new),
+                orchard_bundle: orchard_bundle.map(Box::new),
+                ironwood_bundle: ironwood_bundle.map(Box::new),
             }
         }
     }
@@ -1572,9 +1577,9 @@ pub mod testing {
                 },
                 transparent_bundle,
                 sprout_bundle: None,
-                sapling_bundle,
-                orchard_bundle,
-                ironwood_bundle,
+                sapling_bundle: sapling_bundle.map(Box::new),
+                orchard_bundle: orchard_bundle.map(Box::new),
+                ironwood_bundle: ironwood_bundle.map(Box::new),
             }
         }
     }
