@@ -50,6 +50,11 @@ workspace.
   same names in `zcash_transparent::keys`. Update imports from
   `zcash_transparent::keys::X` to `zcash_keys::keys::transparent::X`.
 
+### Fixed
+- `zcash_keys` now compiles with the `transparent-key-encoding` feature
+  enabled and the `transparent-inputs` feature disabled. Previously this
+  failed unless another crate in the build enabled `bip32/secp256k1-ffi`.
+
 ## [0.17.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet
