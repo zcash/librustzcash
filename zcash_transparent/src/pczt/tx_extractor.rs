@@ -15,7 +15,7 @@ impl<V: Copy + Debug> super::Bundle<V> {
     ///
     /// This is used by the Signer role to produce the transaction sighash.
     ///
-    /// [regular `Bundle`]: super::Bundle
+    /// [regular `Bundle`]: crate::bundle::Bundle
     pub fn extract_effects(
         &self,
     ) -> Result<Option<crate::bundle::Bundle<EffectsOnly<V>, V>>, TxExtractorError> {
@@ -26,7 +26,7 @@ impl<V: Copy + Debug> super::Bundle<V> {
     ///
     /// This is used by the Transaction Extractor role to produce the final transaction.
     ///
-    /// [regular `Bundle`]: super::Bundle
+    /// [regular `Bundle`]: crate::bundle::Bundle
     pub fn extract(
         &self,
     ) -> Result<Option<crate::bundle::Bundle<Unbound<V>, V>>, TxExtractorError> {

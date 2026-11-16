@@ -8,6 +8,8 @@
 //!
 
 #![no_std]
+// Catch documentation errors caused by code changes.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 #[cfg(feature = "std")]
 extern crate std;
