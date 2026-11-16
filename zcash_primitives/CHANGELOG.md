@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::components::transparent::{read_outpoint,
+  write_outpoint, read_script, write_script, script_serialized_size, read_txin,
+  write_txin, read_txout, write_txout}`
+
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their
   Sprout, Sapling, Orchard, and Ironwood bundles on the heap, so a bundle that is
