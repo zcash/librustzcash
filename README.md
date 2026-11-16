@@ -110,7 +110,6 @@ graph TB
     %% zcash_pool_migration --> zcash_protocol
 
     %% zcash_client_sqlite --> zcash_encoding
-    %% zcash_transparent --> zcash_encoding
     %% zcash_client_backend --> zcash_encoding
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
@@ -148,10 +147,8 @@ graph TB
     %% zcash_keys --> zip32
     orchard --> zip32
     sapling-crypto --> zip32
-    zcash_transparent --> zip32
 
     %% zcash_keys --> zcash_spec
-    %% zcash_transparent --> zcash_spec
     %% orchard --> zcash_spec
     %% sapling-crypto --> zcash_spec
     zip32 --> zcash_spec
