@@ -51,12 +51,12 @@ use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationPa
 use {
     crate::data_api::Account,
     std::collections::HashSet,
-    transparent::keys::TransparentKeyScope,
     zcash_keys::keys::{
         ReceiverRequirement::*,
         UnifiedAddressRequest,
-        transparent::gap_limits::{
-            AddressStore, GapAddressesError, GapLimits, generate_gap_addresses,
+        transparent::{
+            TransparentKeyScope,
+            gap_limits::{AddressStore, GapAddressesError, GapLimits, generate_gap_addresses},
         },
     },
 };

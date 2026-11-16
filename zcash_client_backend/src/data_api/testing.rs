@@ -39,9 +39,8 @@ use {
     ::transparent::{
         address::{Script, TransparentAddress},
         bundle::OutPoint,
-        keys::TransparentKeyScope,
     },
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
+    zcash_keys::keys::transparent::{TransparentKeyScope, gap_limits::GapLimits},
 };
 
 use ::sapling::{

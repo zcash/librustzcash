@@ -7,10 +7,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::num::NonZeroU8;
 
-use ::transparent::{
-    address::TransparentAddress,
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
-};
+use ::transparent::address::TransparentAddress;
 use bip32::{ChildNumber, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix};
 use nonempty::NonEmpty;
 use secp256k1::{PublicKey, SecretKey};
@@ -22,9 +19,7 @@ use zcash_script::{
 };
 use zip32::AccountId;
 
-const BIP_48_PURPOSE: fn() -> ChildNumber = || ChildNumber::new(48, true).expect("valid");
-const ZCASH_P2SH_SCRIPT_TYPE: fn() -> ChildNumber =
-    || ChildNumber::new(133000, true).expect("valid");
+use super::{NonHardenedChildIndex, TransparentKeyScope, ZIP_48_P2SH_SCRIPT_TYPE, ZIP_48_PURPOSE};
 
 fn pub_prefix<P: consensus::Parameters>(params: &P) -> Prefix {
     match params.network_type() {
@@ -72,10 +67,10 @@ impl AccountPrivKey {
         let root = ExtendedPrivateKey::new(seed)?;
         let fingerprint = root.public_key().fingerprint();
         let derivation = vec![
-            BIP_48_PURPOSE(),
+            ZIP_48_PURPOSE,
             ChildNumber::new(coin_type, true)?,
             ChildNumber::new(account.into(), true)?,
-            ZCASH_P2SH_SCRIPT_TYPE(),
+            ZIP_48_P2SH_SCRIPT_TYPE,
         ];
 
         let key = derivation
@@ -150,11 +145,11 @@ impl AccountPubKey {
                 // Verify that this `KEY_INFO` expression is for ZIP 48.
                 match origin.derivation() {
                     [purpose, coin_type, account, script_type]
-                        if purpose == &BIP_48_PURPOSE()
+                        if purpose == &ZIP_48_PURPOSE
                             && coin_type.index() == params.coin_type()
                             && coin_type.is_hardened()
                             && account.is_hardened()
-                            && script_type == &ZCASH_P2SH_SCRIPT_TYPE() =>
+                            && script_type == &ZIP_48_P2SH_SCRIPT_TYPE =>
                     {
                         Some(Self { origin, key })
                     }
@@ -798,12 +793,13 @@ mod tests {
     use alloc::vec::Vec;
     use core::num::NonZeroU8;
 
-    use ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex};
+    use ::transparent::address::TransparentAddress;
     use bip32::Prefix;
     use zcash_protocol::consensus::{MainNetwork, Network};
     use zip32::AccountId;
 
     use super::{AccountPrivKey, AccountPubKey, FullViewingKey, test_vectors::TEST_VECTORS};
+    use crate::keys::transparent::NonHardenedChildIndex;
 
     /// The length of the version prefix of a Base58Check-encoded transparent address.
     const B58_ADDRESS_PREFIX_LEN: usize = 2;

@@ -30,10 +30,12 @@ use super::standalone_p2sh;
 use crate::wallet::{encoding::KeyScope, init::WalletMigrationError};
 #[cfg(feature = "transparent-inputs")]
 use {
-    transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
     zcash_keys::{
         encoding::AddressCodec as _,
-        keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
+        keys::{
+            UnifiedFullViewingKey, UnifiedIncomingViewingKey,
+            transparent::{IncomingViewingKey as _, NonHardenedChildIndex},
+        },
     },
 };
 
@@ -333,9 +335,9 @@ mod tests {
 
     use super::{DEPENDENCIES, MIGRATION_ID};
     #[cfg(feature = "transparent-inputs")]
-    use {
-        transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
-        zcash_keys::encoding::AddressCodec as _,
+    use zcash_keys::{
+        encoding::AddressCodec as _,
+        keys::transparent::{IncomingViewingKey as _, NonHardenedChildIndex},
     };
 
     #[test]

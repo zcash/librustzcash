@@ -17,7 +17,6 @@ use tracing::{debug, warn};
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
-    keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
 };
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
@@ -38,7 +37,10 @@ use zcash_keys::{
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey,
-        transparent::gap_limits::{GapLimits, generate_address_list},
+        transparent::{
+            IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope,
+            gap_limits::{GapLimits, generate_address_list},
+        },
     },
 };
 use zcash_primitives::transaction::fees::{
@@ -88,9 +90,8 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::locking::locked_tier_expr,
-    transparent::keys::ExternalIvk,
     zcash_address::unified::{Container as _, Encoding as _},
-    zcash_keys::keys::ReceiverRequirement::*,
+    zcash_keys::keys::{ReceiverRequirement::*, transparent::ExternalIvk},
 };
 
 pub(crate) mod ephemeral;
@@ -2999,7 +3000,6 @@ mod tests {
     use transparent::{
         address::TransparentAddress,
         bundle::{OutPoint, TxOut},
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
     };
     use zcash_client_backend::{
         data_api::{Account as _, AddressSource, WalletRead, WalletWrite, testing::TestBuilder},
@@ -3023,7 +3023,10 @@ mod tests {
     use zcash_keys::{
         address::{Address, UnifiedAddress},
         encoding::AddressCodec,
-        keys::{ReceiverRequirement, UnifiedAddressRequest},
+        keys::{
+            ReceiverRequirement, UnifiedAddressRequest,
+            transparent::{NonHardenedChildIndex, TransparentKeyScope},
+        },
     };
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
@@ -4700,10 +4703,7 @@ mod tests {
     mod funding_accounts {
         use rusqlite::named_params;
         use secrecy::Secret;
-        use transparent::{
-            bundle::{OutPoint, TxOut},
-            keys::TransparentKeyScope,
-        };
+        use transparent::bundle::{OutPoint, TxOut};
         use zcash_client_backend::{
             data_api::{
                 Account as _, AccountBirthday, WalletRead as _, WalletWrite, chain::ChainState,
@@ -4711,7 +4711,7 @@ mod tests {
             },
             wallet::WalletTransparentOutput,
         };
-        use zcash_keys::keys::UnifiedAddressRequest;
+        use zcash_keys::keys::{UnifiedAddressRequest, transparent::TransparentKeyScope};
         use zcash_primitives::block::BlockHash;
         use zcash_protocol::{
             consensus::{self, BlockHeight},

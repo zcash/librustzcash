@@ -7,10 +7,12 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
-    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
-use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
+use zcash_keys::{
+    address::Receiver,
+    keys::{OutgoingViewingKey, transparent::TransparentKeyScope},
+};
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
@@ -28,7 +30,7 @@ use crate::{TransferType, fees::sapling as sapling_fees};
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
+use {std::time::SystemTime, zcash_keys::keys::transparent::NonHardenedChildIndex};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

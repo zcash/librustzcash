@@ -3,7 +3,6 @@ use std::{convert::Infallible, num::NonZeroU8, sync::OnceLock};
 use ::transparent::{
     address::{Script, TransparentAddress},
     bundle as transparent,
-    keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
     sighash::SighashType,
 };
 use orchard::{
@@ -30,7 +29,9 @@ use pczt::{
 use rand::{SeedableRng, rand_core::UnwrapErr, rngs::SysRng};
 use rand_chacha::ChaCha20Rng;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
-use zcash_keys::keys::transparent::zip48;
+use zcash_keys::keys::transparent::{
+    AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex, zip48,
+};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder, BundlePadding, DeferredPcztBuilder, PcztResult},

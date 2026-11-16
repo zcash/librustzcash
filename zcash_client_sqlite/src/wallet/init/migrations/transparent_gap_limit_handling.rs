@@ -32,10 +32,14 @@ use {
             transparent::{find_gap_start, generate_address_range_internal, next_check_time},
         },
     },
-    ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
     ReceiverRequirement::*,
-    transparent::keys::TransparentKeyScope,
-    zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
+    zcash_keys::{
+        encoding::AddressCodec as _,
+        keys::{
+            ReceiverRequirement,
+            transparent::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
+        },
+    },
     zip32::DiversifierIndex,
 };
 

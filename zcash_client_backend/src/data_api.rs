@@ -114,8 +114,8 @@ use {
     transparent::{
         address::TransparentAddress,
         bundle::{OutPoint, TxOut},
-        keys::TransparentKeyScope,
     },
+    zcash_keys::keys::transparent::TransparentKeyScope,
     zcash_primitives::transaction::fees::transparent::OutputView as _,
 };
 
@@ -123,7 +123,7 @@ use {
     feature = "transparent-inputs",
     any(test, feature = "test-dependencies")
 ))]
-use transparent::keys::NonHardenedChildIndex;
+use zcash_keys::keys::transparent::NonHardenedChildIndex;
 
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;

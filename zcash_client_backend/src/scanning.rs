@@ -39,7 +39,10 @@ use crate::wallet::WalletTransparentSpend;
 use orchard::note_encryption::OrchardDomain;
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope};
+use {
+    transparent::{address::TransparentAddress, bundle::OutPoint},
+    zcash_keys::keys::transparent::TransparentKeyScope,
+};
 
 pub(crate) mod compact;
 pub mod full;

@@ -33,6 +33,18 @@ workspace.
 - `zcash_transparent::zip48`. The module is now
   `zcash_keys::keys::transparent::zip48`, with the same items. It requires the
   `transparent-inputs` feature of `zcash_keys`.
+- `zcash_transparent::keys`. Every item is now in
+  `zcash_keys::keys::transparent` under the same name. `AccountPrivKey`,
+  `AccountPubKey`, `IncomingViewingKey`, `ExternalIvk`, `InternalIvk` and
+  `EphemeralIvk` require the `transparent-inputs` feature of `zcash_keys`. The
+  other items require any one of its `orchard`, `sapling` or
+  `transparent-inputs` features.
+- `zcash_transparent::pczt::Bip32Derivation::{extract_bip_44_fields,
+  extract_zip_48_fields}`. Use the free functions
+  `zcash_keys::keys::transparent::{extract_bip_44_fields,
+  extract_zip_48_fields}`, which take the derivation as their first argument.
+  They require any one of the `orchard`, `sapling` or `transparent-inputs`
+  features of `zcash_keys`.
 
 ## [0.11.1] - 2026-11-12
 

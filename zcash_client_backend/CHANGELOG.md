@@ -109,6 +109,11 @@ workspace.
   holds keys for only some protocols. They return
   `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
   pool for which the spending key holds no key.
+- Public items of `zcash_client_backend` that take or return
+  `TransparentKeyScope`, `NonHardenedChildIndex` or other transparent key
+  types now use the types in `zcash_keys::keys::transparent` instead of the
+  types of the same names in `zcash_transparent::keys`. Update imports from
+  `zcash_transparent::keys::X` to `zcash_keys::keys::transparent::X`.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,

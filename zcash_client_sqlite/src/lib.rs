@@ -118,11 +118,7 @@ use zcash_client_backend::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
-    ::transparent::{
-        address::TransparentAddress,
-        bundle::OutPoint,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     ReceiverRequirement::*,
     std::time::SystemTime,
     zcash_client_backend::{
@@ -133,7 +129,10 @@ use {
         fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
-    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
+    zcash_keys::keys::transparent::{
+        NonHardenedChildIndex, TransparentKeyScope,
+        gap_limits::{AddressStore, GapLimits},
+    },
 };
 
 // `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
@@ -4203,7 +4202,7 @@ mod tests {
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     use {
         crate::{AccountRef, wallet::transparent},
-        ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
+        zcash_keys::keys::transparent::{NonHardenedChildIndex, TransparentKeyScope},
     };
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -5125,7 +5124,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn import_transparent_only_account_ufvk() {
         use crate::wallet::encoding::KeyScope;
-        use ::transparent::keys::AccountPrivKey;
+        use zcash_keys::keys::transparent::AccountPrivKey;
         use zcash_protocol::consensus::Parameters;
 
         let mut st = TestBuilder::new()

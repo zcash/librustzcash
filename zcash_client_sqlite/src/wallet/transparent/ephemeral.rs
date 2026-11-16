@@ -16,13 +16,13 @@ use crate::{
 #[cfg(any(test, feature = "test-dependencies"))]
 use {
     crate::{AccountRef, GapLimits, wallet::transparent::find_gap_start},
-    ::transparent::{
-        address::TransparentAddress,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    ::transparent::address::TransparentAddress,
     std::{ops::Range, time::SystemTime},
     zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressMetadata},
-    zcash_keys::encoding::AddressCodec,
+    zcash_keys::{
+        encoding::AddressCodec,
+        keys::transparent::{NonHardenedChildIndex, TransparentKeyScope},
+    },
     zcash_protocol::consensus::{self, BlockHeight},
 };
 

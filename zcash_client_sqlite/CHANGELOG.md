@@ -70,6 +70,11 @@ workspace.
   `min_confirmations` blocks or more therefore reports no spendable shielded
   balance, and proposals fail with `ScanRequired`, until it has scanned to
   that depth.
+- Public items of `zcash_client_sqlite` that take or return
+  `TransparentKeyScope`, `NonHardenedChildIndex` or other transparent key
+  types now use the types in `zcash_keys::keys::transparent` instead of the
+  types of the same names in `zcash_transparent::keys`. Update imports from
+  `zcash_transparent::keys::X` to `zcash_keys::keys::transparent::X`.
 
 ### Fixed
 - `WalletWrite::put_blocks`, `WalletWrite::store_decrypted_tx`,

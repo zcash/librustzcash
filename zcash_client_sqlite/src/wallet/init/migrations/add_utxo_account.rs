@@ -11,15 +11,18 @@ use crate::wallet::init::WalletMigrationError;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{error::SqliteClientError, wallet::encoding::decode_diversifier_index_be},
-    ::transparent::{
-        address::TransparentAddress,
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-    },
+    ::transparent::address::TransparentAddress,
     rusqlite::{OptionalExtension, named_params},
     std::collections::HashMap,
-    transparent::keys::TransparentKeyScope,
     zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
-    zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},
+    zcash_keys::{
+        address::Address,
+        encoding::AddressCodec,
+        keys::{
+            UnifiedFullViewingKey,
+            transparent::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
+        },
+    },
     zip32::{AccountId, Scope},
 };
 

@@ -18,6 +18,12 @@ workspace.
   `test-dependencies` feature)
 - `zcash_keys::keys::transparent::zip48` (under the `transparent-inputs`
   feature)
+- `zcash_keys::keys::transparent::{TransparentKeyScope, NonHardenedChildIndex,
+  NonHardenedChildIter, NonHardenedChildRange, InternalOvk, ExternalOvk,
+  ShieldingOvks, extract_bip_44_fields, extract_zip_48_fields}`
+- `zcash_keys::keys::transparent::{AccountPrivKey, AccountPubKey,
+  IncomingViewingKey, ExternalIvk, InternalIvk, EphemeralIvk}` (under the
+  `transparent-inputs` feature)
 
 ### Changed
 - `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
@@ -39,6 +45,10 @@ workspace.
   `zcash_keys::keys::UnifiedIncomingViewingKey::p2sh`. Import
   `P2shFullViewingKey`, `P2shIncomingViewingKey` and `P2shKey` from the new
   module.
+- Public items of `zcash_keys` that take or return transparent key types now
+  use the types in `zcash_keys::keys::transparent` instead of the types of the
+  same names in `zcash_transparent::keys`. Update imports from
+  `zcash_transparent::keys::X` to `zcash_keys::keys::transparent::X`.
 
 ## [0.17.0-keystone.0] - 2026-11-10
 

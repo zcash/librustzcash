@@ -13,7 +13,7 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::consensus;
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::IncomingViewingKey as _;
+use zcash_keys::keys::transparent::IncomingViewingKey as _;
 
 use crate::wallet::init::WalletMigrationError;
 

@@ -34,9 +34,10 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::SchedulingError,
-    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    ::transparent::address::TransparentAddress,
     zcash_keys::{
-        encoding::TransparentCodecError, keys::transparent::gap_limits::GapAddressesError,
+        encoding::TransparentCodecError,
+        keys::transparent::{TransparentKeyScope, gap_limits::GapAddressesError},
     },
 };
 

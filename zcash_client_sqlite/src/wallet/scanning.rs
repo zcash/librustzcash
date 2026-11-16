@@ -3417,12 +3417,9 @@ pub(crate) mod tests {
 
         #[cfg(feature = "transparent-inputs")]
         use {
-            transparent::{
-                bundle::{OutPoint, TxOut},
-                keys::TransparentKeyScope,
-            },
+            transparent::bundle::{OutPoint, TxOut},
             zcash_client_backend::{data_api::Account, wallet::WalletTransparentOutput},
-            zcash_keys::keys::UnifiedAddressRequest,
+            zcash_keys::keys::{UnifiedAddressRequest, transparent::TransparentKeyScope},
         };
 
         /// Returns the queue as `(start, end_exclusive, priority)` rows ordered by start.

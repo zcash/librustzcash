@@ -288,10 +288,15 @@ mod tests {
         ::transparent::{
             address::Script,
             bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
-            keys::{IncomingViewingKey, NonHardenedChildIndex},
         },
         zcash_client_backend::keys::UnifiedAddressRequest,
-        zcash_keys::{encoding::AddressCodec, keys::ReceiverRequirement::*},
+        zcash_keys::{
+            encoding::AddressCodec,
+            keys::{
+                ReceiverRequirement::*,
+                transparent::{IncomingViewingKey, NonHardenedChildIndex},
+            },
+        },
         zcash_primitives::transaction::{TransactionData, TxVersion},
         zcash_protocol::{
             consensus::{BlockHeight, BranchId},

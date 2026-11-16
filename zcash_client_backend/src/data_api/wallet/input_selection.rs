@@ -7,7 +7,8 @@ use {
         proposal::{Step, StepOutput, StepOutputIndex},
     },
     std::convert::Infallible,
-    transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
+    transparent::{address::TransparentAddress, bundle::OutPoint},
+    zcash_keys::keys::transparent::TransparentKeyScope,
     zcash_primitives::transaction::fees::{
         transparent as transparent_fees, transparent::InputSize, zip317::P2PKH_STANDARD_INPUT_SIZE,
     },

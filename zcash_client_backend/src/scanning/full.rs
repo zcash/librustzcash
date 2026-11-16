@@ -45,7 +45,9 @@ use super::IronwoodDomain;
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use {
+    transparent::address::TransparentAddress, zcash_keys::keys::transparent::TransparentKeyScope,
+};
 
 /// The default number of outputs at which a batch runner immediately flushes a batch.
 pub(crate) const DEFAULT_BATCH_SIZE_THRESHOLD: usize = 200;

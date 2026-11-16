@@ -13,13 +13,9 @@ pub mod address;
 pub mod builder;
 pub mod bundle;
 pub mod coinbase;
-pub mod keys;
 pub mod pczt;
 pub mod sighash;
 pub mod util;
-
-#[cfg(all(test, feature = "transparent-inputs"))]
-mod test_vectors;
 
 #[macro_use]
 extern crate alloc;

@@ -77,7 +77,7 @@ use zcash_client_backend::{
 };
 use zcash_keys::{
     encoding::AddressCodec,
-    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey, transparent::TransparentKeyScope},
 };
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
@@ -86,7 +86,7 @@ use zcash_protocol::{
 };
 use zip32::fingerprint::SeedFingerprint;
 
-use ::transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use ::transparent::address::TransparentAddress;
 
 use crate::{AccountUuid, WalletDb, error::SqliteClientError, util::Clock};
 use ::zewif::MnemonicLanguage as L;
@@ -1667,7 +1667,6 @@ mod tests {
         address::Script,
         bundle as transparent,
         bundle::{Authorized, OutPoint, TxIn, TxOut},
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
     };
     use bip0039::{English, Mnemonic};
     use incrementalmerkletree::Hashable as _;
@@ -1679,7 +1678,10 @@ mod tests {
     };
     use zcash_keys::{
         encoding::AddressCodec,
-        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+        keys::{
+            UnifiedFullViewingKey, UnifiedSpendingKey,
+            transparent::{IncomingViewingKey, NonHardenedChildIndex},
+        },
     };
     use zcash_protocol::{consensus, local_consensus::LocalNetwork, value::Zatoshis};
     use zip32::fingerprint::SeedFingerprint;

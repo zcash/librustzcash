@@ -158,12 +158,14 @@ use {
     ::transparent::{
         address::TransparentAddress,
         bundle::{OutPoint, TxOut},
-        keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
     ReceiverRequirement::*,
     rusqlite::types::Value,
     std::rc::Rc,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
+    zcash_keys::keys::transparent::{
+        IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope,
+    },
 };
 
 #[cfg(feature = "orchard")]

@@ -14,10 +14,7 @@ use zcash_protocol::{{PoolType, consensus}};
 use zip32::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::IncomingViewingKey;
-
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::encoding::AddressCodec;
+use zcash_keys::{encoding::AddressCodec, keys::transparent::IncomingViewingKey};
 
 use crate::{
     UA_TRANSPARENT,

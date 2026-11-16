@@ -12,12 +12,12 @@ use crate::{
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey,
+        transparent::{
+            IncomingViewingKey, NonHardenedChildIndex, NonHardenedChildRange, TransparentKeyScope,
+        },
     },
 };
-use transparent::{
-    address::TransparentAddress,
-    keys::{IncomingViewingKey, NonHardenedChildIndex, NonHardenedChildRange, TransparentKeyScope},
-};
+use transparent::address::TransparentAddress;
 use zcash_address::unified::Typecode;
 use zip32::DiversifierIndex;
 

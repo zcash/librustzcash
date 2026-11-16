@@ -37,8 +37,11 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::WalletTransparentOutput,
-    transparent::{address::TransparentAddress, keys::TransparentKeyScope},
-    zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    transparent::address::TransparentAddress,
+    zcash_keys::keys::{
+        UnifiedAddressRequest,
+        transparent::{TransparentKeyScope, gap_limits::GapLimits},
+    },
 };
 
 #[cfg(feature = "orchard")]

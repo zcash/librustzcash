@@ -120,11 +120,10 @@ use {
     },
     secrecy::ExposeSecret,
     std::str::FromStr,
-    transparent::{
-        bundle::{OutPoint, TxOut},
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    transparent::bundle::{OutPoint, TxOut},
+    zcash_keys::keys::transparent::{
+        NonHardenedChildIndex, TransparentKeyScope, gap_limits::GapLimits,
     },
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
     zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
     zcash_protocol::{
         TxId,

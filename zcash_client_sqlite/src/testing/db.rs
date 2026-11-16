@@ -55,13 +55,11 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::TransparentAddressMetadata,
-    ::transparent::{
-        address::TransparentAddress,
-        bundle::OutPoint,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::fees::StandardFeeRule,
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
+    zcash_keys::keys::transparent::{
+        NonHardenedChildIndex, TransparentKeyScope, gap_limits::GapLimits,
+    },
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).

@@ -150,6 +150,7 @@ graph TB
     sapling-crypto --> zip32
     zcash_transparent --> zip32
 
+    %% zcash_keys --> zcash_spec
     %% zcash_transparent --> zcash_spec
     %% orchard --> zcash_spec
     %% sapling-crypto --> zcash_spec
