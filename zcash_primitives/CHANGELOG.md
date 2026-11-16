@@ -19,6 +19,7 @@ workspace.
 - `zcash_primitives::transaction::coinbase::{Coinbase, Error, coinbase_input,
   is_coinbase, MIN_COINBASE_SCRIPT_LEN, MAX_COINBASE_SCRIPT_LEN,
   MAX_COINBASE_HEIGHT_LEN}`
+- `zcash_primitives::transaction::components::transparent::value_balance`
 
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their

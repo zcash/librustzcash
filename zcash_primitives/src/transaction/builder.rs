@@ -1334,7 +1334,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     /// experimental ZIP 233 value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
-            self.transparent_builder.value_balance()?,
+            transparent_value_balance(&self.transparent_builder)?,
             self.sapling_builder
                 .as_ref()
                 .map_or_else(ZatBalance::zero, |builder| {
@@ -1434,6 +1434,30 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
+}
+
+/// Returns the value of the transparent inputs added to `builder`, minus the value of
+/// its transparent outputs.
+fn transparent_value_balance(builder: &TransparentBuilder) -> Result<ZatBalance, BalanceError> {
+    #[cfg(feature = "transparent-inputs")]
+    let input_sum = builder
+        .inputs()
+        .iter()
+        .map(|input| input.coin().value())
+        .sum::<Option<Zatoshis>>()
+        .ok_or(BalanceError::Overflow)?;
+
+    #[cfg(not(feature = "transparent-inputs"))]
+    let input_sum = Zatoshis::ZERO;
+
+    let output_sum = builder
+        .outputs()
+        .iter()
+        .map(|vo| vo.value())
+        .sum::<Option<Zatoshis>>()
+        .ok_or(BalanceError::Overflow)?;
+
+    (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
 }
 
 impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U> {

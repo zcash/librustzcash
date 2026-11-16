@@ -1,14 +1,14 @@
-//! Functions for parsing and serialization of the transparent components of a
-//! transaction.
+//! Functions for parsing, serialization, and value accounting of the transparent
+//! components of a transaction.
 
 use corez::io::{self, Read, Write};
 
 use ::transparent::{
     address::Script,
-    bundle::{Authorized, OutPoint, TxIn, TxOut},
+    bundle::{Authorization, Authorized, Bundle, OutPoint, TxIn, TxOut},
 };
 use zcash_encoding::Vector;
-use zcash_protocol::value::Zatoshis;
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 use zcash_script::script;
 
 /// The length of a transaction ID in the transaction encoding.
@@ -107,6 +107,47 @@ pub fn write_txout<W: Write>(mut writer: W, txout: &TxOut) -> io::Result<()> {
     write_script(&mut writer, txout.script_pubkey())
 }
 
+/// Returns the amount of value that `bundle` adds to or removes from the transparent
+/// pool.
+///
+/// A positive result means the containing transaction moves funds out of the
+/// transparent pool, into shielded pools or to fees. A negative result means it moves
+/// funds into the transparent pool.
+///
+/// `get_prevout_value` returns the value of the output that a given outpoint refers to,
+/// or `None` if it is not known. The result is `Ok(None)` if the value of any input is
+/// not known.
+///
+/// Returns an error if a sum overflows or underflows, or if `get_prevout_value` fails.
+pub fn value_balance<A, E, F>(
+    bundle: &Bundle<A>,
+    mut get_prevout_value: F,
+) -> Result<Option<ZatBalance>, E>
+where
+    A: Authorization,
+    E: From<BalanceError>,
+    F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
+{
+    let mut input_sum = Zatoshis::ZERO;
+    for txin in &bundle.vin {
+        if let Some(v) = get_prevout_value(txin.prevout())? {
+            input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
+        } else {
+            return Ok(None);
+        }
+    }
+
+    let output_sum = bundle
+        .vout
+        .iter()
+        .map(|p| ZatBalance::from(p.value()))
+        .sum::<Option<ZatBalance>>()
+        .ok_or(BalanceError::Overflow)?;
+
+    let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
+    Ok(Some(balance))
+}
+
 #[cfg(test)]
 mod tests {
     use corez::io;
@@ -115,16 +156,16 @@ mod tests {
     use ::transparent::{
         address::Script,
         bundle::{
-            OutPoint, TxIn, TxOut,
+            Authorized, Bundle, OutPoint, TxIn, TxOut,
             testing::{arb_outpoint, arb_script_pubkey, arb_txin, arb_txout},
         },
     };
-    use zcash_protocol::value::{MAX_MONEY, Zatoshis};
+    use zcash_protocol::value::{BalanceError, MAX_MONEY, ZatBalance, Zatoshis};
     use zcash_script::script;
 
     use super::{
-        read_outpoint, read_script, read_txin, read_txout, script_serialized_size, write_outpoint,
-        write_script, write_txin, write_txout,
+        read_outpoint, read_script, read_txin, read_txout, script_serialized_size, value_balance,
+        write_outpoint, write_script, write_txin, write_txout,
     };
 
     /// The serialized length of an outpoint: a 32-byte txid and a 4-byte output index.
@@ -144,6 +185,67 @@ mod tests {
 
     /// `OP_1`, used as a one-byte script.
     const OP_1: u8 = 0x51;
+
+    /// The larger of the two values used in the balance tests, in zatoshis.
+    const LARGER_ZATS: u64 = 50_000;
+
+    /// The smaller of the two values used in the balance tests, in zatoshis.
+    const SMALLER_ZATS: u64 = 20_000;
+
+    /// [`LARGER_ZATS`] as an amount.
+    const LARGER: Zatoshis = Zatoshis::const_from_u64(LARGER_ZATS);
+
+    /// [`SMALLER_ZATS`] as an amount.
+    const SMALLER: Zatoshis = Zatoshis::const_from_u64(SMALLER_ZATS);
+
+    /// The difference between [`LARGER`] and [`SMALLER`].
+    const DIFFERENCE: ZatBalance = ZatBalance::const_from_u64(LARGER_ZATS - SMALLER_ZATS);
+
+    fn fake_input() -> TxIn<Authorized> {
+        TxIn::from_parts(OutPoint::fake(), Script::default(), u32::MAX)
+    }
+
+    /// Returns a bundle with one input and one output of the given value.
+    fn spend_one_create(created: Zatoshis) -> Bundle<Authorized> {
+        Bundle {
+            vin: vec![fake_input()],
+            vout: vec![TxOut::new(created, Script::default())],
+            authorization: Authorized,
+        }
+    }
+
+    #[test]
+    fn value_balance_is_inputs_minus_outputs() {
+        let balance =
+            value_balance::<_, BalanceError, _>(&spend_one_create(SMALLER), |_| Ok(Some(LARGER)));
+        assert_eq!(balance, Ok(Some(DIFFERENCE)));
+    }
+
+    #[test]
+    fn value_balance_is_negative_when_outputs_exceed_inputs() {
+        let balance =
+            value_balance::<_, BalanceError, _>(&spend_one_create(LARGER), |_| Ok(Some(SMALLER)));
+        assert_eq!(balance, Ok(Some(-DIFFERENCE)));
+    }
+
+    #[test]
+    fn value_balance_is_unknown_when_a_prevout_is_unknown() {
+        let balance = value_balance::<_, BalanceError, _>(&spend_one_create(SMALLER), |_| Ok(None));
+        assert_eq!(balance, Ok(None));
+    }
+
+    #[test]
+    fn value_balance_reports_overflow_of_the_input_sum() {
+        let two_inputs = Bundle {
+            vin: vec![fake_input(), fake_input()],
+            vout: vec![],
+            authorization: Authorized,
+        };
+        let balance = value_balance::<_, BalanceError, _>(&two_inputs, |_| {
+            Ok(Some(Zatoshis::const_from_u64(MAX_MONEY)))
+        });
+        assert_eq!(balance, Err(BalanceError::Overflow));
+    }
 
     #[test]
     fn outpoint_layout() {

@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_protocol::value::Zatoshis;
 
 use zcash_script::{op, script};
 
@@ -314,28 +314,6 @@ impl TransparentBuilder {
         self.vout.push(TxOut::new(value, to.script().into()));
 
         Ok(())
-    }
-
-    pub fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
-        #[cfg(feature = "transparent-inputs")]
-        let input_sum = self
-            .inputs
-            .iter()
-            .map(|input| input.coin.value())
-            .sum::<Option<Zatoshis>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let input_sum = Zatoshis::ZERO;
-
-        let output_sum = self
-            .vout
-            .iter()
-            .map(|vo| vo.value())
-            .sum::<Option<Zatoshis>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<Bundle<Unauthorized>> {

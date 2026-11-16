@@ -67,6 +67,14 @@ workspace.
   - `zcash_transparent::bundle::Bundle::is_coinbase` is replaced by
     `zcash_primitives::transaction::coinbase::is_coinbase`, which takes the
     transaction rather than its transparent bundle.
+- `zcash_transparent::bundle::Bundle::value_balance`. Use
+  `zcash_primitives::transaction::components::transparent::value_balance`,
+  which takes the bundle as its first argument.
+- `zcash_transparent::builder::TransparentBuilder::value_balance`. Compute it
+  as the sum of `TransparentInputInfo::coin().value()` over
+  `TransparentBuilder::inputs`, minus the sum of `TxOut::value` over
+  `TransparentBuilder::outputs`. `inputs` exists only with the
+  `transparent-inputs` feature; without it the builder has no inputs.
 
 ## [0.11.1] - 2026-11-12
 

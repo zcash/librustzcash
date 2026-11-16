@@ -684,7 +684,7 @@ impl<A: Authorization> TransactionData<A> {
     {
         let transparent_balance = self.transparent_bundle.as_ref().map_or_else(
             || Ok(Some(ZatBalance::zero())),
-            |b| b.value_balance(get_prevout),
+            |b| components::transparent::value_balance(b, get_prevout),
         )?;
 
         transparent_balance

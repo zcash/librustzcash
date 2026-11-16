@@ -4,10 +4,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use zcash_script::{script, solver};
 
-use zcash_protocol::{
-    TxId,
-    value::{BalanceError, ZatBalance, Zatoshis},
-};
+use zcash_protocol::{TxId, value::Zatoshis};
 
 use crate::{
     address::{Script, TransparentAddress},
@@ -93,36 +90,6 @@ impl<A: Authorization> Bundle<A> {
             vout: self.vout,
             authorization: f.map_authorization(self.authorization),
         }
-    }
-
-    /// The amount of value added to or removed from the transparent pool by the action of this
-    /// bundle. A positive value represents that the containing transaction has funds being
-    /// transferred out of the transparent pool into shielded pools or to fees; a negative value
-    /// means that the containing transaction has funds being transferred into the transparent pool
-    /// from the shielded pools.
-    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Option<ZatBalance>, E>
-    where
-        E: From<BalanceError>,
-        F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
-    {
-        let mut input_sum = Zatoshis::ZERO;
-        for txin in &self.vin {
-            if let Some(v) = get_prevout_value(txin.prevout())? {
-                input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
-            } else {
-                return Ok(None);
-            }
-        }
-
-        let output_sum = self
-            .vout
-            .iter()
-            .map(|p| ZatBalance::from(p.value()))
-            .sum::<Option<ZatBalance>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
-        Ok(Some(balance))
     }
 }
 
