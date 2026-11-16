@@ -2018,13 +2018,13 @@ mod tests {
             TxVersion,
             builder::{self, TransparentBuilder, default_tx_expiry_delta},
         },
-        ::transparent::{
-            bundle::{OutPoint, TxOut},
-            keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
-        },
+        ::transparent::bundle::{OutPoint, TxOut},
         zcash_protocol::consensus::BranchId,
-        zip32::AccountId,
     };
+
+    /// A fixed secp256k1 secret key for tests that need a spendable transparent coin.
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    const TEST_TRANSPARENT_SECRET_KEY: [u8; 32] = [1; 32];
 
     // The Ironwood tests below reference `TxVersion`/`BranchId` directly; without the
     // `transparent-inputs` feature these are not otherwise in scope.
@@ -2340,20 +2340,11 @@ mod tests {
             .unwrap();
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
 
         builder
@@ -2817,20 +2808,11 @@ mod tests {
         };
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
         builder
             .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
@@ -2868,20 +2850,11 @@ mod tests {
             Builder::new(TEST_NETWORK, tx_height, build_config).with_expiry_height(0u32.into());
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50_000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
         builder
             .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
