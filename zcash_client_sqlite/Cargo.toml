@@ -193,6 +193,8 @@ spend-index = [
 # from which it permits spending.
 transparent-key-import = [
   "transparent-inputs",
+  "bip32/secp256k1-ffi",
+  "zcash_script/descriptor",
   "zcash_client_backend/transparent-key-import"
 ]
 
