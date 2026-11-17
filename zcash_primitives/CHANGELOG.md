@@ -20,6 +20,7 @@ workspace.
   is_coinbase, MIN_COINBASE_SCRIPT_LEN, MAX_COINBASE_SCRIPT_LEN,
   MAX_COINBASE_HEIGHT_LEN}`
 - `zcash_primitives::transaction::components::transparent::value_balance`
+- `zcash_primitives::transaction::util::sha256d::{HashReader, HashWriter}`
 
 ### Changed
 - `zcash_primitives::transaction::{Transaction, TransactionData}` now store their

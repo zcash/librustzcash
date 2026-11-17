@@ -108,6 +108,8 @@ workspace.
   `zcash_primitives::transaction::builder::Error::NullDataTooLong`.
 - `zcash_transparent::bundle::OutPoint::txid`. Use
   `zcash_protocol::TxId::from_bytes(*outpoint.hash())`.
+- `zcash_transparent::util::sha256d`. The module is now
+  `zcash_primitives::transaction::util::sha256d`, with the same items.
 
 ## [0.11.1] - 2026-11-12
 
