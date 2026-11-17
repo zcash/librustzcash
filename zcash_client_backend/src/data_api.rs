@@ -2261,6 +2261,7 @@ pub trait WalletRead {
     ///
     /// Transparent and TEX addresses are resolved by exact match against tracked addresses
     /// only, since a diversifier index cannot be recovered from a transparent receiver alone.
+    /// A TEX address is resolved as the P2PKH address that has the same public key hash.
     ///
     /// # Returns
     ///
