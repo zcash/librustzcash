@@ -5737,6 +5737,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn find_account_for_address_finds_sapling_address_that_wallet_never_generated() {
+        // Create a wallet with two accounts that have different viewing keys.
+        let mut state = create_test_wallet_with_one_account();
+        let first_account_id = state.test_account().unwrap().id();
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let (second_account_id, _) = state
+            .wallet_mut()
+            .create_account("", &Secret::new(vec![1u8; 32]), &birthday, None)
+            .unwrap();
+
+        for account_id in [first_account_id, second_account_id] {
+            let address = sapling_address_that_wallet_never_generated(&state, account_id);
+
+            // The lookup finds the account whose viewing key derives the address.
+            assert_eq!(
+                state
+                    .wallet()
+                    .find_account_for_address(state.network(), &Address::Sapling(Box::new(address)))
+                    .unwrap(),
+                Some(account_id),
+            );
+        }
+    }
+
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn find_account_for_ua_finds_via_transparent_receiver_cache() {
@@ -5994,6 +6022,47 @@ mod tests {
             .get_next_available_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
             .unwrap()
             .expect("address generation for account 1 must succeed")
+    }
+
+    /// Derives a Sapling address that belongs to an account, but that the wallet does not
+    /// track.
+    ///
+    /// - Preconditions: the wallet contains the account, and the viewing key of the account
+    ///   has a Sapling component.
+    /// - Inputs: the wallet state, and the identifier of the account.
+    /// - Outputs: an address that the Sapling incoming viewing key of the account derives.
+    ///   The wallet has no record of this address.
+    /// - Side effects: none.
+    fn sapling_address_that_wallet_never_generated(
+        state: &TestState<(), TestDb, LocalNetwork>,
+        account_id: AccountUuid,
+    ) -> ::sapling::PaymentAddress {
+        let account = state
+            .wallet()
+            .get_account(account_id)
+            .unwrap()
+            .expect("the wallet contains the account");
+        let (_, address) = account
+            .uivk()
+            .sapling()
+            .as_ref()
+            .expect("the account has a Sapling viewing key")
+            .find_address(DiversifierIndex::from(1_000_000u32))
+            .expect("a valid diversifier exists at or above the start index");
+
+        let tracked_addresses = state.wallet().list_addresses(account_id).unwrap();
+        assert!(
+            tracked_addresses
+                .iter()
+                .all(|tracked| match tracked.address() {
+                    Address::Sapling(tracked) => **tracked != address,
+                    Address::Unified(tracked) => tracked.sapling() != Some(&address),
+                    Address::Transparent(_) | Address::Tex(_) => true,
+                }),
+            "the wallet must not track the address",
+        );
+
+        address
     }
 
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
