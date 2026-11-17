@@ -5330,6 +5330,29 @@ mod tests {
     }
 
     #[test]
+    fn find_account_for_tex_address_returns_account_that_tracks_the_p2pkh_address() {
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(
+                1,
+                vec![address_info_of(Address::Transparent(
+                    transparent_address_for_tag(1),
+                ))],
+            )],
+        );
+
+        // A TEX address holds the public key hash of a transparent P2PKH address.
+        let TransparentAddress::PublicKeyHash(pubkey_hash) = transparent_address_for_tag(1) else {
+            panic!("the test address must be a P2PKH address");
+        };
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Tex(pubkey_hash),
+        );
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
     fn find_account_for_transparent_receiver_in_unified_address_returns_matching_account() {
         let transparent = transparent_address_for_tag(1);
         let sapling_address = sapling_address_for_tag(11);
