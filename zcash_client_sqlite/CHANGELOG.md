@@ -80,6 +80,11 @@ workspace.
   above the queue's coverage, or a transaction or transparent output mined
   above the known tip, left the intervening heights absent from the queue and
   from `suggest_scan_ranges`.
+- `WalletDb`'s implementation of `WalletRead::find_account_for_address` now
+  returns the account whose viewing key derives a given Sapling address, even
+  if the wallet has not generated that address. Previously it returned
+  `Ok(None)` unless the address was a receiver of an address that the wallet
+  had generated. No change is needed at call sites.
 
 ## [0.23.0] - 2026-10-21
 

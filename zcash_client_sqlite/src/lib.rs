@@ -5765,6 +5765,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn find_account_for_address_returns_none_for_sapling_address_of_unknown_key() {
+        let state = create_test_wallet_with_one_account();
+
+        // Derive a Sapling address from a key that no account in the wallet holds.
+        let address =
+            UnifiedSpendingKey::from_seed(&state.network(), &[99u8; 32], zip32::AccountId::ZERO)
+                .expect("valid seed")
+                .to_unified_full_viewing_key()
+                .default_address(UnifiedAddressRequest::AllAvailableKeys)
+                .expect("default address must be derivable")
+                .0
+                .sapling()
+                .cloned()
+                .expect("UA must have sapling receiver");
+
+        assert_eq!(
+            state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Sapling(Box::new(address)))
+                .unwrap(),
+            None,
+        );
+    }
+
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn find_account_for_ua_finds_via_transparent_receiver_cache() {
