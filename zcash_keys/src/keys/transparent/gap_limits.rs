@@ -310,7 +310,9 @@ pub enum GapAddressesError<SE> {
 ///
 /// This function queries the wallet backend (via [`AddressStore`]) to find the start
 /// of the first gap of unused addresses, then generates enough addresses to maintain the
-/// configured gap limit. If no gap exists (i.e., the address space is exhausted), this is a
+/// configured gap limit. If storing those addresses moves the start of the gap (because the
+/// backend already held some of them as used addresses), this repeats from the new gap start
+/// until it is stable. If no gap exists (i.e., the address space is exhausted), this is a
 /// no-op.
 ///
 /// Each window of addresses is checked against previously observed transaction involvement via
@@ -370,8 +372,18 @@ where
             .reconcile_stored_addresses(account_id, key_scope, &address_list)
             .map_err(GapAddressesError::Storage)?
         {
-            ReconcileOutcome::Unchanged => break,
             ReconcileOutcome::AddressesUsed(highest) => highest_used = Some(highest),
+            // Storing the window may mark addresses used that the backend already held (for
+            // example as standalone imports with outputs), moving the gap start without being
+            // reported here.
+            ReconcileOutcome::Unchanged => {
+                let next_start = wallet_db
+                    .find_gap_start(account_id, key_scope, gap_limit)
+                    .map_err(GapAddressesError::Storage)?;
+                if next_start == Some(gap_start) {
+                    break;
+                }
+            }
         }
     }
 
