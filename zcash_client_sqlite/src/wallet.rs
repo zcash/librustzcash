@@ -1418,6 +1418,7 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 ///   wallet account could have produced, whether or not it was previously exposed.
 /// - For transparent addresses, no fallback is needed: the exact-match query already covers
 ///   both standalone transparent rows and transparent receivers cached on stored UAs.
+/// - A TEX address is looked up as the P2PKH address that has the same public key hash.
 ///
 /// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
 /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers
@@ -1427,12 +1428,16 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     address: &Address,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
     let addr_str = address.encode(params);
-    // For a UA the transparent receiver (if any) may match the cached column; for non-UA
-    // addresses the same string serves both roles (the `cached_transparent_receiver_address`
-    // column only ever holds transparent addresses, so a Sapling query against it simply
-    // never matches).
+    // For a UA the transparent receiver (if any) may match the cached column. The wallet
+    // stores the P2PKH address that a TEX address holds, never the TEX address. For other
+    // non-UA addresses the same string serves both roles (the
+    // `cached_transparent_receiver_address` column only ever holds transparent addresses,
+    // so a Sapling query against it simply never matches).
     let taddr_str = match address {
         Address::Unified(ua) => ua.transparent().map(|t| t.encode(params)),
+        Address::Tex(pubkey_hash) => Some(
+            ::transparent::address::TransparentAddress::PublicKeyHash(*pubkey_hash).encode(params),
+        ),
         _ => Some(addr_str.clone()),
     };
 
