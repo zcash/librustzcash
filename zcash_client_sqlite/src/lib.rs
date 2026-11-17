@@ -5790,6 +5790,35 @@ mod tests {
         );
     }
 
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_address_finds_tex_address_of_tracked_transparent_address() {
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+
+        // A TEX address holds the public key hash of a transparent P2PKH address.
+        let ::transparent::address::TransparentAddress::PublicKeyHash(pubkey_hash) =
+            ua.transparent().expect("UA must have transparent receiver")
+        else {
+            panic!("the transparent receiver of the UA must be a P2PKH address");
+        };
+
+        // The lookup finds the account that controls the P2PKH address.
+        assert_eq!(
+            state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Tex(*pubkey_hash))
+                .unwrap(),
+            Some(account.id()),
+        );
+    }
+
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn find_account_for_ua_finds_via_transparent_receiver_cache() {
