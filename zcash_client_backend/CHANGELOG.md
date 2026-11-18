@@ -42,6 +42,8 @@ workspace.
   stabilized_note_spendable_across_small_tip_advance}`
 
 ### Changed
+- Migrated to `arti-client 0.44`, `fs-mistrust 0.15`, and `tor-rtcompat 0.44`.
+- MSRV is now 1.91
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
   `height` to be at or below the wallet birthday. An implementation returns an
   error, and leaves the scan queue unchanged, for a `height` above the wallet
