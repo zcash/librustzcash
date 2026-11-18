@@ -114,6 +114,13 @@ workspace.
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
   newly_discovered_notes_become_stabilized}`.
 
+### Fixed
+- `zcash_client_backend::data_api::defaults::find_account_for_address` now
+  returns the account that tracks the P2PKH address with the same public key
+  hash as a given TEX address. Previously it found a TEX address only if a
+  tracked unified address contained that P2PKH address as a receiver. No change
+  is needed at call sites.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added
