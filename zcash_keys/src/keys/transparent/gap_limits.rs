@@ -252,7 +252,9 @@ pub enum GapAddressesError<SE> {
 ///
 /// This function queries the wallet backend (via [`AddressStore`]) to find the start
 /// of the first gap of unused addresses, then generates enough addresses to maintain the
-/// configured gap limit. If no gap exists (i.e., the address space is exhausted), this is a
+/// configured gap limit. If storing those addresses moves the start of the gap (because the
+/// backend already held some of them as used addresses), this repeats from the new gap start
+/// until it is stable. If no gap exists (i.e., the address space is exhausted), this is a
 /// no-op.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_gap_addresses<DbT, SE>(
@@ -274,22 +276,38 @@ where
             AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
         ))?;
 
-    if let Some(gap_start) = wallet_db
+    // Storing the window can move its own start: a backend may already hold one of the derived
+    // addresses (for example as a standalone import) together with outputs received at it, in
+    // which case the window now contains a used address and the gap begins beyond the range just
+    // stored, which must itself be filled. Store windows until the gap start no longer moves.
+    //
+    // This terminates provided that storing a window marks as used only addresses that the
+    // backend already held before the call: each iteration that moves the gap start then turns
+    // at least one such address into a derived one, and there are finitely many of them.
+    let mut gap_start = wallet_db
         .find_gap_start(account_id, key_scope, gap_limit)
-        .map_err(GapAddressesError::Storage)?
-    {
+        .map_err(GapAddressesError::Storage)?;
+    while let Some(start) = gap_start {
         let address_list = generate_address_list(
             account_uivk,
             account_ufvk,
             key_scope,
             request,
-            gap_start..gap_start.saturating_add(gap_limit),
+            start..start.saturating_add(gap_limit),
             require_key,
         )
         .map_err(GapAddressesError::AddressGeneration)?;
         wallet_db
             .store_address_range(account_id, key_scope, address_list)
             .map_err(GapAddressesError::Storage)?;
+
+        let next_start = wallet_db
+            .find_gap_start(account_id, key_scope, gap_limit)
+            .map_err(GapAddressesError::Storage)?;
+        if next_start == gap_start {
+            break;
+        }
+        gap_start = next_start;
     }
 
     Ok(())

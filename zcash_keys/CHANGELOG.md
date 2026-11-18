@@ -31,6 +31,13 @@ workspace.
     non-empty subset of the components. `from_bytes` now reads the entire
     input, and returns an error for trailing data or a repeated typecode.
 
+### Fixed
+- `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses` now
+  repeats until the start of the gap is stable. Previously, when storing the
+  derived window marked an address as used (as a backend does when the address
+  was already held as a standalone import that has received outputs), the gap
+  moved beyond the addresses just stored and the new window was left unfilled.
+
 ## [0.17.0-keystone.0] - 2026-11-10
 
 This is a backport release to enable downstream users that cannot yet

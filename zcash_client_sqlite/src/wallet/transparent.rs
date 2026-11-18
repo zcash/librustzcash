@@ -774,7 +774,8 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
     // for the same transparent receiver (which the UNIQUE index on
     // `cached_transparent_receiver_address` forbids). The row `id` is preserved, so any UTXOs,
     // exposure, and spend-search state already attached to the imported receiver carry over and
-    // become spendable.
+    // become spendable (except that an unused internal or ephemeral receiver's import-time
+    // exposure is released; see below).
     //
     // The import may have been made under a *different* account: deriving the address is itself
     // proof that the deriving account owns it, so in that case the row's account attribution
@@ -834,6 +835,22 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
             .optional()?;
 
         if let Some((foreign_id, foreign_account)) = foreign_row {
+            // An exposure recorded against the standalone import was asserted by whoever
+            // imported it, without knowing that the receiver is one of this account's internal
+            // (change) or ephemeral addresses. For those scopes, an exposure of a derived row
+            // means that this wallet reserved the address for a transaction it built; it is what
+            // excludes the row from further reservation, and an exposed row that never receives
+            // an output occupies its gap window permanently. A receiver that has never received
+            // an output has not appeared as change (or as a ZIP 320 ephemeral output) in any
+            // transaction this wallet has observed, so its import-time exposure is released and
+            // the row becomes reservable like any other derived address in the window. A
+            // receiver that has received an output keeps its exposure. External receivers always
+            // keep it, because an external address may have been given to a payer who has not
+            // yet paid it.
+            let release_import_exposure = matches!(
+                key_scope,
+                TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL
+            );
             conn.execute(
                 "UPDATE addresses
                  SET account_id = :account_id,
@@ -843,7 +860,15 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                      transparent_child_index = :transparent_child_index,
                      receiver_flags = :receiver_flags,
                      imported_transparent_receiver_pubkey = NULL,
-                     imported_transparent_receiver_script = NULL
+                     imported_transparent_receiver_script = NULL,
+                     exposed_at_height = CASE
+                         WHEN :release_import_exposure AND NOT EXISTS (
+                             SELECT 1 FROM transparent_received_outputs tro
+                             WHERE tro.address_id = :id
+                         )
+                         THEN NULL
+                         ELSE exposed_at_height
+                     END
                  WHERE id = :id",
                 named_params![
                     ":account_id": account_id.0,
@@ -852,6 +877,7 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                     ":address": address_enc,
                     ":transparent_child_index": child_index,
                     ":receiver_flags": flags,
+                    ":release_import_exposure": release_import_exposure,
                     ":id": foreign_id,
                 ],
             )?;
@@ -930,16 +956,33 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
     )?;
 
-    if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
+    // Deriving the window can move its own start: when a derived address was previously imported
+    // as a standalone (`Foreign`) receiver, `store_address_range` upgrades that row in place, and
+    // if the receiver has already been used the window now contains a used address. The gap then
+    // begins beyond the range just derived, which must itself be filled. Derive until the gap
+    // start no longer moves.
+    //
+    // This terminates. Only a used row can move the gap start, and a row derived here is used
+    // only if it was upgraded from a `Foreign` row (a freshly inserted row has no outputs). An
+    // upgrade consumes its `Foreign` row, so every iteration but the last consumes at least one,
+    // and the number of iterations is bounded by the number of `Foreign` rows plus one.
+    let mut gap_start = find_gap_start(conn, account_id, key_scope, gap_limit)?;
+    while let Some(start) = gap_start {
         generate_address_range(
             conn,
             params,
             account_id,
             key_scope,
             request,
-            gap_start..gap_start.saturating_add(gap_limit),
+            start..start.saturating_add(gap_limit),
             require_key,
         )?;
+
+        let next_start = find_gap_start(conn, account_id, key_scope, gap_limit)?;
+        if next_start == gap_start {
+            break;
+        }
+        gap_start = next_start;
     }
 
     Ok(())
@@ -3031,8 +3074,10 @@ mod tests {
         proptest::prelude::*,
         secp256k1::{PublicKey, SecretKey},
         std::collections::HashSet,
+        zcash_client_backend::data_api::testing::TestState,
         zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
         zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+        zcash_protocol::local_consensus::LocalNetwork,
     };
 
     #[test]
@@ -3912,6 +3957,664 @@ mod tests {
         assert_eq!((utxo_addr_id, utxo_account_id), (foreign_id, account_a.0));
 
         tx.commit().unwrap();
+    }
+
+    /// How the internal gap window is brought up to date after the used standalone imports have
+    /// been recorded, in [`check_gap_refill_after_used_imports`].
+    #[cfg(feature = "transparent-key-import")]
+    #[derive(Clone, Copy, Debug)]
+    enum GapMaintenance {
+        /// A mined output is received at the last derived change address through
+        /// [`WalletWrite::put_received_transparent_utxo`], which maintains the gap window.
+        ReceiveOutput,
+        /// The same output is recorded without gap maintenance, followed by a single
+        /// `find_gap_start` / `generate_address_range` pass. This is what gap maintenance did
+        /// before it iterated to a fixpoint, and reproduces the state that wallets maintained by
+        /// earlier releases are left in.
+        LegacySinglePass,
+    }
+
+    /// Records `output`, mined at `mined_height`, as received at the account's derived internal
+    /// address at child index `index`, without performing the gap maintenance that every API
+    /// recording an output also does. This reproduces states that earlier releases' gap
+    /// maintenance left behind.
+    #[cfg(feature = "transparent-key-import")]
+    fn record_mined_receipt_without_gap_maintenance(
+        tx: &rusqlite::Transaction,
+        account_id: crate::AccountRef,
+        index: u32,
+        output: &WalletTransparentOutput<crate::AccountUuid>,
+        mined_height: zcash_protocol::consensus::BlockHeight,
+    ) {
+        let id_tx: i64 = tx
+            .query_row(
+                "INSERT INTO transactions (txid, mined_height, min_observed_height)
+                 VALUES (:txid, :height, :height)
+                 RETURNING id_tx",
+                named_params! {
+                    ":txid": output.outpoint().hash().to_vec(),
+                    ":height": u32::from(mined_height),
+                },
+                |r| r.get(0),
+            )
+            .unwrap();
+        let inserted = tx
+            .execute(
+                "INSERT INTO transparent_received_outputs
+                     (transaction_id, output_index, account_id, address, script, value_zat,
+                      address_id)
+                 SELECT :tx, :output_index, account_id, cached_transparent_receiver_address,
+                        :script, :value, id
+                 FROM addresses
+                 WHERE account_id = :account_id
+                   AND key_scope = :internal
+                   AND transparent_child_index = :index",
+                named_params! {
+                    ":tx": id_tx,
+                    ":output_index": output.outpoint().n(),
+                    ":script": output.txout().script_pubkey().0.0.clone(),
+                    ":value": u64::from(output.txout().value()),
+                    ":account_id": account_id.0,
+                    ":internal": KeyScope::INTERNAL.encode(),
+                    ":index": index,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            inserted, 1,
+            "internal address {index} must already be derived"
+        );
+    }
+
+    /// Imports `used + unused` of the account's own internal (change) receivers, at the child
+    /// indices immediately beyond its initial internal gap window, as standalone (`Foreign`)
+    /// pubkeys, as a migration from a zcashd keypool does. The first `used` have each received a
+    /// mined output; the remaining `unused` have received nothing but are marked as exposed, as
+    /// a migration that cannot tell unused keypool reserves apart from disclosed keys does. A
+    /// mined output is then received at the last derived change address, so that gap
+    /// maintenance derives (and thereby upgrades) the imported receivers.
+    ///
+    /// Asserts that a full gap limit of change addresses can then be reserved, starting
+    /// immediately after the last used imported receiver.
+    #[cfg(feature = "transparent-key-import")]
+    fn check_gap_refill_after_imports(used: u32, unused: u32, maintenance: GapMaintenance) {
+        let case = format!("{used} used + {unused} unused exposed imports, {maintenance:?}");
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().unwrap();
+        let account_uuid = account.id();
+        let account_pubkey = account.usk().transparent().unwrap().to_account_pubkey();
+        let import_exposure_height = account.birthday().height() + 1;
+        let mined_height = account.birthday().height() + 10;
+        let network = *st.network();
+        let gap_limits = st.wallet().db().gap_limits;
+        let internal_gap_limit = gap_limits.internal();
+        st.wallet_mut().update_chain_tip(mined_height).unwrap();
+
+        let internal_pubkey = |i: u32| {
+            account_pubkey
+                .derive_address_pubkey(
+                    TransparentKeyScope::INTERNAL,
+                    NonHardenedChildIndex::from_index(i).unwrap(),
+                )
+                .unwrap()
+        };
+        let mined_output_to = |pubkey: &PublicKey, n: u32| {
+            let mut txid = [0xAA; 32];
+            txid[..4].copy_from_slice(&n.to_le_bytes());
+            WalletTransparentOutput::from_parts(
+                OutPoint::new(txid, 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(10_000),
+                    TransparentAddress::from_pubkey(pubkey).script().into(),
+                ),
+                Some(mined_height),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        // The initial internal gap window is [0, internal_gap_limit); the imported receivers lie
+        // immediately beyond it, so no derived row occupies their indices yet.
+        let used_range = internal_gap_limit..internal_gap_limit + used;
+        let unused_range = used_range.end..used_range.end + unused;
+        let imported_pubkeys: Vec<PublicKey> = (used_range.start..unused_range.end)
+            .map(internal_pubkey)
+            .collect();
+        st.wallet_mut()
+            .import_standalone_transparent_pubkeys(account_uuid, &imported_pubkeys)
+            .unwrap();
+        for i in used_range.clone() {
+            // A `Foreign` receiver: recording the output does not touch any derived gap window.
+            st.wallet_mut()
+                .put_received_transparent_utxo(&mined_output_to(&internal_pubkey(i), i))
+                .unwrap();
+        }
+        let unused_exposures: Vec<_> = unused_range
+            .clone()
+            .map(|i| {
+                (
+                    TransparentAddress::from_pubkey(&internal_pubkey(i)),
+                    import_exposure_height,
+                )
+            })
+            .collect();
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&unused_exposures)
+            .unwrap();
+
+        // A mined output at the last derived change address moves the gap start to the first
+        // imported index.
+        let last_derived = internal_gap_limit - 1;
+        let trigger = mined_output_to(&internal_pubkey(last_derived), last_derived);
+        match maintenance {
+            GapMaintenance::ReceiveOutput => {
+                st.wallet_mut()
+                    .put_received_transparent_utxo(&trigger)
+                    .unwrap();
+            }
+            GapMaintenance::LegacySinglePass => {
+                // The output is written directly, because every API that records one also
+                // maintains the gap window.
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+                let account_id = get_account_ref(&tx, account_uuid).unwrap();
+                record_mined_receipt_without_gap_maintenance(
+                    &tx,
+                    account_id,
+                    last_derived,
+                    &trigger,
+                    mined_height,
+                );
+                let gap_start = find_gap_start(
+                    &tx,
+                    account_id,
+                    TransparentKeyScope::INTERNAL,
+                    internal_gap_limit,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(gap_start.index(), internal_gap_limit);
+                super::generate_address_range(
+                    &tx,
+                    &network,
+                    account_id,
+                    TransparentKeyScope::INTERNAL,
+                    UnifiedAddressRequest::unsafe_custom(
+                        ReceiverRequirement::Allow,
+                        ReceiverRequirement::Allow,
+                        ReceiverRequirement::Require,
+                    ),
+                    gap_start..gap_start.saturating_add(internal_gap_limit),
+                    false,
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+        }
+
+        // Every imported receiver is used, so the gap begins immediately after the last of them,
+        // and a full gap limit of change addresses must be reservable from there.
+        let expected: Vec<(TransparentAddress, Option<NonHardenedChildIndex>)> = (used_range.end
+            ..used_range.end + internal_gap_limit)
+            .map(|i| {
+                (
+                    TransparentAddress::from_pubkey(&internal_pubkey(i)),
+                    NonHardenedChildIndex::from_index(i),
+                )
+            })
+            .collect();
+        let reserved = st
+            .wallet_mut()
+            .reserve_next_n_internal_addresses(
+                account_uuid,
+                usize::try_from(internal_gap_limit).unwrap(),
+            )
+            .unwrap_or_else(|e| panic!("{case}: reservation failed: {e:?}"));
+        let reserved: Vec<(TransparentAddress, Option<NonHardenedChildIndex>)> = reserved
+            .into_iter()
+            .map(|(addr, meta)| (addr, meta.address_index()))
+            .collect();
+        assert_eq!(reserved, expected, "{case}");
+    }
+
+    /// Counts of used imported change receivers, relative to the default internal gap limit of
+    /// 5: within one window, exactly one window, just over one window, several windows, and a
+    /// zcashd keypool's worth of used change keys.
+    #[cfg(feature = "transparent-key-import")]
+    const USED_IMPORT_COUNTS: [u32; 6] = [1, 4, 5, 6, 17, 120];
+
+    /// Deriving a gap window can upgrade standalone imports that have already received outputs
+    /// into used derived addresses, which moves the gap start beyond the window just derived.
+    /// Gap maintenance must keep deriving until the gap start is stable, so that the window
+    /// starting there exists and can be reserved from.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn gap_maintenance_refills_window_after_upgrading_used_imports() {
+        for used in USED_IMPORT_COUNTS {
+            check_gap_refill_after_imports(used, 0, GapMaintenance::ReceiveOutput);
+        }
+    }
+
+    /// Deriving a gap window can upgrade standalone imports that have never received an output
+    /// but were marked as exposed when imported. Were that exposure kept, those rows would
+    /// occupy the change window permanently, as no output will ever arrive to move the gap start
+    /// past them; it is released on upgrade instead. This covers a window made up only of such
+    /// rows, one that begins with used imports, and the shape of a migrated zcashd keypool: a run
+    /// of used change keys followed by a run of unused reserves.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn gap_maintenance_releases_import_exposure_of_unused_change_receivers() {
+        for (used, unused) in [(0, 5), (0, 7), (3, 4), (112, 88)] {
+            check_gap_refill_after_imports(used, unused, GapMaintenance::ReceiveOutput);
+        }
+    }
+
+    /// A wallet whose gap window was left unfilled by single-pass gap maintenance can reserve
+    /// change addresses again without first receiving another output, including when used
+    /// imports are followed by unused, exposed ones that the single pass did not reach.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn reservation_heals_window_left_unfilled_by_single_pass_maintenance() {
+        for used in USED_IMPORT_COUNTS {
+            check_gap_refill_after_imports(used, 0, GapMaintenance::LegacySinglePass);
+        }
+        for (used, unused) in [(5, 5), (112, 88)] {
+            check_gap_refill_after_imports(used, unused, GapMaintenance::LegacySinglePass);
+        }
+    }
+
+    /// The highest internal child index of the reported wallet that is a derived address. It
+    /// has received outputs.
+    #[cfg(feature = "transparent-key-import")]
+    const REPORTED_LAST_DERIVED_INDEX: u32 = 111;
+    /// The highest internal child index of the reported wallet that is held as a standalone
+    /// import. Every index from just above [`REPORTED_LAST_DERIVED_INDEX`] up to and including
+    /// this one is held only as a standalone import.
+    #[cfg(feature = "transparent-key-import")]
+    const REPORTED_LAST_IMPORTED_INDEX: u32 = 324;
+    /// The one imported internal child index of the reported wallet that has never received an
+    /// output; the import marked it as exposed. Every other import has received outputs.
+    #[cfg(feature = "transparent-key-import")]
+    const REPORTED_UNUSED_IMPORTED_INDEX: u32 = 276;
+
+    /// Builds the state reported by a wallet migrated from zcashd that could not reserve change
+    /// addresses: internal addresses are derived up to and including
+    /// [`REPORTED_LAST_DERIVED_INDEX`], which has received outputs, and the internal addresses
+    /// above it up to and including [`REPORTED_LAST_IMPORTED_INDEX`] are held only as
+    /// standalone imports, all of which have received outputs except
+    /// [`REPORTED_UNUSED_IMPORTED_INDEX`], which the import marked as exposed. No gap
+    /// maintenance has run since the imports were recorded.
+    ///
+    /// Returns the state, with its chain tip at the height at which the outputs were mined.
+    #[cfg(feature = "transparent-key-import")]
+    fn reported_wallet_state() -> TestState<(), crate::testing::db::TestDb, LocalNetwork> {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().unwrap();
+        let account_uuid = account.id();
+        let account_pubkey = account.usk().transparent().unwrap().to_account_pubkey();
+        let import_exposure_height = account.birthday().height() + 1;
+        let mined_height = account.birthday().height() + 10;
+        let network = *st.network();
+        st.wallet_mut().update_chain_tip(mined_height).unwrap();
+
+        let internal_pubkey = |i: u32| {
+            account_pubkey
+                .derive_address_pubkey(
+                    TransparentKeyScope::INTERNAL,
+                    NonHardenedChildIndex::from_index(i).unwrap(),
+                )
+                .unwrap()
+        };
+        let mined_output_to = |i: u32| {
+            let mut txid = [0xBB; 32];
+            txid[..4].copy_from_slice(&i.to_le_bytes());
+            WalletTransparentOutput::from_parts(
+                OutPoint::new(txid, 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(10_000),
+                    TransparentAddress::from_pubkey(&internal_pubkey(i))
+                        .script()
+                        .into(),
+                ),
+                Some(mined_height),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        // Derived internal addresses up to and including the last derived index, which has
+        // received an output.
+        {
+            let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+            let account_id = get_account_ref(&tx, account_uuid).unwrap();
+            super::generate_address_range(
+                &tx,
+                &network,
+                account_id,
+                TransparentKeyScope::INTERNAL,
+                UnifiedAddressRequest::unsafe_custom(
+                    ReceiverRequirement::Allow,
+                    ReceiverRequirement::Allow,
+                    ReceiverRequirement::Require,
+                ),
+                NonHardenedChildIndex::ZERO
+                    ..NonHardenedChildIndex::from_index(REPORTED_LAST_DERIVED_INDEX + 1).unwrap(),
+                false,
+            )
+            .unwrap();
+            record_mined_receipt_without_gap_maintenance(
+                &tx,
+                account_id,
+                REPORTED_LAST_DERIVED_INDEX,
+                &mined_output_to(REPORTED_LAST_DERIVED_INDEX),
+                mined_height,
+            );
+            tx.commit().unwrap();
+        }
+
+        // The standalone imports above it. Recording an output at a standalone import does not
+        // maintain any derived gap window.
+        let imported = REPORTED_LAST_DERIVED_INDEX + 1..=REPORTED_LAST_IMPORTED_INDEX;
+        let imported_pubkeys: Vec<PublicKey> = imported.clone().map(internal_pubkey).collect();
+        st.wallet_mut()
+            .import_standalone_transparent_pubkeys(account_uuid, &imported_pubkeys)
+            .unwrap();
+        for i in imported.filter(|i| *i != REPORTED_UNUSED_IMPORTED_INDEX) {
+            st.wallet_mut()
+                .put_received_transparent_utxo(&mined_output_to(i))
+                .unwrap();
+        }
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[(
+                TransparentAddress::from_pubkey(&internal_pubkey(REPORTED_UNUSED_IMPORTED_INDEX)),
+                import_exposure_height,
+            )])
+            .unwrap();
+
+        // The reported symptom: the gap starts just above the last derived index, where no
+        // address has been derived.
+        {
+            let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+            let account_id = get_account_ref(&tx, account_uuid).unwrap();
+            let gap_start = find_gap_start(
+                &tx,
+                account_id,
+                TransparentKeyScope::INTERNAL,
+                st.wallet().db().gap_limits.internal(),
+            )
+            .unwrap();
+            assert_eq!(
+                gap_start.map(|i| i.index()),
+                Some(REPORTED_LAST_DERIVED_INDEX + 1)
+            );
+            let max_internal_index: u32 = tx
+                .query_row(
+                    "SELECT MAX(transparent_child_index) FROM addresses
+                     WHERE account_id = :account_id AND key_scope = :internal",
+                    named_params! {
+                        ":account_id": account_id.0,
+                        ":internal": KeyScope::INTERNAL.encode(),
+                    },
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(max_internal_index, REPORTED_LAST_DERIVED_INDEX);
+        }
+
+        st
+    }
+
+    /// In the reported wallet, a single change-address reservation derives every standalone
+    /// import into the internal scope, leaves the gap starting just above the last import, and
+    /// reserves from there. The unused, exposed import does not block anything: it is released
+    /// on upgrade, and in any case lies between used addresses rather than in the gap window.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn reservation_heals_reported_wallet_in_one_call() {
+        let mut st = reported_wallet_state();
+        let account = st.test_account().unwrap();
+        let account_uuid = account.id();
+        let account_pubkey = account.usk().transparent().unwrap().to_account_pubkey();
+        let internal_gap_limit = st.wallet().db().gap_limits.internal();
+        let expected_gap_start = REPORTED_LAST_IMPORTED_INDEX + 1;
+        let internal_address = |i: u32| {
+            TransparentAddress::from_pubkey(
+                &account_pubkey
+                    .derive_address_pubkey(
+                        TransparentKeyScope::INTERNAL,
+                        NonHardenedChildIndex::from_index(i).unwrap(),
+                    )
+                    .unwrap(),
+            )
+        };
+
+        let reserved = st
+            .wallet_mut()
+            .reserve_next_n_internal_addresses(account_uuid, 1)
+            .unwrap();
+        assert_eq!(
+            reserved
+                .into_iter()
+                .map(|(addr, meta)| (addr, meta.address_index().map(|i| i.index())))
+                .collect::<Vec<_>>(),
+            vec![(
+                internal_address(expected_gap_start),
+                Some(expected_gap_start)
+            )]
+        );
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+        assert_eq!(
+            find_gap_start(
+                &tx,
+                account_id,
+                TransparentKeyScope::INTERNAL,
+                internal_gap_limit
+            )
+            .unwrap()
+            .map(|i| i.index()),
+            Some(expected_gap_start)
+        );
+        // No standalone import remains, and the unused one is now an unexposed internal address.
+        let foreign_rows: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM addresses WHERE key_scope = :foreign",
+                named_params! { ":foreign": KeyScope::Foreign.encode() },
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(foreign_rows, 0);
+        let unused_row: (i64, Option<u32>) = tx
+            .query_row(
+                "SELECT key_scope, exposed_at_height FROM addresses
+                 WHERE account_id = :account_id AND transparent_child_index = :index
+                   AND key_scope = :internal",
+                named_params! {
+                    ":account_id": account_id.0,
+                    ":index": REPORTED_UNUSED_IMPORTED_INDEX,
+                    ":internal": KeyScope::INTERNAL.encode(),
+                },
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unused_row, (KeyScope::INTERNAL.encode(), None));
+        drop(tx);
+
+        // The rest of the window is reservable too.
+        let rest = st
+            .wallet_mut()
+            .reserve_next_n_internal_addresses(
+                account_uuid,
+                usize::try_from(internal_gap_limit - 1).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            rest.into_iter()
+                .map(|(_, meta)| meta.address_index().map(|i| i.index()))
+                .collect::<Vec<_>>(),
+            (expected_gap_start + 1..expected_gap_start + internal_gap_limit)
+                .map(Some)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// In the reported wallet, a single pass of gap maintenance (as run when any output is
+    /// received at a derived internal address) reaches the same fixpoint as a reservation.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn gap_maintenance_heals_reported_wallet_in_one_call() {
+        let st = reported_wallet_state();
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+        let gap_limits = st.wallet().db().gap_limits;
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+        super::generate_gap_addresses(
+            &tx,
+            &network,
+            &gap_limits,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            UnifiedAddressRequest::unsafe_custom(
+                ReceiverRequirement::Allow,
+                ReceiverRequirement::Allow,
+                ReceiverRequirement::Require,
+            ),
+            false,
+        )
+        .unwrap();
+        let gap_start = find_gap_start(
+            &tx,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            gap_limits.internal(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(gap_start.index(), REPORTED_LAST_IMPORTED_INDEX + 1);
+        let (_, reservable) = super::select_addrs_to_reserve(
+            &tx,
+            &network,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            gap_limits.internal(),
+            usize::try_from(gap_limits.internal()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            reservable
+                .iter()
+                .map(|(_, _, meta)| meta.address_index().map(|i| i.index()))
+                .collect::<Vec<_>>(),
+            (gap_start.index()..gap_start.index() + gap_limits.internal())
+                .map(Some)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Releasing an import-time exposure on upgrade is confined to receivers that have never
+    /// received an output, and to the internal and ephemeral scopes. An external receiver keeps
+    /// its exposure, as does an internal receiver that has received an output.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_keeps_import_exposure_unless_unused_change() {
+        const IMPORT_EXPOSURE_HEIGHT: u32 = 55;
+        /// Above every default gap limit, so no derived row occupies this index.
+        const CHILD_INDEX: u32 = 100;
+
+        for (key_scope, received_output, expect_released) in [
+            (TransparentKeyScope::INTERNAL, false, true),
+            (TransparentKeyScope::EPHEMERAL, false, true),
+            (TransparentKeyScope::INTERNAL, true, false),
+            (TransparentKeyScope::EXTERNAL, false, false),
+        ] {
+            let st = TestBuilder::new()
+                .with_data_store_factory(TestDbFactory::default())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+            let account_uuid = st.test_account().unwrap().id();
+            let network = *st.network();
+            let taddr = TransparentAddress::PublicKeyHash([0x22; 20]);
+            let taddr_enc = taddr.encode(&network);
+
+            let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+            let account_id = get_account_ref(&tx, account_uuid).unwrap();
+            tx.execute(
+                "INSERT INTO addresses
+                     (account_id, key_scope, address, cached_transparent_receiver_address,
+                      imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+                 VALUES (:account_id, :foreign, :address, :address,
+                      X'020000000000000000000000000000000000000000000000000000000000000001', 1,
+                      :exposed_at_height)",
+                named_params! {
+                    ":account_id": account_id.0,
+                    ":foreign": KeyScope::Foreign.encode(),
+                    ":address": &taddr_enc,
+                    ":exposed_at_height": IMPORT_EXPOSURE_HEIGHT,
+                },
+            )
+            .unwrap();
+            let foreign_id = tx.last_insert_rowid();
+            if received_output {
+                tx.execute(
+                    "INSERT INTO transactions (id_tx, txid, min_observed_height)
+                     VALUES (1, X'00', 1)",
+                    [],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO transparent_received_outputs
+                         (transaction_id, output_index, account_id, address, script, value_zat,
+                          address_id)
+                     VALUES (1, 0, :account_id, :address, X'00', 100000, :address_id)",
+                    named_params! {
+                        ":account_id": account_id.0,
+                        ":address": &taddr_enc,
+                        ":address_id": foreign_id,
+                    },
+                )
+                .unwrap();
+            }
+
+            super::store_address_range(
+                &tx,
+                &network,
+                account_id,
+                key_scope,
+                vec![(
+                    Address::from(taddr),
+                    taddr,
+                    NonHardenedChildIndex::from_index(CHILD_INDEX).unwrap(),
+                )],
+            )
+            .unwrap();
+
+            let exposed_at_height: Option<u32> = tx
+                .query_row(
+                    "SELECT exposed_at_height FROM addresses WHERE id = :id",
+                    named_params! { ":id": foreign_id },
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                exposed_at_height,
+                (!expect_released).then_some(IMPORT_EXPOSURE_HEIGHT),
+                "{key_scope:?}, received output: {received_output}"
+            );
+        }
     }
 
     /// When the upgrade of a standalone (`Foreign`) import moves the address record to the

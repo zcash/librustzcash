@@ -89,6 +89,28 @@ workspace.
   returns the account that controls the P2PKH address with the same public key
   hash as a given TEX address. Previously it returned `Ok(None)` for every TEX
   address. No change is needed at call sites.
+- Transparent gap-limit maintenance no longer leaves the window of
+  pre-generated addresses unfilled when deriving it upgrades standalone
+  imports (such as the keys of a migrated zcashd keypool) that have already
+  received outputs. Such an upgrade moves the start of the gap beyond the
+  addresses just derived; gap maintenance now repeats until the gap start is
+  stable. Previously `WalletWrite::reserve_next_n_internal_addresses` (and
+  hence the creation of transactions with transparent change) could fail with
+  `SqliteClientError::ReachedGapLimit` despite no reserved address awaiting
+  confirmation, until an output was received in that key scope.
+- `WalletWrite::reserve_next_n_internal_addresses` and
+  `WalletWrite::reserve_next_n_ephemeral_addresses` now bring the gap window
+  of their key scope up to date before reserving from it, so that a wallet
+  whose window was left unfilled by an earlier release can reserve addresses
+  again without first receiving an output.
+- When a standalone-imported transparent receiver that has never received an
+  output is derived as one of an account's internal (change) or ephemeral
+  addresses, any exposure recorded for it at import time (for example via
+  `WalletWrite::mark_transparent_addresses_exposed`) is released, so that it
+  becomes reservable. Previously such a receiver occupied its gap window
+  permanently, as no output would ever arrive to move the gap past it.
+  External addresses, and receivers that have received an output, keep their
+  exposure.
 
 ## [0.23.0] - 2026-10-21
 
