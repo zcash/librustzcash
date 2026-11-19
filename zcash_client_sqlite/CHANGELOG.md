@@ -11,12 +11,22 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb` implements `WalletWrite::import_account_uivk`, persisting an
+  incoming-viewing-key-only account. Re-importing a UIVK that adds items to an existing
+  incoming-viewing-key-only account upgrades that account; importing a UIVK over an
+  account that already has a UFVK is rejected.
+- `WalletDb` implements `WalletRead::get_scanning_keys` with one query that reads
+  accounts with a unified full viewing key and accounts with only a unified incoming
+  viewing key. `scan_cached_blocks` uses it, so notes sent to an imported account's
+  external addresses are detected. Spends of those notes are not.
 - `zcash_client_sqlite::error::SqliteClientError::PruneAboveWalletBirthday`
 - `zcash_client_sqlite::WalletDb::anchor_retention`: the anchor-retention policy
   the wallet's `put_blocks` applies, for a store that maintains the wallet's
   note commitment trees by other means.
 
 ### Changed
+- With the `orchard` feature, storing a transaction the wallet built also trial-decrypts
+  incoming-viewing-key-only accounts when classifying the transaction for ZIP 318.
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
   `SqliteClientError::PruneAboveWalletBirthday`, and leaves the scan queue
   unchanged, when `height` is above the wallet birthday.
