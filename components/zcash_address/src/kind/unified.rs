@@ -106,6 +106,8 @@ impl From<DataTypecode> for u32 {
 /// Typecodes for metadata items (0xC0..=0xFC).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MetadataTypecode {
+    /// Viewing key birthday height (typecode 0xC0). 4-byte little-endian block height.
+    BirthdayHeight,
     /// Expiry height (typecode 0xE0). 4-byte little-endian block height.
     ExpiryHeight,
     /// Expiry time (typecode 0xE1). 8-byte little-endian Unix timestamp.
@@ -129,6 +131,7 @@ impl MetadataTypecode {
 impl From<MetadataTypecode> for u32 {
     fn from(t: MetadataTypecode) -> Self {
         match t {
+            MetadataTypecode::BirthdayHeight => 0xC0,
             MetadataTypecode::ExpiryHeight => 0xE0,
             MetadataTypecode::ExpiryTime => 0xE1,
             MetadataTypecode::Unknown(tc) => tc,
@@ -248,9 +251,10 @@ impl TryFrom<u32> for Typecode {
             0x04..=0xBF => Ok(Typecode::Data(DataTypecode::Unknown(typecode))),
             tc @ METADATA_TYPECODE_MIN..=METADATA_TYPECODE_MAX => {
                 match tc {
+                    0xC0 => Ok(Typecode::Metadata(MetadataTypecode::BirthdayHeight)),
                     0xE0 => Ok(Typecode::Metadata(MetadataTypecode::ExpiryHeight)),
                     0xE1 => Ok(Typecode::Metadata(MetadataTypecode::ExpiryTime)),
-                    // 0xC0..=0xDF: unknown SHOULD-understand metadata
+                    // 0xC1..=0xDF: unknown SHOULD-understand metadata
                     // 0xE2..=0xFC: unknown MUST-understand metadata
                     _ => Ok(Typecode::Metadata(MetadataTypecode::Unknown(tc))),
                 }
@@ -277,6 +281,10 @@ impl TryFrom<Typecode> for usize {
 /// A parsed metadata item.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MetadataItem {
+    /// The height of the first block that a user of a viewing key should scan in order to
+    /// detect funds, encoded as a 4-byte little-endian block height. A unified viewing key
+    /// can hold this item; a Unified Address cannot.
+    BirthdayHeight(u32),
     /// An expiry height, encoded as a 4-byte little-endian block height.
     ExpiryHeight(u32),
     /// An expiry time, encoded as an 8-byte little-endian Unix timestamp.
@@ -289,6 +297,7 @@ impl MetadataItem {
     /// Returns the typecode for this metadata item.
     pub fn typecode(&self) -> MetadataTypecode {
         match self {
+            MetadataItem::BirthdayHeight(_) => MetadataTypecode::BirthdayHeight,
             MetadataItem::ExpiryHeight(_) => MetadataTypecode::ExpiryHeight,
             MetadataItem::ExpiryTime(_) => MetadataTypecode::ExpiryTime,
             MetadataItem::Unknown { typecode, .. } => MetadataTypecode::Unknown(*typecode),
@@ -298,6 +307,7 @@ impl MetadataItem {
     /// Returns the raw data bytes for this metadata item.
     pub fn data(&self) -> Vec<u8> {
         match self {
+            MetadataItem::BirthdayHeight(h) => h.to_le_bytes().to_vec(),
             MetadataItem::ExpiryHeight(h) => h.to_le_bytes().to_vec(),
             MetadataItem::ExpiryTime(t) => t.to_le_bytes().to_vec(),
             MetadataItem::Unknown { data, .. } => data.clone(),
@@ -453,6 +463,15 @@ pub enum ParseError {
     /// The raw encoding of the container plus its 16 bytes of padding has this length in
     /// bytes, which is outside the range [`f4jumble::VALID_LENGTH`] that F4Jumble accepts.
     InvalidEncodedLength(usize),
+    /// A Unified Address holds a metadata item of a type that only a unified viewing key
+    /// can hold.
+    NotPermittedInAddress(MetadataTypecode),
+    /// A unified viewing key holds a birthday height that is greater than its expiry
+    /// height.
+    BirthdayAfterExpiry {
+        birthday_height: u32,
+        expiry_height: u32,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -509,6 +528,22 @@ impl fmt::Display for ParseError {
                     f,
                     "Typecode 0x{:02X} is not defined in unified container revision {revision:?}",
                     typecode.typecode_value()
+                )
+            }
+            ParseError::NotPermittedInAddress(typecode) => {
+                write!(
+                    f,
+                    "Metadata typecode 0x{:02X} is not permitted in a Unified Address",
+                    u32::from(*typecode)
+                )
+            }
+            ParseError::BirthdayAfterExpiry {
+                birthday_height,
+                expiry_height,
+            } => {
+                write!(
+                    f,
+                    "Birthday height {birthday_height} is greater than expiry height {expiry_height}"
                 )
             }
         }
@@ -758,6 +793,11 @@ pub(crate) mod private {
             while cursor.position() < encoded.len().try_into().unwrap() {
                 let (tc_val, data) = read_raw_item(&mut cursor)?;
 
+                // A consumer must ignore a birthday height item in a Unified Address.
+                if Self::IS_ADDRESS && tc_val == u32::from(MetadataTypecode::BirthdayHeight) {
+                    continue;
+                }
+
                 match Typecode::try_from(tc_val)? {
                     Typecode::Data(dtc) => {
                         // ZIP 316 gives Typecode 0x01 no meaning in a Revision 0 viewing
@@ -824,6 +864,17 @@ pub(crate) mod private {
                         }
                     }
                     Uitem::Metadata(m) => match m.typecode() {
+                        // Only a unified viewing key can hold a birthday height. The check
+                        // uses the typecode value, so that it also covers an unknown item
+                        // with that typecode.
+                        _ if Self::IS_ADDRESS
+                            && t.typecode_value()
+                                == u32::from(MetadataTypecode::BirthdayHeight) =>
+                        {
+                            return Err(ParseError::NotPermittedInAddress(
+                                MetadataTypecode::BirthdayHeight,
+                            ));
+                        }
                         // No revision permits a MUST-understand item that this
                         // implementation does not recognize.
                         MetadataTypecode::Unknown(tc) if tc >= MUST_UNDERSTAND_METADATA_MIN => {
@@ -863,6 +914,24 @@ pub(crate) mod private {
                 }
 
                 prev_code = t_code;
+            }
+
+            // A birthday height must not be greater than the expiry height.
+            let birthday_height = items.iter().find_map(|item| match item {
+                Uitem::Metadata(MetadataItem::BirthdayHeight(h)) => Some(*h),
+                _ => None,
+            });
+            let expiry_height = items.iter().find_map(|item| match item {
+                Uitem::Metadata(MetadataItem::ExpiryHeight(h)) => Some(*h),
+                _ => None,
+            });
+            if let (Some(birthday_height), Some(expiry_height)) = (birthday_height, expiry_height)
+                && birthday_height > expiry_height
+            {
+                return Err(ParseError::BirthdayAfterExpiry {
+                    birthday_height,
+                    expiry_height,
+                });
             }
 
             // A container of any revision must contain at least one data item; one that
@@ -1047,6 +1116,17 @@ pub(crate) mod private {
             return Err(ParseError::NotUnderstood(tc_val));
         }
         match typecode {
+            MetadataTypecode::BirthdayHeight => {
+                let data: [u8; 4] =
+                    data.as_slice()
+                        .try_into()
+                        .map_err(|_| ParseError::InvalidMetadataLength {
+                            typecode: tc_val,
+                            expected: 4,
+                            actual: data.len(),
+                        })?;
+                Ok(MetadataItem::BirthdayHeight(u32::from_le_bytes(data)))
+            }
             MetadataTypecode::ExpiryHeight => {
                 let data: [u8; 4] =
                     data.as_slice()

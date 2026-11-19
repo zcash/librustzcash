@@ -10,6 +10,28 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::unified::ParseError::{BirthdayAfterExpiry, NotPermittedInAddress}`
+
+### Changed
+- `zcash_address::unified::MetadataTypecode` has a new `BirthdayHeight` variant, and
+  `zcash_address::unified::MetadataItem` has a new `BirthdayHeight(u32)` variant, for
+  the ZIP 316 Viewing Key Birthday Height item (typecode `0xC0`). Typecode `0xC0`
+  now parses as `MetadataTypecode::BirthdayHeight` instead of
+  `MetadataTypecode::Unknown(0xC0)`.
+- `zcash_address::unified::Encoding::try_from_items` now returns:
+  - `ParseError::NotPermittedInAddress` for a `unified::Address` that holds an item
+    with typecode `0xC0`.
+  - `ParseError::BirthdayAfterExpiry` for a container whose birthday height is
+    greater than its expiry height.
+- `zcash_address::unified::Encoding::decode`:
+  - For a `unified::Ufvk` or `unified::Uivk`, returns
+    `ParseError::InvalidMetadataLength` for an item with typecode `0xC0` whose data
+    is not 4 bytes, and `ParseError::BirthdayAfterExpiry` for a key whose birthday
+    height is greater than its expiry height.
+  - For a `unified::Address`, omits every item with typecode `0xC0` from the
+    result.
+
 ## [0.14.0] - 2026-10-21
 
 ### Added

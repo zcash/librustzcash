@@ -255,11 +255,14 @@ mod tests {
         fn arb_unified_fvk()(
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
+            birthday_height in prop::option::of(any::<u32>()),
         ) -> Ufvk {
+            // Revision 0 permits a birthday height, because it is not MUST-understand.
             let mut items: Vec<Uitem<Fvk>> = transparent
                 .into_iter()
                 .chain(shielded)
                 .map(Uitem::Data)
+                .chain(birthday_height.map(|h| Uitem::Metadata(MetadataItem::BirthdayHeight(h))))
                 .collect();
             items.sort_unstable_by(Uitem::encoding_order);
             Ufvk {
@@ -269,16 +272,27 @@ mod tests {
         }
     }
 
+    /// Generates metadata items in which a birthday height, if present together with an
+    /// expiry height, is not greater than that expiry height.
     fn arb_metadata_items() -> impl Strategy<Value = Vec<Uitem<Fvk>>> {
         (
-            prop::option::of(
-                any::<u32>().prop_map(|h| Uitem::Metadata(MetadataItem::ExpiryHeight(h))),
-            ),
-            prop::option::of(
-                any::<u64>().prop_map(|t| Uitem::Metadata(MetadataItem::ExpiryTime(t))),
-            ),
+            prop::option::of(any::<u32>()),
+            prop::option::of(any::<u32>()),
+            prop::option::of(any::<u64>()),
         )
-            .prop_map(|(h, t)| h.into_iter().chain(t).collect())
+            .prop_map(|(birthday, expiry, time)| {
+                let (birthday, expiry) = match (birthday, expiry) {
+                    (Some(b), Some(e)) => (Some(b.min(e)), Some(b.max(e))),
+                    other => other,
+                };
+                birthday
+                    .map(MetadataItem::BirthdayHeight)
+                    .into_iter()
+                    .chain(expiry.map(MetadataItem::ExpiryHeight))
+                    .chain(time.map(MetadataItem::ExpiryTime))
+                    .map(Uitem::Metadata)
+                    .collect()
+            })
     }
 
     prop_compose! {
@@ -715,5 +729,85 @@ mod tests {
                     .any(|fvk| matches!(fvk, Fvk::P2sh(_)))
             );
         }
+    }
+
+    /// A Revision 0 UFVK can hold a birthday height, because the item is not
+    /// MUST-understand.
+    #[test]
+    fn r0_ufvk_birthday_height_roundtrip() {
+        let items = vec![
+            Uitem::Data(Fvk::Orchard([1; 96])),
+            Uitem::Metadata(MetadataItem::BirthdayHeight(419_200)),
+        ];
+        let ufvk = Ufvk::try_from_items(Revision::R0, items).unwrap();
+        assert_eq!(
+            Ufvk::decode(&ufvk.encode(&NetworkType::Main)),
+            Ok((NetworkType::Main, Revision::R0, ufvk))
+        );
+    }
+
+    #[test]
+    fn decode_rejects_birthday_height_of_wrong_length() {
+        use crate::unified::MetadataTypecode;
+
+        /// A data length that a valid birthday height item cannot have.
+        const INVALID_BIRTHDAY_LEN: usize = 3;
+
+        let typecode = u32::from(MetadataTypecode::BirthdayHeight);
+        // `try_from_items` does not check the data of an unknown item, so this container
+        // holds a birthday height typecode with data of the wrong length.
+        let ufvk = Ufvk {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Fvk::Orchard([1; 96])),
+                Uitem::Metadata(MetadataItem::Unknown {
+                    typecode,
+                    data: vec![0; INVALID_BIRTHDAY_LEN],
+                }),
+            ],
+        };
+        assert_eq!(
+            Ufvk::decode(&ufvk.encode(&NetworkType::Main)),
+            Err(ParseError::InvalidMetadataLength {
+                typecode,
+                expected: 4,
+                actual: INVALID_BIRTHDAY_LEN,
+            })
+        );
+    }
+
+    /// A birthday height can equal the expiry height, but cannot be greater than it.
+    #[test]
+    fn birthday_height_not_after_expiry_height() {
+        const EXPIRY_HEIGHT: u32 = 2_000_000;
+
+        let items = |birthday_height| {
+            vec![
+                Uitem::Data(Fvk::Orchard([1; 96])),
+                Uitem::Metadata(MetadataItem::BirthdayHeight(birthday_height)),
+                Uitem::Metadata(MetadataItem::ExpiryHeight(EXPIRY_HEIGHT)),
+            ]
+        };
+
+        assert!(Ufvk::try_from_items(Revision::R2, items(EXPIRY_HEIGHT)).is_ok());
+
+        let expected = Err(ParseError::BirthdayAfterExpiry {
+            birthday_height: EXPIRY_HEIGHT + 1,
+            expiry_height: EXPIRY_HEIGHT,
+        });
+        assert_eq!(
+            Ufvk::try_from_items(Revision::R2, items(EXPIRY_HEIGHT + 1)),
+            expected
+        );
+
+        // A decoder also rejects such a key.
+        let invalid = Ufvk {
+            revision: Revision::R2,
+            items: items(EXPIRY_HEIGHT + 1),
+        };
+        assert_eq!(
+            Ufvk::decode(&invalid.encode(&NetworkType::Main)).map(|(_, _, ufvk)| ufvk),
+            expected
+        );
     }
 }

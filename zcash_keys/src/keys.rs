@@ -155,6 +155,37 @@ impl Display for DerivationError {
 #[cfg(feature = "std")]
 impl std::error::Error for DerivationError {}
 
+/// An error returned when a unified viewing key cannot hold a requested [ZIP 316] birthday
+/// height.
+///
+/// [ZIP 316]: https://zips.z.cash/zip-0316
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BirthdayHeightError {
+    /// The birthday height is greater than the expiry height of the key.
+    AfterExpiry {
+        birthday_height: consensus::BlockHeight,
+        expiry_height: consensus::BlockHeight,
+    },
+}
+
+impl Display for BirthdayHeightError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BirthdayHeightError::AfterExpiry {
+                birthday_height,
+                expiry_height,
+            } => write!(
+                f,
+                "Birthday height {birthday_height} is greater than expiry height {expiry_height}"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for BirthdayHeightError {}
+
 /// A version identifier for the encoding of unified spending keys.
 ///
 /// Each era corresponds to a range of block heights. During an era, the unified spending key
@@ -397,6 +428,7 @@ impl UnifiedSpendingKey {
             #[cfg(feature = "orchard")]
             orchard: self.orchard.as_ref().map(|o| o.into()),
             unknown: vec![],
+            birthday_height: None,
             expiry_height: None,
             expiry_time: None,
             unknown_metadata: vec![],
@@ -1026,6 +1058,7 @@ pub struct UnifiedFullViewingKey {
     #[cfg(feature = "orchard")]
     orchard: Option<orchard::keys::FullViewingKey>,
     unknown: Vec<(u32, Vec<u8>)>,
+    birthday_height: Option<consensus::BlockHeight>,
     expiry_height: Option<consensus::BlockHeight>,
     expiry_time: Option<u64>,
     unknown_metadata: Vec<(u32, Vec<u8>)>,
@@ -1072,6 +1105,7 @@ impl core::fmt::Debug for UnifiedFullViewingKey {
                 .map(|(typecode, _)| *typecode)
                 .collect::<Vec<_>>(),
         )
+        .field("birthday_height", &self.birthday_height)
         .field("expiry_height", &self.expiry_height)
         .field("expiry_time", &self.expiry_time)
         .field(
@@ -1212,6 +1246,7 @@ impl UnifiedFullViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            birthday_height: None,
             expiry_height,
             expiry_time,
             unknown_metadata,
@@ -1266,6 +1301,7 @@ impl UnifiedFullViewingKey {
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
         let mut unknown = vec![];
+        let mut birthday_height = None;
         let mut expiry_height = None;
         let mut expiry_time = None;
         let mut unknown_metadata = vec![];
@@ -1324,6 +1360,9 @@ impl UnifiedFullViewingKey {
                 Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
                     expiry_time = Some(*t);
                 }
+                Uitem::Metadata(MetadataItem::BirthdayHeight(h)) => {
+                    birthday_height = Some(consensus::BlockHeight::from_u32(*h));
+                }
                 Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
                     unknown_metadata.push((*typecode, data.clone()));
                 }
@@ -1351,6 +1390,10 @@ impl UnifiedFullViewingKey {
             expiry_time,
             unknown_metadata,
         )
+        .map(|ufvk| UnifiedFullViewingKey {
+            birthday_height,
+            ..ufvk
+        })
         .map_err(|_| transparent_typecode)
     }
 
@@ -1429,7 +1472,11 @@ impl UnifiedFullViewingKey {
                 self.expiry_height
                     .map(|h| unified::MetadataItem::ExpiryHeight(u32::from(h))),
             )
-            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
+            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime))
+            .chain(
+                self.birthday_height
+                    .map(|h| unified::MetadataItem::BirthdayHeight(u32::from(h))),
+            );
 
         unified::Ufvk::try_from_items(
             revision,
@@ -1459,6 +1506,7 @@ impl UnifiedFullViewingKey {
             sapling: self.sapling.as_ref().map(|s| s.to_external_ivk()),
             #[cfg(feature = "orchard")]
             orchard: self.orchard.as_ref().map(|o| o.to_ivk(Scope::External)),
+            birthday_height: self.birthday_height,
             expiry_height: self.expiry_height,
             expiry_time: self.expiry_time,
             // An item that this build cannot interpret has no derivable incoming viewing key
@@ -1530,6 +1578,44 @@ impl UnifiedFullViewingKey {
         return self.orchard.is_some();
         #[cfg(not(feature = "orchard"))]
         return false;
+    }
+
+    /// Returns the [ZIP 316] birthday height of this key: the height of the first block
+    /// that a user of this key should scan in order to detect funds. Returns `None` if the
+    /// key does not record one.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn birthday_height(&self) -> Option<consensus::BlockHeight> {
+        self.birthday_height
+    }
+
+    /// Returns this key with its [ZIP 316] birthday height set to `birthday_height`, or
+    /// with no birthday height if `birthday_height` is `None`. The birthday height is the
+    /// height of the first block that a user of this key should scan in order to detect
+    /// funds. Unified addresses derived from this key never hold it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BirthdayHeightError::AfterExpiry`] if `birthday_height` is greater than
+    /// the expiry height of this key.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn with_birthday_height(
+        self,
+        birthday_height: Option<consensus::BlockHeight>,
+    ) -> Result<Self, BirthdayHeightError> {
+        match (birthday_height, self.expiry_height) {
+            (Some(birthday_height), Some(expiry_height)) if birthday_height > expiry_height => {
+                Err(BirthdayHeightError::AfterExpiry {
+                    birthday_height,
+                    expiry_height,
+                })
+            }
+            _ => Ok(Self {
+                birthday_height,
+                ..self
+            }),
+        }
     }
 
     /// Returns the expiry height metadata for this key, if present.
@@ -1729,6 +1815,7 @@ pub struct UnifiedIncomingViewingKey {
     /// subsumption. They record only that the account has receiving capability that this key
     /// does not describe.
     unconverted_typecodes: Vec<u32>,
+    birthday_height: Option<consensus::BlockHeight>,
     expiry_height: Option<consensus::BlockHeight>,
     expiry_time: Option<u64>,
     unknown_metadata: Vec<(u32, Vec<u8>)>,
@@ -1754,6 +1841,7 @@ impl core::fmt::Debug for UnifiedIncomingViewingKey {
                 .collect::<Vec<_>>(),
         )
         .field("unconverted_typecodes", &self.unconverted_typecodes)
+        .field("birthday_height", &self.birthday_height)
         .field("expiry_height", &self.expiry_height)
         .field("expiry_time", &self.expiry_time)
         .field(
@@ -1803,6 +1891,7 @@ impl UnifiedIncomingViewingKey {
             orchard,
             unknown,
             unconverted_typecodes: vec![],
+            birthday_height: None,
             expiry_height,
             expiry_time,
             unknown_metadata,
@@ -1847,6 +1936,7 @@ impl UnifiedIncomingViewingKey {
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
         let mut unknown = vec![];
+        let mut birthday_height = None;
         let mut expiry_height = None;
         let mut expiry_time = None;
         let mut unknown_metadata = vec![];
@@ -1905,6 +1995,9 @@ impl UnifiedIncomingViewingKey {
                 Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
                     expiry_time = Some(*t);
                 }
+                Uitem::Metadata(MetadataItem::BirthdayHeight(h)) => {
+                    birthday_height = Some(consensus::BlockHeight::from_u32(*h));
+                }
                 Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
                     unknown_metadata.push((*typecode, data.clone()));
                 }
@@ -1922,6 +2015,7 @@ impl UnifiedIncomingViewingKey {
             // A parsed key keeps every item that it cannot interpret in `unknown`, and so
             // describes itself completely.
             unconverted_typecodes: vec![],
+            birthday_height,
             expiry_height,
             expiry_time,
             unknown_metadata,
@@ -2004,7 +2098,11 @@ impl UnifiedIncomingViewingKey {
                 self.expiry_height
                     .map(|h| unified::MetadataItem::ExpiryHeight(u32::from(h))),
             )
-            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
+            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime))
+            .chain(
+                self.birthday_height
+                    .map(|h| unified::MetadataItem::BirthdayHeight(u32::from(h))),
+            );
 
         unified::Uivk::try_from_items(
             revision,
@@ -2087,6 +2185,44 @@ impl UnifiedIncomingViewingKey {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &Option<orchard::keys::IncomingViewingKey> {
         &self.orchard
+    }
+
+    /// Returns the [ZIP 316] birthday height of this key: the height of the first block
+    /// that a user of this key should scan in order to detect funds. Returns `None` if the
+    /// key does not record one.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn birthday_height(&self) -> Option<consensus::BlockHeight> {
+        self.birthday_height
+    }
+
+    /// Returns this key with its [ZIP 316] birthday height set to `birthday_height`, or
+    /// with no birthday height if `birthday_height` is `None`. The birthday height is the
+    /// height of the first block that a user of this key should scan in order to detect
+    /// funds. Unified addresses derived from this key never hold it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BirthdayHeightError::AfterExpiry`] if `birthday_height` is greater than
+    /// the expiry height of this key.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn with_birthday_height(
+        self,
+        birthday_height: Option<consensus::BlockHeight>,
+    ) -> Result<Self, BirthdayHeightError> {
+        match (birthday_height, self.expiry_height) {
+            (Some(birthday_height), Some(expiry_height)) if birthday_height > expiry_height => {
+                Err(BirthdayHeightError::AfterExpiry {
+                    birthday_height,
+                    expiry_height,
+                })
+            }
+            _ => Ok(Self {
+                birthday_height,
+                ..self
+            }),
+        }
     }
 
     /// Returns the expiry height metadata for this key, if present.
@@ -3818,5 +3954,108 @@ mod tests {
         assert_zeroize_on_drop::<::sapling::zip32::ExtendedSpendingKey>();
         #[cfg(feature = "orchard")]
         assert_zeroize_on_drop::<::orchard::keys::SpendingKey>();
+    }
+
+    /// A birthday height survives encoding and decoding, is retained in a derived UIVK, and
+    /// does not prevent a Revision 0 encoding.
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn birthday_height_roundtrip_and_uivk_derivation() {
+        use zcash_protocol::consensus::BlockHeight;
+
+        const BIRTHDAY_HEIGHT: u32 = 2_000_000;
+        let birthday_height = BlockHeight::from_u32(BIRTHDAY_HEIGHT);
+
+        let ufvk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
+            .expect("the seed yields a valid spending key")
+            .to_unified_full_viewing_key()
+            .with_birthday_height(Some(birthday_height))
+            .expect("the key has no expiry height");
+        assert_eq!(ufvk.birthday_height(), Some(birthday_height));
+
+        let ufvk_encoded = ufvk.encode(&MAIN_NETWORK).unwrap();
+        assert_eq!(
+            ufvk_encoded,
+            ufvk.encode_revision(&MAIN_NETWORK, Revision::R0).unwrap()
+        );
+        let ufvk_decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &ufvk_encoded).unwrap();
+        assert_eq!(ufvk_decoded.birthday_height(), Some(birthday_height));
+
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+        assert_eq!(uivk.birthday_height(), Some(birthday_height));
+        let uivk_encoded = uivk.encode(&MAIN_NETWORK).unwrap();
+        assert_eq!(
+            uivk_encoded,
+            uivk.encode_revision(&MAIN_NETWORK, Revision::R0).unwrap()
+        );
+        let uivk_decoded = UnifiedIncomingViewingKey::decode(&MAIN_NETWORK, &uivk_encoded).unwrap();
+        assert_eq!(uivk_decoded.birthday_height(), Some(birthday_height));
+
+        let cleared = ufvk.with_birthday_height(None).unwrap();
+        assert_eq!(cleared.birthday_height(), None);
+    }
+
+    /// A key accepts a birthday height equal to its expiry height, and rejects a greater one.
+    #[test]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    fn birthday_height_not_after_expiry_height() {
+        use super::BirthdayHeightError;
+        use zcash_address::unified::{Container, MetadataItem, Uitem};
+        use zcash_protocol::consensus::BlockHeight;
+
+        const EXPIRY_HEIGHT: u32 = 3_000_000;
+        let expiry_height = BlockHeight::from_u32(EXPIRY_HEIGHT);
+        let later_height = expiry_height + 1;
+
+        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO)
+            .expect("the seed yields a valid spending key");
+        let r2_encoding = usk
+            .to_unified_full_viewing_key()
+            .encode_revision(&MAIN_NETWORK, Revision::R2)
+            .unwrap();
+        let (_, _, container) = unified::Ufvk::decode(&r2_encoding).unwrap();
+        let items = container
+            .items_as_parsed()
+            .iter()
+            .cloned()
+            .chain(Some(Uitem::Metadata(MetadataItem::ExpiryHeight(
+                EXPIRY_HEIGHT,
+            ))))
+            .collect();
+        let ufvk = UnifiedFullViewingKey::parse(
+            &unified::Ufvk::try_from_items(Revision::R2, items).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ufvk.expiry_height(), Some(expiry_height));
+
+        let expected = Err(BirthdayHeightError::AfterExpiry {
+            birthday_height: later_height,
+            expiry_height,
+        });
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+        assert_eq!(
+            uivk.clone()
+                .with_birthday_height(Some(later_height))
+                .map(|k| k.birthday_height()),
+            expected.clone()
+        );
+        assert!(uivk.with_birthday_height(Some(expiry_height)).is_ok());
+
+        assert_eq!(
+            ufvk.clone()
+                .with_birthday_height(Some(later_height))
+                .map(|k| k.birthday_height()),
+            expected
+        );
+        let ufvk = ufvk.with_birthday_height(Some(expiry_height)).unwrap();
+        assert_eq!(ufvk.birthday_height(), Some(expiry_height));
     }
 }

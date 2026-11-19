@@ -715,10 +715,10 @@ mod tests {
     fn r0_rejects_metadata_only_container() {
         // A container holding only metadata items has no data item whatever its
         // revision, which is distinct from holding only transparent items.
-        // A metadata typecode below the MUST-understand range (which starts at
-        // `0xE0`), so that a Revision 0 container may carry it without being
-        // rejected as not understood.
-        const SHOULD_UNDERSTAND_METADATA_TYPECODE: u32 = 0xC0;
+        // An unassigned metadata typecode below the MUST-understand range (which
+        // starts at `0xE0`), so that a Revision 0 container may carry it without
+        // being rejected as not understood.
+        const SHOULD_UNDERSTAND_METADATA_TYPECODE: u32 = 0xC1;
 
         let items = vec![Uitem::Metadata(MetadataItem::Unknown {
             typecode: SHOULD_UNDERSTAND_METADATA_TYPECODE,
@@ -914,5 +914,59 @@ mod tests {
             Address::decode(&encoded),
             Ok((NetworkType::Main, Revision::R2, ua))
         );
+    }
+
+    /// A Producer must not include a birthday height in a Unified Address, whether as a
+    /// typed item or as an unknown item with the birthday height typecode.
+    #[test]
+    fn try_from_items_rejects_birthday_height() {
+        use crate::unified::MetadataTypecode;
+
+        let orchard = Uitem::Data(Receiver::Orchard([0; 43]));
+        let typed = Uitem::Metadata(MetadataItem::BirthdayHeight(1));
+        let untyped = Uitem::Metadata(MetadataItem::Unknown {
+            typecode: u32::from(MetadataTypecode::BirthdayHeight),
+            data: 1u32.to_le_bytes().to_vec(),
+        });
+        for revision in [Revision::R0, Revision::R2] {
+            for birthday in [typed.clone(), untyped.clone()] {
+                assert_eq!(
+                    Address::try_from_items(revision, vec![orchard.clone(), birthday]),
+                    Err(ParseError::NotPermittedInAddress(
+                        MetadataTypecode::BirthdayHeight
+                    ))
+                );
+            }
+        }
+    }
+
+    /// A Consumer must ignore a birthday height in a Unified Address, even one whose data
+    /// is not a valid birthday height.
+    #[test]
+    fn decode_ignores_birthday_height() {
+        use crate::unified::MetadataTypecode;
+
+        /// A data length that a valid birthday height item cannot have.
+        const INVALID_BIRTHDAY_LEN: usize = 3;
+
+        let orchard = Uitem::Data(Receiver::Orchard([0; 43]));
+        let expected = Address::try_from_items(Revision::R0, vec![orchard.clone()]).unwrap();
+        for data in [1u32.to_le_bytes().to_vec(), vec![0; INVALID_BIRTHDAY_LEN]] {
+            // `try_from_items` rejects this content, so build the container directly.
+            let with_birthday = Address {
+                revision: Revision::R0,
+                items: vec![
+                    orchard.clone(),
+                    Uitem::Metadata(MetadataItem::Unknown {
+                        typecode: u32::from(MetadataTypecode::BirthdayHeight),
+                        data,
+                    }),
+                ],
+            };
+            assert_eq!(
+                Address::decode(&with_birthday.encode(&NetworkType::Main)),
+                Ok((NetworkType::Main, Revision::R0, expected.clone()))
+            );
+        }
     }
 }

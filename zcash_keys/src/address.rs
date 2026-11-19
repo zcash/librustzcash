@@ -145,6 +145,9 @@ impl UnifiedAddress {
                     expiry_time = Some(*t);
                 }
 
+                // A consumer must ignore a birthday height in a Unified Address.
+                Uitem::Metadata(MetadataItem::BirthdayHeight(_)) => {}
+
                 Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
                     unknown_metadata.push((*typecode, data.clone()));
                 }
@@ -1072,8 +1075,9 @@ mod tests {
 
     /// The lowest data typecode that ZIP 316 does not assign to a receiver type.
     const UNASSIGNED_DATA_TYPECODE: u32 = 0x04;
-    /// The lowest metadata typecode in the ZIP 316 SHOULD-understand range.
-    const SHOULD_UNDERSTAND_METADATA_TYPECODE: u32 = 0xC0;
+    /// The lowest metadata typecode in the ZIP 316 SHOULD-understand range that ZIP 316
+    /// does not assign.
+    const SHOULD_UNDERSTAND_METADATA_TYPECODE: u32 = 0xC1;
     /// Payload bytes for the unknown items in the pruning tests.
     const UNKNOWN_ITEM_DATA: [u8; 4] = [0xAB; 4];
     /// Payload bytes for an unknown receiver that, alone in an address, meets the minimum
