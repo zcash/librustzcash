@@ -1455,14 +1455,22 @@ pub(crate) mod tests {
         );
 
         // The widened range is queued for scanning, at a priority that will advance the
-        // fully-scanned height.
-        let historic = priority_code(&ScanPriority::Historic);
+        // fully-scanned height: `Historic`, except for the part of it in the chain-tip pruning
+        // window, which has `Anchor` priority.
+        let rescan_priorities = [
+            priority_code(&ScanPriority::Historic),
+            priority_code(&ScanPriority::Anchor),
+        ];
+        let queued = scan_queue(conn);
+        let rescanned_from_earliest = queued
+            .iter()
+            .filter(|(_, _, priority)| rescan_priorities.contains(priority))
+            .try_fold(earliest, |covered, (start, end, _)| {
+                (*start <= covered).then_some(std::cmp::max(covered, *end))
+            });
         assert!(
-            scan_queue(conn).iter().any(|(start, end, priority)| {
-                *priority == historic && *start <= earliest && *end >= claimed_birthday_height
-            }),
-            "the range from the lowered birthday to the claimed one is queued: {:?}",
-            scan_queue(conn),
+            rescanned_from_earliest.is_some_and(|end| end >= claimed_birthday_height),
+            "the range from the lowered birthday to the claimed one is queued: {queued:?}",
         );
     }
 
@@ -1948,19 +1956,28 @@ pub(crate) mod tests {
             BlockHeight::from(below_activation),
         );
 
-        // No scan work is queued below activation.
-        let historic = priority_code(&ScanPriority::Historic);
+        // No scan work is queued below activation. The widened range is queued at `Historic`
+        // priority, except for the part of it in the chain-tip pruning window, which has `Anchor`
+        // priority.
+        let rescan_priorities = [
+            priority_code(&ScanPriority::Historic),
+            priority_code(&ScanPriority::Anchor),
+        ];
         let queued = scan_queue(conn);
         assert!(
-            queued
-                .iter()
-                .all(|(start, _, priority)| *priority != historic || *start >= activation),
-            "no Historic range starts below Sapling activation: {queued:?}",
-        );
-        assert!(
-            queued.iter().any(|(start, end, priority)| {
-                *priority == historic && *start == activation && *end >= claimed_birthday_height
+            queued.iter().all(|(start, _, priority)| {
+                !rescan_priorities.contains(priority) || *start >= activation
             }),
+            "no rescan range starts below Sapling activation: {queued:?}",
+        );
+        let rescanned_from_activation = queued
+            .iter()
+            .filter(|(_, _, priority)| rescan_priorities.contains(priority))
+            .try_fold(activation, |covered, (start, end, _)| {
+                (*start == covered).then_some(*end)
+            });
+        assert!(
+            rescanned_from_activation.is_some_and(|end| end >= claimed_birthday_height),
             "the range from activation to the claimed birthday is queued: {queued:?}",
         );
     }
@@ -2075,6 +2092,108 @@ pub(crate) mod tests {
                 priority_code(&ScanPriority::Scanned)
             )),
             "the scanned range above the widened one is untouched: {queued:?}",
+        );
+    }
+
+    /// Lowering a birthday re-establishes `Anchor` priority over the chain-tip pruning window. The
+    /// forced `Historic` rewrite of the widened range un-scans whatever part of the window it
+    /// reaches; that part is given `Anchor` priority, so the wallet rescans the window before the
+    /// rest of the widened range, and the part of the range below the window stays `Historic`.
+    #[test]
+    fn birthday_lowering_gives_the_pruning_window_anchor_priority() {
+        use zcash_client_backend::data_api::ll::wallet::PRUNING_DEPTH;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let network = *st.network();
+        let activation = u32::from(st.test_account().unwrap().birthday().height());
+
+        let claimed_birthday_height = activation + 1000;
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                BlockHeight::from(claimed_birthday_height - 1),
+                BlockHash([5; 32]),
+            ),
+            None,
+        );
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0xA9; 32], AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .unwrap();
+
+        // The imported account's birthday lies inside the chain-tip pruning window, whose lowest
+        // block is `chain_tip - PRUNING_DEPTH + 1`.
+        let chain_tip = claimed_birthday_height + 50;
+        let window_start = chain_tip - PRUNING_DEPTH + 1;
+        st.wallet_mut()
+            .db_mut()
+            .update_chain_tip(BlockHeight::from(chain_tip))
+            .unwrap();
+
+        // The wallet has scanned everything from its birthday to the chain tip.
+        {
+            let conn = st.wallet().db().conn.unchecked_transaction().unwrap();
+            conn.execute("DELETE FROM scan_queue", []).unwrap();
+            insert_queue_entries(
+                &conn,
+                [ScanRange::from_parts(
+                    BlockHeight::from(activation)..BlockHeight::from(chain_tip + 1),
+                    ScanPriority::Scanned,
+                )]
+                .iter(),
+            )
+            .unwrap();
+            conn.commit().unwrap();
+        }
+
+        // Involvement below the window lowers the birthday so that the widened range straddles
+        // the window's lower bound.
+        let earlier = window_start - 30;
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &paying_tx(
+                external_address(&ufvk, 0),
+                31_000,
+                OutPoint::new([0xA9; 32], 0),
+            ),
+            Some(BlockHeight::from(earlier)),
+        )
+        .unwrap();
+
+        let conn = &st.wallet().db().conn;
+        assert_eq!(
+            crate::wallet::account_birthday(conn, account.id()).unwrap(),
+            BlockHeight::from(earlier),
+        );
+
+        let queued = scan_queue(conn);
+        assert_eq!(
+            queued,
+            vec![
+                (activation, earlier, priority_code(&ScanPriority::Scanned)),
+                (
+                    earlier,
+                    window_start,
+                    priority_code(&ScanPriority::Historic)
+                ),
+                (
+                    window_start,
+                    claimed_birthday_height,
+                    priority_code(&ScanPriority::Anchor)
+                ),
+                (
+                    claimed_birthday_height,
+                    chain_tip + 1,
+                    priority_code(&ScanPriority::Scanned)
+                ),
+            ],
+            "the widened range is rescanned, its part in the pruning window first",
         );
     }
 

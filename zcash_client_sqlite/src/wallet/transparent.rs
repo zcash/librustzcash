@@ -86,7 +86,7 @@ use crate::{
             is_locked_at, output_eligible_condition, overridable_owners_rarray, push_lock_params,
         },
         mempool_height,
-        scanning::{priority_code, queue_rescan},
+        scanning::{mark_anchor_priority_window, priority_code, queue_rescan},
     },
 };
 #[cfg(feature = "transparent-inputs")]
@@ -2807,6 +2807,11 @@ pub(crate) fn get_receiver_accounts<P: consensus::Parameters>(
 /// [`widened_range_end`] rather than stopping at the previous birthday: lowering leaves no
 /// `Ignored` range between the new birthday and the previous one.
 ///
+/// Where the queued range reaches into the chain-tip pruning window, queueing it leaves blocks of
+/// the window unscanned, and the lowered birthday can extend the window downward. The window's
+/// unscanned ranges are therefore given [`ScanPriority::Anchor`] priority afterwards, so that the
+/// wallet re-establishes a usable anchor before it continues the rest of the rescan.
+///
 /// The note commitment tree sizes stored alongside the birthday are the sizes as of the birthday
 /// height, and cannot be determined offline for a height the wallet has not scanned, so they are
 /// cleared. They inform the reporting of scan progress, which falls back to estimating from
@@ -2850,6 +2855,10 @@ pub(crate) fn lower_account_birthday<P: consensus::Parameters>(
     if queue_from < current {
         let widened = queue_from..widened_range_end(conn, queue_from, current)?;
         queue_rescan(conn, widened)?;
+
+        // This runs after the birthday update above, because the window's lower bound depends
+        // on the wallet birthday.
+        mark_anchor_priority_window(conn)?;
     }
 
     Ok(())

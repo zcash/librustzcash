@@ -180,8 +180,8 @@ pub(crate) fn range_fully_scanned(
 ///
 /// This must be called after operations that mutate `scan_queue` priorities or shift
 /// `chain_tip_height` in ways that can leave the pruning window with non-`Scanned` overlap:
-/// a chain tip update, rewind, truncate-to-height, truncate-to-chain-state, and account
-/// import are the current triggers.
+/// a chain tip update, rewind, truncate-to-height, truncate-to-chain-state, account import,
+/// and lowering an account's birthday to earlier recognized activity are the current triggers.
 pub(crate) fn mark_anchor_priority_window(
     conn: &rusqlite::Transaction<'_>,
 ) -> Result<(), SqliteClientError> {
