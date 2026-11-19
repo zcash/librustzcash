@@ -37,8 +37,13 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 use nonempty::NonEmpty;
 use rand_core::CryptoRng;
 use std::{
+    collections::BTreeSet,
     num::NonZeroU32,
-    ops::{Add, Sub},
+    ops::{
+        Add,
+        Bound::{Excluded, Unbounded},
+        Sub,
+    },
     time::SystemTime,
 };
 
@@ -81,7 +86,7 @@ use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    value::{BalanceError, Zatoshis},
     zip318::AnchorGrid,
 };
 use zip32::Scope;
@@ -123,7 +128,7 @@ use {
     std::collections::BTreeMap,
     transparent::pczt::Bip32Derivation,
     zcash_note_encryption::{Domain, ShieldedOutput, try_output_recovery_with_pkd_esk},
-    zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
+    zcash_protocol::consensus::NetworkConstants,
 };
 
 pub mod input_selection;
@@ -1193,6 +1198,275 @@ where
     }
 
     Ok(proposal)
+}
+
+/// The number of input selections a fee-included search performs before settling for the
+/// best candidate found; a guard against a selector whose reports never settle.
+pub(crate) const FEE_INCLUDED_SELECTION_LIMIT: usize = 32;
+
+/// Proposes a transfer whose payment and fees together come to at most `amount`, so that the
+/// account is debited no more than that value rather than `amount` plus a fee.
+///
+/// Returns the proposal, which may then be executed using [`create_proposed_transactions`].
+/// Depending upon the recipient address, more than one transaction may be constructed in the
+/// execution of the returned proposal.
+///
+/// The fee depends on the inputs selected and on the change produced, so the payment is found
+/// by repeated input selection, bounded to a fixed number of selections: each selection's fee
+/// or reported shortfall gives the next payment to try, and when that gives nothing new, the
+/// search bisects below the smallest payment observed or inferred not to fit. The search
+/// guarantees the following:
+/// * Some selection reached inputs of at least `amount`. A spendable balance below `amount`
+///   is reported as [`Error::InsufficientFunds`] with `required` equal to `amount` and
+///   `available` the largest input value a selection reached, never as a smaller transfer.
+/// * The payment is nonzero, and the payment plus the fees of every proposed transaction is
+///   at most `amount`; any remainder stays in the account. The payment is the largest the
+///   search finds, not a proven maximum.
+/// * When the search finds no such payment, the error is [`Error::NoPaymentWithinAmount`].
+///
+/// An insufficient-funds report with no shortfall (`required` at or below `available`) ends
+/// the search, which then returns as it does at the selection limit.
+///
+/// Unlike [`propose_transfer`], no attempt is made to propose the payment as a canonical
+/// ZIP 318 pool crossing, even when the adjusted payment is a canonical denomination.
+///
+/// The wallet must have been scanned far enough to establish target and anchor heights;
+/// otherwise [`Error::ScanRequired`] is returned. Errors from input selection other than the
+/// insufficient-funds reports that drive the search are returned as they are. The returned
+/// proposal is checked against the transaction size limit as in [`propose_transfer`]
+/// ([`ProposalError::TransactionTooLarge`]), and an overflow in the fee or input totals is
+/// [`Error::BalanceError`].
+///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database.
+/// * `params`: Consensus parameters.
+/// * `spend_from_account`: The unified account that controls the funds that will be spent
+///   in the resulting transaction. This procedure will return an error if the account ID
+///   does not correspond to an account known to the wallet.
+/// * `input_selector`: The strategy used to select the inputs funding each candidate
+///   payment.
+/// * `change_strategy`: The strategy that computes the fee and the change outputs of each
+///   candidate, including whether change below its dust threshold is rejected.
+/// * `recipient`: The address to which the payment will be made.
+/// * `memo`: A memo to be included in the output to the recipient. Supplying a memo for a
+///   recipient that cannot receive one returns [`zip321::PaymentError::TransparentMemo`].
+/// * `amount`: The most the account may be debited, fees included.
+/// * `confirmations_policy`: The minimum number of confirmations that a previously
+///   received note must have in the blockchain in order to be considered for being
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
+/// * `spend_policy`: The pools and sources the selector may draw upon; see
+///   [`input_selection::SpendPolicy`].
+/// * `lock_inputs`: When `Some(request)`, the inputs selected by the returned proposal are
+///   locked on behalf of the request's owner until `target_height + request.for_blocks()`
+///   to prevent concurrent proposals from selecting them; when `None`, no locking is
+///   performed. Candidates that are not returned lock nothing. See [`propose_transfer`]
+///   for the full semantics and concurrency behavior.
+/// * `proposed_version`: The transaction version to request; when `None`, building falls
+///   back to the version implied by the target height.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_fee_included_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    input_selector: &InputsT,
+    change_strategy: &ChangeT,
+    recipient: ZcashAddress,
+    memo: Option<MemoBytes>,
+    amount: Zatoshis,
+    confirmations_policy: ConfirmationsPolicy,
+    spend_policy: &input_selection::SpendPolicy,
+    lock_inputs: Option<LockRequest>,
+    proposed_version: Option<TxVersion>,
+) -> Result<
+    Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+    ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
+>
+where
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    ParamsT: consensus::Parameters + Clone,
+    InputsT: InputSelector<InputSource = DbT>,
+    ChangeT: ChangeStrategy<MetaSource = DbT>,
+{
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted())
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
+    if memo.is_some() && !recipient.can_receive_memo() {
+        return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
+    }
+
+    let zip318 = wallet_db.pool_migration_params(params);
+    let overflow = || -> ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> {
+        Error::BalanceError(BalanceError::Overflow)
+    };
+
+    let mut best: Option<(Zatoshis, Zatoshis, Proposal<ChangeT::FeeRule, DbT::NoteRef>)> = None;
+    let mut max_inputs = Zatoshis::ZERO;
+    let mut smallest_excess_debit: Option<Zatoshis> = None;
+
+    // Every insufficient-funds report lowers the payment by its shortfall, and every
+    // successful selection moves it to `amount` less that selection's fee. When that payment
+    // is zero, already tried, or no larger than the best candidate, the search bisects
+    // between the largest payment that fit (or zero) and the smallest above it that
+    // overshot or that a reported shortfall rules out. The search ends at an exact debit, at
+    // an empty interval, at a repeated payment, at a report with no shortfall, at any other
+    // selection error, or at the selection limit.
+    let mut payment = amount;
+    let mut tried = BTreeSet::new();
+    let mut unfit = BTreeSet::new();
+    while tried.len() < FEE_INCLUDED_SELECTION_LIMIT {
+        let below_best = best
+            .as_ref()
+            .is_some_and(|(best_payment, _, _)| payment <= *best_payment);
+        if !payment.is_positive() || tried.contains(&payment) || below_best {
+            let floor = match &best {
+                Some((_, best_debit, _)) if *best_debit == amount => break,
+                Some((best_payment, _, _)) => *best_payment,
+                None => Zatoshis::ZERO,
+            };
+            if max_inputs < amount {
+                break;
+            }
+            let Some(&ceiling) = unfit.range((Excluded(floor), Unbounded)).next() else {
+                break;
+            };
+            // Lies between two valid amounts, so the conversion cannot fail.
+            payment = match Zatoshis::from_u64(
+                u64::from(floor) + (u64::from(ceiling) - u64::from(floor)) / 2,
+            ) {
+                Ok(midpoint) if midpoint > floor => midpoint,
+                // An inferred ceiling is tried once before the interval is taken as closed.
+                _ if !tried.contains(&ceiling) => ceiling,
+                _ => break,
+            };
+        }
+        if !tried.insert(payment) {
+            break;
+        }
+
+        let request = zip321::TransactionRequest::new(vec![
+            Payment::new(
+                recipient.clone(),
+                Some(payment),
+                memo.clone(),
+                None,
+                None,
+                vec![],
+            )
+            .map_err(Error::Payment)?,
+        ])
+        .expect("a single payment cannot violate ZIP 321 request construction invariants");
+
+        match input_selector.propose_transaction(
+            params,
+            wallet_db,
+            target_height,
+            anchor_height,
+            &zip318,
+            confirmations_policy,
+            spend_from_account,
+            request,
+            change_strategy,
+            spend_policy,
+            proposed_version,
+        ) {
+            Ok(proposal) => {
+                let fee = proposal
+                    .steps()
+                    .iter()
+                    .map(|step| step.balance().fee_required())
+                    .sum::<Option<Zatoshis>>()
+                    .ok_or_else(overflow)?;
+                let inputs = proposal_input_value(&proposal).ok_or_else(overflow)?;
+                let debit = (payment + fee).ok_or_else(overflow)?;
+
+                max_inputs = max_inputs.max(inputs);
+                if debit > amount {
+                    unfit.insert(payment);
+                    smallest_excess_debit =
+                        Some(smallest_excess_debit.map_or(debit, |smallest| smallest.min(debit)));
+                } else if best
+                    .as_ref()
+                    .is_none_or(|(best_payment, _, _)| payment > *best_payment)
+                {
+                    best = Some((payment, debit, proposal));
+                }
+                payment = (amount - fee).unwrap_or(Zatoshis::ZERO);
+            }
+            Err(InputSelectorError::InsufficientFunds {
+                required,
+                available,
+            }) => {
+                max_inputs = max_inputs.max(available);
+                // The shortfall is the selector's figure for what the selection lacked; with
+                // the greedy selector, the change strategy's: the fee and any value beyond the
+                // inputs reached, a further change output, or the dust that the change fell
+                // short by once no more inputs could be added. A report with no shortfall
+                // gives the search nothing to go on.
+                let Some(shortfall) = (required - available).filter(|s| s.is_positive()) else {
+                    break;
+                };
+                unfit.insert(payment);
+                payment = (payment - shortfall).unwrap_or(Zatoshis::ZERO);
+                // Payments above the one the shortfall points to are taken not to fit.
+                unfit.insert((payment + Zatoshis::const_from_u64(1)).ok_or_else(overflow)?);
+            }
+            Err(other) => return Err(other.into()),
+        }
+    }
+
+    let Some((_, _, proposal)) = best.filter(|_| max_inputs >= amount) else {
+        return Err(if max_inputs < amount {
+            Error::InsufficientFunds {
+                required: amount,
+                available: max_inputs,
+            }
+        } else {
+            Error::NoPaymentWithinAmount {
+                amount,
+                smallest_debit: smallest_excess_debit,
+            }
+        });
+    };
+
+    proposal.check_transaction_size()?;
+    if let Some(request) = lock_inputs {
+        let lock_expiry_height = target_height + request.for_blocks();
+        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
+    }
+
+    Ok(proposal.with_proposed_version(proposed_version))
+}
+
+/// Returns the total value of the transparent and shielded inputs of every step of
+/// `proposal`, or `None` if the sum overflows.
+fn proposal_input_value<FeeRuleT, NoteRef>(
+    proposal: &Proposal<FeeRuleT, NoteRef>,
+) -> Option<Zatoshis> {
+    proposal
+        .steps()
+        .iter()
+        .try_fold(Zatoshis::ZERO, |total, step| {
+            let transparent = step
+                .transparent_inputs()
+                .iter()
+                .map(|input| input.value())
+                .sum::<Option<Zatoshis>>()?;
+            let shielded = step
+                .shielded_inputs()
+                .map_or(Some(Zatoshis::ZERO), |inputs| {
+                    inputs
+                        .notes()
+                        .iter()
+                        .map(|note| note.note().value())
+                        .sum::<Option<Zatoshis>>()
+                })?;
+            total + transparent + shielded
+        })
 }
 
 /// Constructs a proposal to shield all of the funds belonging to the provided set of

@@ -71,6 +71,14 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
         required: Zatoshis,
     },
 
+    /// A fee-included transfer found no nonzero payment whose debit, fees included, is at
+    /// most `amount`. `smallest_debit` is the smallest debit above `amount` that a
+    /// selection produced, if any selection succeeded.
+    NoPaymentWithinAmount {
+        amount: Zatoshis,
+        smallest_debit: Option<Zatoshis>,
+    },
+
     /// The wallet must scan more of the chain before it can perform the operation.
     ///
     /// A proposal returns this error when the wallet has no anchor for the transaction, that is,
@@ -366,6 +374,20 @@ where
                 u64::from(*available),
                 u64::from(*required)
             ),
+            Error::NoPaymentWithinAmount {
+                amount,
+                smallest_debit,
+            } => {
+                write!(
+                    f,
+                    "No nonzero payment found within {} including fees",
+                    u64::from(*amount)
+                )?;
+                if let Some(debit) = smallest_debit {
+                    write!(f, " (the smallest debit found is {})", u64::from(*debit))?;
+                }
+                Ok(())
+            }
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
             Error::Payment(e) => write!(f, "An error occurred constructing a payment: {e}"),

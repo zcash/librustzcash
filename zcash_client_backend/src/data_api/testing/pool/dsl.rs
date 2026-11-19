@@ -25,12 +25,12 @@ use crate::{
             TestFvk, TestState, single_output_change_strategy,
         },
         wallet::{
-            ConfirmationsPolicy, LockRequest,
+            ConfirmationsPolicy, LockRequest, ProposeTransferErrT,
             input_selection::{GreedyInputSelector, SpendPolicy},
             propose_transfer,
         },
     },
-    fees::StandardFeeRule,
+    fees::{StandardFeeRule, standard::SingleOutputChangeStrategy},
     proposal::Proposal,
     wallet::{LockOwner, OutputRef, OvkPolicy},
 };
@@ -425,6 +425,48 @@ where
             T::SHIELDED_PROTOCOL,
         )
         .unwrap()
+    }
+
+    /// Proposes a ZIP 317 transfer of `amount` zatoshis with the fee taken from that
+    /// amount, paying the remainder to `to`.
+    ///
+    /// This is the fee-included counterpart of [`Self::propose_transfer_to`]. It
+    /// fixes the same constants (the test account, a [`GreedyInputSelector`], the
+    /// tester's single-output change strategy, [`ConfirmationsPolicy::MIN`], no
+    /// memo, the default [`SpendPolicy`], no locking and no requested transaction
+    /// version) and returns the `Result` rather than unwrapping it, so that error
+    /// scenarios can inspect it.
+    #[allow(clippy::type_complexity)]
+    pub fn propose_fee_included_to(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+    ) -> Result<
+        Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>,
+        ProposeTransferErrT<
+            Dsf::DataStore,
+            Infallible,
+            GreedyInputSelector<Dsf::DataStore>,
+            SingleOutputChangeStrategy<Dsf::DataStore>,
+        >,
+    > {
+        let account_id = self.get_account().id();
+        let input_selector = GreedyInputSelector::new();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        let recipient = to.to_zcash_address(self.network());
+        self.propose_fee_included_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            recipient,
+            None,
+            amount,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            None,
+            None,
+        )
     }
 
     /// Proposes and executes a transfer of `amount` zatoshis to `to` with
