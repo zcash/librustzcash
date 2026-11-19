@@ -10,22 +10,6 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- `zcash_primitives::transaction::{Transaction, TransactionData}` now store their
-  Sprout, Sapling, Orchard, and Ironwood bundles on the heap, so a bundle that is
-  absent no longer occupies space inline. On 64-bit targets this reduces
-  `size_of::<Transaction>()` from 2,760 bytes to 136 bytes. Public signatures are
-  unchanged.
-
-### Fixed
-- The documentation of the following items in `zcash_primitives::transaction`,
-  and the `Display` output of `sighash::Zip244Error`, now say that they also
-  apply to v6 transactions, whose transaction IDs and signature digests are
-  specified by ZIP 229:
-  - `{TxDigests::Zip244, Zip244Digests}`
-  - `sighash::{PrecomputedSighashData::new_zip244, Zip244Error::NotZip244}`
-  - `txid::TxIdDigester`
-
 ## [0.31.1] - 2026-11-12
 
 ### Fixed
@@ -34,18 +18,6 @@ workspace.
   Ironwood bundles, now read and write the Equihash solution and the proof bytes
   in bulk, rather than making one call to the underlying reader or writer per
   byte.
-
-## [0.31.0-keystone.0] - 2026-11-10
-
-This is a backport release to enable downstream users that cannot yet
-upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
-features supported by `zcash_primitives 0.31.0`.
-
-### Changed
-- This release has the following differences from `zcash_primitives 0.31.0`:
-  - It depends on `secp256k1 0.29`, `zcash_script 0.4`, and
-    `zcash_transparent 0.11.0-keystone.0`, in place of `secp256k1 0.33`,
-    `zcash_script 0.6`, and `zcash_transparent 0.11.0`.
 
 ## [0.31.0] - 2026-10-21
 
@@ -107,6 +79,18 @@ features supported by `zcash_primitives 0.31.0`.
 ### Fixed
 - `zcash_primitives::merkle_tree::merkle_path_from_slice` now returns an error
   for an empty slice instead of panicking.
+
+## [0.31.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `zcash_primitives 0.31.0`.
+
+### Changed
+- This release has the following differences from `zcash_primitives 0.31.0`:
+  - It depends on `secp256k1 0.29`, `zcash_script 0.4`, and
+    `zcash_transparent 0.11.0-keystone.0`, in place of `secp256k1 0.33`,
+    `zcash_script 0.6`, and `zcash_transparent 0.11.0`.
 
 ## [0.30.1] - 2026-08-18
 
