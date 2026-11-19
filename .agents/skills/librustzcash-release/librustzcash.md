@@ -29,6 +29,29 @@ Release bottom-up, lowest first:
 must run as `cargo +stable semver-checks …`; on the pinned toolchain it fails
 instead of reporting.
 
+## Generated changelogs (Phases 2–3)
+
+For a crate listed in `.changes/projects.toml`, `CHANGELOG.md` is generated
+from change fragments and release section files (see `.changes/README.md`).
+Never edit its `CHANGELOG.md` directly. For such a crate:
+
+- **Phase 2:** start from `scripts/changelog.py draft <crate> <version> --write`,
+  which writes `.changes/releases/<crate>/<version>.md` from the fragments the
+  release adds since its predecessor tag. Audit and edit that file, not an
+  `## [Unreleased]` section. Fold any pre-release sections that `draft` lists
+  into it, and delete their files.
+- **Phase 3, step 1:** run `scripts/changelog.py assemble` in place of
+  inserting the heading by hand. It keeps the empty `## [Unreleased]` heading.
+- **Phase 3, step 4:** for a dependent listed in `.changes/projects.toml`,
+  add a `Changed` fragment instead of extending a `Migrated to` line. Merged
+  fragments are never edited, so that dependent's own release section combines
+  the lines:
+
+  ```sh
+  scripts/changelog.py new <dependent> Changed -m 'Migrated to `<crate> <version>`.'
+  ```
+- Run `scripts/changelog.py check` before committing.
+
 ## Workspace dependencies (Phase 3)
 
 `zcash_client_sqlite` has no `[workspace.dependencies]` entry, since nothing in

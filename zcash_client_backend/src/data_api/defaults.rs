@@ -9,6 +9,7 @@
 //! [`WalletRead`]: super::WalletRead
 //! [`WalletWrite`]: super::WalletWrite
 
+use ::transparent::address::TransparentAddress;
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::consensus;
 
@@ -28,6 +29,8 @@ pub fn address_receiver_matches_ua<P: consensus::Parameters>(
 }
 
 /// Reference implementation of [`WalletRead::find_account_for_address`].
+///
+/// A TEX address is looked up as the P2PKH address that has the same public key hash.
 ///
 /// Any address whose shielded component can be represented as a [`UnifiedAddress`] — either
 /// directly, or by synthesizing a single-receiver UA around a bare Sapling address — is
@@ -57,6 +60,17 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
     params: &P,
     address: &Address,
 ) -> Result<Option<W::AccountId>, FindAccountForAddressError<W::Error>> {
+    // A TEX address holds the public key hash of a P2PKH address. Wallets track the P2PKH
+    // address, so that is the address to look up.
+    let p2pkh_address;
+    let address = match address {
+        Address::Tex(pubkey_hash) => {
+            p2pkh_address = Address::Transparent(TransparentAddress::PublicKeyHash(*pubkey_hash));
+            &p2pkh_address
+        }
+        _ => address,
+    };
+
     // Promote bare shielded addresses to a synthesized single-receiver UA so that every
     // address with a shielded component is resolved through the same UIVK algebra. The
     // synthesized UA is owned by this local binding; `shielded_ua` borrows from either the

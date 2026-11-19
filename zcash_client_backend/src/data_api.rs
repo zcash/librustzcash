@@ -2261,6 +2261,7 @@ pub trait WalletRead {
     ///
     /// Transparent and TEX addresses are resolved by exact match against tracked addresses
     /// only, since a diversifier index cannot be recovered from a transparent receiver alone.
+    /// A TEX address is resolved as the P2PKH address that has the same public key hash.
     ///
     /// # Returns
     ///
@@ -5325,6 +5326,29 @@ mod tests {
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
             &Address::Transparent(transparent_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_tex_address_returns_account_that_tracks_the_p2pkh_address() {
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(
+                1,
+                vec![address_info_of(Address::Transparent(
+                    transparent_address_for_tag(1),
+                ))],
+            )],
+        );
+
+        // A TEX address holds the public key hash of a transparent P2PKH address.
+        let TransparentAddress::PublicKeyHash(pubkey_hash) = transparent_address_for_tag(1) else {
+            panic!("the test address must be a P2PKH address");
+        };
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Tex(pubkey_hash),
         );
         assert_eq!(result.unwrap(), Some(1));
     }
