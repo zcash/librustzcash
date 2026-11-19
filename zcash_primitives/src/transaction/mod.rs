@@ -324,6 +324,18 @@ pub struct Transaction {
     data: TransactionData<Authorized>,
 }
 
+/// Placeholder accounting until transaction bundle storage is counted.
+#[cfg(feature = "std")]
+impl memuse::DynamicUsage for Transaction {
+    fn dynamic_usage(&self) -> usize {
+        0
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
 impl Deref for Transaction {
     type Target = TransactionData<Authorized>;
 
