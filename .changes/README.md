@@ -55,8 +55,9 @@ was already released on another branch.
    tree of the release's predecessor: the highest release tag reachable from
    the release commit whose version is below the new version. For a release
    that is not a pre-release, only earlier releases that are not pre-releases
-   count, so the draft spans any pre-releases of the same version. `--since
-   <tag>` drafts from a different tag. Without `--write`, the draft is printed.
+   count, so the draft spans any pre-releases of the same version.
+   `--since <tag>` drafts from a different tag. Without `--write`, the draft
+   is printed.
 
 2. Edit `.changes/releases/<crate>/<version>.md` by hand. Consolidate entries
    that describe the same item, and remove entries for changes that a later
@@ -94,5 +95,5 @@ and run `assemble`.
 `scripts/changelog.py check` checks the fragments and release sections, and
 that each `CHANGELOG.md` matches them. `check --base <revision>` also rejects
 changes to fragments that exist at `<revision>`. To move another crate to this
-layout, add it to `projects.toml` and run `scripts/changelog.py migrate
-<crate>`, which converts its `## [Unreleased]` entries into fragments.
+layout, add it to `projects.toml` and run `scripts/changelog.py migrate <crate>`,
+which converts its `## [Unreleased]` entries into fragments.
