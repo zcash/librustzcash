@@ -17,7 +17,7 @@ use memuse::DynamicUsage;
 use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
 
-use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_encoding::{Array, CompactSize, ReverseHex, Vector};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
@@ -46,13 +46,18 @@ impl fmt::Debug for BlockHash {
 
 impl fmt::Display for BlockHash {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut data = self.0;
-        data.reverse();
-        formatter.write_str(&hex::encode(data))
+        formatter.write_str(&ReverseHex::encode(&self.0))
     }
 }
 
 impl BlockHash {
+    /// Parses a block hash from its byte-reversed hexadecimal representation, as produced by
+    /// this type's [`Display`](fmt::Display) impl and by node RPCs. Returns `None` if the input
+    /// is not exactly 64 hexadecimal digits.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        ReverseHex::decode(s).map(BlockHash)
+    }
+
     /// Constructs a [`BlockHash`] from the given slice.
     ///
     /// # Panics
@@ -356,8 +361,10 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, BlockHeader};
+    use super::{Block, BlockHash, BlockHeader};
+    use alloc::string::ToString;
     use alloc::vec::Vec;
+    use proptest::prelude::*;
     use zcash_protocol::consensus::MAIN_NETWORK;
 
     const BLOCK_MAINNET_415000: [u8; 1640] = [
@@ -500,5 +507,24 @@ mod tests {
         let mut encoded = Vec::with_capacity(BLOCK_MAINNET_415000.len());
         block.write(&mut encoded).unwrap();
         assert_eq!(&BLOCK_MAINNET_415000[..], &encoded[..]);
+    }
+
+    #[test]
+    fn block_hash_from_hex() {
+        let header = BlockHeader::read(&BLOCK_MAINNET_415000[..]).unwrap();
+        assert_eq!(
+            BlockHash::from_hex("0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168"),
+            Some(header.hash())
+        );
+        assert_eq!(BlockHash::from_hex("00"), None);
+        assert_eq!(BlockHash::from_hex(&"zz".repeat(32)), None);
+    }
+
+    proptest! {
+        #[test]
+        fn block_hash_from_hex_inverts_display(bytes in any::<[u8; 32]>()) {
+            let hash = BlockHash(bytes);
+            prop_assert_eq!(BlockHash::from_hex(&hash.to_string()), Some(hash));
+        }
     }
 }
