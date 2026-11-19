@@ -678,8 +678,7 @@ mod tests {
     fn io_finalizer_and_signer_succeed_with_absent_ironwood_anchor() {
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         pczt.ironwood.actions.push(dummy_action());
 
         assert!(pczt.ironwood.anchor.is_none());
@@ -772,8 +771,7 @@ mod tests {
 
         let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         pczt.ironwood.actions.push(action);
 
         let pczt = IoFinalizer::new(pczt)

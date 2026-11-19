@@ -203,8 +203,7 @@ pub mod v1 {
                 Some([0; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
             assert!(matches!(
                 super::Pczt::try_from(pczt),
                 Err(crate::EncodingError::UnsupportedTxVersion)
@@ -220,8 +219,7 @@ pub mod v1 {
                 Some([0; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
             pczt.ironwood.bsk = Some(crate::common::SecretKeyBytes::new([1; 32]));
             assert!(matches!(
                 super::Pczt::try_from(pczt),
@@ -313,8 +311,7 @@ pub mod v2 {
             // spends/actions, so they are fully empty and omitted.
             let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
                 .unwrap()
-                .build()
-                .unwrap();
+                .build();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -351,8 +348,7 @@ pub mod v2 {
                 Some([2; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -376,8 +372,7 @@ pub mod v2 {
                 Some([0; 32]),
             )
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
@@ -870,8 +865,7 @@ mod extraction_tests {
             "78296c68a370c2e1f058d997c81c7b011c4562c52fc5ca2994ad59cd179fbe9e";
         let pczt = Creator::new(BranchId::Nu7.into(), EXPIRY_HEIGHT, COIN_TYPE, None, None)
             .unwrap()
-            .build()
-            .unwrap();
+            .build();
         let data = pczt.into_effects().unwrap();
         assert_eq!(data.version(), TxVersion::V6);
         let digests = data.digest(TxIdDigester);
@@ -903,8 +897,7 @@ mod extraction_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         pczt.ironwood.bsk = Some(crate::common::SecretKeyBytes::new([1; 32]));
         assert!(matches!(
             pczt.into_effects(),
@@ -922,8 +915,7 @@ mod extraction_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         pczt.global.consensus_branch_id = BranchId::Nu6_2.into();
         assert!(matches!(
             pczt.into_effects(),
@@ -942,8 +934,7 @@ mod extraction_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
 
         let tx_data = pczt.into_effects().unwrap();
         assert_eq!(tx_data.version(), TxVersion::V7);
@@ -973,8 +964,7 @@ mod serialize_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         let bytes = pczt.clone().serialize().unwrap();
         assert_eq!(encoding_version(&bytes), crate::PCZT_VERSION_1);
         // The minimal encoding still round-trips through the ordinary parser.
@@ -1006,8 +996,7 @@ mod serialize_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
         assert_eq!(
             encoding_version(&v6.serialize().unwrap()),
             crate::PCZT_VERSION_2,
@@ -1025,8 +1014,7 @@ mod serialize_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
 
         // A v6 transaction, which the v1 encoding cannot represent.
         let v6 = Creator::new(
@@ -1037,8 +1025,7 @@ mod serialize_tests {
             Some([0; 32]),
         )
         .unwrap()
-        .build()
-        .unwrap();
+        .build();
 
         for (pczt, expected, expected_header) in [
             (v5, EncodingVersion::V1, crate::PCZT_VERSION_1),
