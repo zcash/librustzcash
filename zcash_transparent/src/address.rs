@@ -66,8 +66,8 @@ impl Script {
         Ok(Script(script::Code(script)))
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write_bytes(&mut writer, &self.0.0)
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Vector::write_bytes(writer, &self.0.0)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
