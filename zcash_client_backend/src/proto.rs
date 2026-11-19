@@ -484,22 +484,18 @@ impl service::TreeState {
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
     pub fn to_chain_state(&self) -> io::Result<ChainState> {
-        let mut hash_bytes = hex::decode(&self.hash).map_err(|e| {
+        let hash = BlockHash::from_hex(&self.hash).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Block hash is not valid hex: {e:?}"),
+                "Block hash is not 64 hex digits.",
             )
         })?;
-        // Zcashd hex strings for block hashes are byte-reversed.
-        hash_bytes.reverse();
 
         Ok(ChainState::new(
             self.height
                 .try_into()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid block height"))?,
-            BlockHash::try_from_slice(&hash_bytes).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "Invalid block hash length.")
-            })?,
+            hash,
             self.sapling_tree()?.to_frontier(),
             #[cfg(feature = "orchard")]
             self.orchard_tree()?.to_frontier(),
@@ -1183,5 +1179,46 @@ impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transpo
     {
         let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
         Ok(Self::new(conn))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service;
+    use zcash_primitives::block::BlockHash;
+
+    /// The byte-reversed hex hash of Mainnet block 415000, as served by lightwalletd.
+    const MAINNET_415000_HASH: &str =
+        "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168";
+
+    /// The height of [`MAINNET_415000_HASH`].
+    const MAINNET_415000_HEIGHT: u64 = 415_000;
+
+    #[test]
+    fn to_chain_state_parses_block_hash() {
+        let tree_state = service::TreeState {
+            height: MAINNET_415000_HEIGHT,
+            hash: MAINNET_415000_HASH.into(),
+            ..Default::default()
+        };
+        let chain_state = tree_state.to_chain_state().unwrap();
+        assert_eq!(
+            chain_state.block_hash(),
+            BlockHash::from_hex(MAINNET_415000_HASH).unwrap()
+        );
+        assert_eq!(chain_state.block_hash().to_string(), MAINNET_415000_HASH);
+    }
+
+    #[test]
+    fn to_chain_state_rejects_malformed_block_hash() {
+        let not_hex = "zz".repeat(32);
+        for hash in ["", "00", &MAINNET_415000_HASH[2..], not_hex.as_str()] {
+            let tree_state = service::TreeState {
+                height: MAINNET_415000_HEIGHT,
+                hash: hash.into(),
+                ..Default::default()
+            };
+            assert!(tree_state.to_chain_state().is_err(), "accepted {hash:?}");
+        }
     }
 }
