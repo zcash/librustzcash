@@ -10,32 +10,6 @@ workspace.
 
 ## [Unreleased]
 
-### Changed
-- The transparent types in the following items are now written with the value
-  parameter of `zcash_transparent` set to `Zatoshis` (for example
-  `transparent::pczt::Bundle<Zatoshis>` and
-  `transparent::bundle::EffectsOnly<Zatoshis>`), and denote the same values as
-  before:
-  - `pczt::EffectsOnly`
-  - `pczt::common::LockTimeInput`
-  - `pczt::roles::low_level_signer::Signer::sign_transparent_with`
-  - `pczt::roles::updater::Updater::update_transparent_with`
-  - `pczt::roles::verifier::Verifier::with_transparent`
-
-## [0.10.0-keystone.0] - 2026-11-10
-
-This is a backport release to enable downstream users that cannot yet
-upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
-features supported by `pczt 0.10.0`.
-
-### Changed
-- This release has the following differences from `pczt 0.10.0`:
-  - It depends on `secp256k1 0.29`, `zcash_script 0.4`,
-    `zcash_primitives 0.31.0-keystone.0`, and
-    `zcash_transparent 0.11.0-keystone.0`, in place of `secp256k1 0.33`,
-    `zcash_script 0.6`, `zcash_primitives 0.31.0`, and
-    `zcash_transparent 0.11.0`.
-
 ## [0.10.0] - 2026-10-21
 
 ### Added
@@ -85,6 +59,20 @@ features supported by `pczt 0.10.0`.
   and `pczt::roles::tx_extractor::TransactionExtractor::extract` extract it as a
   v6 transaction without a ZIP 233 amount. None of these needs the
   `--cfg zcash_unstable="nu7"` configuration flag any more.
+
+## [0.10.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `pczt 0.10.0`.
+
+### Changed
+- This release has the following differences from `pczt 0.10.0`:
+  - It depends on `secp256k1 0.29`, `zcash_script 0.4`,
+    `zcash_primitives 0.31.0-keystone.0`, and
+    `zcash_transparent 0.11.0-keystone.0`, in place of `secp256k1 0.33`,
+    `zcash_script 0.6`, `zcash_primitives 0.31.0`, and
+    `zcash_transparent 0.11.0`.
 
 ## [0.9.3] - 2026-08-07
 
