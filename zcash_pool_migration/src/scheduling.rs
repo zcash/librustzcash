@@ -937,6 +937,27 @@ pub fn earliest_broadcast_height(
     ))
 }
 
+/// The earliest scheduled TARGET height (`chain_tip + 1`, the first height the transaction can be
+/// mined at) for a transfer whose funding note is created at `funding_creation_height`.
+///
+/// A transfer scheduled at target height `h` is broadcast from tip `h - 1`, and its candidate
+/// anchor set must be non-empty there; [`earliest_broadcast_height`] is the first such tip, so the
+/// earliest target height is one above it. Saturates at `u32::MAX`.
+pub(crate) fn earliest_transfer_target(
+    grid: AnchorGrid,
+    nu63_activation: BlockHeight,
+    funding_creation_height: BlockHeight,
+) -> BlockHeight {
+    earliest_broadcast_height(grid, nu63_activation, funding_creation_height) + 1
+}
+
+/// The latest chain tip from which a transaction scheduled at TARGET height `scheduled_height`
+/// (`chain_tip + 1`) is broadcast: `scheduled_height - 1`, saturating at zero. An anchor drawn for
+/// a scheduled transaction is drawn against this tip.
+pub(crate) fn broadcast_tip(scheduled_height: BlockHeight) -> BlockHeight {
+    scheduled_height - 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1969,6 +1990,72 @@ mod tests {
                 draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest - 1, &mut r).is_none(),
                 "a tip below the earliest broadcast height must not"
             );
+        }
+
+        /// A transfer schedule based at [`earliest_transfer_target`] whose first drawn delay is
+        /// zero puts its first transfer AT that target height. That transfer is broadcast from tip
+        /// `target - 1`, and a candidate anchor boundary must already exist there.
+        #[test]
+        fn zero_delay_transfer_at_earliest_target_has_an_anchor(act in 0u32..1_000_000,
+                                                                funding_offset in 0u32..2_000,
+                                                                blocks in 1u32..500u32,
+                                                                seed in any::<u64>()) {
+            let grid = AnchorGrid::new(interval(blocks), BlockSpacing::UNIFORM);
+            let funding = act + funding_offset;
+            let base = earliest_transfer_target(grid, bh(act), bh(funding));
+            let first_target = cumulative_broadcast_heights(
+                &BlockSpacing::UNIFORM,
+                base,
+                1,
+                |_| 0,
+                &mut rng(seed),
+            )[0];
+            prop_assert_eq!(first_target, base);
+            let tip = first_target - 1;
+            prop_assert!(
+                draw_anchor_boundary(grid, bh(act), bh(funding), tip, &mut rng(seed)).is_some(),
+                "a zero-delay transfer at target {} has no candidate anchor at its broadcast tip {}",
+                u32::from(first_target),
+                u32::from(tip),
+            );
+        }
+
+        /// A transfer whose scheduled target height lands exactly on a boundary `B` is broadcast
+        /// from tip `B - 1`, where the most recent boundary is the one before `B`. Neither the
+        /// schedule-time draw nor the overdue-shift redraw, each made against the scheduled
+        /// height's [`broadcast_tip`] as the engine makes them, may choose that boundary (age 0 at
+        /// the broadcast tip); every choice lies at least one boundary below it.
+        #[test]
+        fn transfer_scheduled_on_a_boundary_never_draws_age_zero(blocks in 1u32..500u32,
+                                                                 target_boundaries in 4u32..200u32,
+                                                                 seed in any::<u64>()) {
+            let grid = AnchorGrid::new(interval(blocks), BlockSpacing::UNIFORM);
+            let scheduled = bh(target_boundaries * blocks);
+            prop_assert!(grid.is_boundary(scheduled));
+            let age_zero = grid.boundary_at_or_below(scheduled - 1);
+            let mut r = rng(seed);
+            for _ in 0..16 {
+                let drawn =
+                    draw_anchor_boundary(grid, bh(0), bh(0), broadcast_tip(scheduled), &mut r)
+                        .expect("a candidate exists below the broadcast tip");
+                prop_assert!(
+                    drawn < age_zero,
+                    "draw for target {} chose {}, the age-0 boundary at tip {}",
+                    u32::from(scheduled),
+                    u32::from(drawn),
+                    u32::from(scheduled - 1),
+                );
+                let redrawn =
+                    redraw_anchor_boundary(grid, bh(blocks), broadcast_tip(scheduled), &mut r)
+                        .expect("a candidate exists below the broadcast tip");
+                prop_assert!(
+                    redrawn < age_zero,
+                    "redraw for target {} chose {}, the age-0 boundary at tip {}",
+                    u32::from(scheduled),
+                    u32::from(redrawn),
+                    u32::from(scheduled - 1),
+                );
+            }
         }
     }
 
