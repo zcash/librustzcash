@@ -55,10 +55,10 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7", "NuTachyon"]'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7", "NuTachyon", "NU8"]'
               || (
                 github.event_name == 'pull_request'
-                && '["all-features"]'
+                && '["all-features", "NU8"]'
                 || '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features"]'
               )
             )
@@ -75,6 +75,8 @@ jobs:
           && '--cfg zcash_unstable="nu7"'
           || matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
       RUSTDOCFLAGS: >-
@@ -83,6 +85,8 @@ jobs:
           && '--cfg zcash_unstable="nu7"'
           || matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
 
@@ -96,7 +100,7 @@ jobs:
           transparent-pool: ${{ matrix.state == 'transparent' }}
           orchard-pool: ${{ matrix.state == 'Orchard' }}
           all-pools: ${{ matrix.state == 'all-pools' }}
-          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
           extra-features: >-
             ${{
               matrix.state == 'transparent-inputs-only'
@@ -111,7 +115,7 @@ jobs:
         with:
           shared-key: msrv
           # Unstable cfg states have distinct RUSTFLAGS-derived cache keys.
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
       - name: Run tests
         shell: bash
         env:
@@ -199,7 +203,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-features", "NU7", "NuTachyon"]'
+              && '["all-features", "NU7", "NuTachyon", "NU8"]'
               || '["all-features"]'
             )
           }}
@@ -215,6 +219,8 @@ jobs:
             state: NU7
           - target: macOS
             state: NuTachyon
+          - target: macOS
+            state: NU8
 
     env:
       RUSTFLAGS: >-
@@ -223,6 +229,8 @@ jobs:
           && '--cfg zcash_unstable="nu7"'
           || matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
       RUSTDOCFLAGS: >-
@@ -231,6 +239,8 @@ jobs:
           && '--cfg zcash_unstable="nu7"'
           || matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
 
@@ -245,7 +255,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
       - name: Run tests
         shell: bash
         env:
@@ -274,7 +284,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-pools", "NU7", "NuTachyon"]'
+              && '["all-pools", "NU7", "NuTachyon", "NU8"]'
               || '["all-pools"]'
             )
           }}
@@ -288,6 +298,9 @@ jobs:
 
           - state: NuTachyon
             rustflags: '--cfg zcash_unstable="nutachyon"'
+
+          - state: NU8
+            rustflags: '--cfg zcash_unstable="nu8"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -502,6 +515,177 @@ jobs:
       - name: Build for target
         working-directory: ./ci-build
         run: cargo build --verbose --target ${{ matrix.target }}
+
+  feature-boundaries:
+    name: Feature boundaries
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Direct `--lib` checks, without workspace dev-dependency feature
+      # unification, of each feature whose availability the crate's API depends
+      # on. The NU8 variants cover the same set again.
+      - name: Check zcash_primitives feature boundaries
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            RUSTFLAGS="$cfg" cargo check -p zcash_primitives --lib --no-default-features
+            for feature in sapling orchard sapling,orchard transparent-inputs; do
+              RUSTFLAGS="$cfg" cargo check \
+                -p zcash_primitives \
+                --lib \
+                --no-default-features \
+                --features "$feature"
+            done
+          done
+      - name: Check standalone pczt roles
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            for feature in orchard sapling spend-finalizer zcp-builder signer io-finalizer tx-extractor; do
+              RUSTFLAGS="$cfg" cargo check \
+                -p pczt \
+                --lib \
+                --no-default-features \
+                --features "$feature"
+            done
+          done
+      # Resolve the proof-free builder API from outside the workspace so that
+      # dev-dependencies cannot restore it by enabling `circuits`.
+      - name: Check proof-free PCZT construction from a downstream crate
+        shell: bash
+        env:
+          CRATES: ${{ github.workspace }}
+          FIXTURE: ${{ runner.temp }}/proof-free-builder-fixture
+        run: |
+          cargo init --lib "$FIXTURE"
+          cp "$CRATES/rust-toolchain.toml" "$FIXTURE/"
+          cp "$CRATES/Cargo.lock" "$FIXTURE/"
+          {
+            echo '[patch.crates-io]'
+            sed -n '/^\[patch.crates-io\]/,$p' "$CRATES/Cargo.toml" | tail -n +2
+          } >> "$FIXTURE/Cargo.toml"
+          cd "$FIXTURE"
+          cargo add --path "$CRATES/zcash_primitives" --no-default-features --features sapling,orchard
+          cargo add --path "$CRATES/components/zcash_protocol" --no-default-features
+          cargo add rand_core@0.10 --no-default-features
+          cat > src/lib.rs <<'RS'
+          //! Requires PCZT construction without proof creation.
+
+          use rand_core::{CryptoRng, Rng};
+          use zcash_primitives::transaction::{
+              builder::{BuildConfig, Builder, BundlePadding},
+              fees::zip317,
+          };
+          use zcash_protocol::consensus::{BlockHeight, MainNetwork};
+
+          /// Resolves the builder and its proof-free PCZT construction method.
+          pub fn probe_builder(rng: impl Rng + CryptoRng) {
+              let builder = Builder::new(
+                  MainNetwork,
+                  BlockHeight::from_u32(1),
+                  BuildConfig::Standard {
+                      sapling_anchor: None,
+                      orchard_anchor: None,
+                      ironwood_anchor: None,
+                      orchard_padding: BundlePadding::DEFAULT,
+                      ironwood_padding: BundlePadding::DEFAULT,
+                  },
+              );
+              let _ = builder.build_for_pczt(rng, &zip317::FeeRule::standard());
+          }
+          RS
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            if RUSTFLAGS="$cfg" cargo tree -e features -i zcash_primitives \
+              | grep -q 'zcash_primitives feature "circuits"'; then
+              echo "The proof-free builder fixture activates circuits"
+              exit 1
+            fi
+            RUSTFLAGS="$cfg" cargo check --lib
+          done
+      # Non-role PCZT handling must not pull in `zcash_primitives` and its
+      # transparent dependency, under any cfg.
+      - name: Check standalone pczt protocol features stay lightweight
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            for feature in orchard sapling; do
+              if RUSTFLAGS="$cfg" cargo tree \
+                -p pczt \
+                --no-default-features \
+                --features "$feature" \
+                -e normal \
+                | grep -q zcash_primitives; then
+                echo "pczt --features $feature activates zcash_primitives"
+                exit 1
+              fi
+            done
+          done
+      - name: Build with both unstable cfgs
+        run: >
+          RUSTFLAGS='--cfg zcash_unstable="nu8" --cfg zcash_unstable="nutachyon"'
+          cargo check -p zcash_primitives -p pczt -p zcash --lib --all-features
+      # A synthetic downstream crate keeps workspace dev-dependencies from
+      # restoring APIs that the facade's defaults no longer enable.
+      - name: Check the zcash facade's default API from a downstream crate
+        shell: bash
+        env:
+          CRATES: ${{ github.workspace }}
+          FIXTURE: ${{ runner.temp }}/facade-fixture
+        run: |
+          cargo init --lib "$FIXTURE"
+          cp "$CRATES/rust-toolchain.toml" "$FIXTURE/"
+          cp "$CRATES/Cargo.lock" "$FIXTURE/"
+          {
+            echo '[patch.crates-io]'
+            sed -n '/^\[patch.crates-io\]/,$p' "$CRATES/Cargo.toml" | tail -n +2
+          } >> "$FIXTURE/Cargo.toml"
+          cd "$FIXTURE"
+          cargo add --path "$CRATES/zcash"
+          cargo add --path "$CRATES/components/zcash_protocol" --no-default-features
+          cat > src/lib.rs <<'RS'
+          //! Requires the API that the `zcash` facade enables by default.
+
+          use zcash::primitives::{
+              block::Block,
+              transaction::{
+                  TxVersion,
+                  builder::{BuildConfig, Builder, BundlePadding},
+                  components::{orchard, sapling},
+                  fees::zip317,
+              },
+          };
+          use zcash_protocol::consensus::{BlockHeight, BranchId, MainNetwork};
+
+          /// Resolves the block module and its typed reader.
+          pub fn probe_block() {
+              let _ = Block::read(&[][..], &MainNetwork);
+          }
+
+          /// Resolves the builder and the typed Sapling module.
+          pub fn probe_builder() {
+              let mut builder = Builder::new(
+                  MainNetwork,
+                  BlockHeight::from_u32(1),
+                  BuildConfig::Standard {
+                      sapling_anchor: None,
+                      orchard_anchor: None,
+                      ironwood_anchor: None,
+                      orchard_padding: BundlePadding::DEFAULT,
+                      ironwood_padding: BundlePadding::DEFAULT,
+                  },
+              );
+              let _ = builder.propose_version::<zip317::FeeRule>(TxVersion::V6);
+              let _ = sapling::zip212_enforcement(&MainNetwork, BlockHeight::from_u32(1));
+          }
+
+          /// Resolves the typed Orchard module and its bundle reader.
+          pub fn probe_orchard() {
+              let _ = orchard::read_v5_bundle(&[][..], BranchId::Nu5);
+          }
+          RS
+          cargo build
 
   bitrot:
     name: Bitrot check
@@ -819,6 +1003,7 @@ jobs:
       - build-latest
       - build-nodefault
       - build-nostd
+      - feature-boundaries
       - bitrot
       - changelogs
       - clippy
