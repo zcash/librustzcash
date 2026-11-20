@@ -6350,8 +6350,18 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        ::orchard::tree::MerkleHashOrchard, incrementalmerkletree::Hashable as _,
-        shardtree::error::ShardTreeError, zcash_client_backend::data_api::WalletCommitmentTrees,
+        ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::Hashable as _,
+        proptest::{
+            strategy::{Strategy, ValueTree},
+            test_runner::TestRunner,
+        },
+        shardtree::error::ShardTreeError,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_primitives::transaction::{
+            TransactionData, TxVersion,
+            components::orchard::testing::arb_ironwood_bundle_for_version,
+        },
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
@@ -6913,6 +6923,48 @@ mod tests {
             parse_tx(&MAIN_NETWORK, &raw, None, Some(BlockHeight::from(0)), None),
             Err(SqliteClientError::CorruptedData(_))
         ));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn parse_tx_uncached_expiry_preserves_v6_ironwood() {
+        let expiry_height = MAIN_NETWORK
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("NU6.3 has an activation height");
+        let mut runner = TestRunner::deterministic();
+        let ironwood = arb_ironwood_bundle_for_version(TxVersion::V6)
+            .prop_filter("an Ironwood bundle is required", Option::is_some)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        let original = TransactionData::from_parts_v6(
+            BranchId::Nu6_3,
+            0,
+            expiry_height,
+            None,
+            None,
+            None,
+            ironwood,
+        )
+        .freeze()
+        .unwrap();
+        let mut raw = vec![];
+        original.write(&mut raw).unwrap();
+
+        for cached_expiry in [None, Some(BlockHeight::from(0))] {
+            let (height, parsed) =
+                parse_tx(&MAIN_NETWORK, &raw, None, cached_expiry, None).unwrap();
+            assert_eq!(height, expiry_height);
+            assert_eq!(parsed.txid(), original.txid());
+            assert!(parsed.ironwood_bundle().is_some());
+            assert_eq!(
+                parsed.ironwood_bundle().unwrap().value_balance(),
+                original.ironwood_bundle().unwrap().value_balance(),
+            );
+            let mut rewritten = vec![];
+            parsed.write(&mut rewritten).unwrap();
+            assert_eq!(rewritten, raw);
+        }
     }
 
     /// A stored unmined transaction with a zero expiry height (e.g. a coinbase
