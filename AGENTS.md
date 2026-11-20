@@ -190,8 +190,10 @@ since Mermaid layout is hard to reason about in plain text.
   whose meaning is not obvious from context. Give it a `const` with a
   doc-commented rationale, and reuse the protocol's own named constants
   (`COIN`, `MAX_MONEY`, the ZIP-317 `MARGINAL_FEE`, `PREP_TX_ACTIONS`,
-  `DENOM_CAP`, ...) rather than re-deriving their values. This applies to
-  production code, tests, and fixtures alike.
+  `DENOM_CAP`, ...) rather than re-deriving their values. In test code, a
+  fixture value used in only one place may be written inline or as a `const`
+  local to that test; a value reused across tests or places needs a shared
+  named `const`.
 
 - **Public APIs use semantic types, never bare primitives.** A `pub` function,
   trait method, struct field accessor, or constructor must not represent a
@@ -434,7 +436,8 @@ Type safety is paramount. This is a security-critical codebase.
   inline fields, to ensure safe construction. This can be relaxed for error enum types.
 - No magic numbers: give every literal a named `const` with a documented meaning. Prefer an
   existing protocol constant (e.g. `zcash_protocol::value::COIN` / `MAX_MONEY`,
-  `zip317::MARGINAL_FEE`) over redefining one.
+  `zip317::MARGINAL_FEE`) over redefining one. Single-use values in test code are exempt (see
+  Code Conventions).
 - Make a library `no_std` (with `extern crate alloc`) whenever its dependencies allow it, keeping
   `std` to `#[cfg(test)]` and dev-dependencies.
 
