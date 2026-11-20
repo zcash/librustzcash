@@ -70,10 +70,10 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.9"
 jubjub = "0.11"
 redjubjub = { version = "0.9", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.9", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.9", default-features = false, git = "https://github.com/zcash/sapling-crypto", rev = "4a99cd539456ed973d37a89498e7f5382feb81ad" }
 
 # - Orchard
-orchard = { version = "0.16", default-features = false }
+orchard = { version = "0.16", default-features = false, git = "https://github.com/zcash/orchard", rev = "3426d9772e345054c7775afb4815e0f854f044d2" }
 pasta_curves = "0.6"
 
 # - Transparent

@@ -294,6 +294,10 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
 
         match signable_input {
             SignableInput::Shielded => (),
+            #[cfg(zcash_unstable = "nu8")]
+            // A v4 transaction is never v7, so a v7 context signs as a shielded input
+            // here; its transparent variant is unreachable through this path.
+            SignableInput::V7(_) => (),
             SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle() {
                     let mut data = vec![];
