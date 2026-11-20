@@ -685,7 +685,9 @@ pub enum NetworkUpgrade {
     ///
     /// [Nu7]: https://z.cash/upgrade/nu7/
     Nu7,
-    /// The NU8 network upgrade, which deploys the ZIP 248 transaction format.
+    /// The experimental NU8 upgrade, provisionally associated with ZIP 248.
+    ///
+    /// ZIP 248 does not yet specify deployment.
     #[cfg(zcash_unstable = "nu8")]
     Nu8,
     /// The NuTachyon network upgrade.
@@ -895,10 +897,10 @@ pub enum BranchId {
     ///
     /// The consensus branch identifier is `0x77190AD9`.
     Nu7,
-    /// The consensus rules to be deployed by [`NetworkUpgrade::Nu8`].
+    /// The experimental consensus rules associated with [`NetworkUpgrade::Nu8`].
     ///
-    /// The consensus branch identifier is a placeholder until NU8 is assigned
-    /// one, as for `NuTachyon`.
+    /// The consensus branch identifier `0xffff_fffb` is a placeholder, not an
+    /// assigned identifier.
     #[cfg(zcash_unstable = "nu8")]
     Nu8,
     /// The consensus rules deployed by [`NetworkUpgrade::NuTachyon`].
