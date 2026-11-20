@@ -583,7 +583,7 @@ where
             // Record how the transaction classifies against ZIP 318, in the same database
             // transaction as the record itself. The enhance path stamps this for transactions the
             // wallet learns about by scanning, but a scheduled migration transaction sits stored
-            // and UNMINED from proving until its broadcast height — up to days — and during that
+            // and UNMINED from proving until its scheduled height — up to days — and during that
             // window a wallet that wants to label (or hold back) its own migration traffic would
             // otherwise read "not classified". This is the same one-moment argument the enhance
             // path documents: the parsed transaction and its decrypted outputs are both in hand

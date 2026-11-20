@@ -27,7 +27,7 @@
 //! as a PCZT and pre-signs it (anchors and witnesses are deferred to proving time per ZIP 374, so a
 //! spent note's PLAINTEXT fully determines the signed data — even for a note minted by an earlier,
 //! still-unmined migration transaction, whose plaintext the engine recovers from the built bundle),
-//! then hands each to the backend to PERSIST alongside its schedule: broadcast height, expiry, layer
+//! then hands each to the backend to PERSIST alongside its schedule: scheduled height, expiry, layer
 //! and dependencies, drawn anchor boundary, and state. The whole migration — every preparation
 //! layer, in topological order, and every transfer — is therefore built and signed in ONE signing
 //! phase, before anything is broadcast; an external hardware signer receives the same transactions
@@ -1188,7 +1188,7 @@ impl MigrationPlan {
         &self.prep_schedule
     }
 
-    /// The phase-2 transfer schedule, one entry per funding note (its broadcast height and
+    /// The phase-2 transfer schedule, one entry per funding note (its scheduled height and
     /// expiry), in SHUFFLED broadcast order (ZIP 318): the heights are deliberately not monotone
     /// in crossing index, so the on-chain temporal sequence of denominations is independent of
     /// the balance.
@@ -1311,7 +1311,7 @@ impl MigrationPlan {
                     } else {
                         previous_layer.clone()
                     },
-                    self.prep_broadcast_height(layer, index),
+                    self.prep_scheduled_height(layer, index),
                 ));
             }
             previous_layer = this_layer;
@@ -1345,7 +1345,7 @@ impl MigrationPlan {
                 id,
                 MigrationTxKind::Transfer { crossing },
                 producer.into_iter().collect(),
-                self.schedule.get(crossing).map(Schedule::broadcast_height),
+                self.schedule.get(crossing).map(Schedule::scheduled_height),
             ));
         }
 
@@ -1356,7 +1356,7 @@ impl MigrationPlan {
         }
     }
 
-    /// The drawn broadcast height of the preparation transaction at `[layer][index]`: the height
+    /// The drawn scheduled height of the preparation transaction at `[layer][index]`: the height
     /// the commit stamps on it, and whose canonical expiry window its pre-signature commits to.
     ///
     /// The schedule is index-aligned with the preparation layers by construction —
@@ -1365,7 +1365,7 @@ impl MigrationPlan {
     /// [`commit_preparation`] would itself reject as [`CommitError::InconsistentPlan`]. Such a
     /// transaction still gets a row, with no height, rather than being dropped: every id after it,
     /// and every dependency naming one, is defined by its POSITION in the list.
-    fn prep_broadcast_height(&self, layer: usize, index: usize) -> Option<BlockHeight> {
+    fn prep_scheduled_height(&self, layer: usize, index: usize) -> Option<BlockHeight> {
         self.prep_schedule
             .get(layer)
             .and_then(|heights| heights.get(index))
@@ -1903,7 +1903,7 @@ where
     let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
     let mut layer_base = commit_target;
     for layer in preparation.layers() {
-        let heights = scheduling::schedule_prep_broadcast_heights(
+        let heights = scheduling::schedule_prep_heights(
             &sched_params,
             &spacing,
             layer_base,
@@ -1932,7 +1932,7 @@ where
         nu63_activation,
         est_last_prep_height,
     ));
-    // SHUFFLE (ZIP 318 MUST): the cumulative broadcast heights are non-decreasing in draw
+    // SHUFFLE (ZIP 318 MUST): the cumulative scheduled heights are non-decreasing in draw
     // order, and the split's crossing values are a non-increasing function of the balance, so
     // pairing them in order would broadcast the denominations largest-first — an on-chain
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
@@ -2852,7 +2852,7 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 ///
 /// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
 /// anchor boundary has settled — [`advance_migration`] surfaces this as [`AdvanceStep::Prove`],
-/// typically at a sync wake-up well before the broadcast height); this function performs the proof
+/// typically at a sync wake-up well before the scheduled height); this function performs the proof
 /// for the one transfer `id`. It is idempotent only in the sense that a transaction not in
 /// [`Signed`](MigrationTxState::Signed) is rejected with [`ProveError::NotReady`] rather than
 /// re-proved.
@@ -5095,7 +5095,7 @@ pub(crate) mod tests {
         assert!(
             plan.schedule()
                 .iter()
-                .all(|s| s.broadcast_height() >= earliest),
+                .all(|s| s.scheduled_height() >= earliest),
             "every scheduled transfer is at or after the anchor-viability floor"
         );
         assert_eq!(
@@ -5105,7 +5105,7 @@ pub(crate) mod tests {
     }
 
     /// SHUFFLE (ZIP 318): the crossings are non-increasing, so an unshuffled schedule would
-    /// pair them with non-decreasing broadcast heights and the on-chain temporal sequence of
+    /// pair them with non-decreasing scheduled heights and the on-chain temporal sequence of
     /// denominations would spell out the balance. The drawn permutation makes the heights
     /// non-monotone in crossing index (deterministic for this seed).
     #[test]
@@ -5123,7 +5123,7 @@ pub(crate) mod tests {
         let heights: Vec<u32> = plan
             .schedule()
             .iter()
-            .map(|s| u32::from(s.broadcast_height()))
+            .map(|s| u32::from(s.scheduled_height()))
             .collect();
         assert!(
             heights.windows(2).any(|w| w[0] > w[1]),
@@ -5814,7 +5814,7 @@ mod commit_tests {
                     // The boundary anchor the transfer will PROVE against is drawn at commit
                     // time: on the boundary grid, strictly above the NU6.3 activation, at or
                     // after the estimated height the last preparation has mined, and strictly
-                    // below the most recent boundary at the scheduled broadcast height.
+                    // below the most recent boundary at the scheduled height.
                     let b = u32::from(
                         tx.anchor_boundary
                             .expect("every transfer carries its boundary"),
@@ -6672,7 +6672,7 @@ mod commit_tests {
         let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::new();
         let mut layer_base = BlockHeight::from_u32(2_000_000);
         for layer in preparation.layers() {
-            let heights = crate::scheduling::schedule_prep_broadcast_heights(
+            let heights = crate::scheduling::schedule_prep_heights(
                 &crate::scheduling::SchedulingParams::ZIP_318,
                 &crate::scheduling::BlockSpacing::UNIFORM,
                 layer_base,

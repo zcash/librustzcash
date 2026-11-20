@@ -554,7 +554,7 @@ impl Advance {
 ///    instead of the missed steps broadcasting as a cluster. A shifted transfer whose PROOF is
 ///    still to come also has its anchor boundary redrawn against the shifted schedule
 ///    ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)): its stored
-///    boundary was in-distribution for the original broadcast height, and broadcasting it
+///    boundary was in-distribution for the original scheduled height, and broadcasting it
 ///    `delta` blocks late — with every deferred sibling late by the SAME `delta` — would carry
 ///    an anchor age no honest draw produces, a linkable fingerprint. (A `Proved` transfer's
 ///    proof pins its anchor, so its boundary is kept; a preparation draws none.) The anchor
@@ -1388,7 +1388,7 @@ mod advance_tests {
         }
     }
 
-    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
+    /// A transfer with the given anchor boundary and scheduled height, in the given
     /// lifecycle state (never expiring, like `tx`).
     fn scheduled_transfer(
         id: u32,

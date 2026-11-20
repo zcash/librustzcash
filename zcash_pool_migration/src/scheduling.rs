@@ -27,7 +27,7 @@
 //! 2. DELAYS ([`DelayDistribution::draw`]): the gap between successive transfers is an exponential
 //!    inter-arrival time (mean and cap given by [`SchedulingParams::transfer_delay`]), so broadcasts
 //!    look like an unremarkable Poisson process rather than a burst.
-//! 3. CUMULATIVE ([`schedule_broadcast_heights`]): each transfer's scheduled height is the running
+//! 3. CUMULATIVE ([`schedule_heights`]): each transfer's scheduled height is the running
 //!    sum of independent delays from the commit height.
 //! 4. ANCHOR ([`draw_anchor_boundary`]): at PROVING time each transfer proves against the Orchard
 //!    tree state at a BOUNDARY block (a multiple of the [`AnchorBucketInterval`]), chosen from a
@@ -39,7 +39,7 @@
 //!
 //! Beyond the ZIP 318 draws, [`schedule_sync_wakeups`] derives from a committed transfer schedule
 //! the MINIMAL set of sync/proving wake-ups a background-constrained wallet needs: every transfer
-//! is proved after its drawn anchor boundary settles and strictly before its broadcast height, and
+//! is proved after its drawn anchor boundary settles and strictly before its scheduled height, and
 //! each wake-up lands a settle margin past a bucketed anchor height plus an anti-thundering-herd
 //! jitter ([`WakeupParams`]).
 //!
@@ -387,10 +387,10 @@ impl<T> SyncWakeup<T> {
 /// height.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WakeupScheduleError<T> {
-    /// The transfer's broadcast height is not at least two blocks above its anchor boundary, so no
+    /// The transfer's scheduled height is not at least two blocks above its anchor boundary, so no
     /// height exists at which the boundary has settled (is strictly below the tip) strictly before
     /// the broadcast. Unreachable for a schedule produced by this crate — a drawn anchor sits at
-    /// least one full bucket interval below its broadcast height — so it indicates an inconsistent
+    /// least one full bucket interval below its scheduled height — so it indicates an inconsistent
     /// hand-assembled schedule, or a degenerate custom bucket interval of one block.
     InfeasibleTransfer(T),
 }
@@ -414,24 +414,25 @@ impl<T: fmt::Debug> core::error::Error for WakeupScheduleError<T> {}
 /// Re-exported from [`zcash_protocol::zip318`], which owns the ZIP's specified values.
 pub use zcash_protocol::zip318::{ANCHOR_AGE_CAP, EXPIRY_MODULUS, EXPIRY_WINDOW};
 
-/// The scheduled broadcast and expiry heights of one migration transfer. Produced by
-/// [`schedule`]; ties a part's [`broadcast_height`](Self::broadcast_height) (from the cumulative
+/// The scheduled and expiry heights of one migration transfer. Produced by
+/// [`schedule`]; ties a part's [`scheduled_height`](Self::scheduled_height) (from the cumulative
 /// delay draw) to its canonical [`expiry_height`](Self::expiry_height).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Schedule {
-    broadcast_height: BlockHeight,
+    scheduled_height: BlockHeight,
     expiry_height: BlockHeight,
 }
 
 impl Schedule {
-    /// The block height at which this transfer is scheduled to be broadcast (a cumulative sum of
-    /// per-part delays from the commit height; see [`schedule_broadcast_heights`]).
-    pub fn broadcast_height(&self) -> BlockHeight {
-        self.broadcast_height
+    /// The target height of this transfer: the first height at which it can be mined (a wallet may
+    /// broadcast once its chain tip is one below it). A cumulative sum of per-part delays from the
+    /// commit height; see [`schedule_heights`].
+    pub fn scheduled_height(&self) -> BlockHeight {
+        self.scheduled_height
     }
 
     /// The block height at (and after) which this transfer is no longer valid: the canonical rolling
-    /// window of [`expiry_height`] applied at the broadcast height.
+    /// window of [`expiry_height`] applied at the scheduled height.
     pub fn expiry_height(&self) -> BlockHeight {
         self.expiry_height
     }
@@ -515,13 +516,13 @@ fn gen_index<R: Rng>(rng: &mut R, bound: usize) -> usize {
     }
 }
 
-/// The cumulative-heights core shared by [`schedule_broadcast_heights`] and
-/// [`schedule_prep_broadcast_heights`]: starting at `start`, advance a running height by an
+/// The cumulative-heights core shared by [`schedule_heights`] and
+/// [`schedule_prep_heights`]: starting at `start`, advance a running height by an
 /// independently drawn delay, in reference blocks converted by `spacing`, for each of the `n`
 /// entries. The returned vector has length `n`, is
 /// non-decreasing, and every entry is `>= start`; heights saturate at `u32::MAX` rather than
 /// overflowing (`BlockHeight`'s delta addition saturates).
-fn cumulative_broadcast_heights<R: Rng>(
+fn cumulative_scheduled_heights<R: Rng>(
     spacing: &BlockSpacing,
     start: BlockHeight,
     n: usize,
@@ -537,13 +538,13 @@ fn cumulative_broadcast_heights<R: Rng>(
     heights
 }
 
-/// Compute the per-part scheduled broadcast heights: starting at `commit_height`, advance a running
+/// Compute the per-part scheduled heights: starting at `commit_height`, advance a running
 /// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
 /// (ZIP 318 CUMULATIVE MUST). Each delay is a number of reference blocks, which `spacing` converts
 /// into blocks, so the schedule spans the same time on either side of NU7 activation. The returned
 /// vector has length `n_parts`, is non-decreasing, and every entry is `>= commit_height`. Heights
 /// saturate at `u32::MAX` rather than overflowing.
-pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
+pub fn schedule_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     spacing: &BlockSpacing,
     commit_height: BlockHeight,
@@ -551,7 +552,7 @@ pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
     rng: &mut R,
 ) -> Vec<BlockHeight> {
     let delay = params.transfer_delay();
-    cumulative_broadcast_heights(
+    cumulative_scheduled_heights(
         spacing,
         commit_height,
         n_parts,
@@ -560,7 +561,7 @@ pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
     )
 }
 
-/// Compute per-transaction scheduled broadcast heights for one PREPARATION layer: starting at
+/// Compute per-transaction scheduled heights for one PREPARATION layer: starting at
 /// `start`, advance a running height by an independently drawn `params.preparation_delay()`, in
 /// reference blocks converted by `spacing`, for each of the `n_txs` transactions. The returned
 /// vector has length `n_txs`, is non-decreasing, and
@@ -568,7 +569,7 @@ pub fn schedule_broadcast_heights<R: Rng + CryptoRng>(
 /// later layer's `start` past the previous layer's last scheduled height plus a mining margin, so
 /// layers stay serialized while the transactions within and across layers remain temporally
 /// decoupled.
-pub fn schedule_prep_broadcast_heights<R: Rng + CryptoRng>(
+pub fn schedule_prep_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     spacing: &BlockSpacing,
     start: BlockHeight,
@@ -576,7 +577,7 @@ pub fn schedule_prep_broadcast_heights<R: Rng + CryptoRng>(
     rng: &mut R,
 ) -> Vec<BlockHeight> {
     let delay = params.preparation_delay();
-    cumulative_broadcast_heights(spacing, start, n_txs, |rng| delay.draw_inner(rng), rng)
+    cumulative_scheduled_heights(spacing, start, n_txs, |rng| delay.draw_inner(rng), rng)
 }
 
 /// The canonical rolling EXPIRY height for a transfer at `current_height` (ZIP 318 EXPIRY MUST):
@@ -590,13 +591,13 @@ pub fn schedule_prep_broadcast_heights<R: Rng + CryptoRng>(
 pub use zcash_protocol::zip318::expiry_height;
 
 /// Compute the MINIMAL schedule of sync/proving wake-ups covering `transfers`, each given as
-/// `(id, anchor_boundary, broadcast_height)` — for a committed migration, a transfer's drawn
-/// [`MigrationTransaction::anchor_boundary`] and [`Schedule::broadcast_height`]. Returns one
+/// `(id, anchor_boundary, scheduled_height)` — for a committed migration, a transfer's drawn
+/// [`MigrationTransaction::anchor_boundary`] and [`Schedule::scheduled_height`]. Returns one
 /// [`SyncWakeup`] per wake-up, in strictly increasing height order; at each, the wallet syncs to
 /// the wake-up height and proves every transfer whose anchor boundary has settled.
 ///
 /// Each transfer must be proved after its anchor boundary settles (strictly below the tip, at
-/// least [`WakeupParams::settle_margin`] blocks past it) and strictly before its broadcast height
+/// least [`WakeupParams::settle_margin`] blocks past it) and strictly before its scheduled height
 /// (sync and broadcast never share a wake window), giving it a proving WINDOW of heights. The
 /// fewest wake-ups piercing every window is the classic minimum piercing-set problem, solved
 /// optimally by a greedy pass over the windows in deadline order; each wake-up lands at the
@@ -617,7 +618,7 @@ pub use zcash_protocol::zip318::expiry_height;
 /// whose clamped ready height is exactly `current_tip`): its mandatory piercing point covers them
 /// for free, which is what keeps the schedule minimal whenever overdue transfers are present.
 ///
-/// Returns [`WakeupScheduleError::InfeasibleTransfer`] for a transfer whose broadcast height is
+/// Returns [`WakeupScheduleError::InfeasibleTransfer`] for a transfer whose scheduled height is
 /// not at least two blocks above its anchor boundary (no settle-then-prove height exists), which
 /// no schedule produced by this crate contains.
 ///
@@ -728,8 +729,8 @@ pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
     Ok(wakeups)
 }
 
-/// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
-/// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`], both on
+/// Assemble a [`Schedule`] for each part: draw the cumulative scheduled heights from `commit_height`
+/// (see [`schedule_heights`]) and pair each with its canonical [`expiry_height`], both on
 /// a chain with the given `spacing`. Returns one [`Schedule`] per part, in the (already shuffled)
 /// part order the caller passes.
 pub fn schedule<R: Rng + CryptoRng>(
@@ -739,11 +740,11 @@ pub fn schedule<R: Rng + CryptoRng>(
     n_parts: usize,
     rng: &mut R,
 ) -> Vec<Schedule> {
-    schedule_broadcast_heights(params, spacing, commit_height, n_parts, rng)
+    schedule_heights(params, spacing, commit_height, n_parts, rng)
         .into_iter()
-        .map(|broadcast_height| Schedule {
-            broadcast_height,
-            expiry_height: expiry_height(spacing, broadcast_height),
+        .map(|scheduled_height| Schedule {
+            scheduled_height,
+            expiry_height: expiry_height(spacing, scheduled_height),
         })
         .collect()
 }
@@ -821,7 +822,7 @@ pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
 /// anchor cohorts rely on.
 ///
 /// The draw is [`draw_anchor_boundary`]'s recency-weighted draw against the NEW
-/// `broadcast_height`, with the candidate set floored at `prior_boundary` — the boundary being
+/// `scheduled_height`, with the candidate set floored at `prior_boundary` — the boundary being
 /// replaced — instead of the funding constraints: every note witnessable in the prior boundary's
 /// tree state is witnessable in every later one, so the floor preserves provability without the
 /// funding-note heights this crate's state does not hold. (A funding note that POSTDATES the
@@ -830,7 +831,7 @@ pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
 /// NU6.3-activation bound, which it satisfies by construction.
 ///
 /// Returns `None` when no candidate at or above `prior_boundary` lies strictly below the most
-/// recent boundary at `broadcast_height` — possible only when the prior boundary was itself
+/// recent boundary at `scheduled_height` — possible only when the prior boundary was itself
 /// drawn against a tip past the new schedule (a proving-time re-draw followed by a small shift);
 /// the caller keeps the prior boundary, which remains provable.
 ///
@@ -838,10 +839,10 @@ pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
 pub fn redraw_anchor_boundary<R: Rng + CryptoRng>(
     grid: AnchorGrid,
     prior_boundary: BlockHeight,
-    broadcast_height: BlockHeight,
+    scheduled_height: BlockHeight,
     rng: &mut R,
 ) -> Option<BlockHeight> {
-    let most_recent = grid.boundary_at_or_below(broadcast_height);
+    let most_recent = grid.boundary_at_or_below(scheduled_height);
     // Highest candidate: strictly below the most recent boundary (age >= 1).
     let highest = grid.boundary_before(most_recent)?;
     let lowest = grid.boundary_at_or_above(prior_boundary);
@@ -925,7 +926,7 @@ fn lowest_candidate_boundary(
 /// transfer whose observed chain tip is at or after this height always has at least one boundary
 /// to anchor to, so a schedule that places every broadcast at or after it never needs an anchor
 /// fallback; the scheduler MUST NOT place a transfer before it.
-pub fn earliest_broadcast_height(
+pub fn earliest_scheduled_height(
     grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
@@ -941,14 +942,14 @@ pub fn earliest_broadcast_height(
 /// mined at) for a transfer whose funding note is created at `funding_creation_height`.
 ///
 /// A transfer scheduled at target height `h` is broadcast from tip `h - 1`, and its candidate
-/// anchor set must be non-empty there; [`earliest_broadcast_height`] is the first such tip, so the
+/// anchor set must be non-empty there; [`earliest_scheduled_height`] is the first such tip, so the
 /// earliest target height is one above it. Saturates at `u32::MAX`.
 pub(crate) fn earliest_transfer_target(
     grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
 ) -> BlockHeight {
-    earliest_broadcast_height(grid, nu63_activation, funding_creation_height) + 1
+    earliest_scheduled_height(grid, nu63_activation, funding_creation_height) + 1
 }
 
 /// The latest chain tip from which a transaction scheduled at TARGET height `scheduled_height`
@@ -1198,7 +1199,7 @@ mod tests {
 
     /// Golden vectors for the ZIP 318 transfer delay over several seeds. These are the captured deterministic
     /// draws; the `seed=1` sequence matches the per-step gaps pinned in
-    /// [`schedule_broadcast_heights_golden`] (34, 6, 60, 16, 22, ...).
+    /// [`schedule_heights_golden`] (34, 6, 60, 16, 22, ...).
     #[test]
     fn draw_delay_golden() {
         let exp_seed1 = [34, 6, 60, 16, 22, 82, 41, 11];
@@ -1664,17 +1665,17 @@ mod tests {
         check(42, &exp_seed42);
     }
 
-    // --- schedule_broadcast_heights -----------------------------------------------------------
+    // --- schedule_heights -----------------------------------------------------------
 
     proptest! {
-        /// Broadcast heights are non-decreasing and start at or above the commit height
+        /// Scheduled heights are non-decreasing and start at or above the commit height
         /// (CUMULATIVE MUST).
         #[test]
-        fn broadcast_heights_monotone(commit in 0u32..5_000_000,
+        fn scheduled_heights_monotone(commit in 0u32..5_000_000,
                                       n in 0usize..40,
                                       seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
+            let hs = schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(commit);
             for h in hs {
@@ -1684,13 +1685,13 @@ mod tests {
         }
     }
 
-    /// Assert one golden schedule vector: the exact cumulative broadcast heights for a fixed
+    /// Assert one golden schedule vector: the exact cumulative scheduled heights for a fixed
     /// `(commit, n, seed)`, plus the structural invariants they must satisfy. The heights are captured
     /// from the deterministic [`ChaCha8Rng`], so they pin the exact delay draws as a regression guard;
     /// the invariant checks keep each vector auditable by eye, since each per-step GAP is the drawn
     /// inter-arrival delay and must be a valid `[0, TRANSFER_DELAY_CAP]` value.
     fn check_schedule_golden(commit: u32, n: usize, seed: u64, expected: &[u32]) {
-        let hs: Vec<u32> = schedule_broadcast_heights(
+        let hs: Vec<u32> = schedule_heights(
             &P,
             &crate::scheduling::BlockSpacing::UNIFORM,
             bh(commit),
@@ -1723,7 +1724,7 @@ mod tests {
     /// gaps noted so the drawn delays are visible. The ZIP 318 transfer delay has mean 66 blocks
     /// and cap 576.
     #[test]
-    fn schedule_broadcast_heights_golden() {
+    fn schedule_heights_golden() {
         // n = 0 schedules nothing, whatever the seed.
         check_schedule_golden(1_000_000, 0, 1, &[]);
         // gaps: 34, 6, 60, 16, 22
@@ -1757,7 +1758,7 @@ mod tests {
                                             n in 0usize..40,
                                             seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_prep_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(start), n, &mut r);
+            let hs = schedule_prep_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(start), n, &mut r);
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(start);
             for h in hs {
@@ -1970,25 +1971,25 @@ mod tests {
     }
 
     proptest! {
-        /// [`earliest_broadcast_height`] is the exact viability threshold: a tip at that height
+        /// [`earliest_scheduled_height`] is the exact viability threshold: a tip at that height
         /// always yields an anchor, and a tip one block earlier never does.
         #[test]
-        fn earliest_broadcast_height_is_the_viability_threshold(act in 0u32..1_000_000,
+        fn earliest_scheduled_height_is_the_viability_threshold(act in 0u32..1_000_000,
                                                                funding_offset in 0u32..2_000,
                                                                blocks in 1u32..500u32,
                                                                seed in any::<u64>()) {
             let i = interval(blocks);
             let funding = act + funding_offset;
-            let earliest = earliest_broadcast_height(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding));
+            let earliest = earliest_scheduled_height(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding));
             let mut r = rng(seed);
             prop_assert!(
                 draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest, &mut r).is_some(),
-                "a tip at the earliest broadcast height must have a candidate boundary"
+                "a tip at the earliest scheduled height must have a candidate boundary"
             );
             let mut r = rng(seed);
             prop_assert!(
                 draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest - 1, &mut r).is_none(),
-                "a tip below the earliest broadcast height must not"
+                "a tip below the earliest scheduled height must not"
             );
         }
 
@@ -2003,7 +2004,7 @@ mod tests {
             let grid = AnchorGrid::new(interval(blocks), BlockSpacing::UNIFORM);
             let funding = act + funding_offset;
             let base = earliest_transfer_target(grid, bh(act), bh(funding));
-            let first_target = cumulative_broadcast_heights(
+            let first_target = cumulative_scheduled_heights(
                 &BlockSpacing::UNIFORM,
                 base,
                 1,
@@ -2168,7 +2169,7 @@ mod tests {
 
     proptest! {
         /// A replacement boundary, when one exists, is on the grid, at or above the boundary it
-        /// replaces, and in-distribution against the NEW broadcast height: within
+        /// replaces, and in-distribution against the NEW scheduled height: within
         /// [`ANCHOR_AGE_CAP`] buckets strictly below its most recent grid boundary. `None` arises
         /// exactly when no candidate at or above the prior boundary lies strictly below that
         /// most recent boundary.
@@ -2255,10 +2256,10 @@ mod tests {
         ) {
             let p = SchedulingParams::ZIP_318;
             let after = BlockSpacing::with_nu7_activation(bh(0));
-            let uniform = schedule_broadcast_heights(
+            let uniform = schedule_heights(
                 &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
             );
-            let scaled = schedule_broadcast_heights(&p, &after, bh(commit), n, &mut rng(seed));
+            let scaled = schedule_heights(&p, &after, bh(commit), n, &mut rng(seed));
             for (u, s) in uniform.iter().zip(&scaled) {
                 prop_assert_eq!(u32::from(*s) - commit, R * (u32::from(*u) - commit));
             }
@@ -2277,11 +2278,11 @@ mod tests {
             let p = SchedulingParams::ZIP_318;
             let activation = commit + to_activation;
             let spacing = BlockSpacing::with_nu7_activation(bh(activation));
-            let uniform = schedule_broadcast_heights(
+            let uniform = schedule_heights(
                 &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
             );
             let crossing =
-                schedule_broadcast_heights(&p, &spacing, bh(commit), n, &mut rng(seed));
+                schedule_heights(&p, &spacing, bh(commit), n, &mut rng(seed));
             for (u, c) in uniform.iter().zip(&crossing) {
                 let u = u32::from(*u);
                 let expected = if u <= activation { u } else { activation + R * (u - activation) };
@@ -2318,14 +2319,14 @@ mod tests {
 
         // Identical delay draws under the same seed: only the grid differs.
         assert_eq!(
-            schedule_broadcast_heights(
+            schedule_heights(
                 &short,
                 &crate::scheduling::BlockSpacing::UNIFORM,
                 bh(2_000_000),
                 8,
                 &mut rng(5)
             ),
-            schedule_broadcast_heights(
+            schedule_heights(
                 &P,
                 &crate::scheduling::BlockSpacing::UNIFORM,
                 bh(2_000_000),
@@ -2336,7 +2337,7 @@ mod tests {
 
         // The anchor floor and every drawn anchor sit on the SHORT grid, not the ZIP 318 one.
         let (act, funding) = (bh(1_000), bh(1_100));
-        let earliest = earliest_broadcast_height(
+        let earliest = earliest_scheduled_height(
             crate::scheduling::AnchorGrid::new(
                 short.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM,
@@ -2354,7 +2355,7 @@ mod tests {
         assert_eq!(u32::from(earliest), 1_116); // 1_104 (first boundary >= funding) + 12
         assert!(
             earliest
-                < earliest_broadcast_height(
+                < earliest_scheduled_height(
                     crate::scheduling::AnchorGrid::new(
                         P.anchor_bucket_interval(),
                         crate::scheduling::BlockSpacing::UNIFORM
@@ -2420,9 +2421,9 @@ mod tests {
     // --- schedule wiring ----------------------------------------------------------------------
 
     /// Assert one golden [`schedule`] result: the exact broadcast/expiry height pairs for a fixed
-    /// `(commit, n, seed)`, plus the wiring invariants. The broadcast heights are cross-checked to
-    /// equal [`schedule_broadcast_heights`] on the same seed (identical RNG consumption), and each
-    /// expiry is checked to equal [`expiry_height`] of its broadcast height.
+    /// `(commit, n, seed)`, plus the wiring invariants. The scheduled heights are cross-checked to
+    /// equal [`schedule_heights`] on the same seed (identical RNG consumption), and each
+    /// expiry is checked to equal [`expiry_height`] of its scheduled height.
     fn check_schedule_golden_pairs(
         commit: u32,
         n: usize,
@@ -2439,7 +2440,7 @@ mod tests {
         );
         let broadcast: Vec<u32> = schedules
             .iter()
-            .map(|s| u32::from(s.broadcast_height()))
+            .map(|s| u32::from(s.scheduled_height()))
             .collect();
         let expiry: Vec<u32> = schedules
             .iter()
@@ -2453,10 +2454,10 @@ mod tests {
             expiry, expected_expiry,
             "schedule({commit}, &crate::scheduling::BlockSpacing::UNIFORM, {n}, seed={seed}) expiry"
         );
-        // Broadcast heights equal the cumulative-delay schedule for the same seed.
+        // Scheduled heights equal the cumulative-delay schedule for the same seed.
         assert_eq!(
             broadcast,
-            schedule_broadcast_heights(
+            schedule_heights(
                 &P,
                 &crate::scheduling::BlockSpacing::UNIFORM,
                 bh(commit),
@@ -2466,9 +2467,9 @@ mod tests {
             .into_iter()
             .map(u32::from)
             .collect::<Vec<u32>>(),
-            "broadcast heights must match the cumulative rule"
+            "scheduled heights must match the cumulative rule"
         );
-        // Each expiry is the canonical rolling window of its broadcast height, and broadcast >= commit.
+        // Each expiry is the canonical rolling window of its scheduled height, and broadcast >= commit.
         for (&b, &e) in broadcast.iter().zip(&expiry) {
             assert!(b >= commit, "broadcast {b} below commit {commit}");
             assert_eq!(
@@ -2483,8 +2484,8 @@ mod tests {
     }
 
     /// Golden vectors for [`schedule`]: the exact `(broadcast, expiry)` height pairs for fixed
-    /// `(commit, n, seed)` triples. Broadcast heights reuse the cumulative delays pinned in
-    /// [`schedule_broadcast_heights_golden`]; every expiry equals `expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, broadcast)`, and all
+    /// `(commit, n, seed)` triples. Scheduled heights reuse the cumulative delays pinned in
+    /// [`schedule_heights_golden`]; every expiry equals `expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, broadcast)`, and all
     /// broadcasts here fall inside one `EXPIRY_MODULUS` period so they share a single expiry height.
     #[test]
     fn schedule_golden() {
@@ -2493,7 +2494,7 @@ mod tests {
         let exp_expiry_empty: [u32; 0] = [];
         check_schedule_golden_pairs(1_000_000, 0, 1, &exp_broadcast_empty, &exp_expiry_empty);
 
-        // commit = 1_000_000, n = 5, seed = 1: broadcast heights and their shared expiry.
+        // commit = 1_000_000, n = 5, seed = 1: scheduled heights and their shared expiry.
         let exp_broadcast_c1m_seed1 = [1_000_034, 1_000_040, 1_000_100, 1_000_116, 1_000_138];
         let exp_expiry_c1m_seed1 = [1_036_800; 5];
         check_schedule_golden_pairs(
@@ -2517,10 +2518,10 @@ mod tests {
     }
 
     proptest! {
-        /// [`schedule`] pairs each broadcast height with its canonical expiry, the broadcast heights
-        /// follow the cumulative rule (equal to [`schedule_broadcast_heights`] on the same seed and
+        /// [`schedule`] pairs each scheduled height with its canonical expiry, the scheduled heights
+        /// follow the cumulative rule (equal to [`schedule_heights`] on the same seed and
         /// non-decreasing from the commit height), and each expiry is [`expiry_height`] of its
-        /// broadcast height.
+        /// scheduled height.
         #[test]
         fn schedule_pairs_broadcast_and_expiry(commit in 0u32..1_000_000,
                                                n in 0usize..24,
@@ -2528,18 +2529,18 @@ mod tests {
             let mut r = rng(seed);
             let schedules = schedule(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
             prop_assert_eq!(schedules.len(), n);
-            // Broadcast heights follow the cumulative delay rule (same RNG => same heights).
+            // Scheduled heights follow the cumulative delay rule (same RNG => same heights).
             let broadcast: Vec<BlockHeight> =
-                schedules.iter().map(|s| s.broadcast_height()).collect();
+                schedules.iter().map(|s| s.scheduled_height()).collect();
             prop_assert_eq!(
                 &broadcast,
-                &schedule_broadcast_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed))
+                &schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed))
             );
             let mut prev = bh(commit);
             for s in &schedules {
-                prop_assert!(s.broadcast_height() >= prev, "broadcast heights must be non-decreasing");
-                prev = s.broadcast_height();
-                prop_assert_eq!(s.expiry_height(), expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, s.broadcast_height()));
+                prop_assert!(s.scheduled_height() >= prev, "scheduled heights must be non-decreasing");
+                prev = s.scheduled_height();
+                prop_assert_eq!(s.expiry_height(), expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, s.scheduled_height()));
             }
         }
     }

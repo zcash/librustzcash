@@ -12,7 +12,7 @@
 //!
 //! Both bundle ANCHORS — and the spent note's Merkle witness — are DEFERRED to proving time
 //! ([ZIP 374]): a transfer is pre-signed long before it is proven and broadcast, against a bucketed
-//! boundary anchor drawn near its future broadcast height (see
+//! boundary anchor drawn near its future scheduled height (see
 //! [`draw_anchor_boundary`](crate::scheduling::draw_anchor_boundary)), whose tree state does not
 //! exist at build time. The V6 txid and sighash exclude shielded anchors, so the PCZT is built and
 //! signed with ABSENT anchor and witness fields, and the consumer installs the drawn boundary

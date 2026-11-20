@@ -1385,7 +1385,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     // The stored row carries its ZIP 318 classification from this same atomic write — while the
     // transaction is still UNMINED. The enhance path only stamps classifications for transactions
     // the wallet learns about by scanning, i.e. after they mine; a scheduled transfer sits stored
-    // and unmined until its broadcast height, and a wallet labeling (or holding back) its own
+    // and unmined until its scheduled height, and a wallet labeling (or holding back) its own
     // migration traffic during that window must not read "not classified" there.
     let (zip318_kind, mined_height): (i64, Option<i64>) = run
         .st

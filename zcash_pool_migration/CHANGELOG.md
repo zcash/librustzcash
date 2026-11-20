@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Renamed in `zcash_pool_migration::scheduling`:
+  - `Schedule::broadcast_height` -> `Schedule::scheduled_height`
+  - `schedule_broadcast_heights` -> `schedule_heights`
+  - `schedule_prep_broadcast_heights` -> `schedule_prep_heights`
+  - `earliest_broadcast_height` -> `earliest_scheduled_height`
+
 ### Fixed
 - `zcash_pool_migration::engine::plan_migration` and its variants no longer
   schedule a transfer whose only candidate anchor at its broadcast tip would be

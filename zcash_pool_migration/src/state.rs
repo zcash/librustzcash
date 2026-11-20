@@ -75,14 +75,14 @@ pub enum AdvanceStep {
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
     /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
     /// so a transfer remains provable from the moment its boundary settles until it is broadcast.
-    /// Proving EARLY — at a sync wake-up well before the broadcast height — is what keeps the
+    /// Proving EARLY — at a sync wake-up well before the scheduled height — is what keeps the
     /// sync-heavy work out of the broadcast session.
     Prove {
         /// The transactions to prove, earliest-ready first; never empty, and each id distinct.
         transactions: Vec<ProveTarget>,
     },
     /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
-    /// scheduled broadcast height has arrived.
+    /// scheduled height has arrived.
     Broadcast {
         /// The transaction to broadcast.
         id: MigrationTransferId,
@@ -546,7 +546,7 @@ impl MigrationState {
 
     /// EVERY pre-signed transaction ready to PROVE (move `Signed -> Proved`): each one's anchor
     /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
-    /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
+    /// sync wake-up well before its scheduled height, keeping the sync work and the
     /// broadcast in separate waking sessions — and the whole ready set is surfaced as ONE
     /// [`AdvanceStep::Prove`], because proving emits nothing a network observer can see, so
     /// nothing about it wants the one-at-a-time spacing the broadcast queue exists to provide.
@@ -646,7 +646,7 @@ impl MigrationState {
     /// prove (see [`crate::scheduling::schedule_sync_wakeups`], which defines the windows, the
     /// minimality guarantee, the jitter, and the immediate wake-up that collects overdue
     /// transfers). This is the schedule a background-constrained wallet registers with its OS,
-    /// alongside the (independent) broadcast heights the transfers themselves carry.
+    /// alongside the (independent) scheduled heights the transfers themselves carry.
     ///
     /// Unlike the sibling query methods, which take a [`DuenessTargets`] pair, this method takes a
     /// single observed tip: wake-up heights are floored at the tip (a wake-up at exactly
@@ -1303,7 +1303,7 @@ impl MigrationState {
     ///
     /// Proving is in turn DECOUPLED from the broadcast schedule: a transfer is provable as soon
     /// as its drawn anchor boundary settles (strictly below the chain tip), typically long before
-    /// its scheduled broadcast height. There is no deadline pressure — the wallet durably retains
+    /// its scheduled height. There is no deadline pressure — the wallet durably retains
     /// the boundary checkpoints its committed transfers anchor to (see
     /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
     /// so a transfer remains provable until it is broadcast — but proving at an early sync
@@ -1321,7 +1321,7 @@ impl MigrationState {
     /// late `Replan` slot once no live work remains.
     ///
     /// A missed schedule degrades gracefully rather than requiring reconciliation: a wallet that
-    /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
+    /// slept through a transfer's proving wake-ups and its scheduled height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired. The drive layer adds the RE-SPREAD on top:
     /// [`advance_migration`](crate::satisfiability::advance_migration) shifts the whole pending
@@ -2130,7 +2130,7 @@ mod tests {
         );
     }
 
-    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
+    /// A transfer with the given anchor boundary and scheduled height, in the given
     /// lifecycle state (never expiring, like `tx`).
     fn scheduled_transfer(
         id: u32,
