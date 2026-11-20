@@ -127,11 +127,11 @@ use {
             ll::wallet::generate_transparent_gap_addresses,
         },
         fees::StandardFeeRule,
-        wallet::TransparentAddressMetadata,
+        wallet::{TransparentAddressMetadata, TransparentAddressObservation},
     },
     zcash_keys::keys::transparent::{
         NonHardenedChildIndex, TransparentKeyScope,
-        gap_limits::{AddressStore, GapLimits},
+        gap_limits::{AddressStore, GapLimits, ReconcileOutcome},
     },
 };
 
@@ -2377,8 +2377,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         address: TransparentAddress,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_address(self.conn.0, &self.params, account, address)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_address(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            address,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2387,8 +2393,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkey(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkey,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2397,8 +2409,14 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkeys(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkeys,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2407,7 +2425,13 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
+        wallet::import_standalone_transparent_script(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            script,
+        )
     }
 
     fn get_next_available_address(
@@ -2491,8 +2515,9 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())
             .map_err(|e| PutBlocksError::Wallet(SqliteClientError::from(e)))?;
 
-        ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
+        ll::wallet::put_blocks::<_, _, SqliteClientError, commitment_tree::Error>(
             self,
+            &self.params.clone(),
             #[cfg(feature = "transparent-inputs")]
             self.gap_limits,
             from_state,
@@ -2959,6 +2984,24 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 }
 
+/// Re-derivation of a transaction's funding attribution, for the write paths that link a spend of
+/// a wallet output without recording the spending transaction's own recipients.
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL, R>
+    WalletDb<C, P, CL, R>
+{
+    /// Links a spend by the transaction `spending_tx` through `link`, and records that
+    /// transaction's funded outputs if the link is the first evidence that a wallet account funded
+    /// it. See [`wallet::attribution::link_spend`].
+    fn link_spend<T>(
+        &self,
+        spending_tx: TxRef,
+        link: impl FnOnce(&rusqlite::Transaction<'a>) -> Result<T, SqliteClientError>,
+    ) -> Result<T, SqliteClientError> {
+        let conn = self.conn.borrow();
+        wallet::attribution::link_spend(conn, &self.params, spending_tx, || link(conn))
+    }
+}
+
 impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: Rng>
     LowLevelWalletWrite for WalletDb<C, P, CL, R>
 {
@@ -3060,14 +3103,21 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         target_or_mined_height: Option<BlockHeight>,
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error> {
-        wallet::sapling::put_received_note(
-            self.conn.borrow(),
-            &self.params,
-            output,
-            tx_ref,
-            target_or_mined_height,
-            spent_in,
-        )?;
+        let put = |conn: &rusqlite::Transaction<'a>| {
+            wallet::sapling::put_received_note(
+                conn,
+                &self.params,
+                output,
+                tx_ref,
+                target_or_mined_height,
+                spent_in,
+            )
+        };
+
+        match spent_in {
+            Some(spent_in) => self.link_spend(spent_in, put),
+            None => put(self.conn.borrow()),
+        }?;
 
         Ok(())
     }
@@ -3077,7 +3127,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::sapling::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::sapling::mark_sapling_note_spent(self.conn.borrow(), tx_ref, nf)
+        self.link_spend(tx_ref, |conn| {
+            wallet::sapling::mark_sapling_note_spent(conn, tx_ref, nf)
+        })
     }
 
     fn track_block_sapling_nullifiers(
@@ -3096,15 +3148,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         target_or_mined_height: Option<BlockHeight>,
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error> {
-        wallet::orchard::put_received_note(
-            self.conn.borrow(),
-            &self.params,
-            ShieldedPool::Orchard,
-            output,
-            tx_ref,
-            target_or_mined_height,
-            spent_in,
-        )?;
+        let put = |conn: &rusqlite::Transaction<'a>| {
+            wallet::orchard::put_received_note(
+                conn,
+                &self.params,
+                ShieldedPool::Orchard,
+                output,
+                tx_ref,
+                target_or_mined_height,
+                spent_in,
+            )
+        };
+
+        match spent_in {
+            Some(spent_in) => self.link_spend(spent_in, put),
+            None => put(self.conn.borrow()),
+        }?;
 
         Ok(())
     }
@@ -3117,15 +3176,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         target_or_mined_height: Option<BlockHeight>,
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error> {
-        wallet::orchard::put_received_note(
-            self.conn.borrow(),
-            &self.params,
-            ShieldedPool::Ironwood,
-            output,
-            tx_ref,
-            target_or_mined_height,
-            spent_in,
-        )?;
+        let put = |conn: &rusqlite::Transaction<'a>| {
+            wallet::orchard::put_received_note(
+                conn,
+                &self.params,
+                ShieldedPool::Ironwood,
+                output,
+                tx_ref,
+                target_or_mined_height,
+                spent_in,
+            )
+        };
+
+        match spent_in {
+            Some(spent_in) => self.link_spend(spent_in, put),
+            None => put(self.conn.borrow()),
+        }?;
 
         Ok(())
     }
@@ -3136,7 +3202,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::orchard::mark_orchard_note_spent(self.conn.borrow(), tx_ref, nf)
+        self.link_spend(tx_ref, |conn| {
+            wallet::orchard::mark_orchard_note_spent(conn, tx_ref, nf)
+        })
     }
 
     #[cfg(feature = "orchard")]
@@ -3145,7 +3213,9 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
     ) -> Result<bool, Self::Error> {
-        wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)
+        self.link_spend(tx_ref, |conn| {
+            wallet::orchard::mark_ironwood_note_spent(conn, tx_ref, nf)
+        })
     }
 
     #[cfg(feature = "orchard")]
@@ -3243,9 +3313,24 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             output,
             observation_height,
             known_unspent,
+            wallet::transparent::GapAdvance::Immediate,
         )?;
 
         Ok((account_uuid, key_scope.as_transparent()))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn put_transparent_address_observations(
+        &mut self,
+        tx_ref: Self::TxRef,
+        observations: &[TransparentAddressObservation],
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::observations::put_observations(
+            self.conn.borrow(),
+            &self.params,
+            tx_ref,
+            observations,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -3727,6 +3812,26 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             account_id,
             key_scope,
             list,
+        )
+    }
+
+    fn reconcile_stored_addresses(
+        &mut self,
+        _account_id: Self::AccountRef,
+        _key_scope: TransparentKeyScope,
+        added: &[(Address, TransparentAddress, NonHardenedChildIndex)],
+    ) -> Result<ReconcileOutcome, Self::Error> {
+        // The shared reconciliation helper is address-keyed, and derives each address's account
+        // and key scope from its `addresses` row rather than taking them as arguments: its other
+        // callers — standalone receiver import, and the whole-book pass that account creation
+        // and the index migration run — have no single `(account, key scope)` to supply. The
+        // uniqueness index on `cached_transparent_receiver_address` makes that derivation a
+        // function, so the trait's arguments carry no information the row does not.
+        wallet::transparent::observations::reconcile_address_range(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            added,
         )
     }
 }
