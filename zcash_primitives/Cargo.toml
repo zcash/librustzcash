@@ -37,11 +37,11 @@ sha2.workspace = true
 memuse.workspace = true
 
 # - Shielded protocols
-ff.workspace = true
-jubjub.workspace = true
-nonempty.workspace = true
-orchard.workspace = true
-sapling.workspace = true
+ff = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
+nonempty = { workspace = true, optional = true }
+orchard = { workspace = true, optional = true }
+sapling = { workspace = true, optional = true }
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
@@ -65,7 +65,7 @@ document-features = { workspace = true, optional = true }
 hex.workspace = true
 
 # - Shielded protocols
-redjubjub.workspace = true
+redjubjub = { workspace = true, optional = true }
 
 # No-std support
 corez.workspace = true
@@ -73,6 +73,7 @@ corez.workspace = true
 [dependencies.zcash_note_encryption]
 workspace = true
 features = ["pre-zip-212"]
+optional = true
 
 [dev-dependencies]
 bls12_381.workspace = true
@@ -95,9 +96,9 @@ pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 default = ["multicore", "std", "circuits"]
 std = [
     "document-features",
-    "redjubjub/std",
-    "sapling/std",
-    "orchard/std",
+    "redjubjub?/std",
+    "sapling?/std",
+    "orchard?/std",
     "transparent/std",
 ]
 
@@ -105,11 +106,35 @@ std = [
 ## `--cfg zcash_unstable="zip233"`.
 zip-233 = []
 
-## Enables creating proofs
-circuits = ["orchard/circuit", "sapling/circuit"]
+## Enables the Sapling shielded protocol domain types and conversions.
+##
+## Without this feature, Sapling bundles are still parsed, retained, and
+## re-serialized by the byte layer, but no typed Sapling values are constructed.
+sapling = [
+    "dep:sapling",
+    "dep:redjubjub",
+    "dep:jubjub",
+    "dep:ff",
+    "dep:zcash_note_encryption",
+]
+
+## Enables the Orchard and Ironwood shielded protocol domain types and
+## conversions.
+##
+## Without this feature, Orchard and Ironwood bundles are still parsed,
+## retained, and re-serialized by the byte layer, but no typed Orchard values
+## are constructed.
+orchard = [
+    "dep:orchard",
+    "dep:nonempty",
+    "dep:zcash_note_encryption",
+]
+
+## Enables creating proofs. This requires both shielded protocol domains.
+circuits = ["sapling", "orchard", "orchard/circuit", "sapling/circuit"]
 
 ## Enables multithreading support for creating proofs.
-multicore = ["orchard/multicore", "sapling/multicore"]
+multicore = ["orchard?/multicore", "sapling?/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
 transparent-inputs = [
@@ -125,8 +150,8 @@ temporary-zcashd = []
 test-dependencies = [
     "dep:proptest",
     "incrementalmerkletree/test-dependencies",
-    "orchard/test-dependencies",
-    "sapling/test-dependencies",
+    "orchard?/test-dependencies",
+    "sapling?/test-dependencies",
     "transparent/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]

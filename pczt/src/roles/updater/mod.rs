@@ -247,7 +247,7 @@ fn ensure_anchor_update_supported(global: &Global) -> Result<(), AnchorUpdateErr
         Ok(BranchId::Nu7) => Ok(()),
         #[cfg(zcash_unstable = "nu8")]
         Ok(BranchId::Nu8) => Ok(()),
-        #[cfg(all(zcash_unstable = "nutachyon", zcash_unstable = "nu8"))]
+        #[cfg(zcash_unstable = "nutachyon")]
         Ok(BranchId::NuTachyon) => Ok(()),
         Ok(_) => Err(AnchorUpdateError::UnsupportedConsensusBranchId),
         Err(_) => Err(AnchorUpdateError::UnknownConsensusBranchId),

@@ -10,6 +10,7 @@ use super::{
     sighash_v6::v6_signature_hash,
     txid::TxIdDigester,
 };
+#[cfg(feature = "sapling")]
 use ::sapling::bundle::GrothProofBytes;
 use ::transparent::sighash::TransparentAuthorizingContext;
 use zcash_protocol::value::Zatoshis;
@@ -56,6 +57,7 @@ pub struct PrecomputedSighashData<A: Authorization> {
     transparent_inputs_digests: Option<TransparentInputsDigests>,
 }
 
+#[cfg(feature = "sapling")]
 impl<TA, SA, A> PrecomputedSighashData<A>
 where
     TA: TransparentAuthorizingContext<Zatoshis>,
@@ -68,11 +70,25 @@ where
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 TxDigests::Zip143(zip143_digests(&tx))
             }
-            TxVersion::V5 | TxVersion::V6 => TxDigests::Zip244(tx.digest(TxIdDigester)),
-            // v7 (ZIP 248) digests have their own tree shape, which `TxIdDigester`
-            // does not build.
-            #[cfg(zcash_unstable = "nu8")]
-            TxVersion::V7 => TxDigests::Zip244(tx.digest_v7()),
+            _ => TxDigests::Zip244(tx.digest(TxIdDigester)),
+        };
+        Self::from_tx_digests(tx, tx_digests)
+    }
+}
+
+#[cfg(not(feature = "sapling"))]
+impl<TA, A> PrecomputedSighashData<A>
+where
+    TA: TransparentAuthorizingContext,
+    A: Authorization<TransparentAuth = TA>,
+{
+    /// Computes the digests for `tx` without Sapling domain types.
+    pub fn new(tx: TransactionData<A>) -> Self {
+        let tx_digests = match tx.version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                TxDigests::Zip143(zip143_digests(&tx))
+            }
+            _ => TxDigests::Zip244(tx.digest(TxIdDigester)),
         };
         Self::from_tx_digests(tx, tx_digests)
     }
@@ -86,25 +102,21 @@ where
     /// Computes the digests for `tx`, which must be of version 5 or later.
     ///
     /// Unlike [`PrecomputedSighashData::new`], this does not require the Sapling proofs of
-    /// `tx` to be serialized, because [ZIP 244] and [ZIP 229] signature hashes do not commit
-    /// to them.
+    /// `tx` to be serialized, because [ZIP 244], [ZIP 229] and [ZIP 248] signature hashes do
+    /// not commit to them.
     ///
     /// Returns [`Zip244Error::NotZip244`] if `tx` is of version 4 or earlier.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244
     /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
+    /// [ZIP 248]: https://zips.z.cash/zip-0248
     pub fn new_zip244(tx: TransactionData<A>) -> Result<Self, Zip244Error<A>> {
         match tx.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 Err(Zip244Error::NotZip244(Box::new(tx)))
             }
-            TxVersion::V5 | TxVersion::V6 => {
+            _ => {
                 let tx_digests = TxDigests::Zip244(tx.digest(TxIdDigester));
-                Ok(Self::from_tx_digests(tx, tx_digests))
-            }
-            #[cfg(zcash_unstable = "nu8")]
-            TxVersion::V7 => {
-                let tx_digests = TxDigests::Zip244(tx.digest_v7());
                 Ok(Self::from_tx_digests(tx, tx_digests))
             }
         }
