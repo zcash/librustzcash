@@ -5,6 +5,10 @@
 changelog = "pczt/CHANGELOG.md"
 tag_prefix = "pczt-"
 
+[zcash]
+changelog = "zcash/CHANGELOG.md"
+tag_prefix = "zcash-"
+
 [zcash_client_backend]
 changelog = "zcash_client_backend/CHANGELOG.md"
 tag_prefix = "zcash_client_backend-"

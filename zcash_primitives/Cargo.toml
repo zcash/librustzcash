@@ -136,7 +136,10 @@ circuits = ["sapling", "orchard", "orchard/circuit", "sapling/circuit"]
 ## Enables multithreading support for creating proofs.
 multicore = ["orchard?/multicore", "sapling?/multicore"]
 
-## Enables spending transparent notes with the transaction builder.
+## Enables spending transparent notes.
+##
+## Using the transaction builder also requires `sapling` and `orchard`.
+## PCZT construction does not require `circuits`.
 transparent-inputs = [
     "transparent/transparent-inputs",
     "dep:secp256k1",
