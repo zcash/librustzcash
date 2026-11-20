@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
+
 ### Changed
 - `zcash_protocol::TxId::from_hex` now returns
   `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
@@ -19,6 +22,10 @@ workspace.
   that take consensus parameters are unspecified for an implementation that
   violates it, including a `zcash_protocol::local_consensus::LocalNetwork`
   whose activation heights are out of order.
+
+### Deprecated
+- `zcash_protocol::zip318::BlockSpacing::nu7_activation`. Use
+  `Parameters::activation_height(NetworkUpgrade::Nu7)` instead.
 
 ## [0.11.0] - 2026-10-21
 

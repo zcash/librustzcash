@@ -808,8 +808,8 @@ pub(crate) struct PowTargetSpacingChange {
 ///
 /// The spacing before the first change is [`PRE_BLOSSOM_POW_TARGET_SPACING`]. Each change takes
 /// effect at the activation height of its upgrade. This list is the only definition of the
-/// per-height target spacing: [`pow_target_spacing`] and [`target_time_between`] both derive
-/// from it.
+/// per-height target spacing: [`pow_target_spacing`], [`target_time_between`] and
+/// [`crate::zip318::BlockSpacing`] all derive from it.
 ///
 /// [ZIP 208]: https://zips.z.cash/zip-0208
 /// [ZIP 218]: https://zips.z.cash/zip-0218
