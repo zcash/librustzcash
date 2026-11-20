@@ -210,7 +210,7 @@ mod tests {
         assert_ne!(hex::encode(bytes), txid.to_string());
         assert_eq!(
             zcash_protocol::TxId::from_hex(&hex::encode(bytes)).map(|t| *t.as_ref()),
-            Some({
+            Ok({
                 let mut r = bytes;
                 r.reverse();
                 r

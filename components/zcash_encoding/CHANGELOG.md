@@ -7,8 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_encoding::ReverseHexError`
+
 ### Changed
 - MSRV is now 1.89
+- `zcash_encoding::ReverseHex::decode` now returns
+  `Result<[u8; 32], ReverseHexError>` instead of `Option<[u8; 32]>`.
 
 ## [0.5.1] - 2026-11-12
 

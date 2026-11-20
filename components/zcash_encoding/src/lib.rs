@@ -389,25 +389,76 @@ impl ReverseHex {
     }
 
     /// Decodes a reversed-hex string into a byte array by decoding the hex and
-    /// reversing the order of the bytes.
+    /// reversing the order of the bytes. Upper- and lower-case digits are both accepted.
     ///
-    /// Returns `None` if the hex decoding fails or if the output is the wrong
-    /// size.
-    pub fn decode(hex_str: &str) -> Option<[u8; 32]> {
+    /// # Errors
+    ///
+    /// - [`ReverseHexError::InvalidLength`] if the input is not exactly 64 bytes long.
+    /// - [`ReverseHexError::InvalidCharacter`] if the input contains a character that is
+    ///   not a hexadecimal digit.
+    pub fn decode(hex_str: &str) -> Result<[u8; 32], ReverseHexError> {
         let mut bytes = [0; 32];
-        let res = hex::decode_to_slice(hex_str, &mut bytes);
-        if res.is_err() {
-            return None;
+        if hex_str.len() != bytes.len() * HEX_DIGITS_PER_BYTE {
+            return Err(ReverseHexError::InvalidLength(hex_str.len()));
         }
+        hex::decode_to_slice(hex_str, &mut bytes).map_err(|e| match e {
+            hex::FromHexError::InvalidHexCharacter { c, index } => {
+                ReverseHexError::InvalidCharacter {
+                    character: c,
+                    index,
+                }
+            }
+            // The length was checked above, so `decode_to_slice` reports only invalid
+            // characters; map any other error to a length error rather than panicking.
+            hex::FromHexError::OddLength | hex::FromHexError::InvalidStringLength => {
+                ReverseHexError::InvalidLength(hex_str.len())
+            }
+        })?;
 
         bytes.reverse();
-        Some(bytes)
+        Ok(bytes)
     }
 }
+
+/// The number of hexadecimal digits that encode one byte.
+const HEX_DIGITS_PER_BYTE: usize = 2;
+
+/// Errors that can occur when decoding a [`ReverseHex`] string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReverseHexError {
+    /// The input is not exactly 64 bytes long. Carries the length of the input in bytes.
+    InvalidLength(usize),
+    /// The input contains a character that is not a hexadecimal digit.
+    InvalidCharacter {
+        /// The offending character.
+        character: char,
+        /// The byte offset of the offending character in the input.
+        index: usize,
+    },
+}
+
+impl core::fmt::Display for ReverseHexError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ReverseHexError::InvalidLength(len) => write!(
+                f,
+                "Expected 64 hexadecimal digits, but the input is {len} bytes long."
+            ),
+            ReverseHexError::InvalidCharacter { character, index } => write!(
+                f,
+                "Invalid hexadecimal character {character:?} at byte offset {index}."
+            ),
+        }
+    }
+}
+
+impl core::error::Error for ReverseHexError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::String;
     use core::fmt::Debug;
     use proptest::prelude::*;
 
@@ -416,8 +467,38 @@ mod tests {
         fn reverse_hex_roundtrip(bytes in prop::array::uniform32(any::<u8>())) {
             let encoded = ReverseHex::encode(&bytes);
             let decoded = ReverseHex::decode(&encoded);
-            prop_assert_eq!(decoded, Some(bytes));
+            prop_assert_eq!(decoded, Ok(bytes));
         }
+    }
+
+    #[test]
+    fn reverse_hex_decode() {
+        let ascending: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let ascending_hex = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
+        assert_eq!(ReverseHex::decode(ascending_hex), Ok(ascending));
+        assert_eq!(
+            ReverseHex::decode(&ascending_hex.to_uppercase()),
+            Ok(ascending)
+        );
+
+        assert_eq!(
+            ReverseHex::decode(&ascending_hex[1..]),
+            Err(ReverseHexError::InvalidLength(63))
+        );
+        assert_eq!(
+            ReverseHex::decode(""),
+            Err(ReverseHexError::InvalidLength(0))
+        );
+
+        let mut corrupted = String::from(ascending_hex);
+        corrupted.replace_range(17..18, "g");
+        assert_eq!(
+            ReverseHex::decode(&corrupted),
+            Err(ReverseHexError::InvalidCharacter {
+                character: 'g',
+                index: 17
+            })
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ use alloc::string::{String, ToString};
 use core::fmt;
 use corez::io::{self, Read, Write};
 
-use zcash_encoding::ReverseHex;
+use zcash_encoding::{ReverseHex, ReverseHexError};
 
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
@@ -64,8 +64,12 @@ impl TxId {
 
     /// Parses a transaction id from its canonical hexadecimal representation — the byte-reversed
     /// form produced by this type's [`Display`](fmt::Display) impl, as shown by block explorers
-    /// and node RPCs. Returns `None` if the input is not exactly 64 hexadecimal digits.
-    pub fn from_hex(s: &str) -> Option<Self> {
+    /// and node RPCs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReverseHexError`] if the input is not exactly 64 hexadecimal digits.
+    pub fn from_hex(s: &str) -> Result<Self, ReverseHexError> {
         ReverseHex::decode(s).map(TxId::from_bytes)
     }
 
@@ -111,17 +115,17 @@ mod tests {
     fn from_hex_inverts_display() {
         let bytes: [u8; 32] = core::array::from_fn(|i| i as u8);
         let txid = TxId::from_bytes(bytes);
-        assert_eq!(TxId::from_hex(&txid.to_string()), Some(txid));
+        assert_eq!(TxId::from_hex(&txid.to_string()), Ok(txid));
         assert_eq!(
             TxId::from_hex(&hex::encode(bytes)),
-            Some(TxId::from_bytes({
+            Ok(TxId::from_bytes({
                 let mut r = bytes;
                 r.reverse();
                 r
             })),
             "internal-order hex parses as the REVERSED id"
         );
-        assert_eq!(TxId::from_hex("beef"), None);
-        assert_eq!(TxId::from_hex("zz"), None);
+        assert!(TxId::from_hex("beef").is_err());
+        assert!(TxId::from_hex("zz").is_err());
     }
 }

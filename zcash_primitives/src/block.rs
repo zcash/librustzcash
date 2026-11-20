@@ -17,7 +17,7 @@ use memuse::DynamicUsage;
 use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
 
-use zcash_encoding::{Array, CompactSize, ReverseHex, Vector};
+use zcash_encoding::{Array, CompactSize, ReverseHex, ReverseHexError, Vector};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
@@ -52,9 +52,12 @@ impl fmt::Display for BlockHash {
 
 impl BlockHash {
     /// Parses a block hash from its byte-reversed hexadecimal representation, as produced by
-    /// this type's [`Display`](fmt::Display) impl and by node RPCs. Returns `None` if the input
-    /// is not exactly 64 hexadecimal digits.
-    pub fn from_hex(s: &str) -> Option<Self> {
+    /// this type's [`Display`](fmt::Display) impl and by node RPCs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReverseHexError`] if the input is not exactly 64 hexadecimal digits.
+    pub fn from_hex(s: &str) -> Result<Self, ReverseHexError> {
         ReverseHex::decode(s).map(BlockHash)
     }
 
@@ -359,13 +362,27 @@ impl Block {
     }
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use super::BlockHash;
+
+    /// Generates arbitrary block hashes.
+    pub fn arb_block_hash() -> impl Strategy<Value = BlockHash> {
+        any::<[u8; 32]>().prop_map(BlockHash)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Block, BlockHash, BlockHeader};
     use alloc::string::ToString;
     use alloc::vec::Vec;
+
     use proptest::prelude::*;
     use zcash_protocol::consensus::MAIN_NETWORK;
+
+    use super::{Block, BlockHash, BlockHeader, testing::arb_block_hash};
 
     const BLOCK_MAINNET_415000: [u8; 1640] = [
         0x04, 0x00, 0x00, 0x00, 0x52, 0x74, 0xb4, 0x3b, 0x9e, 0x4a, 0xd8, 0xf4, 0x3e, 0x93, 0xf7,
@@ -511,20 +528,27 @@ mod tests {
 
     #[test]
     fn block_hash_from_hex() {
+        /// The byte-reversed hex hash of [`BLOCK_MAINNET_415000`], as reported by node RPCs.
+        const BLOCK_MAINNET_415000_HASH_HEX: &str =
+            "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168";
+
         let header = BlockHeader::read(&BLOCK_MAINNET_415000[..]).unwrap();
         assert_eq!(
-            BlockHash::from_hex("0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168"),
-            Some(header.hash())
+            BlockHash::from_hex(BLOCK_MAINNET_415000_HASH_HEX),
+            Ok(header.hash())
         );
-        assert_eq!(BlockHash::from_hex("00"), None);
-        assert_eq!(BlockHash::from_hex(&"zz".repeat(32)), None);
+        assert_eq!(
+            BlockHash::from_hex(&BLOCK_MAINNET_415000_HASH_HEX.to_uppercase()),
+            Ok(header.hash())
+        );
+        assert!(BlockHash::from_hex(&BLOCK_MAINNET_415000_HASH_HEX[1..]).is_err());
+        assert!(BlockHash::from_hex(&"zz".repeat(32)).is_err());
     }
 
     proptest! {
         #[test]
-        fn block_hash_from_hex_inverts_display(bytes in any::<[u8; 32]>()) {
-            let hash = BlockHash(bytes);
-            prop_assert_eq!(BlockHash::from_hex(&hash.to_string()), Some(hash));
+        fn block_hash_from_hex_inverts_display(hash in arb_block_hash()) {
+            prop_assert_eq!(BlockHash::from_hex(&hash.to_string()), Ok(hash));
         }
     }
 }

@@ -484,10 +484,10 @@ impl service::TreeState {
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
     pub fn to_chain_state(&self) -> io::Result<ChainState> {
-        let hash = BlockHash::from_hex(&self.hash).ok_or_else(|| {
+        let hash = BlockHash::from_hex(&self.hash).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Block hash is not 64 hex digits.",
+                format!("Invalid block hash: {e}"),
             )
         })?;
 
@@ -1184,37 +1184,42 @@ impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transpo
 
 #[cfg(test)]
 mod tests {
-    use super::service;
     use zcash_primitives::block::BlockHash;
 
-    /// The byte-reversed hex hash of Mainnet block 415000, as served by lightwalletd.
-    const MAINNET_415000_HASH: &str =
-        "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168";
+    use super::service;
 
-    /// The height of [`MAINNET_415000_HASH`].
-    const MAINNET_415000_HEIGHT: u64 = 415_000;
+    /// An arbitrary block height for the tree states under test.
+    const TREE_STATE_HEIGHT: u64 = 415_000;
 
     #[test]
     fn to_chain_state_parses_block_hash() {
+        /// A block hash whose bytes in internal (little-endian) order are `0x00, 0x01, ..., 0x1f`.
+        const ASCENDING_BLOCK_HASH: BlockHash = BlockHash([
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f,
+        ]);
+
+        /// [`ASCENDING_BLOCK_HASH`] in the byte-reversed hex form served by lightwalletd.
+        const ASCENDING_BLOCK_HASH_HEX: &str =
+            "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
+
         let tree_state = service::TreeState {
-            height: MAINNET_415000_HEIGHT,
-            hash: MAINNET_415000_HASH.into(),
+            height: TREE_STATE_HEIGHT,
+            hash: ASCENDING_BLOCK_HASH_HEX.into(),
             ..Default::default()
         };
         let chain_state = tree_state.to_chain_state().unwrap();
-        assert_eq!(
-            chain_state.block_hash(),
-            BlockHash::from_hex(MAINNET_415000_HASH).unwrap()
-        );
-        assert_eq!(chain_state.block_hash().to_string(), MAINNET_415000_HASH);
+        assert_eq!(chain_state.block_hash(), ASCENDING_BLOCK_HASH);
     }
 
     #[test]
     fn to_chain_state_rejects_malformed_block_hash() {
+        let one_byte_short = "00".repeat(31);
         let not_hex = "zz".repeat(32);
-        for hash in ["", "00", &MAINNET_415000_HASH[2..], not_hex.as_str()] {
+        for hash in ["", "00", one_byte_short.as_str(), not_hex.as_str()] {
             let tree_state = service::TreeState {
-                height: MAINNET_415000_HEIGHT,
+                height: TREE_STATE_HEIGHT,
                 hash: hash.into(),
                 ..Default::default()
             };
