@@ -259,6 +259,7 @@ fn set_transaction_state(
                     t.unsatisfiable(),
                     t.spend_nullifiers().clone(),
                     t.broadcast_failure_at(),
+                    t.orchard_change(),
                 )
             } else {
                 t.clone()

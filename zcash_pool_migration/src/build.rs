@@ -30,6 +30,7 @@ mod transfer;
 pub use prep::{PlacedPrepOutput, build_prep_tx};
 pub use sign::sign_pczt;
 pub use transfer::build_transfer_pczt;
+pub(crate) use transfer::{TransferChange, build_transfer_pczt_with_change};
 
 #[cfg(test)]
 mod end_to_end;

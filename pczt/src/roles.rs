@@ -127,7 +127,10 @@ mod tests {
             builder::{BuildConfig, Builder, BundlePadding, PcztResult},
             fees::zip317,
         };
-        use zcash_protocol::{consensus::MainNetwork, value::Zatoshis};
+        use zcash_protocol::{
+            consensus::{BlockHeight, MainNetwork},
+            value::Zatoshis,
+        };
 
         use crate::{
             Pczt,
@@ -138,6 +141,21 @@ mod tests {
         };
 
         const SIGHASH_ALL_ANYONECANPAY: u8 = SIGHASH_ALL | SIGHASH_ANYONECANPAY;
+
+        /// The height the test transactions are built for.
+        const TARGET_HEIGHT: BlockHeight = BlockHeight::from_u32(10_000_000);
+
+        /// The value of every coin the test transactions spend.
+        const COIN_VALUE: Zatoshis = Zatoshis::const_from_u64(1_000_000);
+
+        /// The single output of a transaction spending `coins` coins into one output: their value
+        /// less the ZIP 317 minimum fee at [`TARGET_HEIGHT`], which a transaction of at most two
+        /// transparent inputs and one transparent output pays.
+        fn output_after_fee(coins: u64) -> Zatoshis {
+            (COIN_VALUE * coins)
+                .and_then(|value| value - zip317::minimum_fee(&MainNetwork, TARGET_HEIGHT))
+                .expect("the coins cover the fee")
+        }
 
         fn secret_key() -> secp256k1::SecretKey {
             secp256k1::SecretKey::from_secret_bytes([1; 32]).expect("valid")
@@ -152,14 +170,14 @@ mod tests {
             let addr = TransparentAddress::from_pubkey(&public_key(&secret_key()));
             (
                 OutPoint::new([1; 32], 1),
-                TxOut::new(Zatoshis::const_from_u64(1_000_000), addr.script().into()),
+                TxOut::new(COIN_VALUE, addr.script().into()),
             )
         }
 
         fn builder() -> Builder<MainNetwork, ()> {
             Builder::new(
                 MainNetwork,
-                10_000_000.into(),
+                TARGET_HEIGHT,
                 BuildConfig::Standard {
                     sapling_anchor: None,
                     orchard_anchor: None,
@@ -192,7 +210,7 @@ mod tests {
                 .add_transparent_p2pkh_input(pubkey, utxo, coin)
                 .unwrap();
             builder
-                .add_transparent_output(&addr, Zatoshis::const_from_u64(990_000))
+                .add_transparent_output(&addr, output_after_fee(1))
                 .unwrap();
             finalize(builder)
         }
@@ -393,7 +411,7 @@ mod tests {
             (
                 pubkey,
                 OutPoint::new([2; 32], 0),
-                TxOut::new(Zatoshis::const_from_u64(1_000_000), addr.script().into()),
+                TxOut::new(COIN_VALUE, addr.script().into()),
             )
         }
 
@@ -413,7 +431,7 @@ mod tests {
                 .add_transparent_p2pkh_input(attacker_pubkey, attacker_utxo, attacker_coin)
                 .unwrap();
             builder
-                .add_transparent_output(&attacker_addr, Zatoshis::const_from_u64(1_990_000))
+                .add_transparent_output(&attacker_addr, output_after_fee(2))
                 .unwrap();
 
             let mut pczt = finalize(builder);
@@ -517,7 +535,7 @@ mod tests {
             let contributor_pubkey = public_key(&contributor_sk);
             let contributor_utxo = OutPoint::new([3; 32], 0);
             let contributor_coin = TxOut::new(
-                Zatoshis::const_from_u64(1_000_000),
+                COIN_VALUE,
                 TransparentAddress::from_pubkey(&contributor_pubkey)
                     .script()
                     .into(),
@@ -537,7 +555,7 @@ mod tests {
                 .add_transparent_p2pkh_input(contributor_pubkey, contributor_utxo, contributor_coin)
                 .unwrap();
             builder
-                .add_transparent_output(&addr, Zatoshis::const_from_u64(1_990_000))
+                .add_transparent_output(&addr, output_after_fee(2))
                 .unwrap();
 
             let mut pczt = finalize(builder);

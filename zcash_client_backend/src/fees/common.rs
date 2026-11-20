@@ -4,7 +4,8 @@ use std::num::{NonZeroU64, NonZeroUsize};
 #[cfg(feature = "orchard")]
 use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::fees::{
-    FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
+    FeeRule, transparent,
+    zip317::{P2PKH_STANDARD_OUTPUT_SIZE, minimum_fee},
 };
 #[cfg(feature = "orchard")]
 use zcash_protocol::zip318::PoolMigrationConstants;
@@ -28,6 +29,11 @@ use super::{
 use super::orchard::{self as orchard_fees, OutputView as _};
 #[cfg(feature = "transparent-inputs")]
 use {super::TransparentChangePolicy, crate::data_api::TransparentChangeKind};
+
+/// The most dust [`DustAction::AddDustToFee`] folds into the fee, as a multiple of the ZIP 317
+/// minimum fee in effect at the target height; change above this cap is kept as a change output
+/// so that a mis-set dust threshold cannot burn more than this as fee.
+pub(crate) const DUST_TO_FEE_CAP_MINIMUM_FEES: u64 = 10;
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -832,8 +838,10 @@ where
                         // no change memo is given, we might omit the change output instead.
                         let fee_with_dust = (total_change + total_fee).ok_or_else(overflow)?;
 
-                        let reasonable_fee =
-                            (total_fee + (MINIMUM_FEE * 10u64).unwrap()).ok_or_else(overflow)?;
+                        let dust_cap = (minimum_fee(cfg.params, target_height.into())
+                            * DUST_TO_FEE_CAP_MINIMUM_FEES)
+                            .ok_or_else(overflow)?;
+                        let reasonable_fee = (total_fee + dust_cap).ok_or_else(overflow)?;
 
                         if fee_with_dust > reasonable_fee {
                             // Defend against losing money by using AddDustToFee with a too-high
