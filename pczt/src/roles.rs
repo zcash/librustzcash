@@ -10,6 +10,25 @@
 
 pub mod creator;
 
+/// The sighash policy to apply to a version 7 transparent input.
+///
+/// Version 7 variant 0 signatures support only `SIGHASH_ALL`. A configured policy
+/// that permits it therefore collapses to
+/// [`SighashPolicy::ALL_ONLY`](::transparent::sighash::SighashPolicy::ALL_ONLY),
+/// which keeps the caller's restriction; one that does not becomes
+/// [`SighashPolicy::EMPTY`](::transparent::sighash::SighashPolicy::EMPTY), so
+/// every input is refused.
+#[cfg(any(feature = "signer", feature = "spend-finalizer"))]
+pub(crate) fn v7_sighash_policy(
+    policy: ::transparent::sighash::SighashPolicy,
+) -> ::transparent::sighash::SighashPolicy {
+    if policy.permits(::transparent::sighash::SighashType::ALL) {
+        ::transparent::sighash::SighashPolicy::ALL_ONLY
+    } else {
+        ::transparent::sighash::SighashPolicy::EMPTY
+    }
+}
+
 #[cfg(feature = "io-finalizer")]
 pub mod io_finalizer;
 

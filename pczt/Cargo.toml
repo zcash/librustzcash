@@ -72,6 +72,7 @@ ripemd.workspace = true
 secp256k1.workspace = true
 sha2.workspace = true
 shardtree.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = [
     "test-dependencies",
     "transparent-inputs",

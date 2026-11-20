@@ -2,6 +2,7 @@
 //!
 //! - Creates bindingSig and extracts the final transaction.
 
+use alloc::vec::Vec;
 use core::{cell::RefCell, marker::PhantomData};
 use rand_core::{CryptoRng, Rng};
 
@@ -10,7 +11,20 @@ use zcash_primitives::transaction::{
     sighash::{PrecomputedSighashData, SignableInput},
 };
 
+#[cfg(zcash_unstable = "nu8")]
+use ::transparent::sighash::TransparentAuthorizingContext;
+
+#[cfg(zcash_unstable = "nu8")]
+use zcash_primitives::transaction::sighash::V7SignatureContext;
+
 use crate::Pczt;
+
+/// The per-index and binding signature hashes of the bundles of a version 7 transaction.
+struct V7ExtractorSighashes {
+    sapling: Option<(Vec<[u8; 32]>, [u8; 32])>,
+    orchard: Option<(Vec<[u8; 32]>, [u8; 32])>,
+    ironwood: Option<(Vec<[u8; 32]>, [u8; 32])>,
+}
 
 mod orchard;
 pub use self::orchard::OrchardError;
@@ -99,10 +113,67 @@ impl<'a> TransactionExtractor<'a> {
             },
         )?;
 
-        // The commitment being signed is shared across all shielded inputs.
+        // The commitment being signed is shared across all shielded inputs before
+        // version 7; version 7 gives each Spend, action and binding signature its own
+        // digest, so compute those before the transaction is consumed.
         let sighash_data = PrecomputedSighashData::new(tx_data);
-        let shielded_sighash = sighash_data.signature_hash(&SignableInput::Shielded);
+        #[cfg(zcash_unstable = "nu8")]
+        let is_v7 = matches!(
+            sighash_data.tx().version(),
+            zcash_primitives::transaction::TxVersion::V7
+        );
+        #[cfg(not(zcash_unstable = "nu8"))]
+        let is_v7 = false;
+        let shielded_sighash = (!is_v7).then(|| {
+            *sighash_data
+                .signature_hash(&SignableInput::Shielded)
+                .as_ref()
+        });
+
+        #[cfg(zcash_unstable = "nu8")]
+        let v7_sighashes = is_v7.then(|| V7ExtractorSighashes {
+            sapling: sighash_data.tx().sapling_bundle().map(|b| {
+                v7_bundle_sighashes(
+                    &sighash_data,
+                    b.shielded_spends().len(),
+                    |index| V7SignatureContext::SaplingSpend { index },
+                    V7SignatureContext::SaplingBinding,
+                )
+            }),
+            orchard: sighash_data.tx().orchard_bundle().map(|b| {
+                v7_bundle_sighashes(
+                    &sighash_data,
+                    b.actions().len(),
+                    |index| V7SignatureContext::OrchardAction { index },
+                    V7SignatureContext::OrchardBinding,
+                )
+            }),
+            ironwood: sighash_data.tx().ironwood_bundle().map(|b| {
+                v7_bundle_sighashes(
+                    &sighash_data,
+                    b.actions().len(),
+                    |index| V7SignatureContext::IronwoodAction { index },
+                    V7SignatureContext::IronwoodBinding,
+                )
+            }),
+        });
+        #[cfg(not(zcash_unstable = "nu8"))]
+        let v7_sighashes: Option<V7ExtractorSighashes> = None;
+
         let tx_data = sighash_data.into_tx();
+
+        let sapling_sighashes = v7_sighashes
+            .as_ref()
+            .and_then(|s| s.sapling.as_ref())
+            .map(|(spends, binding)| (spends.as_slice(), *binding));
+        let orchard_sighashes = v7_sighashes
+            .as_ref()
+            .and_then(|s| s.orchard.as_ref())
+            .map(|(actions, binding)| (actions.as_slice(), *binding));
+        let ironwood_sighashes = v7_sighashes
+            .as_ref()
+            .and_then(|s| s.ironwood.as_ref())
+            .map(|(actions, binding)| (actions.as_slice(), *binding));
 
         // Create the binding signatures. The bundle mappers each need the RNG, and
         // `try_map_bundles` calls them one at a time.
@@ -111,8 +182,17 @@ impl<'a> TransactionExtractor<'a> {
             |t| Ok(t.map(|t| t.map_authorization(transparent::RemoveInputInfo))),
             |s| {
                 s.map(|s| {
+                    if let Some((spend_sighashes, binding_sighash)) = sapling_sighashes {
+                        return s
+                            .apply_binding_signature_with_sighashes(
+                                spend_sighashes,
+                                binding_sighash,
+                                &mut **binding_rng.borrow_mut(),
+                            )
+                            .ok_or(Error::SighashMismatch);
+                    }
                     s.apply_binding_signature(
-                        *shielded_sighash.as_ref(),
+                        shielded_sighash.expect("pre-v7 signs a shared shielded digest"),
                         &mut **binding_rng.borrow_mut(),
                     )
                     .ok_or(Error::SighashMismatch)
@@ -120,9 +200,25 @@ impl<'a> TransactionExtractor<'a> {
                 .transpose()
             },
             |o| {
+                // `try_map_bundles` applies this closure to the Orchard bundle and then
+                // the Ironwood bundle, which have distinct digests. The bundle's own pool
+                // selects which set applies.
                 o.map(|o| {
+                    let sighashes = match o.bundle_version().value_pool() {
+                        ::orchard::ValuePool::Orchard => orchard_sighashes,
+                        ::orchard::ValuePool::Ironwood => ironwood_sighashes,
+                    };
+                    if let Some((action_sighashes, binding_sighash)) = sighashes {
+                        return o
+                            .apply_binding_signature_with_sighashes(
+                                action_sighashes,
+                                binding_sighash,
+                                &mut **binding_rng.borrow_mut(),
+                            )
+                            .ok_or(Error::SighashMismatch);
+                    }
                     o.apply_binding_signature(
-                        *shielded_sighash.as_ref(),
+                        shielded_sighash.expect("pre-v7 signs a shared shielded digest"),
                         &mut **binding_rng.borrow_mut(),
                     )
                     .ok_or(Error::SighashMismatch)
@@ -142,21 +238,60 @@ impl<'a> TransactionExtractor<'a> {
                 bundle,
                 spend_vk,
                 output_vk,
-                *shielded_sighash.as_ref(),
+                shielded_sighash,
+                sapling_sighashes,
             )
             .map_err(Error::Sapling)?;
         }
         if let Some(bundle) = tx.orchard_bundle() {
-            orchard::verify_bundle(&mut rng, bundle, orchard_vk, *shielded_sighash.as_ref())
-                .map_err(Error::Orchard)?;
+            orchard::verify_bundle(
+                &mut rng,
+                bundle,
+                orchard_vk,
+                shielded_sighash,
+                orchard_sighashes,
+            )
+            .map_err(Error::Orchard)?;
         }
         if let Some(bundle) = tx.ironwood_bundle() {
-            orchard::verify_bundle(&mut rng, bundle, orchard_vk, *shielded_sighash.as_ref())
-                .map_err(Error::Ironwood)?;
+            orchard::verify_bundle(
+                &mut rng,
+                bundle,
+                orchard_vk,
+                shielded_sighash,
+                ironwood_sighashes,
+            )
+            .map_err(Error::Ironwood)?;
         }
 
         Ok(tx)
     }
+}
+
+/// Computes the signature hash of every Spend or action of a bundle, plus that of its
+/// binding signature.
+#[cfg(zcash_unstable = "nu8")]
+fn v7_bundle_sighashes<TA, A>(
+    sighash_data: &PrecomputedSighashData<A>,
+    count: usize,
+    index_context: impl Fn(usize) -> V7SignatureContext<'static>,
+    binding_context: V7SignatureContext<'static>,
+) -> (Vec<[u8; 32]>, [u8; 32])
+where
+    TA: TransparentAuthorizingContext<zcash_protocol::value::Zatoshis>,
+    A: Authorization<TransparentAuth = TA>,
+{
+    let spends = (0..count)
+        .map(|index| {
+            *sighash_data
+                .signature_hash(&SignableInput::V7(index_context(index)))
+                .as_ref()
+        })
+        .collect();
+    let binding = *sighash_data
+        .signature_hash(&SignableInput::V7(binding_context))
+        .as_ref();
+    (spends, binding)
 }
 
 struct Unbound;

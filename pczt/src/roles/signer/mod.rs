@@ -63,13 +63,16 @@ use rand_core::{CryptoRng, Rng};
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE, SighashPolicy};
 use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput};
 
+#[cfg(zcash_unstable = "nu8")]
+use zcash_primitives::transaction::sighash::V7SignatureContext;
+
 use crate::{
     ExtractError, ParsedPczt, Pczt,
     common::{
         FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE, Global,
     },
-    precompute_sighash_data, sighash,
+    is_v7_version, precompute_sighash_data, sighash,
 };
 
 pub use crate::EffectsOnly;
@@ -169,6 +172,9 @@ pub struct Signer {
 
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
+    ///
+    /// Returns [`Error::Extract`] if the transaction version, branch, v7 expiry
+    /// height or signature counts are unsupported, or a bundle cannot be extracted.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
         let anchor_requirement =
             crate::common::AnchorRequirement::for_pre_authorization(pczt.global.tx_version);
@@ -196,7 +202,14 @@ impl Signer {
             |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
         let sighash_data = precompute_sighash_data(&global, tx_data)?;
-        let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
+        let is_v7 = is_v7_version(global.tx_version);
+        // Version 7 signs a distinct digest per shielded Spend, action and binding
+        // signature, so the shared digest is only meaningful before it.
+        let shielded_sighash = if is_v7 {
+            [0; 32]
+        } else {
+            sighash(&sighash_data, &SignableInput::Shielded)
+        };
 
         Ok(Self {
             global,
@@ -216,17 +229,124 @@ impl Signer {
     /// The default is [`SighashPolicy::ALL_ONLY`]; see [`SighashPolicy`] for why the
     /// sighash type a counterparty placed in the PCZT is only used if this Signer’s own
     /// policy permits it.
+    ///
+    /// Version 7 variant 0 signatures support only `SIGHASH_ALL`. A policy that permits
+    /// it is therefore applied as [`SighashPolicy::ALL_ONLY`]; a policy that does not is
+    /// applied as [`SighashPolicy::EMPTY`], under which every input is refused.
     pub fn with_transparent_sighash_policy(mut self, sighash_policy: SighashPolicy) -> Self {
         self.transparent_sighash_policy = sighash_policy;
         self
     }
 
+    /// Returns the policy applied to transparent inputs.
+    fn transparent_sighash_policy(&self) -> SighashPolicy {
+        if is_v7_version(self.global.tx_version) {
+            crate::roles::v7_sighash_policy(self.transparent_sighash_policy)
+        } else {
+            self.transparent_sighash_policy
+        }
+    }
+
     /// Calculates the signature digest that must be signed to authorize shielded spends.
+    ///
+    /// This is the shared digest used by version 5 and version 6 transactions, where
+    /// every shielded bundle, Spend, action and binding signature signs the same value.
+    /// Version 7 signs each shielded Spend, action and binding signature over its own
+    /// digest; use [`Self::sapling_sighash`], [`Self::orchard_sighash`] or
+    /// [`Self::ironwood_sighash`] for those.
     ///
     /// This can be used to produce a signature externally suitable for passing to e.g.
     /// [`Self::apply_orchard_signature`].}
+    ///
+    /// # Panics
+    ///
+    /// Panics if the PCZT holds a version 7 transaction.
+    /// Use [`Self::try_shielded_sighash`] to handle that case without panicking.
     pub fn shielded_sighash(&self) -> [u8; 32] {
-        self.shielded_sighash
+        self.try_shielded_sighash().expect(
+            "version 7 signatures each use their own digest; call `sapling_sighash`, \
+             `orchard_sighash` or `ironwood_sighash`",
+        )
+    }
+
+    /// Returns the shared shielded signature digest for a pre-v7 transaction.
+    ///
+    /// Returns [`Error::NoSharedShieldedSighash`] for v7, whose Spend, action and
+    /// binding signatures each use a distinct digest.
+    pub fn try_shielded_sighash(&self) -> Result<[u8; 32], Error> {
+        if is_v7_version(self.global.tx_version) {
+            Err(Error::NoSharedShieldedSighash)
+        } else {
+            Ok(self.shielded_sighash)
+        }
+    }
+
+    /// Calculates the signature digest that must be signed to authorize the Sapling Spend
+    /// at `index`.
+    ///
+    /// Before version 7 this is the shared shielded digest; version 7 signs each Spend
+    /// over its own index. This can be used to produce a signature externally suitable
+    /// for passing to [`Self::apply_sapling_signature`].
+    ///
+    /// Returns an error if `index` is invalid for this PCZT.
+    pub fn sapling_sighash(&self, index: usize) -> Result<[u8; 32], Error> {
+        if index >= self.sapling.bundle.spends().len() {
+            return Err(Error::InvalidIndex);
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        if is_v7_version(self.global.tx_version) {
+            return Ok(sighash(
+                &self.sighash_data,
+                &SignableInput::V7(V7SignatureContext::SaplingSpend { index }),
+            ));
+        }
+        Ok(self.shielded_sighash)
+    }
+
+    /// Calculates the signature digest that must be signed to authorize the Orchard action
+    /// at `index`.
+    ///
+    /// Before version 7 this is the shared shielded digest; version 7 signs each action
+    /// over its own index and pool. This can be used to produce a signature externally
+    /// suitable for passing to [`Self::apply_orchard_signature`] or
+    /// [`Self::apply_orchard_spend_auth_signature`].
+    ///
+    /// Returns an error if `index` is invalid for this PCZT.
+    pub fn orchard_sighash(&self, index: usize) -> Result<[u8; 32], Error> {
+        if index >= self.orchard.bundle.actions().len() {
+            return Err(Error::InvalidIndex);
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        if is_v7_version(self.global.tx_version) {
+            return Ok(sighash(
+                &self.sighash_data,
+                &SignableInput::V7(V7SignatureContext::OrchardAction { index }),
+            ));
+        }
+        Ok(self.shielded_sighash)
+    }
+
+    /// Calculates the signature digest that must be signed to authorize the Ironwood action
+    /// at `index`.
+    ///
+    /// Before version 7 this is the shared shielded digest; version 7 signs each action
+    /// over its own index and pool. This can be used to produce a signature externally
+    /// suitable for passing to [`Self::apply_ironwood_signature`] or
+    /// [`Self::apply_orchard_spend_auth_signature`].
+    ///
+    /// Returns an error if `index` is invalid for this PCZT.
+    pub fn ironwood_sighash(&self, index: usize) -> Result<[u8; 32], Error> {
+        if index >= self.ironwood.bundle.actions().len() {
+            return Err(Error::InvalidIndex);
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        if is_v7_version(self.global.tx_version) {
+            return Ok(sighash(
+                &self.sighash_data,
+                &SignableInput::V7(V7SignatureContext::IronwoodAction { index }),
+            ));
+        }
+        Ok(self.shielded_sighash)
     }
 
     /// Calculates the signature digest that must be signed to authorize the transparent
@@ -253,10 +373,13 @@ impl Signer {
                 |signable_input| {
                     sighash(
                         &self.sighash_data,
-                        &SignableInput::Transparent(signable_input),
+                        &SignableInput::transparent(
+                            self.sighash_data.tx().version(),
+                            signable_input,
+                        ),
                     )
                 },
-                self.transparent_sighash_policy,
+                self.transparent_sighash_policy(),
             )
             .map_err(Error::TransparentSign)
     }
@@ -271,11 +394,16 @@ impl Signer {
         index: usize,
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
-        let sighash_policy = self.transparent_sighash_policy;
+        let sighash_policy = self.transparent_sighash_policy();
         self.generate_or_append_transparent_signature(index, |input, sighash_data| {
             input.sign_with_sighash_policy(
                 index,
-                |input| sighash(sighash_data, &SignableInput::Transparent(input)),
+                |input| {
+                    sighash(
+                        sighash_data,
+                        &SignableInput::transparent(sighash_data.tx().version(), input),
+                    )
+                },
                 sk,
                 sighash_policy,
             )
@@ -292,11 +420,16 @@ impl Signer {
         index: usize,
         signature: secp256k1::ecdsa::Signature,
     ) -> Result<(), Error> {
-        let sighash_policy = self.transparent_sighash_policy;
+        let sighash_policy = self.transparent_sighash_policy();
         self.generate_or_append_transparent_signature(index, |input, sighash_data| {
             input.append_signature_with_sighash_policy(
                 index,
-                |input| sighash(sighash_data, &SignableInput::Transparent(input)),
+                |input| {
+                    sighash(
+                        sighash_data,
+                        &SignableInput::transparent(sighash_data.tx().version(), input),
+                    )
+                },
                 signature,
                 sighash_policy,
             )
@@ -393,6 +526,7 @@ impl Signer {
     where
         F: FnOnce(&mut sapling::pczt::Spend, [u8; 32]) -> Result<(), sapling::pczt::SignerError>,
     {
+        let sighash = self.sapling_sighash(index)?;
         let spend = self
             .sapling
             .bundle
@@ -412,7 +546,7 @@ impl Signer {
         .map_err(Error::SaplingVerify)?;
 
         // Generate or apply the signature.
-        f(spend, self.shielded_sighash).map_err(Error::SaplingSign)?;
+        f(spend, sighash).map_err(Error::SaplingSign)?;
 
         // Update transaction modifiability: all transaction effects have been committed
         // to by the signature.
@@ -486,6 +620,7 @@ impl Signer {
     where
         F: FnOnce(&mut orchard::pczt::Action, [u8; 32]) -> Result<(), orchard::pczt::SignerError>,
     {
+        let sighash = self.orchard_sighash(index)?;
         let action = self
             .orchard
             .bundle
@@ -506,7 +641,7 @@ impl Signer {
         .map_err(Error::OrchardVerify)?;
 
         // Generate or apply the signature.
-        f(action, self.shielded_sighash).map_err(Error::OrchardSign)?;
+        f(action, sighash).map_err(Error::OrchardSign)?;
 
         // Update transaction modifiability: all transaction effects have been committed
         // to by the signature.
@@ -556,6 +691,7 @@ impl Signer {
     where
         F: FnOnce(&mut orchard::pczt::Action, [u8; 32]) -> Result<(), orchard::pczt::SignerError>,
     {
+        let sighash = self.ironwood_sighash(index)?;
         let action = self
             .ironwood
             .bundle
@@ -576,7 +712,7 @@ impl Signer {
         .map_err(Error::IronwoodVerify)?;
 
         // Generate or apply the signature.
-        f(action, self.shielded_sighash).map_err(Error::IronwoodSign)?;
+        f(action, sighash).map_err(Error::IronwoodSign)?;
 
         // Update transaction modifiability: all transaction effects have been committed
         // to by the signature.
@@ -616,6 +752,8 @@ impl Signer {
 pub enum Error {
     Extract(crate::ExtractError),
     InvalidIndex,
+    /// The transaction uses distinct per-signature digests, not a shared shielded digest.
+    NoSharedShieldedSighash,
     IronwoodSign(orchard::pczt::SignerError),
     IronwoodVerify(orchard::pczt::VerifyError),
     OrchardSign(orchard::pczt::SignerError),
@@ -643,6 +781,110 @@ mod tests {
         orchard::{Action, Spend},
         roles::{creator::Creator, io_finalizer::IoFinalizer, updater::Updater},
     };
+
+    #[test]
+    fn legacy_sighash_accessors_reject_missing_spends_and_actions() {
+        /// No expiry or keys are needed to check an empty bundle's bounds.
+        const EXPIRY_DISABLED: u32 = 0;
+        /// Mainnet's registered coin type.
+        const COIN_TYPE: u32 = 133;
+        for branch in [BranchId::Nu6, BranchId::Nu7] {
+            let pczt = Creator::new(
+                branch.into(),
+                EXPIRY_DISABLED,
+                COIN_TYPE,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            let signer = Signer::new(pczt).unwrap();
+            assert_eq!(
+                signer.try_shielded_sighash().unwrap(),
+                signer.shielded_sighash()
+            );
+            for index in [0, usize::MAX] {
+                assert!(matches!(
+                    signer.sapling_sighash(index),
+                    Err(super::Error::InvalidIndex)
+                ));
+                assert!(matches!(
+                    signer.orchard_sighash(index),
+                    Err(super::Error::InvalidIndex)
+                ));
+                assert!(matches!(
+                    signer.ironwood_sighash(index),
+                    Err(super::Error::InvalidIndex)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_action_sighashes_are_shared_only_for_existing_indices() {
+        /// No expiry or keys are needed to check the one-action bundle's bounds.
+        const EXPIRY_DISABLED: u32 = 0;
+        /// Mainnet's registered coin type.
+        const COIN_TYPE: u32 = 133;
+        let mut pczt = Creator::new(BranchId::Nu7.into(), EXPIRY_DISABLED, COIN_TYPE, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        pczt.orchard
+            .actions
+            .push(crate::orchard::testing::dummy_action());
+        pczt.ironwood
+            .actions
+            .push(crate::orchard::testing::dummy_action());
+        let signer = Signer::new(pczt).unwrap();
+        assert_eq!(
+            signer.orchard_sighash(0).unwrap(),
+            signer.shielded_sighash()
+        );
+        assert_eq!(
+            signer.ironwood_sighash(0).unwrap(),
+            signer.shielded_sighash()
+        );
+        assert!(matches!(
+            signer.orchard_sighash(1),
+            Err(super::Error::InvalidIndex)
+        ));
+        assert!(matches!(
+            signer.ironwood_sighash(1),
+            Err(super::Error::InvalidIndex)
+        ));
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    #[test]
+    fn v7_shared_sighash_is_fallible_without_panicking() {
+        /// No expiry or keys are needed to check the version contract.
+        const EXPIRY_DISABLED: u32 = 0;
+        /// Mainnet's registered coin type.
+        const COIN_TYPE: u32 = 133;
+        let pczt = Creator::new_v7(BranchId::Nu8.into(), EXPIRY_DISABLED, COIN_TYPE, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let signer = Signer::new(pczt).unwrap();
+        assert!(matches!(
+            signer.try_shielded_sighash(),
+            Err(super::Error::NoSharedShieldedSighash)
+        ));
+        assert!(matches!(
+            signer.sapling_sighash(0),
+            Err(super::Error::InvalidIndex)
+        ));
+        assert!(matches!(
+            signer.orchard_sighash(0),
+            Err(super::Error::InvalidIndex)
+        ));
+        assert!(matches!(
+            signer.ironwood_sighash(0),
+            Err(super::Error::InvalidIndex)
+        ));
+    }
 
     /// Builds a fully-dummy (zero-valued, freshly-random-key) Ironwood action, whose
     /// spend the IO Finalizer signs itself via `dummy_sk`. This lets the IO Finalizer
@@ -786,5 +1028,187 @@ mod tests {
             crate::orchard::EncCiphertext::Encrypted(randomized_ciphertext)
         );
         assert_eq!(pczt.ironwood.actions[0].output.value, Some(0));
+    }
+}
+
+/// Version 7 variant 0 transparent signatures support only `SIGHASH_ALL`, so the Signer
+/// refuses any other sighash type even under [`SighashPolicy::ANY`].
+#[cfg(all(
+    test,
+    feature = "io-finalizer",
+    feature = "spend-finalizer",
+    feature = "tx-extractor",
+    zcash_unstable = "nu8"
+))]
+mod v7_policy_tests {
+    use alloc::{collections::BTreeMap, vec};
+
+    use ::transparent::sighash::{SighashPolicy, SighashType};
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
+    use ripemd::Ripemd160;
+    use sha2::{Digest, Sha256};
+    use zcash_protocol::consensus::BranchId;
+
+    use super::{Error, Signer};
+    use crate::{
+        Pczt,
+        roles::{
+            creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
+            tx_extractor::TransactionExtractor,
+        },
+        transparent,
+    };
+
+    /// A version 7 PCZT with one P2PKH input of the given sighash type, spendable by the
+    /// returned key.
+    fn pczt_with_p2pkh_input(sighash_type: SighashType) -> (Pczt, secp256k1::SecretKey) {
+        let sk = secp256k1::SecretKey::from_secret_bytes([1; 32]).unwrap();
+        let pubkey = sk.public_key().serialize();
+        let hash160: [u8; 20] = Ripemd160::digest(Sha256::digest(pubkey)).into();
+
+        let mut script_pubkey = vec![0x76, 0xa9, 0x14];
+        script_pubkey.extend_from_slice(&hash160);
+        script_pubkey.extend_from_slice(&[0x88, 0xac]);
+
+        let mut pczt = Creator::new_v7(BranchId::Nu8.into(), 100, 133, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        pczt.transparent.inputs.push(transparent::Input {
+            prevout_txid: [1; 32],
+            prevout_index: 0,
+            sequence: None,
+            required_time_lock_time: None,
+            required_height_lock_time: None,
+            script_sig: None,
+            value: 1_000,
+            script_pubkey,
+            redeem_script: None,
+            partial_signatures: BTreeMap::new(),
+            sighash_type: sighash_type.encode(),
+            bip32_derivation: BTreeMap::new(),
+            ripemd160_preimages: BTreeMap::new(),
+            sha256_preimages: BTreeMap::new(),
+            hash160_preimages: BTreeMap::from([(hash160, pubkey.to_vec())]),
+            hash256_preimages: BTreeMap::new(),
+            proprietary: BTreeMap::new(),
+        });
+        pczt.transparent.outputs.push(transparent::Output {
+            value: 500,
+            script_pubkey: vec![0x51],
+            redeem_script: None,
+            bip32_derivation: BTreeMap::new(),
+            user_address: None,
+            proprietary: BTreeMap::new(),
+        });
+        (pczt, sk)
+    }
+
+    fn assert_rejected(policy: SighashPolicy, sighash_type: SighashType) {
+        let (pczt, sk) = pczt_with_p2pkh_input(sighash_type);
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
+        let mut signer = Signer::new(pczt)
+            .unwrap()
+            .with_transparent_sighash_policy(policy);
+
+        fn disallowed<T>(result: Result<T, Error>) -> bool {
+            matches!(
+                result,
+                Err(Error::TransparentSign(
+                    ::transparent::pczt::SignerError::DisallowedSighashType(_)
+                ))
+            )
+        }
+
+        assert!(disallowed(signer.transparent_sighash(0)));
+
+        assert!(disallowed(signer.sign_transparent(0, &sk)));
+
+        let signature = secp256k1::ecdsa::sign(secp256k1::Message::from_digest([0; 32]), &sk);
+        assert!(disallowed(
+            signer.append_transparent_signature(0, signature)
+        ));
+    }
+
+    /// A policy excluding `ALL`, built on top of the empty policy.
+    fn non_all_policy() -> SighashPolicy {
+        SighashPolicy::EMPTY.permitting(SighashType::NONE)
+    }
+
+    #[test]
+    fn v7_signer_rejects_non_all_sighash_under_any() {
+        assert_rejected(SighashPolicy::ANY, SighashType::NONE);
+    }
+
+    #[test]
+    fn v7_signer_rejects_non_all_sighash_under_all_only() {
+        assert_rejected(SighashPolicy::ALL_ONLY, SighashType::NONE);
+    }
+
+    #[test]
+    fn v7_signer_rejects_all_sighash_under_empty() {
+        assert_rejected(SighashPolicy::EMPTY, SighashType::ALL);
+    }
+
+    #[test]
+    fn v7_signer_rejects_all_sighash_under_non_all_policy() {
+        assert_rejected(non_all_policy(), SighashType::ALL);
+    }
+
+    /// The Signer produces a transparent signature over the version 7 per-input digest,
+    /// and the Spend Finalizer accepts it.
+    #[test]
+    fn v7_signer_signs_transparent_over_the_v7_digest() {
+        let (pczt, sk) = pczt_with_p2pkh_input(SighashType::ALL);
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
+        let mut signer = Signer::new(pczt).unwrap();
+        let sighash = signer.transparent_sighash(0).unwrap();
+        signer.sign_transparent(0, &sk).unwrap();
+        let pczt = signer.finish();
+
+        let pubkey = sk.public_key().serialize();
+        let signature = pczt.transparent.inputs[0].partial_signatures[&pubkey].clone();
+        let (hash_type, der) = signature.split_last().unwrap();
+        assert_eq!(*hash_type, SighashType::ALL.encode());
+        secp256k1::ecdsa::Signature::from_der(der)
+            .unwrap()
+            .verify(secp256k1::Message::from_digest(sighash), &sk.public_key())
+            .expect("the signature verifies over the Signer's version 7 digest");
+
+        let pczt = SpendFinalizer::new(pczt)
+            .with_sighash_policy(SighashPolicy::ANY)
+            .finalize_spends()
+            .unwrap();
+        assert!(pczt.transparent.inputs[0].script_sig.is_some());
+
+        let tx = TransactionExtractor::new(pczt)
+            .extract(UnwrapErr(SysRng))
+            .unwrap();
+        assert!(tx.transparent_bundle().is_some());
+    }
+
+    /// An externally produced transparent signature is applied over the same version 7
+    /// per-input digest that the Signer exposes.
+    #[test]
+    fn v7_signer_applies_external_transparent_signature_over_the_v7_digest() {
+        let (pczt, sk) = pczt_with_p2pkh_input(SighashType::ALL);
+        let pczt = IoFinalizer::new(pczt)
+            .finalize_io(UnwrapErr(SysRng))
+            .unwrap();
+        let mut signer = Signer::new(pczt).unwrap();
+        let sighash = signer.transparent_sighash(0).unwrap();
+        let signature = secp256k1::ecdsa::sign(secp256k1::Message::from_digest(sighash), &sk);
+        signer.append_transparent_signature(0, signature).unwrap();
+        let pczt = signer.finish();
+
+        let pczt = SpendFinalizer::new(pczt)
+            .with_sighash_policy(SighashPolicy::ANY)
+            .finalize_spends()
+            .unwrap();
+        assert!(pczt.transparent.inputs[0].script_sig.is_some());
     }
 }

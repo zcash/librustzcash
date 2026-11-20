@@ -2,6 +2,28 @@ use zcash_script::script::Evaluable;
 
 use crate::address::TransparentAddress;
 
+#[cfg(any(test, feature = "test-dependencies"))]
+use {
+    crate::sighash::SighashType,
+    alloc::{collections::BTreeMap, vec::Vec},
+};
+
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<V> super::Input<V> {
+    /// Returns the input's partial signatures.
+    ///
+    /// Each value is a signature encoding as the Spend Finalizer consumes it: a
+    /// DER-encoded ECDSA signature followed by its sighash type byte.
+    pub fn partial_signatures_mut(&mut self) -> &mut BTreeMap<[u8; 33], Vec<u8>> {
+        &mut self.partial_signatures
+    }
+
+    /// Sets the sighash type that signatures for this input must use.
+    pub fn set_sighash_type(&mut self, sighash_type: SighashType) {
+        self.sighash_type = sighash_type;
+    }
+}
+
 impl<V> super::Input<V> {
     /// Verifies the consistency of this transparent input.
     ///
