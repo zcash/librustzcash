@@ -3597,7 +3597,7 @@ where
         scheduling::AnchorGrid::new(sched_params.anchor_bucket_interval(), spacing),
         nu63_activation,
         funding_creation,
-        scheduled_height,
+        scheduling::broadcast_tip(scheduled_height),
         rng,
     )
     .ok_or(RebuildError::NoCandidateAnchor)?;
@@ -4413,14 +4413,15 @@ where
         // what the schedule knows: the candidate set lies strictly above the NU6.3 activation, at
         // or after the height the funding notes are ESTIMATED to exist on-chain (the last drawn
         // preparation height plus the mining margin — the estimate `plan_migration` floored the
-        // schedule on), and strictly below the most recent boundary at the transfer's scheduled
-        // broadcast height. The estimate is not reality: a preparation that out-mines it leaves
-        // this boundary BELOW the funding note's actual creation height, where the note can never
-        // be witnessed — which is why `prove_transfer` re-validates the boundary against the
-        // funding preparation's real mined height at proving time and re-draws it there when the
-        // note postdates it (ZIP 318 anchor selection is a proving-time rule). The anchor and the
-        // funding note's witness are installed against the validated boundary through the PCZT
-        // Updater role at proving time (ZIP 374); nothing here needs them.
+        // schedule on), and strictly below the most recent boundary at the tip the transfer is
+        // broadcast from, one below its scheduled target height. The estimate is not reality: a
+        // preparation that out-mines it leaves this boundary BELOW the funding note's actual
+        // creation height, where the note can never be witnessed — which is why `prove_transfer`
+        // re-validates the boundary against the funding preparation's real mined height at proving
+        // time and re-draws it there when the note postdates it (ZIP 318 anchor selection is a
+        // proving-time rule). The anchor and the funding note's witness are installed against the
+        // validated boundary through the PCZT Updater role at proving time (ZIP 374); nothing here
+        // needs them.
         //
         // `plan_migration` floors the first scheduled transfer on this same estimate, so every
         // transfer has a candidate boundary by construction; an empty draw therefore means the plan
@@ -4502,7 +4503,7 @@ where
                 anchor_grid,
                 nu63_activation,
                 est_last_prep_height,
-                scheduled_height,
+                scheduling::broadcast_tip(scheduled_height),
                 self.rng,
             )
             .ok_or(CommitError::StalePlan)?;
