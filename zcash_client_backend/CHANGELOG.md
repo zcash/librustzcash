@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::wallet::TargetHeight` is now a re-export of
+  `zcash_primitives::transaction::TargetHeight`.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

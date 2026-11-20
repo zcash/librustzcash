@@ -36,11 +36,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 
 use nonempty::NonEmpty;
 use rand_core::CryptoRng;
-use std::{
-    num::NonZeroU32,
-    ops::{Add, Sub},
-    time::SystemTime,
-};
+use std::{num::NonZeroU32, time::SystemTime};
 
 use shardtree::error::{QueryError, ShardTreeError};
 
@@ -71,6 +67,7 @@ use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
+pub use zcash_primitives::transaction::TargetHeight;
 use zcash_primitives::transaction::{
     Transaction, TxId, TxVersion,
     builder::{BuildConfig, BuildResult, Builder, BundlePadding},
@@ -347,67 +344,6 @@ pub type ExtractErrT<DbT, N> = Error<
     Infallible,
     N,
 >;
-
-/// A wrapper type around [`BlockHeight`] that represents the _next_ chain tip.
-///
-/// Addition and subtraction are provided by proxying to [`BlockHeight`].
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TargetHeight(BlockHeight);
-
-impl TargetHeight {
-    /// Subtracts the provided value from this height, returning [`zcash_protocol::consensus::H0`]
-    /// if this would result in underflow of the wrapped `u32`.
-    pub fn saturating_sub(self, value: u32) -> BlockHeight {
-        self.0.saturating_sub(value)
-    }
-}
-
-impl From<BlockHeight> for TargetHeight {
-    fn from(value: BlockHeight) -> Self {
-        TargetHeight(value)
-    }
-}
-
-impl From<TargetHeight> for BlockHeight {
-    fn from(value: TargetHeight) -> Self {
-        value.0
-    }
-}
-
-impl From<TargetHeight> for u32 {
-    fn from(value: TargetHeight) -> Self {
-        u32::from(value.0)
-    }
-}
-
-impl From<u32> for TargetHeight {
-    fn from(value: u32) -> Self {
-        TargetHeight(BlockHeight::from_u32(value))
-    }
-}
-
-impl<I> Add<I> for TargetHeight
-where
-    BlockHeight: Add<I>,
-{
-    type Output = <BlockHeight as Add<I>>::Output;
-
-    fn add(self, rhs: I) -> Self::Output {
-        self.0 + rhs
-    }
-}
-
-impl<I> Sub<I> for TargetHeight
-where
-    BlockHeight: Sub<I>,
-{
-    type Output = <BlockHeight as Sub<I>>::Output;
-
-    fn sub(self, rhs: I) -> Self::Output {
-        self.0 - rhs
-    }
-}
 
 /// A description of the policy that is used to determine what notes are available for spending,
 /// based upon the number of confirmations (the number of blocks in the chain since and including
