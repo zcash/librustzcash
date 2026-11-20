@@ -12,10 +12,10 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_primitives::transaction::{TxId, builder::default_tx_expiry_delta, fees::zip317};
+use zcash_primitives::transaction::{TxId, fees::zip317};
 use zcash_protocol::{
     PoolType, ShieldedPool,
-    consensus::{self, BlockHeight, BranchId, UPGRADES_IN_ORDER},
+    consensus::{self, BlockHeight, BranchId, UPGRADES_IN_ORDER, default_tx_expiry_delta},
     value::{BalanceError, Zatoshis},
 };
 
@@ -1312,10 +1312,10 @@ mod tests {
         scanning::ScanPriority,
         testing::{AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
-    use zcash_primitives::{block::BlockHash, transaction::builder::default_tx_expiry_delta};
+    use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
         ShieldedPool,
-        consensus::{BlockHeight, BranchId},
+        consensus::{BlockHeight, BranchId, default_tx_expiry_delta},
         local_consensus::LocalNetwork,
         value::Zatoshis,
     };

@@ -6329,13 +6329,13 @@ mod tests {
         wallet::OvkPolicy,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
-    use zcash_primitives::{
-        block::BlockHash,
-        transaction::builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
-    };
+    use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
         TxId,
-        consensus::{BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters},
+        consensus::{
+            BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, BlockHeight, BranchId, MAIN_NETWORK,
+            NU7_DEFAULT_TX_EXPIRY_DELTA, NetworkUpgrade, Parameters,
+        },
         local_consensus::LocalNetwork,
         value::{ZatBalance, Zatoshis},
         zip318::{Zip318Classification, Zip318TxKind},

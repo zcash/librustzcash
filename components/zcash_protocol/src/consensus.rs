@@ -49,6 +49,51 @@ pub const BLOCKS_PER_HOUR: u32 = 3600 / SECONDS_PER_BLOCK;
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const NU7_POW_TARGET_SPACING_RATIO: u32 = 3;
 
+/// The default transaction expiry delta, in blocks, for transactions targeting a height before
+/// Blossom activation ([ZIP 203]).
+///
+/// [ZIP 203]: https://zips.z.cash/zip-0203
+pub const OVERWINTER_DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
+
+/// The default transaction expiry delta, in blocks, for transactions targeting a height from
+/// Blossom activation until NU7 activation ([ZIP 203]). It is about 50 minutes at the 75-second
+/// target block spacing.
+///
+/// [ZIP 203]: https://zips.z.cash/zip-0203#changes-for-blossom
+pub const BLOSSOM_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
+
+/// The default transaction expiry delta, in blocks, for transactions targeting a height from NU7
+/// activation onward ([ZIP 218]): 120 blocks, the same 50 minutes as
+/// [`BLOSSOM_DEFAULT_TX_EXPIRY_DELTA`] at the 25-second target block spacing.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218#default-expiry-delta
+pub const NU7_DEFAULT_TX_EXPIRY_DELTA: u32 =
+    NU7_POW_TARGET_SPACING_RATIO * BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
+
+/// Returns the default expiry delta, in blocks, for a transaction built under the rules of the
+/// given consensus branch.
+///
+/// Transaction builders set a non-coinbase transaction's expiry height to its target height plus this
+/// delta, unless the caller overrides the expiry height.
+pub fn default_tx_expiry_delta(consensus_branch_id: BranchId) -> u32 {
+    match consensus_branch_id {
+        BranchId::Sprout | BranchId::Overwinter | BranchId::Sapling => {
+            OVERWINTER_DEFAULT_TX_EXPIRY_DELTA
+        }
+        BranchId::Blossom
+        | BranchId::Heartwood
+        | BranchId::Canopy
+        | BranchId::Nu5
+        | BranchId::Nu6
+        | BranchId::Nu6_1
+        | BranchId::Nu6_2
+        | BranchId::Nu6_3 => BLOSSOM_DEFAULT_TX_EXPIRY_DELTA,
+        BranchId::Nu7 => NU7_DEFAULT_TX_EXPIRY_DELTA,
+        #[cfg(zcash_unstable = "nutachyon")]
+        BranchId::NuTachyon => NU7_DEFAULT_TX_EXPIRY_DELTA,
+    }
+}
+
 impl BlockHeight {
     pub const fn from_u32(v: u32) -> BlockHeight {
         BlockHeight(v)
