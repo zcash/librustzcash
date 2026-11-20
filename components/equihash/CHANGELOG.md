@@ -7,6 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `Params::new` now rejects parameter sets for which `is_valid_solution` would
+  panic: `n > 512` (which makes `indices_per_hash_output` zero), and index bit
+  widths outside `9..=25` for indices and `8..=24` for the leaf hashes
+  (`n / (k + 1) < 8` or `> 24`, which violate the byte
+  width and `u32` accumulator requirements of `minimal`). These now return
+  `Error::InvalidParams` like other invalid parameter sets. Parameter sets used
+  by Zcash and other Equihash chains (including `n = 144, k = 5`, the widest
+  index width, and `n = 64, k = 7`, the narrowest collision bit width) remain
+  supported.
+
 ### Changed
 - MSRV is now 1.89
 
