@@ -780,6 +780,76 @@ pub const POST_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(75);
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const POST_NU7_POW_TARGET_SPACING: Duration = Duration::from_secs(25);
 
+/// A change of the target block spacing at the activation of a network upgrade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PowTargetSpacingChange {
+    /// The network upgrade whose activation changes the spacing.
+    pub(crate) upgrade: NetworkUpgrade,
+    /// The target spacing of every block from the change onward, until the next change.
+    pub(crate) spacing: Duration,
+}
+
+/// The changes of the target block spacing defined by [ZIP 208] and [ZIP 218], in order.
+///
+/// The spacing before the first change is [`PRE_BLOSSOM_POW_TARGET_SPACING`]. Each change takes
+/// effect at the first height at which its upgrade and the upgrades of every earlier change are
+/// all active. This list is the only definition of the per-height target spacing:
+/// [`pow_target_spacing`] and [`target_time_between`] both derive from it.
+///
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub(crate) const POW_TARGET_SPACING_CHANGES: [PowTargetSpacingChange; 2] = [
+    PowTargetSpacingChange {
+        upgrade: NetworkUpgrade::Blossom,
+        spacing: POST_BLOSSOM_POW_TARGET_SPACING,
+    },
+    PowTargetSpacingChange {
+        upgrade: NetworkUpgrade::Nu7,
+        spacing: POST_NU7_POW_TARGET_SPACING,
+    },
+];
+
+/// Returns, for each of `changes` that takes effect on the network `params` describe, the first
+/// height at which it is in effect and the spacing it sets, in order.
+///
+/// The heights are non-decreasing. A change whose upgrade, or an earlier change's upgrade, never
+/// activates is omitted, along with every change after it.
+pub(crate) fn pow_target_spacing_schedule<'a, P: Parameters>(
+    params: &'a P,
+    changes: &'a [PowTargetSpacingChange],
+) -> impl Iterator<Item = (BlockHeight, Duration)> + 'a {
+    changes.iter().scan(H0, move |earliest, change| {
+        let activation = params.activation_height(change.upgrade)?;
+        *earliest = (*earliest).max(activation);
+        Some((*earliest, change.spacing))
+    })
+}
+
+/// Returns the sum of the target spacings of the heights in `[start, end)`.
+///
+/// `base` is the spacing of every height before the first entry of `schedule`, and each entry of
+/// `schedule` gives the first height of a run and the spacing of every height in it, with
+/// non-decreasing heights. Heights are `u64` so that `end` may lie one past `u32::MAX`. Returns
+/// [`Duration::ZERO`] if `end <= start`.
+pub(crate) fn sum_of_spacings(
+    base: Duration,
+    schedule: impl Iterator<Item = (BlockHeight, Duration)>,
+    start: u64,
+    end: u64,
+) -> Duration {
+    let (run_start, spacing, total_secs) = schedule
+        .map(|(height, spacing)| (u64::from(height), spacing))
+        .take_while(|(height, _)| *height < end)
+        .fold(
+            (start, base, 0u64),
+            |(run_start, spacing, total_secs), (height, next_spacing)| {
+                let run_secs = height.saturating_sub(run_start) * spacing.as_secs();
+                (run_start.max(height), next_spacing, total_secs + run_secs)
+            },
+        );
+    Duration::from_secs(total_secs + end.saturating_sub(run_start) * spacing.as_secs())
+}
+
 /// Returns the target spacing between the block at `height` and its parent, as defined by
 /// [ZIP 208] and [ZIP 218].
 ///
@@ -791,13 +861,20 @@ pub const POST_NU7_POW_TARGET_SPACING: Duration = Duration::from_secs(25);
 /// [ZIP 208]: https://zips.z.cash/zip-0208
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub fn pow_target_spacing<P: Parameters>(params: &P, height: BlockHeight) -> Duration {
-    if !params.is_nu_active(NetworkUpgrade::Blossom, height) {
-        PRE_BLOSSOM_POW_TARGET_SPACING
-    } else if !params.is_nu_active(NetworkUpgrade::Nu7, height) {
-        POST_BLOSSOM_POW_TARGET_SPACING
-    } else {
-        POST_NU7_POW_TARGET_SPACING
-    }
+    pow_target_spacing_with(&POW_TARGET_SPACING_CHANGES, params, height)
+}
+
+/// Returns the target spacing at `height` under the spacing changes `changes`; see
+/// [`pow_target_spacing`].
+pub(crate) fn pow_target_spacing_with<P: Parameters>(
+    changes: &[PowTargetSpacingChange],
+    params: &P,
+    height: BlockHeight,
+) -> Duration {
+    pow_target_spacing_schedule(params, changes)
+        .take_while(|(start, _)| *start <= height)
+        .last()
+        .map_or(PRE_BLOSSOM_POW_TARGET_SPACING, |(_, spacing)| spacing)
 }
 
 /// Returns the target time from the block at height `from` to the block at height `to`.
@@ -810,34 +887,22 @@ pub fn target_time_between<P: Parameters>(
     from: BlockHeight,
     to: BlockHeight,
 ) -> Duration {
-    if to <= from {
-        return Duration::ZERO;
-    }
-    // The number of heights in `(from, to]` at or above `start`, or zero if `start` is `None`.
-    // `from < to`, so `from + 1` does not saturate.
-    let heights_at_or_above = |start: Option<BlockHeight>| -> u64 {
-        start.map_or(0, |start| {
-            let first = start.max(from + 1);
-            if first > to {
-                0
-            } else {
-                u64::from(to) - u64::from(first) + 1
-            }
-        })
-    };
-    // `pow_target_spacing` changes value only at Blossom activation and at the first height at
-    // which both Blossom and NU7 are active, which splits `(from, to]` into at most three runs.
-    let blossom = params.activation_height(NetworkUpgrade::Blossom);
-    let post_nu7_start = blossom
-        .zip(params.activation_height(NetworkUpgrade::Nu7))
-        .map(|(blossom_height, nu7_height)| blossom_height.max(nu7_height));
-    let all_heights = u64::from(to - from);
-    let post_blossom_or_later = heights_at_or_above(blossom);
-    let post_nu7 = heights_at_or_above(post_nu7_start);
-    Duration::from_secs(
-        (all_heights - post_blossom_or_later) * PRE_BLOSSOM_POW_TARGET_SPACING.as_secs()
-            + (post_blossom_or_later - post_nu7) * POST_BLOSSOM_POW_TARGET_SPACING.as_secs()
-            + post_nu7 * POST_NU7_POW_TARGET_SPACING.as_secs(),
+    target_time_between_with(&POW_TARGET_SPACING_CHANGES, params, from, to)
+}
+
+/// Returns the target time from `from` to `to` under the spacing changes `changes`; see
+/// [`target_time_between`].
+pub(crate) fn target_time_between_with<P: Parameters>(
+    changes: &[PowTargetSpacingChange],
+    params: &P,
+    from: BlockHeight,
+    to: BlockHeight,
+) -> Duration {
+    sum_of_spacings(
+        PRE_BLOSSOM_POW_TARGET_SPACING,
+        pow_target_spacing_schedule(params, changes),
+        u64::from(from) + 1,
+        u64::from(to) + 1,
     )
 }
 
