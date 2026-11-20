@@ -23,6 +23,17 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
+/// The parameter names that ZIP 321 reserves for specific meanings.
+///
+/// An `otherparam` may have one of these names (the grammar permits it), but
+/// it is then a different thing from the reserved parameter of the same name:
+/// `label` (no `=`) is an extension parameter, while `label=` is a
+/// [`Param::Label`]. They still count as the same parameter for the purposes
+/// of ZIP 321's uniqueness rule, and the reserved name is what makes
+/// rendering such an extension parameter require care (see
+/// [`render::other_param`]).
+const RESERVED_PARAM_NAMES: &[&str] = &["address", "amount", "memo", "label", "message"];
+
 /// Errors that may be produced in constructing a [`Payment`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaymentError {
@@ -428,7 +439,7 @@ impl TransactionRequest {
                     payment
                         .other_params
                         .iter()
-                        .map(move |(name, value)| render::str_param(name, value, payment_index)),
+                        .map(move |(name, value)| render::other_param(name, value, payment_index)),
                 )
         }
 
@@ -524,6 +535,7 @@ mod render {
         value::{COIN, Zatoshis},
     };
 
+    use super::RESERVED_PARAM_NAMES;
     use super::memo_to_base64;
 
     /// The set of ASCII characters that must be percent-encoded according
@@ -604,6 +616,24 @@ mod render {
             utf8_percent_encode(value, QCHAR_ENCODE)
         )
     }
+
+    /// Constructs a key/value pair for an `otherparam` at the specified
+    /// parameter index.
+    ///
+    /// An extension parameter with a reserved name and an empty value must be
+    /// rendered without `=`: rendering it as `name=` would reparse as the
+    /// reserved parameter (for example `label=` becomes a `label` parameter),
+    /// or fail to parse entirely (as with `amount=`). Such a parameter can
+    /// only have been parsed valueless, because the `=`-present forms of
+    /// reserved names parse to their reserved [`Param`](crate::parse::Param)
+    /// variants (or are rejected, as with `amount=`).
+    pub fn other_param(name: &str, value: &str, idx: Option<usize>) -> String {
+        if value.is_empty() && RESERVED_PARAM_NAMES.contains(&name) {
+            format!("{name}{}", param_index(idx))
+        } else {
+            str_param(name, value, idx)
+        }
+    }
 }
 
 mod parse {
@@ -614,7 +644,7 @@ mod parse {
         bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
         combinator::{all_consuming, map_opt, map_res, opt, recognize},
-        sequence::{preceded, separated_pair, tuple},
+        sequence::{preceded, tuple},
     };
     use percent_encoding::percent_decode;
     use zcash_address::ZcashAddress;
@@ -659,24 +689,17 @@ mod parse {
         pub payment_index: usize,
     }
 
-    /// Utility function for determining parameter uniqueness.
-    ///
     /// Utility function for determining whether a newly parsed param is a duplicate
     /// of a previous parameter.
+    ///
+    /// ZIP 321: "There MUST NOT be more than one occurrence of a given parameter
+    /// and `paramindex`." Parameters are identified by name, so this compares
+    /// names across parameter kinds: a valueless extension parameter named
+    /// `amount` and an `amount=...` parameter are two occurrences of the
+    /// parameter named `amount`.
     pub fn has_duplicate_param(v: &[Param], p: &Param) -> bool {
-        for p0 in v {
-            match (p0, p) {
-                (Param::Addr(_), Param::Addr(_)) => return true,
-                (Param::Amount(_), Param::Amount(_)) => return true,
-                (Param::Memo(_), Param::Memo(_)) => return true,
-                (Param::Label(_), Param::Label(_)) => return true,
-                (Param::Message(_), Param::Message(_)) => return true,
-                (Param::Other(n, _), Param::Other(n0, _)) if (n == n0) => return true,
-                _otherwise => continue,
-            }
-        }
-
-        false
+        let name = p.name();
+        v.iter().any(|p0| p0.name() == name)
     }
 
     /// Converts an vector of [`Param`] values to a [`Payment`].
@@ -753,10 +776,18 @@ mod parse {
         )(input)
     }
 
-    /// The primary parser for `name=value` query-string parameter pairs.
+    /// The primary parser for `name[.index][=value]` query-string parameter pairs.
+    ///
+    /// The value is optional, as allowed by the `otherparam` and `otherreqparam`
+    /// productions of the ZIP 321 grammar:
+    ///
+    /// ```abnf
+    /// otherreqparam   = "req-" paramname [ paramindex ] [ "=" *qchar ]
+    /// otherparam      = paramname [ paramindex ] [ "=" *qchar ]
+    /// ```
     pub fn zcashparam(input: &str) -> IResult<&str, IndexedParam> {
         map_res(
-            separated_pair(indexed_name, char('='), recognize(qchars)),
+            tuple((indexed_name, opt(preceded(char('='), recognize(qchars))))),
             to_indexed_param,
         )(input)
     }
@@ -833,43 +864,55 @@ mod parse {
     }
 
     fn to_indexed_param(
-        ((name, iopt), value): ((&str, Option<&str>), &str),
+        ((name, iopt), value): ((&str, Option<&str>), Option<&str>),
     ) -> Result<IndexedParam, String> {
-        let param = match name {
-            "address" => ZcashAddress::try_from_encoded(value)
-                .map(Box::new)
-                .map(Param::Addr)
-                .map_err(|err| {
-                    format!("Could not interpret {value} as a valid Zcash address: {err}")
-                }),
-
-            "amount" => parse_amount(value)
-                .map_err(|e| e.to_string())
-                .map(|(_, a)| Param::Amount(a)),
-
-            "label" => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Label(s.into_owned()))
-                .map_err(|e| e.to_string()),
-
-            "message" => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Message(s.into_owned()))
-                .map_err(|e| e.to_string()),
-
-            "memo" => memo_from_base64(value)
-                .map(Box::new)
-                .map(Param::Memo)
-                .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
-
-            other if other.starts_with("req-") => {
-                Err(format!("Required parameter {other} not recognized"))
+        let param = match value {
+            // A parameter with no value can only be an `otherparam` or
+            // `otherreqparam`: all of the reserved parameters (`address`,
+            // `amount`, `label`, `memo`, `message`) require "=" followed by
+            // their value in the grammar. In particular, a valueless
+            // parameter named `address` is an `otherparam`, not the
+            // payment's recipient address.
+            None if name.starts_with("req-") => {
+                Err(format!("Required parameter {name} not recognized"))
             }
+            None => Ok(Param::Other(name.to_string(), String::new())),
+            Some(value) => match name {
+                "address" => ZcashAddress::try_from_encoded(value)
+                    .map(Box::new)
+                    .map(Param::Addr)
+                    .map_err(|err| {
+                        format!("Could not interpret {value} as a valid Zcash address: {err}")
+                    }),
 
-            other => percent_decode(value.as_bytes())
-                .decode_utf8()
-                .map(|s| Param::Other(other.to_string(), s.into_owned()))
-                .map_err(|e| e.to_string()),
+                "amount" => parse_amount(value)
+                    .map_err(|e| e.to_string())
+                    .map(|(_, a)| Param::Amount(a)),
+
+                "label" => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Label(s.into_owned()))
+                    .map_err(|e| e.to_string()),
+
+                "message" => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Message(s.into_owned()))
+                    .map_err(|e| e.to_string()),
+
+                "memo" => memo_from_base64(value)
+                    .map(Box::new)
+                    .map(Param::Memo)
+                    .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
+
+                other if other.starts_with("req-") => {
+                    Err(format!("Required parameter {other} not recognized"))
+                }
+
+                other => percent_decode(value.as_bytes())
+                    .decode_utf8()
+                    .map(|s| Param::Other(other.to_string(), s.into_owned()))
+                    .map_err(|e| e.to_string()),
+            },
         }?;
 
         let payment_index = match iopt {
@@ -1328,5 +1371,191 @@ mod tests {
             let serialized = parsed.to_uri();
             assert_eq!(serialized, uri)
         }
+    }
+}
+
+#[cfg(test)]
+mod valueless_param_tests {
+    use super::{TransactionRequest, parse::Param};
+
+    const TADDR: &str = "tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+
+    /// The ZIP 321 grammar allows a parameter with no value:
+    ///
+    /// ```abnf
+    /// otherreqparam = "req-" paramname [ paramindex ] [ "=" *qchar ]
+    /// otherparam    = paramname [ paramindex ] [ "=" *qchar ]
+    /// ```
+    ///
+    /// Such a parameter is an `otherparam`; the reserved parameters all
+    /// require `=` followed by their value.
+    #[test]
+    fn valueless_other_param_is_accepted() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let payment = request.payments().get(&0).unwrap();
+        assert_eq!(
+            payment.other_params(),
+            &[("myflag".to_string(), String::new())][..]
+        );
+    }
+
+    #[test]
+    fn valueless_other_param_with_index_is_accepted() {
+        let uri = format!("zcash:?address={TADDR}&amount=1&address.1={TADDR}&amount.1=1&myflag.1");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let payment = request.payments().get(&1).unwrap();
+        assert_eq!(
+            payment.other_params(),
+            &[("myflag".to_string(), String::new())][..]
+        );
+    }
+
+    /// A valueless parameter is preserved by a round trip through the
+    /// canonical rendering, which appends `=` to it.
+    #[test]
+    fn valueless_other_param_round_trips() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        let reparsed = TransactionRequest::from_uri(&request.to_uri()).unwrap();
+        assert_eq!(reparsed, request);
+    }
+
+    /// A valueless parameter named `address` is an `otherparam`, not the
+    /// payment's recipient address: without a lead address, the payment is
+    /// missing its recipient entirely.
+    #[test]
+    fn valueless_address_param_is_not_the_recipient() {
+        let uri = format!("zcash:?amount=1&address");
+        assert!(matches!(
+            TransactionRequest::from_uri(&uri),
+            Err(crate::Zip321Error::RecipientMissing(0))
+        ));
+    }
+
+    /// A valueless `address` alongside a lead address (or an `address=`
+    /// parameter) is a second occurrence of the parameter named `address` at
+    /// the same index, so the request is rejected as a duplicate — as is a
+    /// valueless `amount` alongside `amount=`.
+    #[test]
+    fn valueless_reserved_name_colliding_with_valued_param_is_a_duplicate() {
+        let lead = format!("zcash:{TADDR}?amount=1&address");
+        let valued = format!("zcash:?address={TADDR}&amount=1&address");
+        let amount = format!("zcash:{TADDR}?amount=1&amount");
+        let amount_reversed = format!("zcash:{TADDR}?amount&amount=1");
+        let label = format!("zcash:{TADDR}?amount=1&label=x&label");
+        for uri in [lead, valued, amount, amount_reversed, label] {
+            assert!(
+                matches!(
+                    TransactionRequest::from_uri(&uri),
+                    Err(crate::Zip321Error::DuplicateParameter(_, 0))
+                ),
+                "{uri} should be rejected as a duplicate parameter"
+            );
+        }
+    }
+
+    /// Valueless extension parameters with reserved names round-trip through
+    /// `to_uri`, which preserves the omitted `=` (an `amount=` or `label=`
+    /// rendering would reparse differently, or fail to parse).
+    #[test]
+    fn valueless_reserved_name_params_round_trip() {
+        for name in ["amount", "memo", "label", "message"] {
+            // No `amount=` parameter here: a valued parameter of the same
+            // name would make the valueless one a duplicate.
+            let uri = format!("zcash:{TADDR}?{name}");
+            let request = TransactionRequest::from_uri(&uri)
+                .unwrap_or_else(|e| panic!("{name} should parse: {e}"));
+            assert_eq!(
+                request.payments().get(&0).unwrap().other_params(),
+                &[(name.to_string(), String::new())][..]
+            );
+
+            let rendered = request.to_uri();
+            assert!(
+                rendered.ends_with(name),
+                "{name} should render valueless, saw {rendered}"
+            );
+            let reparsed = TransactionRequest::from_uri(&rendered)
+                .unwrap_or_else(|e| panic!("{name} should reparse: {e}"));
+            assert_eq!(reparsed, request, "round trip failed for {name}");
+        }
+    }
+
+    /// A valueless `address` parameter can never occur in a valid request:
+    /// every payment requires an `address` parameter (the lead address or
+    /// `address.N`) at its own index, and a valueless `address` at that
+    /// index is a duplicate of it by name.
+    #[test]
+    fn valueless_address_is_always_a_duplicate_or_missing() {
+        // With the payment's address supplied by the lead address.
+        let uri = format!("zcash:{TADDR}?amount=1&address");
+        assert!(matches!(
+            TransactionRequest::from_uri(&uri),
+            Err(crate::Zip321Error::DuplicateParameter(_, 0))
+        ));
+
+        // With the payment's address supplied by an `address` parameter.
+        let uri = format!("zcash:?address={TADDR}&amount=1&address");
+        assert!(matches!(
+            TransactionRequest::from_uri(&uri),
+            Err(crate::Zip321Error::DuplicateParameter(_, 0))
+        ));
+
+        // At a different index, where the payment has its own `address.N`.
+        let uri = format!("zcash:?address={TADDR}&amount=1&address.1={TADDR}&amount.1=2&address.1");
+        assert!(matches!(
+            TransactionRequest::from_uri(&uri),
+            Err(crate::Zip321Error::DuplicateParameter(_, 1))
+        ));
+    }
+
+    /// A `Payment` constructed with an empty-valued extension parameter of a
+    /// reserved name can be used in a `TransactionRequest`, whose validity
+    /// check re-parses the rendered URI.
+    #[test]
+    fn reserved_name_extension_survives_request_construction() {
+        use zcash_protocol::value::Zatoshis;
+
+        let addr = zcash_address::ZcashAddress::try_from_encoded(TADDR).unwrap();
+        let payment = super::Payment::new(
+            addr,
+            Some(Zatoshis::const_from_u64(1)),
+            None,
+            None,
+            None,
+            vec![("label".to_string(), String::new())],
+        )
+        .unwrap();
+        let request = super::TransactionRequest::new(vec![payment]).unwrap();
+        assert_eq!(
+            request.payments().get(&0).unwrap().other_params(),
+            &[("label".to_string(), String::new())][..]
+        );
+    }
+
+    /// An unrecognised `req-` parameter without a value still invalidates the
+    /// request (ZIP 321: a parser that does not recognise a `req-` parameter
+    /// MUST consider the entire URI invalid).
+    #[test]
+    fn valueless_req_param_is_rejected() {
+        let uri = format!("zcash:{TADDR}?amount=1&req-unknown");
+        assert!(TransactionRequest::from_uri(&uri).is_err());
+    }
+
+    /// Parameters are still checked for duplicates when they are valueless.
+    #[test]
+    fn valueless_params_are_checked_for_duplicates() {
+        let uri = format!("zcash:{TADDR}?amount=1&myflag&myflag");
+        assert!(TransactionRequest::from_uri(&uri).is_err());
+    }
+
+    /// `zcashparam` parses a bare parameter name.
+    #[test]
+    fn zcashparam_parses_valueless() {
+        let (rest, param) = super::parse::zcashparam("myflag&next=1").unwrap();
+        assert_eq!(rest, "&next=1");
+        assert_eq!(param.param, Param::Other("myflag".into(), String::new()));
+        assert_eq!(param.payment_index, 0);
     }
 }
