@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_protocol::TxId::from_hex` now returns
+  `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
+
 ## [0.11.0] - 2026-10-21
 
 This release sets the NU7 mainnet activation height to 3543405.
