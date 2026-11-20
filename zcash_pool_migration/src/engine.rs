@@ -1833,6 +1833,10 @@ where
     let commit_height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
+    // Scheduled heights are TARGET heights (`chain_tip + 1`), so the schedules are based at the
+    // target height at which the plan is committed: no transaction is scheduled at a height that
+    // is already mined.
+    let commit_target = commit_height + 1;
     // The anchor grid and delay distributions come from the backend, not from this function's
     // caller: the grid must be the one the backend retains its anchor checkpoints on. The block
     // spacing comes from the network, and converts both into blocks at each height.
@@ -1897,7 +1901,7 @@ where
     // Each later layer's schedule bases past the previous layer's last height plus a mining
     // margin, keeping the layers serialized.
     let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
-    let mut layer_base = commit_height;
+    let mut layer_base = commit_target;
     for layer in preparation.layers() {
         let heights = scheduling::schedule_prep_broadcast_heights(
             &sched_params,
@@ -1915,14 +1919,15 @@ where
 
     // Lower-bound the FIRST scheduled transfer so that every transfer is guaranteed a candidate
     // anchor boundary: the funding notes exist only once the preparation has mined, and a boundary
-    // must then exist above their creation (see [`scheduling::earliest_broadcast_height`]). Basing
-    // the schedule at this bound, rather than the raw commit height, keeps the drawn inter-arrival
-    // gaps intact while making an empty candidate set impossible for a plan committed at (or
-    // reasonably near) its planning height.
+    // must then exist above their creation, observed by the tip each transfer is broadcast from
+    // (see [`scheduling::earliest_transfer_target`]). Basing the schedule at this bound, rather
+    // than the commit target height, keeps the drawn inter-arrival gaps intact while making an
+    // empty candidate set impossible for a plan committed at (or reasonably near) its planning
+    // height.
     let nu63_activation = params
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
-    let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
+    let schedule_base = commit_target.max(scheduling::earliest_transfer_target(
         grid,
         nu63_activation,
         est_last_prep_height,
@@ -5078,7 +5083,7 @@ pub(crate) mod tests {
             .copied()
             .unwrap_or(BlockHeight::from_u32(2_000_000))
             + EST_PREP_LAYER_MINING_BLOCKS;
-        let earliest = crate::scheduling::earliest_broadcast_height(
+        let earliest = crate::scheduling::earliest_transfer_target(
             crate::scheduling::AnchorGrid::new(
                 crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM,
@@ -6684,7 +6689,7 @@ mod commit_tests {
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .expect("NU6.3 is active on the test network")
         };
-        let schedule_base = crate::scheduling::earliest_broadcast_height(
+        let schedule_base = crate::scheduling::earliest_transfer_target(
             crate::scheduling::AnchorGrid::new(
                 crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM,

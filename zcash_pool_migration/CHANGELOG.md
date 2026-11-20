@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_pool_migration::engine::plan_migration` and its variants no longer
+  schedule a transfer whose only candidate anchor at its broadcast tip would be
+  the most recent boundary (an age-0 anchor, which ZIP 318 forbids). Every
+  transfer now has a candidate anchor at the tip it is broadcast from.
+- `zcash_pool_migration::engine::plan_migration` and its variants no longer
+  schedule a preparation or transfer at the chain tip, a height that is already
+  mined; every scheduled height is now above it.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
