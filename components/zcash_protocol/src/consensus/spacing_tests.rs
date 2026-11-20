@@ -8,6 +8,12 @@ use super::{
     Parameters, TEST_NETWORK, pow_target_spacing, target_time_between,
 };
 
+#[cfg(feature = "local-consensus")]
+use super::{
+    PowTargetSpacingChange, pow_target_spacing_with, spacing_changes_are_in_activation_order,
+    target_time_between_with,
+};
+
 /// A local network on which every upgrade through Blossom activates at `blossom`, and every later
 /// upgrade through NU7 activates at `nu7`. The heights must be in activation order, as
 /// [`in_activation_order`] checks.
@@ -255,6 +261,96 @@ fn target_time_between_matches_the_sum_of_per_block_spacings() {
                         per_block_sum,
                         "from {from}, to {to}, network {network:?}"
                     );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "local-consensus")]
+fn a_further_spacing_change_extends_the_per_height_spacing() {
+    /// The upgrade that makes the second of the three changes. No upgrade follows NU7 to make a
+    /// further change, so the third change is keyed to NU7 and the second to the upgrade before
+    /// it.
+    const SECOND_UPGRADE: NetworkUpgrade = NetworkUpgrade::Nu6_3;
+    /// The target spacing from the third change, which no consensus rule defines.
+    const THIRD_SPACING: Duration = Duration::from_secs(5);
+    /// Three changes of the target spacing, in the activation order of their upgrades: the two
+    /// consensus spacings followed by [`THIRD_SPACING`].
+    const CHANGES: [PowTargetSpacingChange; 3] = [
+        PowTargetSpacingChange {
+            upgrade: NetworkUpgrade::Blossom,
+            spacing: POST_BLOSSOM_POW_TARGET_SPACING,
+        },
+        PowTargetSpacingChange {
+            upgrade: SECOND_UPGRADE,
+            spacing: POST_NU7_POW_TARGET_SPACING,
+        },
+        PowTargetSpacingChange {
+            upgrade: NetworkUpgrade::Nu7,
+            spacing: THIRD_SPACING,
+        },
+    ];
+    /// Candidate activation heights. The triples of candidates that are in activation order
+    /// cover each upgrade never activating, and each activating with and after the one before.
+    const ACTIVATIONS: [Option<BlockHeight>; 4] = [
+        None,
+        Some(BlockHeight(2)),
+        Some(BlockHeight(4)),
+        Some(BlockHeight(7)),
+    ];
+    /// Every range whose endpoints both lie below this height is checked; it exceeds every
+    /// candidate activation height.
+    const HEIGHT_LIMIT: u32 = 10;
+
+    assert!(spacing_changes_are_in_activation_order(&CHANGES));
+
+    for blossom in ACTIVATIONS {
+        for second in ACTIVATIONS {
+            for third in ACTIVATIONS
+                .into_iter()
+                .filter(|third| in_activation_order(&[blossom, second, *third]))
+            {
+                // Every upgrade after Blossom through `SECOND_UPGRADE` activates at `second`.
+                let network = crate::local_consensus::LocalNetwork {
+                    heartwood: second,
+                    canopy: second,
+                    nu5: second,
+                    nu6: second,
+                    nu6_1: second,
+                    nu6_2: second,
+                    nu6_3: second,
+                    ..spacing_test_network(blossom, third)
+                };
+                let specified_spacing = |height: BlockHeight| {
+                    let active = |upgrade| network.is_nu_active(upgrade, height);
+                    if !active(NetworkUpgrade::Blossom) {
+                        PRE_BLOSSOM_POW_TARGET_SPACING
+                    } else if !active(SECOND_UPGRADE) {
+                        POST_BLOSSOM_POW_TARGET_SPACING
+                    } else if !active(NetworkUpgrade::Nu7) {
+                        POST_NU7_POW_TARGET_SPACING
+                    } else {
+                        THIRD_SPACING
+                    }
+                };
+                for from in (0..HEIGHT_LIMIT).map(BlockHeight) {
+                    assert_eq!(
+                        pow_target_spacing_with(&CHANGES, &network, from),
+                        specified_spacing(from),
+                        "height {from}, network {network:?}"
+                    );
+                    for to in (0..HEIGHT_LIMIT).map(BlockHeight) {
+                        let per_block_sum = (u32::from(from) + 1..=u32::from(to))
+                            .map(|h| specified_spacing(BlockHeight(h)))
+                            .sum::<Duration>();
+                        assert_eq!(
+                            target_time_between_with(&CHANGES, &network, from, to),
+                            per_block_sum,
+                            "from {from}, to {to}, network {network:?}"
+                        );
+                    }
                 }
             }
         }
