@@ -195,7 +195,10 @@ transparent-inputs = [
 # with an account in the wallet. Applications that rely on this feature must
 # maintain spending keys corresponding to all imported pubkeys for any account
 # from which it permits spending.
-transparent-key-import = ["transparent-inputs"]
+transparent-key-import = [
+    "transparent-inputs",
+    "zcash_script/descriptor",
+]
 
 ## Enables per-outpoint transparent spend queries, for consumers that have access
 ## to a spent-outpoint index (e.g. a full node's spend index). Adds the

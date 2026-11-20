@@ -162,7 +162,7 @@ impl<'a> TransactionExtractor<'a> {
 struct Unbound;
 
 impl Authorization for Unbound {
-    type TransparentAuth = ::transparent::pczt::Unbound;
+    type TransparentAuth = ::transparent::pczt::Unbound<zcash_protocol::value::Zatoshis>;
     type SaplingAuth = ::sapling::pczt::Unbound;
     type OrchardAuth = ::orchard::pczt::Unbound;
 }

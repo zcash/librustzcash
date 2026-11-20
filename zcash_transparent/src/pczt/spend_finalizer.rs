@@ -7,7 +7,7 @@ use crate::{
 
 use super::Bundle;
 
-impl Bundle {
+impl<V> Bundle<V> {
     /// Finalizes the spends for this bundle.
     ///
     /// Every partial signature that is used commits to the transaction in full: a
@@ -253,7 +253,7 @@ mod tests {
         let pubkey = [0x02u8; 33];
         let script_pubkey_bytes = script::Component(pay_to_pubkey_hash(&pubkey)).to_bytes();
 
-        let mut input = Input::parse(
+        let mut input = Input::<u64>::parse(
             [0u8; 32],           // prevout_txid
             0,                   // prevout_index
             None,                // sequence
@@ -306,14 +306,14 @@ mod tests {
     }
 
     /// A P2PKH input signed by `pubkey(1)`.
-    fn p2pkh_input(sighash_type: SighashType, signature: Vec<u8>) -> Input {
+    fn p2pkh_input(sighash_type: SighashType, signature: Vec<u8>) -> Input<u64> {
         let mut input = input(p2pkh(&pubkey(1)), None, sighash_type);
         input.partial_signatures.insert(pubkey(1), signature);
         input
     }
 
     /// A 2-of-3 P2SH-P2MS input, signed by the pubkeys named by the given indices.
-    fn p2ms_input(sighash_type: SighashType, signatures: &[(u8, u8)]) -> Input {
+    fn p2ms_input(sighash_type: SighashType, signatures: &[(u8, u8)]) -> Input<u64> {
         let pubkeys = [pubkey(1), pubkey(2), pubkey(3)];
         let redeem_script = p2ms(2, &[&pubkeys[0], &pubkeys[1], &pubkeys[2]]);
         let mut input = input(p2sh(&redeem_script), Some(redeem_script), sighash_type);
@@ -325,7 +325,10 @@ mod tests {
         input
     }
 
-    fn finalize(input: Input, sighash_policy: SighashPolicy) -> Result<(), SpendFinalizerError> {
+    fn finalize(
+        input: Input<u64>,
+        sighash_policy: SighashPolicy,
+    ) -> Result<(), SpendFinalizerError> {
         Bundle {
             inputs: vec![input],
             outputs: vec![],

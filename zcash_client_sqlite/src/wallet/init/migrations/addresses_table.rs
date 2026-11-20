@@ -15,7 +15,7 @@ use zip32::{AccountId, DiversifierIndex};
 use crate::{UA_TRANSPARENT, wallet::init::WalletMigrationError};
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::IncomingViewingKey;
+use zcash_keys::keys::transparent::IncomingViewingKey;
 
 use super::ufvk_support;
 

@@ -57,6 +57,10 @@ getset.workspace = true
 # - Documentation
 document-features = { workspace = true, optional = true }
 
+# - Test support
+#   - Enabled only by the `internal-tests` feature, for the end-to-end tests.
+zcash_keys = { workspace = true, features = ["transparent-inputs"], optional = true }
+
 [dev-dependencies]
 hex.workspace = true
 incrementalmerkletree.workspace = true
@@ -162,6 +166,7 @@ tx-extractor = [
 
 # Undocumented internal feature flag for enabling features needed for tests.
 internal-tests = [
+    "dep:zcash_keys",
     "io-finalizer",
     "orchard",
     "prover",

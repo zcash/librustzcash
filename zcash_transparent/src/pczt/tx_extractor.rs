@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use zcash_protocol::value::Zatoshis;
+use core::fmt::Debug;
 use zcash_script::script;
 
 use crate::{
@@ -10,15 +10,15 @@ use crate::{
 
 use super::Input;
 
-impl super::Bundle {
+impl<V: Copy + Debug> super::Bundle<V> {
     /// Extracts the effects of this PCZT bundle as a [regular `Bundle`].
     ///
     /// This is used by the Signer role to produce the transaction sighash.
     ///
-    /// [regular `Bundle`]: super::Bundle
+    /// [regular `Bundle`]: crate::bundle::Bundle
     pub fn extract_effects(
         &self,
-    ) -> Result<Option<crate::bundle::Bundle<EffectsOnly>>, TxExtractorError> {
+    ) -> Result<Option<crate::bundle::Bundle<EffectsOnly<V>, V>>, TxExtractorError> {
         self.to_tx_data(|_| Ok(()), |bundle| Ok(effects_only(bundle)))
     }
 
@@ -26,8 +26,10 @@ impl super::Bundle {
     ///
     /// This is used by the Transaction Extractor role to produce the final transaction.
     ///
-    /// [regular `Bundle`]: super::Bundle
-    pub fn extract(&self) -> Result<Option<crate::bundle::Bundle<Unbound>>, TxExtractorError> {
+    /// [regular `Bundle`]: crate::bundle::Bundle
+    pub fn extract(
+        &self,
+    ) -> Result<Option<crate::bundle::Bundle<Unbound<V>, V>>, TxExtractorError> {
         self.to_tx_data(
             |input| {
                 input
@@ -43,18 +45,18 @@ impl super::Bundle {
         &self,
         script_sig: F,
         bundle_auth: G,
-    ) -> Result<Option<crate::bundle::Bundle<A>>, E>
+    ) -> Result<Option<crate::bundle::Bundle<A, V>>, E>
     where
         A: Authorization,
         E: From<TxExtractorError>,
-        F: Fn(&Input) -> Result<<A as Authorization>::ScriptSig, E>,
+        F: Fn(&Input<V>) -> Result<<A as Authorization>::ScriptSig, E>,
         G: FnOnce(&Self) -> Result<A, E>,
     {
         let vin = self
             .inputs
             .iter()
             .map(|input| {
-                let prevout = OutPoint::new(input.prevout_txid.into(), input.prevout_index);
+                let prevout = OutPoint::new(input.prevout_txid, input.prevout_index);
 
                 Ok(TxIn::from_parts(
                     prevout,
@@ -90,7 +92,7 @@ pub enum TxExtractorError {
     MissingScriptSig,
 }
 
-fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
+fn effects_only<V: Copy>(bundle: &super::Bundle<V>) -> EffectsOnly<V> {
     let inputs = bundle
         .inputs
         .iter()
@@ -103,14 +105,14 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
 /// Authorizing data for a transparent bundle in a transaction that is just missing
 /// binding signatures.
 #[derive(Debug)]
-pub struct Unbound(EffectsOnly);
+pub struct Unbound<V>(EffectsOnly<V>);
 
-impl Authorization for Unbound {
+impl<V: Debug> Authorization for Unbound<V> {
     type ScriptSig = script::Sig;
 }
 
-impl TransparentAuthorizingContext for Unbound {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
+impl<V: Copy + Debug> TransparentAuthorizingContext<V> for Unbound<V> {
+    fn input_amounts(&self) -> Vec<V> {
         self.0.input_amounts()
     }
 

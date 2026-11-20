@@ -813,7 +813,7 @@ pub(crate) mod tests {
     use zcash_protocol::consensus::{BlockHeight, Network, NetworkUpgrade, Parameters};
 
     #[cfg(feature = "transparent-inputs")]
-    use {::transparent::keys::NonHardenedChildIndex, zcash_keys::encoding::AddressCodec as _};
+    use zcash_keys::{encoding::AddressCodec as _, keys::transparent::NonHardenedChildIndex};
 
     use crate::{
         WalletDb,

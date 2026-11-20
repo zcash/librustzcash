@@ -45,7 +45,10 @@ use super::IronwoodDomain;
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use {
+    transparent::address::TransparentAddress, zcash_keys::keys::transparent::TransparentKeyScope,
+    zcash_primitives::transaction::coinbase::is_coinbase,
+};
 
 /// The default number of outputs at which a batch runner immediately flushes a batch.
 pub(crate) const DEFAULT_BATCH_SIZE_THRESHOLD: usize = 200;
@@ -536,7 +539,7 @@ where
         #[cfg(feature = "transparent-inputs")]
         let (transparent_spends, unlinked_prevouts) = tx
             .transparent_bundle()
-            .filter(|bundle| !bundle.is_coinbase())
+            .filter(|_| !is_coinbase(&tx))
             .map(|bundle| {
                 find_transparent_spends(
                     bundle.vin.iter().map(|txin| txin.prevout().clone()),

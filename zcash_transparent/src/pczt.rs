@@ -6,13 +6,9 @@ use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use getset::Getters;
-use zcash_protocol::{TxId, value::Zatoshis};
 use zcash_script::script;
 
-use crate::{
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
-    sighash::SighashType,
-};
+use crate::sighash::SighashType;
 
 mod parse;
 pub use parse::ParseError;
@@ -43,25 +39,25 @@ pub use tx_extractor::{TxExtractorError, Unbound};
 /// [the regular `Bundle` struct]: crate::bundle::Bundle
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Bundle {
+pub struct Bundle<V> {
     /// The transparent inputs in this bundle.
     ///
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
-    pub(crate) inputs: Vec<Input>,
+    pub(crate) inputs: Vec<Input<V>>,
 
     /// The transparent outputs in this bundle.
     ///
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
-    pub(crate) outputs: Vec<Output>,
+    pub(crate) outputs: Vec<Output<V>>,
 }
 
-impl Bundle {
+impl<V> Bundle<V> {
     /// Returns a mutable reference to the inputs in this bundle.
     ///
     /// This is used by Signers to apply signatures with [`Input::sign`].
-    pub fn inputs_mut(&mut self) -> &mut [Input] {
+    pub fn inputs_mut(&mut self) -> &mut [Input<V>] {
         &mut self.inputs
     }
 }
@@ -74,10 +70,10 @@ impl Bundle {
 /// [the regular `TxIn` struct]: crate::bundle::TxIn
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Input {
+pub struct Input<V> {
     /// The ID of the previous transaction containing the transparent coin being spent by
-    /// this input.
-    pub(crate) prevout_txid: TxId,
+    /// this input, in internal byte order. That is the reverse of its displayed hex form.
+    pub(crate) prevout_txid: [u8; 32],
 
     /// The index of the entry in the `vout` field of the previous transaction containing
     /// the transparent coin being spent by this input.
@@ -114,7 +110,7 @@ pub struct Input {
     /// - This is set by the Constructor.
     /// - This is required by the IO Finalizer and Transaction Extractor, to derive the
     ///   shielded sighash needed for computing the binding signatures.
-    pub(crate) value: Zatoshis,
+    pub(crate) value: V,
 
     /// The `script_pubkey` of the input being spent.
     ///
@@ -191,9 +187,9 @@ pub struct Input {
 /// [the regular `TxOut` struct]: crate::bundle::TxOut
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
-pub struct Output {
+pub struct Output<V> {
     /// The value of the output.
-    pub(crate) value: Zatoshis,
+    pub(crate) value: V,
 
     /// The script constraining how spending of this output must be authorized.
     pub(crate) script_pubkey: script::PubKey,
@@ -235,94 +231,6 @@ pub struct Bip32Derivation {
     derivation_path: Vec<ChildNumber>,
 }
 
-impl Bip32Derivation {
-    /// Extracts the BIP 44 account index, scope, and address index from this derivation
-    /// path.
-    ///
-    /// Returns `None` if the seed fingerprints don't match, or if this is not a BIP 44
-    /// derivation path.
-    pub fn extract_bip_44_fields(
-        &self,
-        seed_fp: &zip32::fingerprint::SeedFingerprint,
-        expected_coin_type: ChildNumber,
-    ) -> Option<(zip32::AccountId, TransparentKeyScope, NonHardenedChildIndex)> {
-        if self.seed_fingerprint == seed_fp.to_bytes() {
-            match &self.derivation_path[..] {
-                [purpose, coin_type, account_index, scope, address_index]
-                    if purpose == &ChildNumber(44 | ChildNumber::HARDENED_FLAG)
-                        && coin_type.is_hardened()
-                        && coin_type == &expected_coin_type
-                        && account_index.is_hardened()
-                        && !scope.is_hardened()
-                        && !address_index.is_hardened() =>
-                {
-                    let account_index = zip32::AccountId::try_from(account_index.index())
-                        .expect("account_index is hardened");
-
-                    let scope =
-                        TransparentKeyScope::custom(scope.index()).expect("scope is not hardened");
-
-                    let address_index = NonHardenedChildIndex::from_index(address_index.index())
-                        .expect("address_index is not hardened");
-
-                    Some((account_index, scope, address_index))
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Extracts the ZIP 48 account index, scope, and address index from this derivation
-    /// path.
-    ///
-    /// Returns `None` if the seed fingerprints don't match, or if this is not a ZIP 48
-    /// derivation path.
-    pub fn extract_zip_48_fields(
-        &self,
-        seed_fp: &zip32::fingerprint::SeedFingerprint,
-        expected_coin_type: ChildNumber,
-    ) -> Option<(zip32::AccountId, zip32::Scope, NonHardenedChildIndex)> {
-        if self.seed_fingerprint == seed_fp.to_bytes() {
-            match &self.derivation_path[..] {
-                [
-                    purpose,
-                    coin_type,
-                    account_index,
-                    script_type,
-                    scope,
-                    address_index,
-                ] if purpose == &ChildNumber(48 | ChildNumber::HARDENED_FLAG)
-                    && coin_type.is_hardened()
-                    && coin_type == &expected_coin_type
-                    && account_index.is_hardened()
-                    && script_type == &ChildNumber(133000 | ChildNumber::HARDENED_FLAG)
-                    && !scope.is_hardened()
-                    && !address_index.is_hardened() =>
-                {
-                    let account_index = zip32::AccountId::try_from(account_index.index())
-                        .expect("account_index is hardened");
-
-                    let scope = match scope.index() {
-                        0 => Some(zip32::Scope::External),
-                        1 => Some(zip32::Scope::Internal),
-                        _ => None,
-                    };
-
-                    let address_index = NonHardenedChildIndex::from_index(address_index.index())
-                        .expect("address_index is not hardened");
-
-                    scope.map(|scope| (account_index, scope, address_index))
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod testing {
     //! Helpers shared between the tests of this module's submodules.
@@ -330,7 +238,6 @@ pub(crate) mod testing {
     use alloc::collections::BTreeMap;
     use alloc::vec::Vec;
 
-    use zcash_protocol::{TxId, value::Zatoshis};
     use zcash_script::{
         pattern,
         script::{self, Evaluable},
@@ -339,6 +246,9 @@ pub(crate) mod testing {
     use crate::{address::TransparentAddress, sighash::SighashType, util::hash160};
 
     use super::Input;
+
+    /// The value of the coin that [`input`] spends. Its value is arbitrary.
+    pub(crate) const INPUT_VALUE: u64 = 1_000_000;
 
     /// The P2PKH `script_pubkey` paying to `pubkey`.
     pub(crate) fn p2pkh(pubkey: &[u8; 33]) -> script::FromChain {
@@ -375,15 +285,15 @@ pub(crate) mod testing {
         script_pubkey: script::FromChain,
         redeem_script: Option<script::FromChain>,
         sighash_type: SighashType,
-    ) -> Input {
+    ) -> Input<u64> {
         Input {
-            prevout_txid: TxId::from_bytes([0; 32]),
+            prevout_txid: [0; 32],
             prevout_index: 0,
             sequence: None,
             required_time_lock_time: None,
             required_height_lock_time: None,
             script_sig: None,
-            value: Zatoshis::const_from_u64(1_000_000),
+            value: INPUT_VALUE,
             script_pubkey,
             redeem_script,
             partial_signatures: BTreeMap::new(),

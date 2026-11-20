@@ -426,7 +426,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -479,7 +479,7 @@ mod tests {
                         AnchorRetentionInterval::ZIP_318,
                     ),
                     &[] as &[TestTransparentInput],
-                    &[] as &[TxOut],
+                    &[] as &[TxOut<Zatoshis>],
                     &(
                         sapling::builder::BundleType::DEFAULT,
                         &[TestSaplingInput {
@@ -542,7 +542,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &(
                     sapling::builder::BundleType::DEFAULT,
                     &[TestSaplingInput {
@@ -592,7 +592,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &(
                     sapling::builder::BundleType::DEFAULT,
                     &[TestSaplingInput {
@@ -637,7 +637,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &(
                     sapling::builder::BundleType::DEFAULT,
                     &[TestSaplingInput {
@@ -687,7 +687,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &(
                     sapling::builder::BundleType::DEFAULT,
                     &[TestSaplingInput {
@@ -745,7 +745,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -798,7 +798,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &sapling_fees::EmptyBundleView,
             &(
                 ::orchard::bundle::BundleVersion::orchard_v3(),
@@ -1006,7 +1006,7 @@ mod tests {
                     anchor,
                     &zip318,
                     &[] as &[TestTransparentInput],
-                    &[] as &[TxOut],
+                    &[] as &[TxOut<Zatoshis>],
                     &sapling_view,
                     &orchard_view,
                     &ironwood_view,
@@ -1070,7 +1070,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &sapling_view,
                 &orchard_view,
                 &orchard_fees::EmptyBundleView,
@@ -1089,7 +1089,7 @@ mod tests {
                     AnchorRetentionInterval::ZIP_318,
                 ),
                 &[] as &[TestTransparentInput],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &sapling_view,
                 &orchard_view,
                 &(
@@ -1465,7 +1465,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -1752,7 +1752,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -1806,7 +1806,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -1865,7 +1865,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -1919,7 +1919,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -2185,7 +2185,7 @@ mod tests {
                         TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
                     ),
                 }],
-                &[] as &[TxOut],
+                &[] as &[TxOut<Zatoshis>],
                 &sapling_fees::EmptyBundleView,
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,

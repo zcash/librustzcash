@@ -2,18 +2,19 @@ use transparent::{
     bundle::{Authorization, Authorized, MapAuth},
     pczt::{TxExtractorError, Unbound},
 };
+use zcash_protocol::value::Zatoshis;
 
 pub(super) struct RemoveInputInfo;
 
-impl MapAuth<Unbound, Authorized> for RemoveInputInfo {
+impl MapAuth<Unbound<Zatoshis>, Authorized> for RemoveInputInfo {
     fn map_script_sig(
         &self,
-        s: <Unbound as Authorization>::ScriptSig,
+        s: <Unbound<Zatoshis> as Authorization>::ScriptSig,
     ) -> <Authorized as Authorization>::ScriptSig {
         s.into()
     }
 
-    fn map_authorization(&self, _: Unbound) -> Authorized {
+    fn map_authorization(&self, _: Unbound<Zatoshis>) -> Authorized {
         Authorized
     }
 }

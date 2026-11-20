@@ -4,21 +4,12 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::{
-    consensus::BlockHeight,
-    value::{BalanceError, ZatBalance, Zatoshis},
-};
-
-use zcash_script::{
-    op,
-    opcode::PushValue,
-    script::{self, Code, Evaluable},
-};
+use zcash_script::script;
 
 use crate::{
     address::{Script, TransparentAddress},
-    bundle::{Authorization, Authorized, Bundle, MapAuth, TxIn, TxOut},
-    coinbase, pczt,
+    bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
+    pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
@@ -28,25 +19,11 @@ use {
         bundle::OutPoint,
         sighash::{SIGHASH_ALL, SighashType},
     },
-    core::iter,
-    zcash_encoding::CompactSize,
-    zcash_script::{pattern::push_script, pv, solver},
+    zcash_script::{pattern::push_script, pv, script::Evaluable, solver},
 };
 
-/// Maximum size of a DER-encoded ECDSA signature (72 bytes) plus one SIGHASH type byte.
-#[cfg(feature = "transparent-inputs")]
-const MAX_SIG_SIZE: usize = 72 + 1;
-
-/// Size of a serialized outpoint: transaction hash (32 bytes) + output index (4 bytes).
-#[cfg(feature = "transparent-inputs")]
-const PREVOUT_SIZE: usize = 32 + 4;
-
-/// Size of a serialized sequence number (u32).
-#[cfg(feature = "transparent-inputs")]
-const SEQUENCE_SIZE: usize = 4;
-
 #[cfg(not(feature = "transparent-inputs"))]
-use zcash_script::Opcode;
+use {core::marker::PhantomData, zcash_script::Opcode};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -57,11 +34,6 @@ pub enum Error {
     /// A bundle could not be built because a required signing key was missing, or
     /// insufficient keys were provided to meet a multisig threshold.
     MissingSigningKey,
-    /// Provided null data is longer than the maximum supported length.
-    NullDataTooLong {
-        actual: usize,
-        limit: usize,
-    },
     /// The number of inputs does not match number of sighashes.
     InputCountMismatch, // Use this for prepare_transparent_signatures
     /// A provided external signature was not valid for any transparent input.
@@ -85,10 +57,6 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::NullDataTooLong { actual, limit } => write!(
-                f,
-                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
-            ),
             Error::InputCountMismatch => write!(
                 f,
                 "The number of inputs does not match the number of sighashes"
@@ -175,16 +143,20 @@ pub enum SpendInfo {
 /// required to spend the output.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
-pub struct TransparentInputInfo {
+pub struct TransparentInputInfo<V> {
     utxo: OutPoint,
-    coin: TxOut,
+    coin: TxOut<V>,
     spend_info: SpendInfo,
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentInputInfo {
+impl<V> TransparentInputInfo<V> {
     /// Constructs a [`TransparentInputInfo`] value from its constituent parts.
-    pub fn from_parts(utxo: OutPoint, coin: TxOut, spend_info: SpendInfo) -> Result<Self, Error> {
+    pub fn from_parts(
+        utxo: OutPoint,
+        coin: TxOut<V>,
+        spend_info: SpendInfo,
+    ) -> Result<Self, Error> {
         match &spend_info {
             SpendInfo::P2pkh { pubkey } => {
                 let script_pubkey = script::PubKey::parse(&coin.script_pubkey().0)
@@ -234,7 +206,7 @@ impl TransparentInputInfo {
     }
 
     /// Returns the original coin data that is pointed to by [`Self::outpoint`].
-    pub fn coin(&self) -> &TxOut {
+    pub fn coin(&self) -> &TxOut<V> {
         &self.coin
     }
 
@@ -242,80 +214,32 @@ impl TransparentInputInfo {
     pub fn spend_info(&self) -> &SpendInfo {
         &self.spend_info
     }
-
-    /// The size of this transparent input in a transaction, as used in [ZIP 317].
-    ///
-    /// Returns `None` if we cannot determine the size. (TODO: Remove this case)
-    ///
-    /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
-    pub fn serialized_len(&self) -> Option<usize> {
-        match &self.spend_info {
-            SpendInfo::P2pkh { .. } => {
-                let fake_sig = pv::push_value(&[0; MAX_SIG_SIZE]).expect("short enough");
-                let fake_pubkey = pv::push_value(&[0; secp256k1::constants::PUBLIC_KEY_SIZE])
-                    .expect("short enough");
-                let script_len = script::Component(vec![fake_sig, fake_pubkey]).byte_len();
-                let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
-                Some(PREVOUT_SIZE + script_sig_len + SEQUENCE_SIZE)
-            }
-            SpendInfo::P2sh { redeem_script } => p2sh_input_serialized_len(redeem_script),
-        }
-    }
 }
 
-/// Computes the serialized input size for a P2SH input given the redeem script.
-///
-/// Returns `None` if the redeem script is not a recognized P2SH script kind (currently
-/// only P2MS-in-P2SH is supported).
-#[cfg(feature = "transparent-inputs")]
-pub fn p2sh_input_serialized_len(redeem_script: &script::FromChain) -> Option<usize> {
-    let fake_sig = pv::push_value(&[0; MAX_SIG_SIZE]).expect("short enough");
-
-    let script_len = redeem_script
-        .refine()
-        .ok()
-        .as_ref()
-        .and_then(solver::standard)
-        .and_then(|spend_info| match spend_info {
-            solver::ScriptKind::MultiSig { required, .. } => Some(
-                script::Component(
-                    iter::empty()
-                        .chain(Some(pv::_0))
-                        .chain(core::iter::repeat_n(fake_sig, usize::from(required)))
-                        .chain(push_script(redeem_script))
-                        .collect(),
-                )
-                .byte_len(),
-            ),
-            _ => None,
-        })?;
-
-    let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
-    Some(PREVOUT_SIZE + script_sig_len + SEQUENCE_SIZE)
-}
-
-pub struct TransparentBuilder {
+pub struct TransparentBuilder<V> {
     #[cfg(feature = "transparent-inputs")]
-    inputs: Vec<TransparentInputInfo>,
-    vout: Vec<TxOut>,
+    inputs: Vec<TransparentInputInfo<V>>,
+    vout: Vec<TxOut<V>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Unauthorized {
+pub struct Unauthorized<V> {
     #[cfg(feature = "transparent-inputs")]
-    inputs: Vec<TransparentInputInfo>,
+    inputs: Vec<TransparentInputInfo<V>>,
+    #[cfg(not(feature = "transparent-inputs"))]
+    _value: PhantomData<V>,
 }
 
-impl Authorization for Unauthorized {
+impl<V: fmt::Debug> Authorization for Unauthorized<V> {
     type ScriptSig = ();
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub struct TransparentSignatureContext {
+pub struct TransparentSignatureContext<V: fmt::Debug> {
     // Data from the original Bundle<Unauthorized>, needed to reconstruct Bundle<Authorized>
-    original_vin_unauthorized: Vec<TxIn<Unauthorized>>,
-    original_vout: Vec<TxOut>,
-    authorization_inputs: Vec<TransparentInputInfo>,
+    original_vin_unauthorized: Vec<TxIn<Unauthorized<V>>>,
+    original_vout: Vec<TxOut<V>>,
+    authorization_inputs: Vec<TransparentInputInfo<V>>,
 
     // External data references
     sighashes: Vec<[u8; 32]>,
@@ -324,38 +248,7 @@ pub struct TransparentSignatureContext {
     final_script_sigs: Vec<Option<script::Sig>>,
 }
 
-/// [`Authorization`] marker type for coinbase transactions without authorization data.
-#[derive(Debug, Clone)]
-pub struct Coinbase;
-
-impl Authorization for Coinbase {
-    type ScriptSig = script::Sig;
-}
-
-impl TransparentAuthorizingContext for Coinbase {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
-        vec![]
-    }
-
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
-        vec![]
-    }
-}
-
-impl MapAuth<Coinbase, Authorized> for Coinbase {
-    fn map_script_sig(
-        &self,
-        s: <Coinbase as Authorization>::ScriptSig,
-    ) -> <Authorized as Authorization>::ScriptSig {
-        Script(Code(s.to_bytes()))
-    }
-
-    fn map_authorization(&self, _: Coinbase) -> Authorized {
-        Authorized
-    }
-}
-
-impl TransparentBuilder {
+impl<V> TransparentBuilder<V> {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
         TransparentBuilder {
@@ -368,18 +261,18 @@ impl TransparentBuilder {
     /// Returns the list of transparent inputs that will be consumed by the transaction being
     /// constructed.
     #[cfg(feature = "transparent-inputs")]
-    pub fn inputs(&self) -> &[TransparentInputInfo] {
+    pub fn inputs(&self) -> &[TransparentInputInfo<V>] {
         &self.inputs
     }
 
     /// Returns the transparent outputs that will be produced by the transaction being constructed.
-    pub fn outputs(&self) -> &[TxOut] {
+    pub fn outputs(&self) -> &[TxOut<V>] {
         &self.vout
     }
 
     /// Adds an input (the output of a previous transaction) to be spent in the transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn add_input(&mut self, input: TransparentInputInfo) {
+    pub fn add_input(&mut self, input: TransparentInputInfo<V>) {
         self.inputs.push(input);
     }
 
@@ -390,7 +283,7 @@ impl TransparentBuilder {
         &mut self,
         pubkey: secp256k1::PublicKey,
         utxo: OutPoint,
-        coin: TxOut,
+        coin: TxOut<V>,
     ) -> Result<(), Error> {
         let input = TransparentInputInfo::from_parts(utxo, coin, SpendInfo::P2pkh { pubkey })?;
         self.inputs.push(input);
@@ -404,7 +297,7 @@ impl TransparentBuilder {
         &mut self,
         redeem_script: script::FromChain,
         utxo: OutPoint,
-        coin: TxOut,
+        coin: TxOut<V>,
     ) -> Result<(), Error> {
         let input =
             TransparentInputInfo::from_parts(utxo, coin, SpendInfo::P2sh { redeem_script })?;
@@ -412,44 +305,32 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn add_output(&mut self, to: &TransparentAddress, value: Zatoshis) -> Result<(), Error> {
-        self.vout.push(TxOut::new(value, to.script().into()));
+    /// Adds an output with the given `scriptPubKey` and value.
+    ///
+    /// No standardness or relay-policy check is applied to `script_pubkey`.
+    pub fn add_script_output(&mut self, script_pubkey: &script::PubKey, value: V) {
+        self.vout.push(TxOut::new(value, script_pubkey.into()));
+    }
+
+    /// Adds an output that pays `value` to the address `to`.
+    pub fn add_output(&mut self, to: &TransparentAddress, value: V) -> Result<(), Error> {
+        self.add_script_output(&to.script(), value);
 
         Ok(())
     }
+}
 
-    pub fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
+impl<V: fmt::Debug> TransparentBuilder<V> {
+    pub fn build(self) -> Option<Bundle<Unauthorized<V>, V>> {
         #[cfg(feature = "transparent-inputs")]
-        let input_sum = self
-            .inputs
-            .iter()
-            .map(|input| input.coin.value())
-            .sum::<Option<Zatoshis>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let input_sum = Zatoshis::ZERO;
-
-        let output_sum = self
-            .vout
-            .iter()
-            .map(|vo| vo.value())
-            .sum::<Option<Zatoshis>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
-    }
-
-    pub fn build(self) -> Option<Bundle<Unauthorized>> {
-        #[cfg(feature = "transparent-inputs")]
-        let vin: Vec<TxIn<Unauthorized>> = self
+        let vin: Vec<TxIn<Unauthorized<V>>> = self
             .inputs
             .iter()
             .map(|i| TxIn::new(i.utxo.clone()))
             .collect();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let vin: Vec<TxIn<Unauthorized>> = vec![];
+        let vin: Vec<TxIn<Unauthorized<V>>> = vec![];
 
         if vin.is_empty() && self.vout.is_empty() {
             None
@@ -460,36 +341,17 @@ impl TransparentBuilder {
                 authorization: Unauthorized {
                     #[cfg(feature = "transparent-inputs")]
                     inputs: self.inputs,
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    _value: PhantomData,
                 },
             })
         }
     }
+}
 
-    /// Builds a coinbase bundle.
-    ///
-    /// Returns an error if:
-    ///
-    /// - any inputs were added to the builder, or if
-    /// - `miner_data` makes the tx input oversized, vid. [`TxIn::coinbase`].
-    pub fn build_coinbase(
-        self,
-        height: BlockHeight,
-        miner_data: Option<PushValue>,
-    ) -> Result<Bundle<Coinbase>, coinbase::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        if !self.inputs.is_empty() {
-            return Err(coinbase::Error::UnexpectedInputs);
-        }
-
-        Ok(Bundle {
-            vin: vec![TxIn::coinbase(height, miner_data)?],
-            vout: self.vout,
-            authorization: Coinbase,
-        })
-    }
-
+impl<V: Copy> TransparentBuilder<V> {
     /// Builds a bundle containing the given inputs and outputs, for inclusion in a PCZT.
-    pub fn build_for_pczt(self) -> Option<pczt::Bundle> {
+    pub fn build_for_pczt(self) -> Option<pczt::Bundle<V>> {
         #[cfg(feature = "transparent-inputs")]
         let inputs = self
             .inputs
@@ -545,29 +407,9 @@ impl TransparentBuilder {
             Some(pczt::Bundle { inputs, outputs })
         }
     }
-
-    /// Adds a zero-value "null data" (OP_RETURN) output containing the given data.
-    pub fn add_null_data_output(&mut self, data: &[u8]) -> Result<(), Error> {
-        // Check 80 bytes limit.
-        const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
-        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
-            return Err(Error::NullDataTooLong {
-                actual: data.len(),
-                limit: MAX_OP_RETURN_RELAY_BYTES,
-            });
-        }
-
-        let script = script::Component(vec![
-            op::RETURN,
-            op::push_value(data).expect("length checked"),
-        ]);
-
-        self.vout.push(TxOut::new(Zatoshis::ZERO, script.into()));
-        Ok(())
-    }
 }
 
-impl TxIn<Unauthorized> {
+impl<V: fmt::Debug> TxIn<Unauthorized<V>> {
     #[cfg(feature = "transparent-inputs")]
     pub fn new(prevout: OutPoint) -> Self {
         TxIn::from_parts(prevout, (), u32::MAX)
@@ -575,8 +417,8 @@ impl TxIn<Unauthorized> {
 }
 
 #[cfg(not(feature = "transparent-inputs"))]
-impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
+impl<V: fmt::Debug> TransparentAuthorizingContext<V> for Unauthorized<V> {
+    fn input_amounts(&self) -> Vec<V> {
         vec![]
     }
 
@@ -586,8 +428,8 @@ impl TransparentAuthorizingContext for Unauthorized {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
+impl<V: Copy + fmt::Debug> TransparentAuthorizingContext<V> for Unauthorized<V> {
+    fn input_amounts(&self) -> Vec<V> {
         self.inputs.iter().map(|txin| txin.coin.value()).collect()
     }
 
@@ -599,7 +441,7 @@ impl TransparentAuthorizingContext for Unauthorized {
     }
 }
 
-impl Bundle<Unauthorized> {
+impl<V: Copy + fmt::Debug> Bundle<Unauthorized<V>, V> {
     /// Applies signatures to the bundle using the provided signing set.
     ///
     /// All signatures use [`SighashType::ALL`]. For other sighash types, use the PCZT
@@ -609,9 +451,9 @@ impl Bundle<Unauthorized> {
         self,
         calculate_sighash: F,
         signing_set: &TransparentSigningSet,
-    ) -> Result<Bundle<Authorized>, Error>
+    ) -> Result<Bundle<Authorized, V>, Error>
     where
-        F: Fn(SignableInput) -> [u8; 32],
+        F: Fn(SignableInput<V>) -> [u8; 32],
     {
         #[cfg(feature = "transparent-inputs")]
         let script_sigs = self
@@ -732,9 +574,9 @@ impl Bundle<Unauthorized> {
     pub fn prepare_transparent_signatures<F>(
         self,
         calculate_sighash: F,
-    ) -> Result<TransparentSignatureContext, Error>
+    ) -> Result<TransparentSignatureContext<V>, Error>
     where
-        F: Fn(SignableInput) -> [u8; 32], // The closure's signature
+        F: Fn(SignableInput<V>) -> [u8; 32], // The closure's signature
     {
         // Compute the sighashes for all inputs using the provided closure.
         let sighashes = self
@@ -766,7 +608,7 @@ impl Bundle<Unauthorized> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentSignatureContext {
+impl<V: fmt::Debug> TransparentSignatureContext<V> {
     /// Appends a new batch of external signatures to the transparent inputs.
     ///
     /// This method iterates through the provided signatures, applying each one to the
@@ -843,7 +685,7 @@ impl TransparentSignatureContext {
     /// Finalizes the signing process and attempts to build the `Bundle<Authorized>`.
     ///
     /// Returns an error if any signatures are missing.
-    pub fn finalize_signatures(self) -> Result<Bundle<Authorized>, Error> {
+    pub fn finalize_signatures(self) -> Result<Bundle<Authorized, V>, Error> {
         let mut fully_signed_scripts = Vec::with_capacity(self.final_script_sigs.len());
         for script_opt in self.final_script_sigs.iter() {
             match script_opt {
@@ -882,21 +724,26 @@ mod tests {
     use super::{Error, OutPoint, SignableInput, TransparentBuilder, TxOut};
     use crate::address::TransparentAddress;
     use secp256k1::{Message, SecretKey};
-    use zcash_protocol::value::Zatoshis;
 
     /// The pubkey hash of the P2PKH address that the tests pay. Its value is arbitrary.
     const RECIPIENT_PUBKEY_HASH: [u8; 20] = [0x11; 20];
 
+    /// The value of each coin that the tests spend. Its value is arbitrary.
+    const INPUT_VALUE: u64 = 10_000;
+
+    /// The value of the output that the tests create. Its value is arbitrary.
+    const OUTPUT_VALUE: u64 = 5_000;
+
     // Helper that takes a key to create distinct inputs.
     fn new_p2pkh_spend_with_key(
         key_bytes: [u8; 32],
-    ) -> (SecretKey, secp256k1::PublicKey, TxOut, OutPoint) {
+    ) -> (SecretKey, secp256k1::PublicKey, TxOut<u64>, OutPoint) {
         let sk = SecretKey::from_secret_bytes(key_bytes).expect("32 bytes is a valid secret key");
         let pk = secp256k1::PublicKey::from_secret_key(&sk);
 
         let taddr = TransparentAddress::PublicKeyHash(crate::util::hash160::hash(&pk.serialize()));
 
-        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
+        let txout = TxOut::new(INPUT_VALUE, taddr.script().into());
 
         let txid = [0u8; 32]; // Dummy txid
         let outpoint = OutPoint::new(txid, 0);
@@ -916,16 +763,14 @@ mod tests {
         let mut builder = TransparentBuilder::empty();
         builder.add_p2pkh_input(pk1, utxo1, coin1).unwrap();
         builder.add_p2pkh_input(pk2, utxo2, coin2).unwrap();
-        builder
-            .add_output(&taddr, Zatoshis::from_u64(5000).unwrap())
-            .unwrap();
+        builder.add_output(&taddr, OUTPUT_VALUE).unwrap();
 
         // Build the unauthorized bundle
         let bundle = builder.build().unwrap();
 
         // This closure will be called by `prepare_transparent_signatures` for each input.
         // For this test, we'll just return a fixed, unique hash for each input.
-        let calculate_sighash = |input: SignableInput| {
+        let calculate_sighash = |input: SignableInput<u64>| {
             let mut sighash = [0u8; 32];
             // Create a distinct sighash for each input index
             sighash[0] = input.index as u8;
@@ -967,7 +812,7 @@ mod tests {
         let bundle = builder.build().unwrap();
 
         // Prepare the signing context
-        let calculate_sighash = |input: SignableInput| [input.index as u8; 32];
+        let calculate_sighash = |input: SignableInput<u64>| [input.index as u8; 32];
         let sig_context = bundle
             .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
@@ -1007,7 +852,7 @@ mod tests {
 
         // Prepare the signing context
         // Make both sighashes the same for this test.
-        let calculate_sighash = |_input: SignableInput| [42; 32];
+        let calculate_sighash = |_input: SignableInput<u64>| [42; 32];
         let sig_context = bundle
             .prepare_transparent_signatures(calculate_sighash)
             .unwrap();
@@ -1034,7 +879,7 @@ mod tests {
         let bundle = builder.build().unwrap();
 
         // Prepare the signing context
-        let calculate_sighash = |input: SignableInput| {
+        let calculate_sighash = |input: SignableInput<u64>| {
             let mut sighash = [0u8; 32];
             sighash[0] = input.index as u8; // A simple, unique sighash for each input
             sighash
@@ -1072,7 +917,7 @@ mod tests {
     ) -> (
         Vec<SecretKey>,
         zcash_script::script::FromChain,
-        TxOut,
+        TxOut<u64>,
         OutPoint,
     ) {
         use zcash_script::pattern::check_multisig;
@@ -1092,7 +937,7 @@ mod tests {
         let taddr =
             TransparentAddress::ScriptHash(crate::util::hash160::hash(&redeem_script.to_bytes()));
 
-        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
+        let txout = TxOut::new(INPUT_VALUE, taddr.script().into());
         let outpoint = OutPoint::new([0u8; 32], 0);
 
         (vec![sk1, sk2], redeem_script, txout, outpoint)
@@ -1108,9 +953,7 @@ mod tests {
 
         let mut builder = TransparentBuilder::empty();
         builder.add_p2sh_input(redeem_script, utxo, coin).unwrap();
-        builder
-            .add_output(&taddr, Zatoshis::from_u64(5000).unwrap())
-            .unwrap();
+        builder.add_output(&taddr, OUTPUT_VALUE).unwrap();
 
         let bundle = builder.build().unwrap();
 
@@ -1120,7 +963,7 @@ mod tests {
             signing_set.add_key(*sk);
         }
 
-        let calculate_sighash = |input: SignableInput| {
+        let calculate_sighash = |input: SignableInput<u64>| {
             let mut sighash = [0u8; 32];
             sighash[0] = input.index as u8;
             sighash
@@ -1140,9 +983,7 @@ mod tests {
 
         let mut builder = TransparentBuilder::empty();
         builder.add_p2sh_input(redeem_script, utxo, coin).unwrap();
-        builder
-            .add_output(&taddr, Zatoshis::from_u64(5000).unwrap())
-            .unwrap();
+        builder.add_output(&taddr, OUTPUT_VALUE).unwrap();
 
         let bundle = builder.build().unwrap();
 
@@ -1150,7 +991,7 @@ mod tests {
         let mut signing_set = TransparentSigningSet::new();
         signing_set.add_key(sks[0]);
 
-        let calculate_sighash = |input: SignableInput| {
+        let calculate_sighash = |input: SignableInput<u64>| {
             let mut sighash = [0u8; 32];
             sighash[0] = input.index as u8;
             sighash

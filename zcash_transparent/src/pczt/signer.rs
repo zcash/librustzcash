@@ -9,7 +9,7 @@ use crate::{
 
 use super::{Input, VerifyError};
 
-impl Input {
+impl<V: Copy> Input<V> {
     /// Helper to prepare a [`SignableInput`] for this input.
     ///
     /// This can be used to calculate the sighash for this input within its transaction,
@@ -22,7 +22,7 @@ impl Input {
     /// the same checks that [`Input::sign`] makes.
     pub fn with_signable_input<T, F>(&self, index: usize, f: F) -> Result<T, SignerError>
     where
-        F: FnOnce(SignableInput) -> T,
+        F: FnOnce(SignableInput<V>) -> T,
     {
         self.with_signable_input_with_sighash_policy(index, f, SighashPolicy::ALL_ONLY)
     }
@@ -39,7 +39,7 @@ impl Input {
         sighash_policy: SighashPolicy,
     ) -> Result<T, SignerError>
     where
-        F: FnOnce(SignableInput) -> T,
+        F: FnOnce(SignableInput<V>) -> T,
     {
         self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
@@ -103,7 +103,7 @@ impl Input {
         sk: &secp256k1::SecretKey,
     ) -> Result<(), SignerError>
     where
-        F: FnOnce(SignableInput) -> [u8; 32],
+        F: FnOnce(SignableInput<V>) -> [u8; 32],
     {
         self.sign_with_sighash_policy(index, calculate_sighash, sk, SighashPolicy::ALL_ONLY)
     }
@@ -121,7 +121,7 @@ impl Input {
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError>
     where
-        F: FnOnce(SignableInput) -> [u8; 32],
+        F: FnOnce(SignableInput<V>) -> [u8; 32],
     {
         self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
@@ -206,7 +206,7 @@ impl Input {
         sig: secp256k1::ecdsa::Signature,
     ) -> Result<(), SignerError>
     where
-        F: FnOnce(SignableInput) -> [u8; 32],
+        F: FnOnce(SignableInput<V>) -> [u8; 32],
     {
         self.append_signature_with_sighash_policy(
             index,
@@ -230,7 +230,7 @@ impl Input {
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError>
     where
-        F: FnOnce(SignableInput) -> [u8; 32],
+        F: FnOnce(SignableInput<V>) -> [u8; 32],
     {
         self.check_sighash_policy(sighash_policy)?;
         self.verify_for_signing()?;
@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn sign(
-        input: &mut Input,
+        input: &mut Input<u64>,
         sk: &secp256k1::SecretKey,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError> {
@@ -356,7 +356,7 @@ mod tests {
 
     /// Appends an externally-produced signature over [`SIGHASH`] by `sk`.
     fn append(
-        input: &mut Input,
+        input: &mut Input<u64>,
         sk: &secp256k1::SecretKey,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SignerError> {
@@ -366,7 +366,7 @@ mod tests {
 
     /// A P2PKH input, with the `hash160` preimage that `Input::append_signature` needs in
     /// order to recover the pubkey from the script.
-    fn p2pkh_input(sk: &secp256k1::SecretKey, sighash_type: SighashType) -> Input {
+    fn p2pkh_input(sk: &secp256k1::SecretKey, sighash_type: SighashType) -> Input<u64> {
         let mut input = input(p2pkh(&pubkey(sk)), None, sighash_type);
         input
             .hash160_preimages
@@ -481,7 +481,7 @@ mod tests {
     /// Preparing the sighash for an external signer hands out a commitment to the same
     /// unverified `script_code`; whoever signs it authorizes whatever it commits to.
     fn signable_input(
-        input: &Input,
+        input: &Input<u64>,
         sighash_policy: SighashPolicy,
     ) -> Result<SighashType, SignerError> {
         input.with_signable_input_with_sighash_policy(

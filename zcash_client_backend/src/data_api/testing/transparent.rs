@@ -11,11 +11,13 @@ use subtle::ConditionallySelectable;
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
 };
 use zcash_keys::{
     address::Address,
-    keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    keys::{
+        UnifiedAddressRequest,
+        transparent::{NonHardenedChildIndex, TransparentKeyScope, gap_limits::GapLimits},
+    },
 };
 use zcash_primitives::{
     block::{Block, BlockHash, BlockHeaderData},
@@ -1229,7 +1231,7 @@ where
         .collect::<BTreeMap<_, _>>();
     let to = Address::from(
         *external_taddrs_sorted
-            .get(&transparent::keys::NonHardenedChildIndex::from_index(4).unwrap())
+            .get(&NonHardenedChildIndex::from_index(4).unwrap())
             .expect("An address exists at index 4."),
     )
     .to_zcash_address(st.network());

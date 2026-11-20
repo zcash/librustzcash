@@ -3,8 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxIn,
-        TxVersion, Zip244Digests,
+        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxVersion,
+        Zip244Digests,
+        coinbase::is_coinbase,
         sighash::{PrecomputedSighashData, SignableInput},
         sighash_v4::{v4_signature_hash, zip143_digests},
         sighash_v5::v5_signature_hash,
@@ -15,6 +16,7 @@ use {
     },
     ::transparent::{
         address::Script,
+        bundle::TxIn,
         sighash::{SighashType, TransparentAuthorizingContext},
     },
     alloc::vec::Vec,
@@ -1215,7 +1217,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 #[cfg(test)]
-impl TransparentAuthorizingContext for TestTransparentAuth {
+impl TransparentAuthorizingContext<Zatoshis> for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         self.reads.set(self.reads.get() + 1);
         self.input_amounts.clone()
@@ -1399,7 +1401,7 @@ fn zip_0244() {
         if let Some(bundle) = precomputed
             .tx()
             .transparent_bundle()
-            .filter(|b| !b.is_coinbase() && !b.vin.is_empty())
+            .filter(|b| !is_coinbase(precomputed.tx()) && !b.vin.is_empty())
         {
             for index in 0..bundle.vin.len() {
                 for hash_type in [

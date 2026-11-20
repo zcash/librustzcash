@@ -18,36 +18,30 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-zcash_encoding.workspace = true
-zcash_protocol.workspace = true
-zip32.workspace = true
-
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Encodings
 corez.workspace = true
 
-# - Secret management
-subtle.workspace = true
-
-# - Shielded protocols
-zcash_spec.workspace = true
-
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 
-# - Transparent inputs
-#   - `Error` type exposed
+# - PCZT
+#   - `ChildNumber` type exposed
 bip32.workspace = true
+
+# - Transparent protocol
+#   - Script types exposed
+zcash_script.workspace = true
+
+# - Transparent inputs
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
-zcash_script = { workspace = true, features = ["descriptor"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Boilerplate
 getset.workspace = true
-nonempty.workspace = true
 
 # - Digests
 sha2.workspace = true
@@ -56,7 +50,6 @@ sha2.workspace = true
 document-features = { workspace = true, optional = true }
 
 # - Encodings
-bs58.workspace = true
 hex.workspace = true
 
 # - Transparent protocol
@@ -64,7 +57,6 @@ ripemd.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["std"]
@@ -75,13 +67,10 @@ std = [
 ]
 
 ## Enables spending transparent notes with the transaction builder.
-transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
+transparent-inputs = ["dep:secp256k1"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
-test-dependencies = [
-    "dep:proptest",
-    "zcash_protocol/test-dependencies",
-]
+test-dependencies = ["dep:proptest"]
 
 [lints]
 workspace = true

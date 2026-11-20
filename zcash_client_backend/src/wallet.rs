@@ -7,10 +7,12 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
-    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
-use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
+use zcash_keys::{
+    address::Receiver,
+    keys::{OutgoingViewingKey, transparent::TransparentKeyScope},
+};
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
@@ -28,7 +30,7 @@ use crate::{TransferType, fees::sapling as sapling_fees};
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
+use {std::time::SystemTime, zcash_keys::keys::transparent::NonHardenedChildIndex};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -293,7 +295,7 @@ impl<AccountId> WalletTx<AccountId> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
-    txout: TxOut,
+    txout: TxOut<Zatoshis>,
     mined_height: Option<BlockHeight>,
     recipient_account: Option<AccountId>,
     recipient_key_scope: Option<TransparentKeyScope>,
@@ -311,7 +313,7 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     /// determined based on the set of output script patterns understood by this wallet.
     pub fn from_parts(
         outpoint: OutPoint,
-        txout: TxOut,
+        txout: TxOut<Zatoshis>,
         mined_height: Option<BlockHeight>,
         recipient_account: Option<AccountId>,
         recipient_key_scope: Option<TransparentKeyScope>,
@@ -381,7 +383,7 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     }
 
     /// Returns the transaction output itself.
-    pub fn txout(&self) -> &TxOut {
+    pub fn txout(&self) -> &TxOut<Zatoshis> {
         &self.txout
     }
 
@@ -469,7 +471,7 @@ impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<A
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }
-    fn coin(&self) -> &TxOut {
+    fn coin(&self) -> &TxOut<Zatoshis> {
         &self.txout
     }
     fn serialized_size(&self) -> transparent_fees::InputSize {

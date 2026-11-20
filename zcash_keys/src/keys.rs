@@ -4,7 +4,10 @@ use core::fmt::{self, Display};
 use nonempty::NonEmpty;
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
+    crate::keys::transparent::{
+        IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope,
+        zip48::{P2shFullViewingKey, P2shIncomingViewingKey},
+    },
     core::convert::TryInto,
 };
 
@@ -30,8 +33,6 @@ use zcash_protocol::consensus::NetworkConstants;
     any(test, feature = "test-dependencies")
 ))]
 use ::transparent::address::TransparentAddress;
-#[cfg(feature = "transparent-inputs")]
-use ::transparent::zip48::{P2shFullViewingKey, P2shIncomingViewingKey};
 
 #[cfg(feature = "unstable")]
 use {
@@ -106,7 +107,6 @@ pub mod sapling {
     }
 }
 
-#[cfg(any(feature = "transparent-key-encoding", feature = "transparent-inputs"))]
 pub mod transparent;
 
 #[cfg(feature = "zcashd-compat")]
@@ -258,7 +258,7 @@ impl Era {
 #[derive(Clone)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<::transparent::keys::AccountPrivKey>,
+    transparent: Option<crate::keys::transparent::AccountPrivKey>,
     #[cfg(feature = "sapling")]
     sapling: Option<sapling::ExtendedSpendingKey>,
     #[cfg(feature = "orchard")]
@@ -302,7 +302,7 @@ impl UnifiedSpendingKey {
         UnifiedSpendingKey::from_parts(
             #[cfg(feature = "transparent-inputs")]
             Some(
-                ::transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
+                crate::keys::transparent::AccountPrivKey::from_seed(_params, seed, _account)
                     .map_err(DerivationError::Transparent)?,
             ),
             #[cfg(feature = "sapling")]
@@ -330,7 +330,7 @@ impl UnifiedSpendingKey {
     ///   transparent part.
     pub fn from_parts(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
-            ::transparent::keys::AccountPrivKey,
+            crate::keys::transparent::AccountPrivKey,
         >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::ExtendedSpendingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::SpendingKey>,
@@ -408,7 +408,7 @@ impl UnifiedSpendingKey {
     /// For a key derived with [`Self::from_seed`], this is the key at the BIP 44 path
     /// `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> Option<&::transparent::keys::AccountPrivKey> {
+    pub fn transparent(&self) -> Option<&crate::keys::transparent::AccountPrivKey> {
         self.transparent.as_ref()
     }
 
@@ -575,7 +575,7 @@ impl UnifiedSpendingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            ::transparent::keys::AccountPrivKey::from_bytes(&key)
+                            crate::keys::transparent::AccountPrivKey::from_bytes(&key)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
                         );
                     }
@@ -618,7 +618,7 @@ impl UnifiedSpendingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: crate::keys::transparent::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -1038,7 +1038,7 @@ pub struct UnifiedFullViewingKey {
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, PartialEq, Eq)]
 enum TransparentFvk {
-    P2pkh(::transparent::keys::AccountPubKey),
+    P2pkh(crate::keys::transparent::AccountPubKey),
     P2sh(P2shFullViewingKey),
 }
 
@@ -1049,7 +1049,7 @@ enum TransparentFvk {
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, PartialEq, Eq)]
 enum TransparentIvk {
-    P2pkh(::transparent::keys::ExternalIvk),
+    P2pkh(crate::keys::transparent::ExternalIvk),
     P2sh(P2shIncomingViewingKey),
 }
 
@@ -1095,7 +1095,7 @@ impl UnifiedFullViewingKey {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
-            ::transparent::keys::AccountPubKey,
+            crate::keys::transparent::AccountPubKey,
         >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
@@ -1298,7 +1298,7 @@ impl UnifiedFullViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(TransparentFvk::P2pkh(
-                            ::transparent::keys::AccountPubKey::deserialize(data)
+                            crate::keys::transparent::AccountPubKey::deserialize(data)
                                 .map_err(|_| Typecode::P2PKH)?,
                         ));
                     }
@@ -1475,7 +1475,7 @@ impl UnifiedFullViewingKey {
     /// BIP44 path `m/44'/<coin_type>'/<account>'`, if present.
     #[cfg(feature = "transparent-inputs")]
     #[deprecated(note = "Use `UnifiedFullViewingKey::p2pkh` instead.")]
-    pub fn transparent(&self) -> Option<&::transparent::keys::AccountPubKey> {
+    pub fn transparent(&self) -> Option<&crate::keys::transparent::AccountPubKey> {
         self.p2pkh()
     }
 
@@ -1485,7 +1485,7 @@ impl UnifiedFullViewingKey {
     /// Returns `None` if the key has no transparent component, or carries a P2SH viewing
     /// key item instead; the two are mutually exclusive.
     #[cfg(feature = "transparent-inputs")]
-    pub fn p2pkh(&self) -> Option<&::transparent::keys::AccountPubKey> {
+    pub fn p2pkh(&self) -> Option<&crate::keys::transparent::AccountPubKey> {
         match self.transparent.as_ref() {
             Some(TransparentFvk::P2pkh(k)) => Some(k),
             Some(TransparentFvk::P2sh(_)) | None => None,
@@ -1639,7 +1639,7 @@ impl UnifiedFullViewingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: crate::keys::transparent::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -1785,7 +1785,7 @@ impl UnifiedIncomingViewingKey {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
-            ::transparent::keys::ExternalIvk,
+            crate::keys::transparent::ExternalIvk,
         >,
         #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
@@ -1879,7 +1879,7 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(TransparentIvk::P2pkh(
-                            ::transparent::keys::ExternalIvk::deserialize(data)
+                            crate::keys::transparent::ExternalIvk::deserialize(data)
                                 .map_err(|_| Typecode::P2PKH)?,
                         ));
                     }
@@ -2029,7 +2029,7 @@ impl UnifiedIncomingViewingKey {
     /// Returns the transparent external IVK, if present.
     #[cfg(feature = "transparent-inputs")]
     #[deprecated(note = "Use `UnifiedIncomingViewingKey::p2pkh` instead.")]
-    pub fn transparent(&self) -> Option<&::transparent::keys::ExternalIvk> {
+    pub fn transparent(&self) -> Option<&crate::keys::transparent::ExternalIvk> {
         self.p2pkh()
     }
 
@@ -2038,7 +2038,7 @@ impl UnifiedIncomingViewingKey {
     /// Returns `None` if the key has no transparent component, or carries a P2SH viewing
     /// key item instead; the two are mutually exclusive.
     #[cfg(feature = "transparent-inputs")]
-    pub fn p2pkh(&self) -> Option<&::transparent::keys::ExternalIvk> {
+    pub fn p2pkh(&self) -> Option<&crate::keys::transparent::ExternalIvk> {
         match self.transparent.as_ref() {
             Some(TransparentIvk::P2pkh(k)) => Some(k),
             Some(TransparentIvk::P2sh(_)) | None => None,
@@ -2429,7 +2429,7 @@ impl UnifiedIncomingViewingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: crate::keys::transparent::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -2511,8 +2511,10 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::encoding::AddressCodec,
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        crate::{
+            encoding::AddressCodec,
+            keys::transparent::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        },
         alloc::{string::ToString, vec::Vec},
         zcash_address::unified::Revision,
     };
@@ -3557,7 +3559,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn ufvk_from_p2sh_round_trips_and_is_transparent_only() {
         use super::{UnifiedAddressRequest, UnifiedFullViewingKey};
-        use ::transparent::zip48::{P2shFullViewingKey, P2shKey};
+        use crate::keys::transparent::zip48::{P2shFullViewingKey, P2shKey};
         use core::num::NonZeroU8;
         use secp256k1::{PublicKey, SecretKey};
 

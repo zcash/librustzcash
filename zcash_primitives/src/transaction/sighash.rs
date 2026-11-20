@@ -12,10 +12,11 @@ use super::{
 };
 use ::sapling::bundle::GrothProofBytes;
 use ::transparent::sighash::TransparentAuthorizingContext;
+use zcash_protocol::value::Zatoshis;
 
 pub enum SignableInput<'a> {
     Shielded,
-    Transparent(transparent::sighash::SignableInput<'a>),
+    Transparent(transparent::sighash::SignableInput<'a, Zatoshis>),
 }
 
 impl SignableInput<'_> {
@@ -54,7 +55,7 @@ pub struct PrecomputedSighashData<A: Authorization> {
 
 impl<TA, SA, A> PrecomputedSighashData<A>
 where
-    TA: TransparentAuthorizingContext,
+    TA: TransparentAuthorizingContext<Zatoshis>,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 {
@@ -74,7 +75,7 @@ where
 
 impl<TA, A> PrecomputedSighashData<A>
 where
-    TA: TransparentAuthorizingContext,
+    TA: TransparentAuthorizingContext<Zatoshis>,
     A: Authorization<TransparentAuth = TA>,
 {
     /// Computes the digests for `tx`, which must be of version 5 or later.

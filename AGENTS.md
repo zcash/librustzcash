@@ -180,7 +180,8 @@ since Mermaid layout is hard to reason about in plain text.
   the reverse.
 - `zcash_protocol` is the lowest layer with Zcash-domain semantics — most crates depend
   on it. The standalone utility crates (`zcash_encoding`, `equihash`, `f4jumble`) sit
-  below it, and `eip681` stands alone with no in-repo dependencies.
+  below it, and `eip681` and `zcash_transparent` each stand alone with no in-repo
+  dependencies.
 - `zcash_client_sqlite` sits at the top, depending on `zcash_client_backend`.
 
 ## Code Conventions

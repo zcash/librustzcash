@@ -18,9 +18,8 @@ use zip32::DiversifierIndex;
 use {
     super::transparent::SchedulingError,
     std::time::{Duration, SystemTime},
-    transparent::keys::TransparentKeyScope,
     zcash_client_backend::data_api::TransparentKeyOrigin,
-    zcash_keys::keys::AddressGenerationError,
+    zcash_keys::keys::{AddressGenerationError, transparent::TransparentKeyScope},
 };
 
 use crate::error::SqliteClientError;
@@ -120,7 +119,7 @@ pub(crate) enum KeyScope {
     /// An ephemeral transparent address, which is derived from an account's transparent
     /// [`AccountPubKey`] with the BIP 44 path `change` level index set to the value `2`.
     ///
-    /// [`AccountPubKey`]: transparent::keys::AccountPubKey
+    /// [`AccountPubKey`]: zcash_keys::keys::transparent::AccountPubKey
     Ephemeral,
     /// A transparent address that is logically associated with an account (i.e. funds
     /// controlled by the correponding secret key contribute to that account's balance)

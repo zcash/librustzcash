@@ -318,7 +318,10 @@ impl Bundle {
 impl Bundle {
     pub(crate) fn into_parsed(
         self,
-    ) -> Result<transparent::pczt::Bundle, transparent::pczt::ParseError> {
+    ) -> Result<
+        transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
+        transparent::pczt::ParseError,
+    > {
         let inputs = self
             .inputs
             .into_iter()
@@ -383,12 +386,14 @@ impl Bundle {
         transparent::pczt::Bundle::parse(inputs, outputs)
     }
 
-    pub(crate) fn serialize_from(bundle: transparent::pczt::Bundle) -> Self {
+    pub(crate) fn serialize_from(
+        bundle: transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
+    ) -> Self {
         let inputs = bundle
             .inputs()
             .iter()
             .map(|input| Input {
-                prevout_txid: (*input.prevout_txid()).into(),
+                prevout_txid: *input.prevout_txid(),
                 prevout_index: *input.prevout_index(),
                 sequence: *input.sequence(),
                 required_time_lock_time: *input.required_time_lock_time(),

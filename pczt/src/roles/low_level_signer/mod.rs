@@ -122,7 +122,11 @@ impl Signer {
     pub fn sign_transparent_with<E, F>(self, f: F) -> Result<Self, E>
     where
         E: From<transparent::pczt::ParseError>,
-        F: FnOnce(&Pczt, &mut transparent::pczt::Bundle, &mut u8) -> Result<(), E>,
+        F: FnOnce(
+            &Pczt,
+            &mut transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
+            &mut u8,
+        ) -> Result<(), E>,
     {
         let mut pczt = self.pczt;
 

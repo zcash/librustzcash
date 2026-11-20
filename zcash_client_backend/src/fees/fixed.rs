@@ -201,7 +201,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -249,7 +249,7 @@ mod tests {
                 AnchorRetentionInterval::ZIP_318,
             ),
             &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
+            &[] as &[TxOut<Zatoshis>],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[

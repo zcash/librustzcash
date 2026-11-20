@@ -14,12 +14,13 @@ use ::sapling::bundle::{OutputDescription, SpendDescription};
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
-    value::ZatBalance,
+    value::{ZatBalance, Zatoshis},
 };
 
 use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxId, TxVersion,
     Zip244Digests,
+    components::transparent::{write_outpoint, write_script, write_txout},
 };
 
 /// TxId tree root personalization
@@ -115,7 +116,7 @@ pub(crate) fn transparent_prevout_hash<TransparentAuth: transparent::Authorizati
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_PREVOUTS_HASH_PERSONALIZATION);
     for t_in in vin {
-        t_in.prevout().write(&mut h).unwrap();
+        write_outpoint(&mut h, t_in.prevout()).unwrap();
     }
     h.finalize()
 }
@@ -136,10 +137,10 @@ pub(crate) fn transparent_sequence_hash<TransparentAuth: transparent::Authorizat
 /// to a hash personalized by ZCASH_OUTPUTS_HASH_PERSONALIZATION.
 /// In the case that no outputs are provided, this produces a default
 /// hash from just the personalization string.
-pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bHash {
+pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut<Zatoshis>>>(vout: &[T]) -> Blake2bHash {
     let mut h = hasher(ZCASH_OUTPUTS_HASH_PERSONALIZATION);
     for t_out in vout {
-        t_out.borrow().write(&mut h).unwrap();
+        write_txout(&mut h, t_out.borrow()).unwrap();
     }
     h.finalize()
 }
@@ -224,7 +225,7 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
 /// The txid commits to the hash of all transparent outputs. The
 /// prevout and sequence_hash components of txid
 fn transparent_digests<A: transparent::Authorization>(
-    bundle: &transparent::Bundle<A>,
+    bundle: &transparent::Bundle<A, Zatoshis>,
 ) -> TransparentDigests<Blake2bHash> {
     TransparentDigests {
         prevouts_digest: transparent_prevout_hash(&bundle.vin),
@@ -326,7 +327,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth, Zatoshis>>,
     ) -> Self::TransparentDigest {
         transparent_bundle.map(transparent_digests)
     }
@@ -543,12 +544,12 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
+        transparent_bundle: Option<&transparent::Bundle<transparent::Authorized, Zatoshis>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
-                txin.script_sig().write(&mut h).unwrap();
+                write_script(&mut h, txin.script_sig()).unwrap();
             }
         }
         h.finalize()

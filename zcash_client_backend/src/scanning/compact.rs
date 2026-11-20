@@ -27,7 +27,8 @@ use crate::{
 use {
     super::find_transparent_spends,
     crate::wallet::WalletTransparentOutput,
-    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    zcash_keys::keys::transparent::TransparentKeyScope,
 };
 
 #[cfg(feature = "orchard")]

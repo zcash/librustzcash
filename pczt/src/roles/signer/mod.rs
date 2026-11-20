@@ -156,7 +156,7 @@ pub fn extract_orchard_spend_auth_signatures(pczt: &Pczt) -> Vec<SpendAuthSignat
 
 pub struct Signer {
     global: Global,
-    transparent: transparent::pczt::Bundle,
+    transparent: transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
     sapling: crate::sapling::Parsed,
     orchard: crate::orchard::Parsed,
     ironwood: crate::orchard::Parsed,
@@ -310,7 +310,7 @@ impl Signer {
     ) -> Result<(), Error>
     where
         F: FnOnce(
-            &mut transparent::pczt::Input,
+            &mut transparent::pczt::Input<zcash_protocol::value::Zatoshis>,
             &PrecomputedSighashData<EffectsOnly>,
         ) -> Result<(), transparent::pczt::SignerError>,
     {

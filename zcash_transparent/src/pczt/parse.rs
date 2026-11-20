@@ -3,7 +3,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use bip32::ChildNumber;
-use zcash_protocol::{TxId, value::Zatoshis};
 use zcash_script::script;
 
 use crate::sighash::SighashType;
@@ -15,15 +14,17 @@ use super::{Bip32Derivation, Bundle, Input, Output};
 /// spend finalization, so they cannot exceed this.
 pub(super) const MAX_SCRIPT_PUSH_VALUE_LEN: usize = 520;
 
-impl Bundle {
+impl<V> Bundle<V> {
     /// Parses a PCZT bundle from its component parts.
-    pub fn parse(inputs: Vec<Input>, outputs: Vec<Output>) -> Result<Self, ParseError> {
+    pub fn parse(inputs: Vec<Input<V>>, outputs: Vec<Output<V>>) -> Result<Self, ParseError> {
         Ok(Self { inputs, outputs })
     }
 }
 
-impl Input {
+impl<V: TryFrom<u64>> Input<V> {
     /// Parses a PCZT input from its component parts.
+    ///
+    /// Returns [`ParseError::InvalidValue`] if `V::try_from(value)` fails.
     #[allow(clippy::too_many_arguments)]
     pub fn parse(
         prevout_txid: [u8; 32],
@@ -44,8 +45,6 @@ impl Input {
         hash256_preimages: BTreeMap<[u8; 32], Vec<u8>>,
         proprietary: BTreeMap<String, Vec<u8>>,
     ) -> Result<Self, ParseError> {
-        let prevout_txid = TxId::from_bytes(prevout_txid);
-
         match required_time_lock_time {
             None | Some(500000000..) => Ok(()),
             Some(_) => Err(ParseError::InvalidRequiredTimeLocktime),
@@ -60,7 +59,7 @@ impl Input {
             .map(|s| parse_script_sig(s).ok_or(ParseError::InvalidScriptSig))
             .transpose()?;
 
-        let value = Zatoshis::from_u64(value).map_err(|_| ParseError::InvalidValue)?;
+        let value = V::try_from(value).map_err(|_| ParseError::InvalidValue)?;
 
         let script_pubkey =
             parse_script_from_chain(script_pubkey).ok_or(ParseError::InvalidScriptPubkey)?;
@@ -104,8 +103,10 @@ impl Input {
     }
 }
 
-impl Output {
+impl<V: TryFrom<u64>> Output<V> {
     /// Parses a PCZT output from its component parts.
+    ///
+    /// Returns [`ParseError::InvalidValue`] if `V::try_from(value)` fails.
     pub fn parse(
         value: u64,
         script_pubkey: Vec<u8>,
@@ -114,7 +115,7 @@ impl Output {
         user_address: Option<String>,
         proprietary: BTreeMap<String, Vec<u8>>,
     ) -> Result<Self, ParseError> {
-        let value = Zatoshis::from_u64(value).map_err(|_| ParseError::InvalidValue)?;
+        let value = V::try_from(value).map_err(|_| ParseError::InvalidValue)?;
 
         let script_pubkey =
             parse_script_pubkey(script_pubkey).ok_or(ParseError::InvalidScriptPubkey)?;
@@ -200,7 +201,7 @@ mod tests {
         partial_signatures.insert([2; 33], vec![0; 521]);
 
         assert!(matches!(
-            Input::parse(
+            Input::<u64>::parse(
                 [0; 32],
                 0,
                 None,

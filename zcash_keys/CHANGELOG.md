@@ -9,44 +9,6 @@ workspace.
 
 ## [Unreleased]
 
-### Added
-- `zcash_keys::keys::UnifiedSpendingKey::from_parts`
-- `zcash_keys::keys::DerivationError::Empty`
-- `zcash_keys::keys::DecodingError::{DuplicateTypecode, Empty}` (under the
-  `unstable` feature)
-- `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
-  `test-dependencies` feature)
-
-### Changed
-- `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
-  subset of the supported protocols:
-  - `UnifiedSpendingKey::{transparent, sapling, orchard}` now return an
-    `Option` of a reference to the key, which is `None` when the key does not
-    hold a key for that protocol. Keys derived with `from_seed` hold every
-    component.
-  - `UnifiedSpendingKey::to_unified_full_viewing_key` returns a viewing key
-    that holds exactly the protocols that the spending key holds.
-  - `UnifiedSpendingKey::to_bytes` encodes only the components that are
-    present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
-    non-empty subset of the components. `from_bytes` now reads the entire
-    input, and returns an error for trailing data or a repeated typecode.
-
-## [0.17.0-keystone.0] - 2026-11-10
-
-This is a backport release to enable downstream users that cannot yet
-upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
-features supported by `zcash_keys 0.17.0`.
-
-### Added
-- `zcash_keys::keys::transparent::Key::{pubkey_with_context,
-  der_encode_with_context}`, which `zcash_keys 0.17.0` does not provide.
-
-### Changed
-- This release has the following differences from `zcash_keys 0.17.0`:
-  - It depends on `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, and
-    `zcash_transparent 0.11.0-keystone.0`, in place of `bip32 0.6`,
-    `secp256k1 0.33`, and `zcash_transparent 0.11.0`.
-
 ## [0.17.0] - 2026-10-21
 
 ### Added
@@ -174,6 +136,22 @@ features supported by `zcash_keys 0.17.0`.
   panics when the `regex` crate is built without the `unicode-perl` feature,
   which this crate does not require. This affected consumers whose dependency
   graphs enabled no `regex` Unicode features.
+
+## [0.17.0-keystone.0] - 2026-11-10
+
+This is a backport release to enable downstream users that cannot yet
+upgrade from `secp256k1 0.29` to adapt to NU7 and otherwise take advantage of
+features supported by `zcash_keys 0.17.0`.
+
+### Added
+- `zcash_keys::keys::transparent::Key::{pubkey_with_context,
+  der_encode_with_context}`, which `zcash_keys 0.17.0` does not provide.
+
+### Changed
+- This release has the following differences from `zcash_keys 0.17.0`:
+  - It depends on `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, and
+    `zcash_transparent 0.11.0-keystone.0`, in place of `bip32 0.6`,
+    `secp256k1 0.33`, and `zcash_transparent 0.11.0`.
 
 ## [0.16.1] - 2026-07-28
 

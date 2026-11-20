@@ -13,10 +13,9 @@ use super::utxos_to_txos;
 use {
     crate::{AccountRef, GapLimits, error::SqliteClientError},
     rusqlite::named_params,
-    transparent::keys::NonHardenedChildIndex,
     zcash_keys::{
         encoding::AddressCodec,
-        keys::{AddressGenerationError, UnifiedFullViewingKey},
+        keys::{AddressGenerationError, UnifiedFullViewingKey, transparent::NonHardenedChildIndex},
     },
     zip32::DiversifierIndex,
 };

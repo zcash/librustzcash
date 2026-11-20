@@ -5,19 +5,17 @@ use core::{cmp::Ordering, fmt};
 use rand_core::{CryptoRng, Rng};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut, coinbase,
-};
+use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
     PoolType,
     consensus::{self, BlockHeight, BranchId, NU7_POW_TARGET_SPACING_RATIO, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
-use zcash_script::opcode::PushValue;
+use zcash_script::{op, opcode::PushValue, script};
 
 use crate::transaction::{
-    Transaction, TxVersion,
+    Transaction, TxVersion, coinbase,
     components::orchard::bundle_version_for_branch,
     fees::{
         FeeRule,
@@ -40,7 +38,7 @@ use {
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::builder::TransparentInputInfo, zcash_script::script};
+use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
 use core::convert::Infallible;
@@ -67,6 +65,10 @@ pub const BLOSSOM_DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 /// [ZIP 218]: https://zips.z.cash/zip-0218#default-expiry-delta
 pub const NU7_DEFAULT_TX_EXPIRY_DELTA: u32 =
     NU7_POW_TARGET_SPACING_RATIO * BLOSSOM_DEFAULT_TX_EXPIRY_DELTA;
+
+/// The maximum length, in bytes, of the data in a transparent null-data (`OP_RETURN`)
+/// output that nodes relay.
+const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
 
 /// Returns the default expiry delta, in blocks, for a transaction built under the rules of the
 /// given consensus branch.
@@ -126,6 +128,14 @@ pub enum Error<FE> {
     Balance(BalanceError),
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
+    /// The data for a transparent null-data output is longer than the maximum length
+    /// that is relayed.
+    NullDataTooLong {
+        /// The length of the data provided.
+        actual: usize,
+        /// The maximum length.
+        limit: usize,
+    },
     /// An error occurred in constructing the Sapling parts of a transaction.
     SaplingBuild(sapling::builder::Error),
     /// An error occurred in constructing the Orchard parts of a transaction.
@@ -187,6 +197,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::Balance(e) => write!(f, "Invalid amount {e:?}"),
             Error::Fee(e) => write!(f, "An error occurred in fee calculation: {e}"),
             Error::TransparentBuild(err) => err.fmt(f),
+            Error::NullDataTooLong { actual, limit } => write!(
+                f,
+                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
+            ),
             Error::SaplingBuild(err) => err.fmt(f),
             Error::OrchardBuild(err) => write!(f, "{err:?}"),
             Error::IronwoodBuild(err) => write!(f, "{err:?}"),
@@ -834,7 +848,7 @@ pub struct PcztParts<P: Parameters> {
     pub consensus_branch_id: BranchId,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
-    pub transparent: Option<transparent::pczt::Bundle>,
+    pub transparent: Option<transparent::pczt::Bundle<Zatoshis>>,
     pub sapling: Option<sapling::pczt::Bundle>,
     pub orchard: Option<orchard::pczt::Bundle>,
     pub ironwood: Option<orchard::pczt::Bundle>,
@@ -850,7 +864,7 @@ pub struct Builder<P, U> {
     expiry_height: BlockHeight,
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
-    transparent_builder: TransparentBuilder,
+    transparent_builder: TransparentBuilder<Zatoshis>,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     orchard_bundle_version: Option<orchard::bundle::BundleVersion>,
@@ -879,13 +893,13 @@ impl<P, U> Builder<P, U> {
     /// Returns the set of transparent inputs currently committed to be consumed
     /// by the transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent_inputs(&self) -> &[TransparentInputInfo] {
+    pub fn transparent_inputs(&self) -> &[TransparentInputInfo<Zatoshis>] {
         self.transparent_builder.inputs()
     }
 
     /// Returns the set of transparent outputs currently set to be produced by
     /// the transaction.
-    pub fn transparent_outputs(&self) -> &[TxOut] {
+    pub fn transparent_outputs(&self) -> &[TxOut<Zatoshis>] {
         self.transparent_builder.outputs()
     }
 
@@ -1289,7 +1303,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
 
     /// Adds a transparent coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn add_transparent_input(&mut self, input: TransparentInputInfo) {
+    pub fn add_transparent_input(&mut self, input: TransparentInputInfo<Zatoshis>) {
         self.transparent_builder.add_input(input)
     }
 
@@ -1299,7 +1313,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         &mut self,
         pubkey: secp256k1::PublicKey,
         utxo: transparent::bundle::OutPoint,
-        coin: TxOut,
+        coin: TxOut<Zatoshis>,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_p2pkh_input(pubkey, utxo, coin)
     }
@@ -1310,7 +1324,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         &mut self,
         redeem_script: script::FromChain,
         utxo: transparent::bundle::OutPoint,
-        coin: TxOut,
+        coin: TxOut<Zatoshis>,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder
             .add_p2sh_input(redeem_script, utxo, coin)
@@ -1325,18 +1339,33 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
         self.transparent_builder.add_output(to, value)
     }
 
-    /// Adds a transparent "null data" (OP_RETURN) output with the given data payload.
+    /// Adds a zero-value transparent "null data" (`OP_RETURN`) output that carries
+    /// `data`.
+    ///
+    /// Returns [`Error::NullDataTooLong`] if `data` is longer than 80 bytes.
     pub fn add_transparent_null_data_output<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
+        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
+            return Err(Error::NullDataTooLong {
+                actual: data.len(),
+                limit: MAX_OP_RETURN_RELAY_BYTES,
+            });
+        }
+
+        let script = script::Component(vec![
+            op::RETURN,
+            op::push_value(data).expect("length checked"),
+        ]);
+
         self.transparent_builder
-            .add_null_data_output(data)
-            .map_err(Error::TransparentBuild)
+            .add_script_output(&script, Zatoshis::ZERO);
+        Ok(())
     }
 
     /// Returns the sum of the transparent, Sapling, Orchard, Ironwood, and any
     /// experimental ZIP 233 value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
-            self.transparent_builder.value_balance()?,
+            transparent_value_balance(&self.transparent_builder)?,
             self.sapling_builder
                 .as_ref()
                 .map_or_else(ZatBalance::zero, |builder| {
@@ -1438,6 +1467,32 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     }
 }
 
+/// Returns the value of the transparent inputs added to `builder`, minus the value of
+/// its transparent outputs.
+fn transparent_value_balance(
+    builder: &TransparentBuilder<Zatoshis>,
+) -> Result<ZatBalance, BalanceError> {
+    #[cfg(feature = "transparent-inputs")]
+    let input_sum = builder
+        .inputs()
+        .iter()
+        .map(|input| input.coin().value())
+        .sum::<Option<Zatoshis>>()
+        .ok_or(BalanceError::Overflow)?;
+
+    #[cfg(not(feature = "transparent-inputs"))]
+    let input_sum = Zatoshis::ZERO;
+
+    let output_sum = builder
+        .outputs()
+        .iter()
+        .map(|vo| vo.value())
+        .sum::<Option<Zatoshis>>()
+        .ok_or(BalanceError::Overflow)?;
+
+    (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
+}
+
 impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U> {
     /// Builds a transaction from the configured spends and outputs.
     ///
@@ -1471,11 +1526,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
                 self.build_internal::<Coinbase, _, _, _, _>(
                     |b| {
-                        b.build_coinbase(target_height, miner_data)
+                        coinbase::build_transparent_bundle(b, target_height, miner_data)
                             .map(Some)
                             .map_err(Error::Coinbase)
                     },
-                    |b, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
+                    |b, _| Ok(b.clone().map_authorization(coinbase::Coinbase)),
                     &[],
                     &[],
                     rng,
@@ -1508,16 +1563,16 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
     fn build_internal<A, R, SP, OP, FE>(
         self,
         build_transparent: impl FnOnce(
-            TransparentBuilder,
+            TransparentBuilder<Zatoshis>,
         ) -> Result<
-            Option<transparent::bundle::Bundle<A::TransparentAuth>>,
+            Option<transparent::bundle::Bundle<A::TransparentAuth, Zatoshis>>,
             Error<FE>,
         >,
         authorize_transparent: impl FnOnce(
-            &transparent::bundle::Bundle<A::TransparentAuth>,
+            &transparent::bundle::Bundle<A::TransparentAuth, Zatoshis>,
             &PrecomputedSighashData<A>,
         ) -> Result<
-            transparent::bundle::Bundle<transparent::bundle::Authorized>,
+            transparent::bundle::Bundle<transparent::bundle::Authorized, Zatoshis>,
             transparent::builder::Error,
         >,
         sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
@@ -1538,7 +1593,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
                     orchard::builder::Unauthorized,
                 >,
             >,
-        A::TransparentAuth: transparent::sighash::TransparentAuthorizingContext,
+        A::TransparentAuth: transparent::sighash::TransparentAuthorizingContext<Zatoshis>,
         R: Rng + CryptoRng,
         SP: SpendProver,
         OP: OutputProver,
@@ -1911,11 +1966,13 @@ pub fn cached_orchard_proving_key(
 
 #[cfg(feature = "circuits")]
 fn authorize_transparent(
-    b: &transparent::bundle::Bundle<transparent::builder::Unauthorized>,
+    b: &transparent::bundle::Bundle<transparent::builder::Unauthorized<Zatoshis>, Zatoshis>,
     sighash_data: &PrecomputedSighashData<Unauthorized>,
     transparent_signing_set: &TransparentSigningSet,
-) -> Result<transparent::bundle::Bundle<transparent::bundle::Authorized>, transparent::builder::Error>
-{
+) -> Result<
+    transparent::bundle::Bundle<transparent::bundle::Authorized, Zatoshis>,
+    transparent::builder::Error,
+> {
     b.clone().apply_signatures(
         |input| {
             *sighash_data
@@ -1991,7 +2048,7 @@ mod tests {
     use {
         super::{
             BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, Builder, DeferredPcztBuilder, Error,
-            NU7_DEFAULT_TX_EXPIRY_DELTA,
+            MAX_OP_RETURN_RELAY_BYTES, NU7_DEFAULT_TX_EXPIRY_DELTA,
         },
         crate::transaction::{
             builder::{BuildConfig, BundlePadding},
@@ -2015,13 +2072,16 @@ mod tests {
     #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
         crate::transaction::{
-            OutPoint, TxOut, TxVersion,
+            TxVersion,
             builder::{self, TransparentBuilder, default_tx_expiry_delta},
         },
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        ::transparent::bundle::{OutPoint, TxOut},
         zcash_protocol::consensus::BranchId,
-        zip32::AccountId,
     };
+
+    /// A fixed secp256k1 secret key for tests that need a spendable transparent coin.
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
+    const TEST_TRANSPARENT_SECRET_KEY: [u8; 32] = [1; 32];
 
     // The Ironwood tests below reference `TxVersion`/`BranchId` directly; without the
     // `transparent-inputs` feature these are not otherwise in scope.
@@ -2141,6 +2201,76 @@ mod tests {
             BuildConfig::Coinbase { miner_data: None },
         );
         assert_eq!(builder.expiry_height(), nu7_activation);
+    }
+
+    /// `OP_RETURN`.
+    #[cfg(feature = "circuits")]
+    const OP_RETURN: u8 = 0x6a;
+
+    /// `OP_PUSHDATA1`, which precedes a one-byte length and 76 to 255 bytes of data.
+    #[cfg(feature = "circuits")]
+    const OP_PUSHDATA1: u8 = 0x4c;
+
+    /// An arbitrary byte that fills the data of a null-data output in tests.
+    #[cfg(feature = "circuits")]
+    const NULL_DATA_FILL: u8 = 0xab;
+
+    /// Returns a standard builder at NU7 activation with no shielded components.
+    #[cfg(feature = "circuits")]
+    fn unshielded_test_builder() -> Builder<zcash_protocol::local_consensus::LocalNetwork, ()> {
+        let params = nu7_test_network();
+        let nu7_activation = params.activation_height(NetworkUpgrade::Nu7).unwrap();
+        Builder::new(params, nu7_activation, standard_build_config())
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_is_op_return_with_zero_value() {
+        let mut builder = unshielded_test_builder();
+        builder
+            .add_transparent_null_data_output::<Infallible>(&[0xde, 0xad])
+            .unwrap();
+
+        let outputs = builder.transparent_outputs();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].value(), Zatoshis::ZERO);
+        // `OP_RETURN`, then a push of two bytes.
+        assert_eq!(
+            outputs[0].script_pubkey().0.0,
+            [OP_RETURN, 0x02, 0xde, 0xad]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_accepts_the_maximum_length() {
+        let mut builder = unshielded_test_builder();
+        builder
+            .add_transparent_null_data_output::<Infallible>(
+                &[NULL_DATA_FILL; MAX_OP_RETURN_RELAY_BYTES],
+            )
+            .unwrap();
+
+        let outputs = builder.transparent_outputs();
+        assert_eq!(outputs.len(), 1);
+        // `OP_RETURN`, then `OP_PUSHDATA1` with a one-byte length, then the data.
+        let mut expected = vec![OP_RETURN, OP_PUSHDATA1, MAX_OP_RETURN_RELAY_BYTES as u8];
+        expected.extend_from_slice(&[NULL_DATA_FILL; MAX_OP_RETURN_RELAY_BYTES]);
+        assert_eq!(outputs[0].script_pubkey().0.0, expected);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn null_data_output_rejects_data_over_the_maximum_length() {
+        let mut builder = unshielded_test_builder();
+        assert_matches!(
+            builder.add_transparent_null_data_output::<Infallible>(
+                &[0u8; MAX_OP_RETURN_RELAY_BYTES + 1]
+            ),
+            Err(Error::NullDataTooLong { actual, limit })
+                if actual == MAX_OP_RETURN_RELAY_BYTES + 1 && limit == MAX_OP_RETURN_RELAY_BYTES
+        );
+        assert!(builder.transparent_outputs().is_empty());
     }
 
     #[test]
@@ -2337,20 +2467,11 @@ mod tests {
             .unwrap();
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
 
         builder
@@ -2814,20 +2935,11 @@ mod tests {
         };
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
         builder
             .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
@@ -2865,20 +2977,11 @@ mod tests {
             Builder::new(TEST_NETWORK, tx_height, build_config).with_expiry_height(0u32.into());
 
         let mut transparent_signing_set = TransparentSigningSet::new();
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
-        let sk = tsk
-            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-            .unwrap();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut::new(
             Zatoshis::const_from_u64(50_000),
-            tsk.to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .script()
-                .into(),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
         builder
             .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)

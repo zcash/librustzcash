@@ -76,6 +76,8 @@ graph TB
     %% zcash_client_sqlite --> zcash_keys
     zcash_client_backend --> zcash_keys
     %% zcash_pool_migration --> zcash_keys
+    %% `pczt` depends on `zcash_keys` only under its test-only `internal-tests` feature.
+    pczt -.-> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 
@@ -97,10 +99,9 @@ graph TB
     %% zcash_client_sqlite --> zcash_address
     zip321 --> zcash_address
 
-    zcash_transparent --> zcash_protocol
     %% zcash_keys --> zcash_protocol
     %% zcash_client_sqlite --> zcash_protocol
-    %% zcash_primitives --> zcash_protocol
+    zcash_primitives --> zcash_protocol
     %% zcash_client_backend --> zcash_protocol
     %% pczt --> zcash_protocol
     zcash_address --> zcash_protocol
@@ -108,7 +109,6 @@ graph TB
     %% zcash_pool_migration --> zcash_protocol
 
     %% zcash_client_sqlite --> zcash_encoding
-    %% zcash_transparent --> zcash_encoding
     %% zcash_client_backend --> zcash_encoding
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
@@ -146,9 +146,8 @@ graph TB
     %% zcash_keys --> zip32
     orchard --> zip32
     sapling-crypto --> zip32
-    zcash_transparent --> zip32
 
-    %% zcash_transparent --> zcash_spec
+    %% zcash_keys --> zcash_spec
     %% orchard --> zcash_spec
     %% sapling-crypto --> zcash_spec
     zip32 --> zcash_spec

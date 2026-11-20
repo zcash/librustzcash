@@ -30,7 +30,7 @@ use {
     transparent::address::TransparentAddress,
     zcash_client_backend::data_api::DecryptedTransaction,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::transaction::Transaction,
+    zcash_primitives::transaction::{Transaction, coinbase::is_coinbase},
     zcash_protocol::{
         TxId,
         consensus::{BlockHeight, BranchId},
@@ -259,12 +259,12 @@ fn queue_transparent_input_retrieval<AccountId>(
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
     if let Some(b) = d_tx.tx().transparent_bundle()
-        && !b.is_coinbase()
+        && !is_coinbase(d_tx.tx())
     {
         // queue the transparent inputs for enhancement
         queue_tx_retrieval(
             conn,
-            b.vin.iter().map(|txin| *txin.prevout().txid()),
+            b.vin.iter().map(|txin| TxId::from_bytes(*txin.prevout().hash())),
             Some(tx_ref),
         )?;
     }

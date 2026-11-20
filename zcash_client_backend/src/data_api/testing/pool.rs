@@ -120,11 +120,10 @@ use {
     },
     secrecy::ExposeSecret,
     std::str::FromStr,
-    transparent::{
-        bundle::{OutPoint, TxOut},
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    transparent::bundle::{OutPoint, TxOut},
+    zcash_keys::keys::transparent::{
+        NonHardenedChildIndex, TransparentKeyScope, gap_limits::GapLimits,
     },
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
     zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize, zip317},
     zcash_protocol::{
         TxId,
@@ -4741,9 +4740,8 @@ where
     // outpoint does not yet exist.
     let requests = st.wallet().transaction_data_requests().unwrap();
     assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
+        !requests.iter().any(|req| req
+            == &TransactionDataRequest::Enhancement(TxId::from_bytes(*spent_outpoint.hash())))
     );
 
     // Use `decrypt_and_store_transaction` for the side effect of creating enhancement requests for
@@ -4759,9 +4757,8 @@ where
     // Verify that a transaction enhancement request for the received transaction was created
     let requests = st.wallet().transaction_data_requests().unwrap();
     assert!(
-        requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
+        requests.iter().any(|req| req
+            == &TransactionDataRequest::Enhancement(TxId::from_bytes(*spent_outpoint.hash())))
     );
 
     // Now advance the chain by the pre-NU7 default expiry delta; even though a record for the transaction that created
@@ -4782,7 +4779,7 @@ where
     // Simulate the situation where the enhancement request results in `TxidNotRecognized`
     st.wallet_mut()
         .set_transaction_status(
-            *spent_outpoint.txid(),
+            TxId::from_bytes(*spent_outpoint.hash()),
             data_api::TransactionStatus::TxidNotRecognized,
         )
         .unwrap();
@@ -4790,9 +4787,8 @@ where
     // Verify that the transaction enhancement request for the invalid txid has been deleted.
     let requests = st.wallet().transaction_data_requests().unwrap();
     assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
+        !requests.iter().any(|req| req
+            == &TransactionDataRequest::Enhancement(TxId::from_bytes(*spent_outpoint.hash())))
     );
 }
 

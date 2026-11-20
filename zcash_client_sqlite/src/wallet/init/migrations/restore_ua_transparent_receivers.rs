@@ -172,13 +172,16 @@ mod tests {
     use schemerz::MigratorError;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
-    use transparent::{address::TransparentAddress, keys::NonHardenedChildIndex};
+    use transparent::address::TransparentAddress;
     use uuid::Uuid;
     use zcash_address::{
         ToAddress, ZcashAddress, test_vectors,
         unified::{self, Encoding, Revision, Uitem},
     };
-    use zcash_keys::{encoding::AddressCodec, keys::UnifiedSpendingKey};
+    use zcash_keys::{
+        encoding::AddressCodec,
+        keys::{UnifiedSpendingKey, transparent::NonHardenedChildIndex},
+    };
     use zcash_protocol::consensus::{Network, NetworkType};
     use zip32::DiversifierIndex;
 

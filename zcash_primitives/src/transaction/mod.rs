@@ -1,5 +1,6 @@
 //! Structs and methods for handling Zcash transactions.
 pub mod builder;
+pub mod coinbase;
 pub mod components;
 pub mod fees;
 pub mod sighash;
@@ -8,6 +9,7 @@ mod sighash_v5;
 mod sighash_v6;
 
 pub mod txid;
+pub mod util;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod tests;
@@ -20,7 +22,7 @@ use core::fmt::Debug;
 use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
-use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
+use ::transparent::bundle::{self as transparent, OutPoint};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -33,10 +35,11 @@ use self::{
     components::{
         orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
+        transparent::{read_txin, read_txout, write_txin, write_txout},
     },
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
+    util::sha256d::{HashReader, HashWriter},
 };
-use ::transparent::util::sha256d::{HashReader, HashWriter};
 
 #[cfg(feature = "circuits")]
 use ::sapling::builder as sapling_builder;
@@ -294,7 +297,7 @@ pub struct Unauthorized;
 
 #[cfg(feature = "circuits")]
 impl Authorization for Unauthorized {
-    type TransparentAuth = ::transparent::builder::Unauthorized;
+    type TransparentAuth = ::transparent::builder::Unauthorized<Zatoshis>;
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
@@ -307,7 +310,7 @@ struct Coinbase;
 
 #[cfg(feature = "circuits")]
 impl Authorization for Coinbase {
-    type TransparentAuth = ::transparent::builder::Coinbase;
+    type TransparentAuth = coinbase::Coinbase;
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
@@ -344,7 +347,7 @@ pub struct TransactionData<A: Authorization> {
     expiry_height: BlockHeight,
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     zip233_amount: Zatoshis,
-    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
     sprout_bundle: Option<Box<sprout::Bundle>>,
     sapling_bundle: Option<Box<sapling::Bundle<A::SaplingAuth, ZatBalance>>>,
     orchard_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
@@ -389,7 +392,7 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -421,7 +424,7 @@ impl<A: Authorization> TransactionData<A> {
         lock_time: u32,
         expiry_height: BlockHeight,
         zip233_amount: Zatoshis,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -457,7 +460,7 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -485,7 +488,7 @@ impl<A: Authorization> TransactionData<A> {
         lock_time: u32,
         expiry_height: BlockHeight,
         zip233_amount: Zatoshis,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -510,7 +513,7 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -542,7 +545,7 @@ impl<A: Authorization> TransactionData<A> {
         lock_time: u32,
         expiry_height: BlockHeight,
         zip233_amount: Zatoshis,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -566,7 +569,7 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -600,7 +603,7 @@ impl<A: Authorization> TransactionData<A> {
         lock_time: u32,
         expiry_height: BlockHeight,
         zip233_amount: Zatoshis,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -643,7 +646,7 @@ impl<A: Authorization> TransactionData<A> {
         self.expiry_height
     }
 
-    pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
+    pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth, Zatoshis>> {
         self.transparent_bundle.as_ref()
     }
 
@@ -682,7 +685,7 @@ impl<A: Authorization> TransactionData<A> {
     {
         let transparent_balance = self.transparent_bundle.as_ref().map_or_else(
             || Ok(Some(ZatBalance::zero())),
-            |b| b.value_balance(get_prevout),
+            |b| components::transparent::value_balance(b, get_prevout),
         )?;
 
         transparent_balance
@@ -765,8 +768,8 @@ impl<A: Authorization> TransactionData<A> {
     pub fn map_bundles<B: Authorization>(
         self,
         f_transparent: impl FnOnce(
-            Option<transparent::Bundle<A::TransparentAuth>>,
-        ) -> Option<transparent::Bundle<B::TransparentAuth>>,
+            Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
+        ) -> Option<transparent::Bundle<B::TransparentAuth, Zatoshis>>,
         f_sapling: impl FnOnce(
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
@@ -800,9 +803,11 @@ impl<A: Authorization> TransactionData<A> {
     pub fn try_map_bundles<B: Authorization, E>(
         self,
         f_transparent: impl FnOnce(
-            Option<transparent::Bundle<A::TransparentAuth>>,
-        )
-            -> Result<Option<transparent::Bundle<B::TransparentAuth>>, E>,
+            Option<transparent::Bundle<A::TransparentAuth, Zatoshis>>,
+        ) -> Result<
+            Option<transparent::Bundle<B::TransparentAuth, Zatoshis>>,
+            E,
+        >,
         f_sapling: impl FnOnce(
             Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         )
@@ -1068,9 +1073,9 @@ impl Transaction {
 
     fn read_transparent<R: Read>(
         mut reader: R,
-    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
-        let vin = Vector::read(&mut reader, TxIn::read)?;
-        let vout = Vector::read(&mut reader, TxOut::read)?;
+    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized, Zatoshis>>> {
+        let vin = Vector::read(&mut reader, |r| read_txin(r))?;
+        let vout = Vector::read(&mut reader, |r| read_txout(r))?;
         Ok(if vin.is_empty() && vout.is_empty() {
             None
         } else {
@@ -1245,8 +1250,8 @@ impl Transaction {
 
     pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.transparent_bundle {
-            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &bundle.vin, |w, e| write_txin(w, e))?;
+            Vector::write(&mut writer, &bundle.vout, |w, e| write_txout(w, e))?;
         } else {
             CompactSize::write(&mut writer, 0)?;
             CompactSize::write(&mut writer, 0)?;
@@ -1440,7 +1445,7 @@ pub trait TransactionDigest<A: Authorization> {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth, Zatoshis>>,
     ) -> Self::TransparentDigest;
 
     fn digest_sapling(
@@ -1489,7 +1494,7 @@ pub mod testing {
     use proptest::prelude::*;
 
     use ::transparent::bundle::testing::{self as transparent};
-    use zcash_protocol::consensus::BranchId;
+    use zcash_protocol::{consensus::BranchId, value::testing::arb_zatoshis};
 
     use super::{
         Authorized, Transaction, TransactionData, TxId, TxVersion,
@@ -1531,7 +1536,7 @@ pub mod testing {
         )(
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            transparent_bundle in transparent::arb_bundle(),
+            transparent_bundle in transparent::arb_bundle(arb_zatoshis()),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
@@ -1559,7 +1564,7 @@ pub mod testing {
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
             zip233_amount in 0..=MAX_MONEY,
-            transparent_bundle in transparent::arb_bundle(),
+            transparent_bundle in transparent::arb_bundle(arb_zatoshis()),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),

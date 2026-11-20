@@ -17,7 +17,6 @@ use tracing::{debug, warn};
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
-    keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
 };
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
@@ -38,12 +37,15 @@ use zcash_keys::{
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey,
-        transparent::gap_limits::{GapLimits, generate_address_list},
+        transparent::{
+            IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope,
+            gap_limits::{GapLimits, generate_address_list},
+        },
     },
 };
 use zcash_primitives::transaction::fees::{
     FeeRule,
-    transparent::{InputSize, InputView},
+    transparent::{InputSize, InputView, p2sh_input_serialized_len},
     zip317,
 };
 use zcash_protocol::{
@@ -88,9 +90,8 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::locking::locked_tier_expr,
-    transparent::keys::ExternalIvk,
     zcash_address::unified::{Container as _, Encoding as _},
-    zcash_keys::keys::ReceiverRequirement::*,
+    zcash_keys::keys::{ReceiverRequirement::*, transparent::ExternalIvk},
 };
 
 pub(crate) mod ephemeral;
@@ -1578,7 +1579,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         if let Ok(Some(rs_bytes)) =
             row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
             && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
-            && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
+            && let Some(input_size) = p2sh_input_serialized_len(&from_chain)
         {
             output = output.with_known_input_size(input_size);
         }
@@ -2932,7 +2933,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              AND ts.prevout_output_index = :prevout_idx
              ORDER BY t.mined_height NULLS LAST LIMIT 1",
             named_params![
-                ":prevout_txid": output.outpoint().txid().as_ref(),
+                ":prevout_txid": output.outpoint().hash().as_slice(),
                 ":prevout_idx": output.outpoint().n()
             ],
             |row| row.get::<_, i64>(0).map(TxRef),
@@ -2953,7 +2954,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         conn,
         params,
         gap_limits,
-        *output.outpoint().txid(),
+        TxId::from_bytes(*output.outpoint().hash()),
         output_height.map_or(observation_height, BlockHeight::from),
     )?;
 
@@ -2999,7 +3000,6 @@ mod tests {
     use transparent::{
         address::TransparentAddress,
         bundle::{OutPoint, TxOut},
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
     };
     use zcash_client_backend::{
         data_api::{Account as _, AddressSource, WalletRead, WalletWrite, testing::TestBuilder},
@@ -3023,7 +3023,10 @@ mod tests {
     use zcash_keys::{
         address::{Address, UnifiedAddress},
         encoding::AddressCodec,
-        keys::{ReceiverRequirement, UnifiedAddressRequest},
+        keys::{
+            ReceiverRequirement, UnifiedAddressRequest,
+            transparent::{NonHardenedChildIndex, TransparentKeyScope},
+        },
     };
     use zcash_protocol::value::Zatoshis;
     #[cfg(feature = "transparent-key-import")]
@@ -4700,10 +4703,7 @@ mod tests {
     mod funding_accounts {
         use rusqlite::named_params;
         use secrecy::Secret;
-        use transparent::{
-            bundle::{OutPoint, TxOut},
-            keys::TransparentKeyScope,
-        };
+        use transparent::bundle::{OutPoint, TxOut};
         use zcash_client_backend::{
             data_api::{
                 Account as _, AccountBirthday, WalletRead as _, WalletWrite, chain::ChainState,
@@ -4711,7 +4711,7 @@ mod tests {
             },
             wallet::WalletTransparentOutput,
         };
-        use zcash_keys::keys::UnifiedAddressRequest;
+        use zcash_keys::keys::{UnifiedAddressRequest, transparent::TransparentKeyScope};
         use zcash_primitives::block::BlockHash;
         use zcash_protocol::{
             consensus::{self, BlockHeight},

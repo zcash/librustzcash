@@ -282,11 +282,7 @@ mod tests {
     use rusqlite::{Connection, OptionalExtension, named_params, params};
     use tempfile::NamedTempFile;
 
-    use ::transparent::{
-        builder::TransparentSigningSet,
-        bundle as transparent,
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-    };
+    use ::transparent::{builder::TransparentSigningSet, bundle as transparent};
     use zcash_client_backend::{
         TransferType,
         data_api::{
@@ -297,7 +293,10 @@ mod tests {
         scanning::{SpendIdentifiers, ScanningKeys, scan_block},
         wallet::WalletTx,
     };
-    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_keys::keys::{
+        UnifiedFullViewingKey, UnifiedSpendingKey,
+        transparent::{IncomingViewingKey, NonHardenedChildIndex},
+    };
     use zcash_primitives::{
         block::BlockHash,
         transaction::{

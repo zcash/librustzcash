@@ -1,25 +1,11 @@
 //! Structs representing the components within Zcash transactions.
 
 use alloc::vec::Vec;
-use core::fmt::Debug;
-use corez::io::{self, Read, Write};
-use zcash_script::{
-    opcode::{Evaluable as _, PushValue},
-    pattern::push_num,
-    pv,
-    script::{self, Evaluable as _},
-    solver,
-};
-
-use zcash_protocol::{
-    TxId,
-    consensus::BlockHeight,
-    value::{BalanceError, ZatBalance, Zatoshis},
-};
+use core::fmt::{self, Debug};
+use zcash_script::{script, solver};
 
 use crate::{
     address::{Script, TransparentAddress},
-    builder, coinbase,
     sighash::TransparentAuthorizingContext,
 };
 
@@ -30,16 +16,16 @@ pub trait Authorization: Debug {
 /// Marker type for a bundle that contains no authorizing data, and the necessary input
 /// information for creating sighashes.
 #[derive(Debug)]
-pub struct EffectsOnly {
-    pub(crate) inputs: Vec<TxOut>,
+pub struct EffectsOnly<V> {
+    pub(crate) inputs: Vec<TxOut<V>>,
 }
 
-impl Authorization for EffectsOnly {
+impl<V: Debug> Authorization for EffectsOnly<V> {
     type ScriptSig = ();
 }
 
-impl TransparentAuthorizingContext for EffectsOnly {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
+impl<V: Copy + Debug> TransparentAuthorizingContext<V> for EffectsOnly<V> {
+    fn input_amounts(&self) -> Vec<V> {
         self.inputs.iter().map(|input| input.value()).collect()
     }
 
@@ -77,28 +63,20 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
+/// The transparent part of a transaction: its inputs, its outputs, and the authorizing
+/// data `A`.
+///
+/// `V` is the type of the value of each output; see [`TxOut`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct Bundle<A: Authorization> {
+pub struct Bundle<A: Authorization, V> {
     pub vin: Vec<TxIn<A>>,
-    pub vout: Vec<TxOut>,
+    pub vout: Vec<TxOut<V>>,
     pub authorization: A,
 }
 
-impl<A: Authorization> Bundle<A> {
-    /// Returns `true` if this bundle matches the definition of a coinbase transaction.
-    ///
-    /// Note that this is defined purely in terms of the transparent transaction part. The
-    /// consensus rules enforce additional rules on the shielded parts (namely, that they
-    /// don't have any inputs) of transactions with a transparent part that matches this
-    /// definition.
-    pub fn is_coinbase(&self) -> bool {
-        // From `CTransaction::IsCoinBase()` in zcashd:
-        //   return (vin.size() == 1 && vin[0].prevout.IsNull());
-        matches!(&self.vin[..], [input] if input.prevout().is_null())
-    }
-
+impl<A: Authorization, V> Bundle<A, V> {
     #[allow(deprecated)]
-    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B, V> {
         Bundle {
             vin: self
                 .vin
@@ -115,95 +93,56 @@ impl<A: Authorization> Bundle<A> {
             authorization: f.map_authorization(self.authorization),
         }
     }
-
-    /// The amount of value added to or removed from the transparent pool by the action of this
-    /// bundle. A positive value represents that the containing transaction has funds being
-    /// transferred out of the transparent pool into shielded pools or to fees; a negative value
-    /// means that the containing transaction has funds being transferred into the transparent pool
-    /// from the shielded pools.
-    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Option<ZatBalance>, E>
-    where
-        E: From<BalanceError>,
-        F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
-    {
-        let mut input_sum = Zatoshis::ZERO;
-        for txin in &self.vin {
-            if let Some(v) = get_prevout_value(txin.prevout())? {
-                input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
-            } else {
-                return Ok(None);
-            }
-        }
-
-        let output_sum = self
-            .vout
-            .iter()
-            .map(|p| ZatBalance::from(p.value()))
-            .sum::<Option<ZatBalance>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
-        Ok(Some(balance))
-    }
 }
 
 /// A pointer to a transparent Zcash transaction output.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutPoint {
     /// The txid of the transaction containing the output being pointed to.
-    pub(crate) hash: TxId,
+    pub(crate) hash: [u8; 32],
     /// The index of the output being pointed to within its transaction.
     pub(crate) n: u32,
 }
 
+impl fmt::Debug for OutPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The txid is shown as byte-reversed hex, which is the form that RPC methods and
+        // block explorers use.
+        let mut txid = self.hash;
+        txid.reverse();
+        f.debug_struct("OutPoint")
+            .field("hash", &hex::encode(txid))
+            .field("n", &self.n)
+            .finish()
+    }
+}
+
 impl OutPoint {
     /// Returns the null [`OutPoint`] in the Bitcoin sense:
-    /// - [`TxId`] is set to all-zeroes, and
-    /// - output index is set to [`u32::MAX`].
+    /// - the txid is set to all-zeroes, and
+    /// - the output index is set to [`u32::MAX`].
     pub const NULL: OutPoint = OutPoint {
-        hash: TxId::NULL,
+        hash: [0u8; 32],
         n: u32::MAX,
     };
 
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
+    ///
+    /// `hash` is the txid in its internal byte order, as it appears in the transaction
+    /// encoding. That is the reverse of the hex form that RPC methods and block explorers
+    /// show.
     pub const fn new(hash: [u8; 32], n: u32) -> Self {
-        OutPoint {
-            hash: TxId::from_bytes(hash),
-            n,
-        }
+        OutPoint { hash, n }
     }
 
     /// Constructs a fake `OutPoint` for use in tests.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const fn fake() -> Self {
         OutPoint {
-            hash: TxId::from_bytes([1u8; 32]),
+            hash: [1u8; 32],
             n: 1,
         }
-    }
-
-    /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
-    /// followed by the output index as a little-endian `u32`.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
-        let mut n = [0; 4];
-        reader.read_exact(&mut n)?;
-        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
-    }
-
-    /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
-    /// followed by the output index as a little-endian `u32`.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.hash.as_ref())?;
-        writer.write_all(&self.n.to_le_bytes())
-    }
-
-    /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
-    /// all-zeroes and output index set to `u32::MAX`.
-    fn is_null(&self) -> bool {
-        *self == Self::NULL
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -211,13 +150,9 @@ impl OutPoint {
         self.n
     }
 
-    /// Returns the byte representation of the txid of the transaction containing this `OutPoint`.
+    /// Returns the txid of the transaction containing this `OutPoint`, in internal byte
+    /// order. That is the reverse of its displayed hex form.
     pub fn hash(&self) -> &[u8; 32] {
-        self.hash.as_ref()
-    }
-
-    /// Returns the txid of the transaction containing this `OutPoint`.
-    pub fn txid(&self) -> &TxId {
         &self.hash
     }
 }
@@ -259,147 +194,27 @@ impl<A: Authorization> TxIn<A> {
     }
 }
 
-impl TxIn<Authorized> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let prevout = OutPoint::read(&mut reader)?;
-        let script_sig = Script::read(&mut reader)?;
-        let sequence = {
-            let mut sequence = [0; 4];
-            reader.read_exact(&mut sequence)?;
-            u32::from_le_bytes(sequence)
-        };
-
-        Ok(TxIn::from_parts(prevout, script_sig, sequence))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout().write(&mut writer)?;
-        self.script_sig().write(&mut writer)?;
-        writer.write_all(&self.sequence().to_le_bytes())
-    }
-}
-
-impl TxIn<builder::Coinbase> {
-    /// Creates an input for a coinbase transaction.
-    ///
-    /// - Does not support creating inputs for the genesis block.
-    /// - The `miner_data` parameter can carry arbitrary data, which will be included in the input's
-    ///   `script_sig` field, as long as the field's length stays within
-    ///   [`coinbase::MAX_COINBASE_SCRIPT_LEN`] bytes.
-    pub fn coinbase(
-        height: BlockHeight,
-        miner_data: Option<PushValue>,
-    ) -> Result<Self, coinbase::Error> {
-        let h = match i64::from(height) {
-            0 => Err(coinbase::Error::GenesisInputNotSupported),
-            h => Ok(push_num(h)),
-        }?;
-
-        let h_len = h.byte_len();
-        assert!(h_len > 0);
-
-        // # Consensus
-        //
-        // > A coinbase transaction for a block at block height greater than 0 MUST have a script
-        // > that, as its first item, encodes the block height `height` as follows. For `height` in
-        // > the range {1 .. 16}, the encoding is a single byte of value `0x50` + `height`.
-        // > Otherwise, let `heightBytes` be the signed little-endian representation of `height`,
-        // > using the minimum nonzero number of bytes such that the most significant byte is <
-        // > `0x80`. The length of `heightBytes` MUST be in the range {1 .. 5}. Then the encoding is
-        // > the length of `heightBytes` encoded as one byte, followed by `heightBytes` itself. This
-        // > matches the encoding used by Bitcoin in the implementation of [BIP-34] (but the
-        // > description here is to be considered normative).
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        //
-        // ## Note
-        //
-        // The height is encoded in `push_num`, which always returns an opcode, and every opcode
-        // serializes to at least one byte, so we assert the lower bound.
-        //
-        // [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
-        if h_len > coinbase::MAX_COINBASE_HEIGHT_LEN {
-            return Err(coinbase::Error::OversizedHeight);
-        }
-
-        let script_sig = script::Component(
-            [
-                Some(h),
-                // Consensus rule: coinbase script must be at least 2 bytes.
-                (h_len < coinbase::MIN_COINBASE_SCRIPT_LEN && miner_data.is_none())
-                    .then_some(pv::_0),
-                miner_data,
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
-        );
-
-        let s_len = script_sig.byte_len();
-        assert!(s_len >= coinbase::MIN_COINBASE_SCRIPT_LEN);
-
-        // # Consensus
-        //
-        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        //
-        // ## Note
-        //
-        // The `miner_data` param always contains an opcode, and every opcode serializes to at least
-        // one byte, so we assert the lower bound.
-        if s_len > coinbase::MAX_COINBASE_SCRIPT_LEN {
-            return Err(coinbase::Error::OversizedScript);
-        }
-
-        // We set the `prevout` argument to [`OutPoint::NULL`] since [§ 3.11] defines coinbase txs
-        // as those that have a single transparent input with a null `prevout` field.
-        //
-        // We set the `sequence` field to [`u32::MAX`] to disable time-locking, as described in the
-        // [Bitcoin Developer Reference].
-        //
-        // [§ 3.11]: <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
-        // [Bitcoin Developer Reference]: <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
-        Ok(TxIn::from_parts(OutPoint::NULL, script_sig, u32::MAX))
-    }
-}
-
+/// A transparent transaction output.
+///
+/// `V` is the type of the output's value. This crate stores and returns the value
+/// without interpreting it. A Zcash consumer instantiates `V` with a type that represents
+/// a non-negative amount of zatoshis, such as `zcash_protocol::value::Zatoshis`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TxOut {
+pub struct TxOut<V> {
     #[deprecated(since = "0.4.1", note = "use the value() accessor instead.")]
-    pub value: Zatoshis,
+    pub value: V,
     #[deprecated(since = "0.4.1", note = "use the script_pubkey() accessor instead.")]
     pub script_pubkey: Script,
 }
 
 #[allow(deprecated)]
-impl TxOut {
+impl<V> TxOut<V> {
     // Constructs a new `TxOut` from its constituent parts.
-    pub fn new(value: Zatoshis, script_pubkey: Script) -> Self {
+    pub fn new(value: V, script_pubkey: Script) -> Self {
         Self {
             value,
             script_pubkey,
         }
-    }
-
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = {
-            let mut tmp = [0u8; 8];
-            reader.read_exact(&mut tmp)?;
-            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
-        }
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = Script::read(&mut reader)?;
-
-        Ok(TxOut {
-            value,
-            script_pubkey,
-        })
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.script_pubkey.write(&mut writer)
     }
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
@@ -407,10 +222,6 @@ impl TxOut {
         self.script_kind()
             .as_ref()
             .and_then(TransparentAddress::from_script_kind)
-    }
-
-    pub fn value(&self) -> Zatoshis {
-        self.value
     }
 
     pub fn script_pubkey(&self) -> &Script {
@@ -426,12 +237,19 @@ impl TxOut {
     }
 }
 
+#[allow(deprecated)]
+impl<V: Copy> TxOut<V> {
+    /// Returns the value of this output.
+    pub fn value(&self) -> V {
+        self.value
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
-    use zcash_protocol::value::testing::arb_zatoshis;
     use zcash_script::script;
 
     use crate::address::Script;
@@ -477,22 +295,83 @@ pub mod testing {
         }
     }
 
-    prop_compose! {
-        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script_pubkey()) -> TxOut {
-            TxOut::new(value, script_pubkey)
-        }
+    /// Generates an arbitrary [`TxOut`] whose value is drawn from `arb_value`.
+    pub fn arb_txout<V: core::fmt::Debug>(
+        arb_value: impl Strategy<Value = V>,
+    ) -> impl Strategy<Value = TxOut<V>> {
+        (arb_value, arb_script_pubkey())
+            .prop_map(|(value, script_pubkey)| TxOut::new(value, script_pubkey))
     }
 
-    prop_compose! {
-        pub fn arb_bundle()(
-            vin in vec(arb_txin(), 0..10),
-            vout in vec(arb_txout(), 0..10),
-        ) -> Option<Bundle<Authorized>> {
+    /// Generates an arbitrary authorized bundle whose output values are drawn from
+    /// `arb_value`, or `None` if the generated bundle would be empty.
+    pub fn arb_bundle<V: core::fmt::Debug>(
+        arb_value: impl Strategy<Value = V>,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, V>>> {
+        (vec(arb_txin(), 0..10), vec(arb_txout(arb_value), 0..10)).prop_map(|(vin, vout)| {
             if vin.is_empty() && vout.is_empty() {
                 None
             } else {
-                Some(Bundle { vin, vout, authorization: Authorized })
+                Some(Bundle {
+                    vin,
+                    vout,
+                    authorization: Authorized,
+                })
             }
-        }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutPoint;
+    use crate::{address::TransparentAddress, builder::TransparentBuilder};
+
+    /// A value type that implements nothing but `Debug`.
+    #[derive(Debug)]
+    struct OpaqueValue;
+
+    /// An arbitrary public key hash for a recipient address.
+    const RECIPIENT_PUBKEY_HASH: [u8; 20] = [7; 20];
+
+    #[test]
+    fn building_a_bundle_does_not_copy_the_value() {
+        let recipient = TransparentAddress::PublicKeyHash(RECIPIENT_PUBKEY_HASH);
+        let mut builder = TransparentBuilder::<OpaqueValue>::empty();
+        builder.add_output(&recipient, OpaqueValue).unwrap();
+
+        let bundle = builder.build().unwrap();
+        assert_eq!(bundle.vout.len(), 1);
+        assert_eq!(bundle.vout[0].recipient_address(), Some(recipient));
+    }
+
+    /// The first byte of the txid in the test below. It is the last byte of the txid as
+    /// displayed.
+    const FIRST_TXID_BYTE: u8 = 0x01;
+
+    /// The last byte of the txid in the test below. It is the first byte of the txid as
+    /// displayed.
+    const LAST_TXID_BYTE: u8 = 0xff;
+
+    /// The output index in the test below.
+    const OUTPUT_INDEX: u32 = 7;
+
+    /// The number of zero bytes between the first and last bytes of the 32-byte txid.
+    const MIDDLE_TXID_BYTES: usize = 30;
+
+    #[test]
+    fn outpoint_debug_shows_the_txid_as_byte_reversed_hex() {
+        let mut hash = [0u8; 32];
+        hash[0] = FIRST_TXID_BYTE;
+        hash[hash.len() - 1] = LAST_TXID_BYTE;
+        let outpoint = OutPoint::new(hash, OUTPUT_INDEX);
+
+        assert_eq!(
+            format!("{outpoint:?}"),
+            format!(
+                "OutPoint {{ hash: \"ff{}01\", n: {OUTPUT_INDEX} }}",
+                "00".repeat(MIDDLE_TXID_BYTES)
+            )
+        );
     }
 }

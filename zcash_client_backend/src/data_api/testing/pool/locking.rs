@@ -37,11 +37,8 @@ use {
         data_api::{CoinbaseFilter, WalletWrite, testing::TestBuilder},
         wallet::WalletTransparentOutput,
     },
-    transparent::{
-        bundle::{OutPoint, TxOut},
-        keys::TransparentKeyScope,
-    },
-    zcash_keys::keys::UnifiedAddressRequest,
+    transparent::bundle::{OutPoint, TxOut},
+    zcash_keys::keys::{UnifiedAddressRequest, transparent::TransparentKeyScope},
     zcash_primitives::block::BlockHash,
 };
 
