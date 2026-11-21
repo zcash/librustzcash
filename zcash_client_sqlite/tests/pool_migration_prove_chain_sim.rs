@@ -1278,6 +1278,31 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
         "the crossing carries an Ironwood bundle",
     );
 
+    // The wallet records the transaction with the target height it was scheduled for: the first
+    // height at which it can be mined.
+    let scheduled_height = committed
+        .state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .expect("the transfer is present")
+        .scheduled_height();
+    let stored_target_height: u32 = run
+        .st
+        .wallet_mut()
+        .conn_mut()
+        .query_row(
+            "SELECT target_height FROM transactions WHERE txid = :txid",
+            rusqlite::named_params![":txid": txid.as_ref()],
+            |row| row.get(0),
+        )
+        .expect("reads the recorded target height");
+    assert_eq!(
+        stored_target_height,
+        u32::from(scheduled_height),
+        "the transaction is recorded with its scheduled target height",
+    );
+
     // Its sent-output record is exactly the transfer's REAL outputs: the Ironwood crossing
     // output carrying the migrated value, plus the Orchard change returning the unspent share of
     // the funding note's fee buffer — together the funding note minus the fee. The padding

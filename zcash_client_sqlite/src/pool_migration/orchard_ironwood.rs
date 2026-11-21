@@ -522,10 +522,11 @@ where
             .cloned()
             .ok_or(Error::ViewingKeyUnavailable)?;
         let ufvks = HashMap::from([(self.account, ufvk)]);
+        // The transaction is broadcast from the chain tip one below its scheduled target height.
         let decrypted = decrypt_transaction(
             &self.params,
             None,
-            Some(row.scheduled_height()),
+            Some(row.scheduled_height().saturating_sub(1)),
             &tx,
             &ufvks,
         );
@@ -552,9 +553,8 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // The transaction is built to be broadcast at its scheduled height, so the block it aims
-        // to mine in — the standard flow's construction target — is that height's successor.
-        let target_height = TargetHeight::from(u32::from(row.scheduled_height()) + 1);
+        // The scheduled height is the target height the transaction was built to be mined at.
+        let target_height = TargetHeight::from(row.scheduled_height());
         let created = time::OffsetDateTime::from(self.clock.now());
         let sent = SentTransaction::new(
             &tx,
