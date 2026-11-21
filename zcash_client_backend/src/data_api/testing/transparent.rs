@@ -21,12 +21,10 @@ use zcash_keys::{
 };
 use zcash_primitives::{
     block::{Block, BlockHash, BlockHeaderData},
-    transaction::{
-        Transaction, TransactionData, TxVersion, builder::NU7_DEFAULT_TX_EXPIRY_DELTA, fees::zip317,
-    },
+    transaction::{Transaction, TransactionData, TxVersion, fees::zip317},
 };
 use zcash_protocol::{
-    consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
+    consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS, NU7_DEFAULT_TX_EXPIRY_DELTA},
     local_consensus::LocalNetwork,
     value::Zatoshis,
 };

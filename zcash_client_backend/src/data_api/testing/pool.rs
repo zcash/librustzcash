@@ -22,15 +22,15 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
-        builder::{
-            BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA, default_tx_expiry_delta,
-        },
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
 use zcash_protocol::{
     ShieldedPool,
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{
+        self, BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, BlockHeight, BranchId, NU7_DEFAULT_TX_EXPIRY_DELTA,
+        NetworkUpgrade, Parameters, default_tx_expiry_delta,
+    },
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::{MAX_MONEY, Zatoshis},
