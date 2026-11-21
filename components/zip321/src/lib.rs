@@ -11,10 +11,7 @@ use std::{
 };
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
-use nom::{
-    character::complete::char, combinator::all_consuming, multi::separated_list0,
-    sequence::preceded,
-};
+use nom::{character::complete::char, combinator::all_consuming, sequence::preceded};
 
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_protocol::{
@@ -475,11 +472,9 @@ impl TransactionRequest {
         let (_, xs) = if rest.is_empty() {
             ("", vec![])
         } else {
-            all_consuming(preceded(
-                char('?'),
-                separated_list0(char('&'), parse::zcashparam),
-            ))(rest)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing query parameters: {e}")))?
+            all_consuming(preceded(char('?'), parse::zcashparams))(rest).map_err(|e| {
+                Zip321Error::ParseError(format!("Error parsing query parameters: {e}"))
+            })?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.
@@ -611,10 +606,11 @@ mod parse {
 
     use nom::{
         AsChar, IResult, InputTakeAtPosition,
-        bytes::complete::{tag, take_till},
+        bytes::complete::{tag_no_case, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
-        combinator::{all_consuming, map_opt, map_res, opt, recognize},
-        sequence::{preceded, separated_pair, tuple},
+        combinator::{all_consuming, map, map_opt, map_res, opt, recognize},
+        multi::separated_list0,
+        sequence::{pair, preceded, tuple},
     };
     use percent_encoding::percent_decode;
     use zcash_address::ZcashAddress;
@@ -733,7 +729,7 @@ mod parse {
     /// Parses and consumes the leading "zcash:\[address\]" from a ZIP 321 URI.
     pub fn lead_addr(input: &str) -> IResult<&str, Option<IndexedParam>> {
         map_opt(
-            preceded(tag("zcash:"), take_till(|c| c == '?')),
+            preceded(tag_no_case("zcash:"), take_till(|c| c == '?')),
             |addr_str: &str| {
                 if addr_str.is_empty() {
                     Some(None) // no address is ok, so wrap in `Some`
@@ -753,12 +749,26 @@ mod parse {
         )(input)
     }
 
-    /// The primary parser for `name=value` query-string parameter pairs.
+    /// The primary parser for `name[=value]` query-string parameter pairs.
+    ///
+    /// Per the ZIP 321 ABNF, the `= value` portion is optional for `otherparam` and
+    /// `otherreqparam`; [`to_indexed_param`] enforces its presence for the named
+    /// parameter types.
     pub fn zcashparam(input: &str) -> IResult<&str, IndexedParam> {
         map_res(
-            separated_pair(indexed_name, char('='), recognize(qchars)),
+            pair(indexed_name, opt(preceded(char('='), recognize(qchars)))),
             to_indexed_param,
         )(input)
+    }
+
+    /// Parses the `&`-separated query parameter list of a ZIP 321 URI.
+    ///
+    /// The grammar makes each `zcashparam` optional, so empty segments (from `?&`,
+    /// `&&`, or a trailing `&`) are permitted and ignored.
+    pub fn zcashparams(input: &str) -> IResult<&str, Vec<IndexedParam>> {
+        map(separated_list0(char('&'), opt(zcashparam)), |xs| {
+            xs.into_iter().flatten().collect()
+        })(input)
     }
 
     /// Extension for the `alphanumeric0` parser which extends that parser
@@ -774,8 +784,31 @@ mod parse {
     }
 
     /// Parses valid characters which may appear in parameter values.
+    ///
+    /// Per the ZIP 321 grammar, `%` is only valid as the lead character of a
+    /// pct-encoded triple (`"%" HEXDIG HEXDIG`); a `%` that does not start a valid
+    /// triple terminates the value, leaving the malformed remainder unparsed.
     pub fn qchars(input: &str) -> IResult<&str, &str> {
-        alphanum_or("-._~!$'()*+,;:@%")(input)
+        const ALLOWED: &str = "-._~!$'()*+,;:@";
+        let mut end = input.len();
+        let mut chars = input.char_indices();
+        while let Some((i, c)) = chars.next() {
+            if c == '%' {
+                match (chars.next(), chars.next()) {
+                    (Some((_, a)), Some((_, b)))
+                        if a.is_ascii_hexdigit() && b.is_ascii_hexdigit() => {}
+                    _ => {
+                        end = i;
+                        break;
+                    }
+                }
+            } else if !(c.is_alphanum() || ALLOWED.contains(c)) {
+                end = i;
+                break;
+            }
+        }
+        let (matched, rest) = input.split_at(end);
+        Ok((rest, matched))
     }
 
     /// Parses valid characters that may appear in parameter names.
@@ -833,8 +866,16 @@ mod parse {
     }
 
     fn to_indexed_param(
-        ((name, iopt), value): ((&str, Option<&str>), &str),
+        ((name, iopt), value): ((&str, Option<&str>), Option<&str>),
     ) -> Result<IndexedParam, String> {
+        // Per the ZIP 321 ABNF, the named parameters require `= value`; only
+        // `otherparam` and `otherreqparam` may omit it.
+        let value = match (name, value) {
+            ("address" | "amount" | "label" | "memo" | "message", None) => {
+                return Err(format!("The {name} parameter requires a value"));
+            }
+            (_, value) => value.unwrap_or(""),
+        };
         let param = match name {
             "address" => ZcashAddress::try_from_encoded(value)
                 .map(Box::new)
@@ -1273,6 +1314,55 @@ mod tests {
             Payment::new(addr, None, None, None, None, vec![]),
             Err(PaymentError::SproutAddress)
         ));
+    }
+
+    /// Grammar edge cases from <https://github.com/zcash/librustzcash/issues/3085>:
+    /// value-less and empty `otherparam` segments are valid, malformed pct-escapes
+    /// must be rejected, and the scheme is case-insensitive.
+    #[test]
+    fn zip321_grammar_edge_cases() {
+        const SAPLING: &str = "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k";
+
+        // Valid per the ZIP 321 ABNF.
+        for valid in [
+            format!("zcash:{SAPLING}?amount=1&foo"),
+            format!("zcash:{SAPLING}?foo&amount=1"),
+            format!("zcash:{SAPLING}?amount=1&"),
+            format!("zcash:{SAPLING}?&amount=1"),
+            format!("zcash:{SAPLING}?amount=1&&label=x"),
+            format!("ZCASH:{SAPLING}?amount=1"),
+            format!("zCaSh:{SAPLING}"),
+        ] {
+            assert!(
+                TransactionRequest::from_uri(&valid).is_ok(),
+                "rejected a valid URI: {valid}"
+            );
+        }
+
+        // Invalid per the ZIP 321 ABNF; these MUST NOT be accepted.
+        for invalid in [
+            format!("zcash:{SAPLING}?amount=1&label=%ZZ"),
+            format!("zcash:{SAPLING}?amount=1&label=abc%"),
+            format!("zcash:{SAPLING}?amount=1&message=%4"),
+            format!("zcash:{SAPLING}?amount=1&foo=%G1"),
+            // The named parameters require `= value`; only other params may omit it.
+            format!("zcash:{SAPLING}?amount"),
+            format!("zcash:{SAPLING}?label"),
+        ] {
+            assert!(
+                TransactionRequest::from_uri(&invalid).is_err(),
+                "accepted an invalid URI: {invalid}"
+            );
+        }
+
+        // A value-less other param parses with an empty value.
+        let req = TransactionRequest::from_uri(&format!("zcash:{SAPLING}?amount=1&foo")).unwrap();
+        let payment = req.payments().get(&0).unwrap();
+        assert!(
+            payment
+                .other_params()
+                .contains(&("foo".to_string(), String::new()))
+        );
     }
 
     proptest! {
