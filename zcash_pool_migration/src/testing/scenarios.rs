@@ -7,7 +7,7 @@
 
 use core::fmt::Debug;
 
-use zcash_protocol::consensus::BlockHeight;
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::value::COIN;
 
 use crate::engine::{MigrationTransferId, MigrationTxKind};
@@ -32,7 +32,7 @@ const SCENARIO_BASE_HEIGHT: u32 = 2_000_000;
 pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
     let mut txs = Vec::with_capacity(n_prep + n_transfer);
     let mut id = 0u32;
-    let height = |id: u32| Some(BlockHeight::from_u32(SCENARIO_BASE_HEIGHT + id));
+    let height = |id: u32| Some(TargetHeight::from(SCENARIO_BASE_HEIGHT + id));
     for index in 0..n_prep {
         txs.push(PlannedTx::new(
             MigrationTransferId::new(id),

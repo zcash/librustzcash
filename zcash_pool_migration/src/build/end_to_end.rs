@@ -12,6 +12,7 @@ use super::test_util::{
     single_note_witness, spending_key,
 };
 use super::{build_prep_tx, build_transfer_pczt, sign_pczt};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use zcash_protocol::consensus::BlockHeight;
@@ -76,11 +77,11 @@ fn migration_pipeline_end_to_end() {
     let (note, _path, _anchor) = single_note_witness(&fvk, balance, seed);
     let prep_expiry = u32::from(crate::scheduling::expiry_height(
         &crate::scheduling::BlockSpacing::UNIFORM,
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
     ));
     let (prep_pczt, placed) = build_prep_tx(
         &params,
-        TARGET_HEIGHT,
+        TargetHeight::from(TARGET_HEIGHT),
         prep_expiry,
         &fvk,
         vec![note],
@@ -143,7 +144,7 @@ fn migration_pipeline_end_to_end() {
     let (fnote, _fpath, _fanchor) = single_note_witness(&fvk, u64::from(funding_value), seed + 2);
     let transfer_pczt = build_transfer_pczt(
         &params,
-        TARGET_HEIGHT,
+        TargetHeight::from(TARGET_HEIGHT),
         TARGET_HEIGHT + 40_000,
         &fvk,
         fnote,

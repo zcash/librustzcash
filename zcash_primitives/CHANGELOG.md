@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::TargetHeight`
+- `zcash_primitives::transaction::testing::arb_target_height` (under the
+  `test-dependencies` feature)
+
 ## [0.31.1] - 2026-11-12
 
 ### Fixed

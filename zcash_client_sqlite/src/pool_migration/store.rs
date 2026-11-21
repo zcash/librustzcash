@@ -48,6 +48,7 @@ use zcash_pool_migration::satisfiability::{
     UnsatisfiableKind, classify_input_observations,
 };
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
@@ -1328,7 +1329,7 @@ fn read_transactions(
             kind,
             r.pczt,
             depends_on,
-            BlockHeight::from_u32(r.scheduled_height),
+            TargetHeight::from(r.scheduled_height),
             BlockHeight::from_u32(r.expiry_height),
             r.anchor_boundary.map(BlockHeight::from_u32),
             txid,

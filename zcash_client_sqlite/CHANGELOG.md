@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`
+  records a broadcast migration transaction in the wallet with its scheduled
+  height as its target height. It previously recorded the height one above it.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

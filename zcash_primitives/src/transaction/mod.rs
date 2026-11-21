@@ -7,6 +7,7 @@ pub mod sighash;
 mod sighash_v4;
 mod sighash_v5;
 mod sighash_v6;
+mod target_height;
 
 pub mod txid;
 pub mod util;
@@ -53,6 +54,7 @@ use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 #[cfg(zcash_unstable = "nutachyon")]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
+pub use self::target_height::TargetHeight;
 pub use zcash_protocol::TxId;
 
 /// The set of defined transaction format versions.
@@ -1494,10 +1496,13 @@ pub mod testing {
     use proptest::prelude::*;
 
     use ::transparent::bundle::testing::{self as transparent};
-    use zcash_protocol::{consensus::BranchId, value::testing::arb_zatoshis};
+    use zcash_protocol::{
+        consensus::{BranchId, testing::arb_block_height},
+        value::testing::arb_zatoshis,
+    };
 
     use super::{
-        Authorized, Transaction, TransactionData, TxId, TxVersion,
+        Authorized, TargetHeight, Transaction, TransactionData, TxId, TxVersion,
         components::{
             orchard::testing::{self as orchard},
             sapling::testing::{self as sapling},
@@ -1509,6 +1514,11 @@ pub mod testing {
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
         prop::array::uniform32(any::<u8>()).prop_map(TxId::from_bytes)
+    }
+
+    /// An arbitrary [`TargetHeight`], over the same range as [`arb_block_height`].
+    pub fn arb_target_height() -> impl Strategy<Value = TargetHeight> {
+        arb_block_height().prop_map(TargetHeight::from)
     }
 
     pub fn arb_tx_version(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {

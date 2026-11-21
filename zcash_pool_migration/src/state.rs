@@ -25,6 +25,7 @@ use alloc::vec::Vec;
 
 use getset::{CopyGetters, Getters};
 use rand_core::{CryptoRng, Rng};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
@@ -75,14 +76,14 @@ pub enum AdvanceStep {
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
     /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
     /// so a transfer remains provable from the moment its boundary settles until it is broadcast.
-    /// Proving EARLY — at a sync wake-up well before the broadcast height — is what keeps the
+    /// Proving EARLY — at a sync wake-up well before the scheduled height — is what keeps the
     /// sync-heavy work out of the broadcast session.
     Prove {
         /// The transactions to prove, earliest-ready first; never empty, and each id distinct.
         transactions: Vec<ProveTarget>,
     },
     /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
-    /// scheduled broadcast height has arrived.
+    /// scheduled height has arrived.
     Broadcast {
         /// The transaction to broadcast.
         id: MigrationTransferId,
@@ -300,9 +301,10 @@ pub struct TransactionStatus {
     /// The transactions that must be mined before this one can be built or broadcast.
     #[getset(get = "pub")]
     pub(crate) depends_on: Vec<MigrationTransferId>,
-    /// The height at or after which it is due to broadcast.
+    /// The target height at which it is scheduled: it is due once the target height (`chain_tip +
+    /// 1`) reaches it.
     #[getset(get_copy = "pub")]
-    pub(crate) scheduled_height: BlockHeight,
+    pub(crate) scheduled_height: TargetHeight,
     /// The height after which the transaction can no longer be mined (ZIP 203); `0` means it never
     /// expires. Surfaced so a wallet can show how close a transaction is to expiring, and recognize
     /// the [`Blocker::Expired`] state.
@@ -371,7 +373,7 @@ impl MigrationState {
     /// [`DuenessTargets`]: which of the two targets expiry is judged at is precisely what
     /// distinguishes a determination from a protective withhold, so that choice belongs to each
     /// call site (where it is stated) and never to this predicate.
-    fn is_expired(t: &MigrationTransaction, target_height: BlockHeight) -> bool {
+    fn is_expired(t: &MigrationTransaction, target_height: TargetHeight) -> bool {
         if matches!(t.state, MigrationTxState::Mined { .. }) {
             return false;
         }
@@ -546,7 +548,7 @@ impl MigrationState {
 
     /// EVERY pre-signed transaction ready to PROVE (move `Signed -> Proved`): each one's anchor
     /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
-    /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
+    /// sync wake-up well before its scheduled height, keeping the sync work and the
     /// broadcast in separate waking sessions — and the whole ready set is surfaced as ONE
     /// [`AdvanceStep::Prove`], because proving emits nothing a network observer can see, so
     /// nothing about it wants the one-at-a-time spacing the broadcast queue exists to provide.
@@ -577,7 +579,13 @@ impl MigrationState {
             .collect();
         // The height each became provable at: a transfer's drawn boundary, a preparation's
         // schedule.
-        ready.sort_by_key(|t| (t.anchor_boundary.unwrap_or(t.scheduled_height), t.id));
+        ready.sort_by_key(|t| {
+            (
+                t.anchor_boundary
+                    .unwrap_or(BlockHeight::from(t.scheduled_height)),
+                t.id,
+            )
+        });
         ready
             .into_iter()
             .map(|t| ProveTarget {
@@ -646,7 +654,7 @@ impl MigrationState {
     /// prove (see [`crate::scheduling::schedule_sync_wakeups`], which defines the windows, the
     /// minimality guarantee, the jitter, and the immediate wake-up that collects overdue
     /// transfers). This is the schedule a background-constrained wallet registers with its OS,
-    /// alongside the (independent) broadcast heights the transfers themselves carry.
+    /// alongside the (independent) scheduled heights the transfers themselves carry.
     ///
     /// Unlike the sibling query methods, which take a [`DuenessTargets`] pair, this method takes a
     /// single observed tip: wake-up heights are floored at the tip (a wake-up at exactly
@@ -678,12 +686,12 @@ impl MigrationState {
         // Expiry semantics are defined against the next block a transaction could mine in. The
         // caller's tip is an observation, so the pair is degenerate: there is no estimate here to
         // separate from.
-        let targets = DuenessTargets::at(current_tip + 1);
+        let targets = DuenessTargets::at(TargetHeight::from(current_tip + 1));
         // The dead set subsumes expiry (an expired unmined transfer is a dead-set seed), so this
         // one exclusion covers both a transfer past its own window and one whose inputs can never
         // exist: neither will ever need the proof a wake-up exists to produce.
         let dead = self.dead_set(targets);
-        let transfers: Vec<(MigrationTransferId, BlockHeight, BlockHeight)> = self
+        let transfers: Vec<(MigrationTransferId, BlockHeight, TargetHeight)> = self
             .transactions
             .iter()
             .filter(|t| {
@@ -858,8 +866,8 @@ impl MigrationState {
     pub(crate) fn shift_schedule<R: Rng + CryptoRng>(
         &mut self,
         spacing: &crate::scheduling::BlockSpacing,
-        from: BlockHeight,
-        to: BlockHeight,
+        from: TargetHeight,
+        to: TargetHeight,
         rng: &mut R,
     ) {
         let grid = crate::scheduling::AnchorGrid::new(self.anchor_bucket_interval, *spacing);
@@ -867,7 +875,8 @@ impl MigrationState {
             match tx.state {
                 MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => continue,
                 MigrationTxState::AwaitingSignature | MigrationTxState::Signed => {
-                    tx.scheduled_height = spacing.shift(tx.scheduled_height, from, to);
+                    tx.scheduled_height =
+                        scheduling::shift_target(spacing, tx.scheduled_height, from, to);
                     if matches!(tx.kind, MigrationTxKind::Transfer { .. })
                         && let Some(prior) = tx.anchor_boundary
                         && let Some(fresh) = crate::scheduling::redraw_anchor_boundary(
@@ -881,7 +890,8 @@ impl MigrationState {
                     }
                 }
                 MigrationTxState::Proved => {
-                    tx.scheduled_height = spacing.shift(tx.scheduled_height, from, to);
+                    tx.scheduled_height =
+                        scheduling::shift_target(spacing, tx.scheduled_height, from, to);
                 }
             }
         }
@@ -1303,7 +1313,7 @@ impl MigrationState {
     ///
     /// Proving is in turn DECOUPLED from the broadcast schedule: a transfer is provable as soon
     /// as its drawn anchor boundary settles (strictly below the chain tip), typically long before
-    /// its scheduled broadcast height. There is no deadline pressure — the wallet durably retains
+    /// its scheduled height. There is no deadline pressure — the wallet durably retains
     /// the boundary checkpoints its committed transfers anchor to (see
     /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
     /// so a transfer remains provable until it is broadcast — but proving at an early sync
@@ -1321,7 +1331,7 @@ impl MigrationState {
     /// late `Replan` slot once no live work remains.
     ///
     /// A missed schedule degrades gracefully rather than requiring reconciliation: a wallet that
-    /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
+    /// slept through a transfer's proving wake-ups and its scheduled height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired. The drive layer adds the RE-SPREAD on top:
     /// [`advance_migration`](crate::satisfiability::advance_migration) shifts the whole pending
@@ -1433,7 +1443,7 @@ impl MigrationState {
         t: &MigrationTransaction,
         targets: DuenessTargets,
         dead: &BTreeSet<MigrationTransferId>,
-    ) -> Option<(StepKind, BlockHeight)> {
+    ) -> Option<(StepKind, TargetHeight)> {
         // Mined is final: nothing is ever asked of the transaction again.
         if matches!(t.state, MigrationTxState::Mined { .. }) {
             return None;
@@ -1450,13 +1460,15 @@ impl MigrationState {
         // expiry, as in the status view: being actively withheld on another observer's testimony
         // is the more specific thing to report.
         if let Some(reported) = t.broadcast_failure_at {
-            return Some((StepKind::Reevaluate, reported + 1));
+            return Some((StepKind::Reevaluate, TargetHeight::from(reported + 1)));
         }
         // A lapse the wallet's own scan supports: a transfer's remedy is its rebuild; an expired
         // preparation has no single-transaction step (see `Blocker::Expired`).
         if Self::is_expired(t, targets.scanned()) {
             return match t.kind {
-                MigrationTxKind::Transfer { .. } => Some((StepKind::Rebuild, t.expiry_height + 1)),
+                MigrationTxKind::Transfer { .. } => {
+                    Some((StepKind::Rebuild, TargetHeight::from(t.expiry_height + 1)))
+                }
                 MigrationTxKind::Preparation { .. } => None,
             };
         }
@@ -1464,7 +1476,9 @@ impl MigrationState {
             MigrationTxState::Signed | MigrationTxState::AwaitingSignature => Some((
                 StepKind::Prove,
                 match t.anchor_boundary {
-                    Some(boundary) => boundary + (scheduling::PROVABLE_ANCHOR_DEPTH + 1),
+                    Some(boundary) => {
+                        TargetHeight::from(boundary + (scheduling::PROVABLE_ANCHOR_DEPTH + 1))
+                    }
                     None => t.scheduled_height,
                 },
             )),
@@ -1496,7 +1510,7 @@ impl MigrationState {
         &self,
         targets: DuenessTargets,
         set_aside: &[MigrationTransferId],
-    ) -> Option<(BlockHeight, StepKind)> {
+    ) -> Option<(TargetHeight, StepKind)> {
         match self.next_step(targets, set_aside) {
             AdvanceStep::Complete => None,
             // The kernel never returns `Reevaluate` (the drive API owns that slot), but it is a
@@ -1747,7 +1761,7 @@ mod tests {
             kind,
             pczt: Vec::new(),
             depends_on: Vec::new(),
-            scheduled_height: BlockHeight::from_u32(0),
+            scheduled_height: TargetHeight::from(0),
             expiry_height: BlockHeight::from_u32(0),
             anchor_boundary: None,
             txid,
@@ -1989,7 +2003,7 @@ mod tests {
     #[test]
     fn awaiting_signature_is_blocked_on_signature() {
         let state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
-        let views = state.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(100)));
+        let views = state.transaction_statuses(DuenessTargets::at(TargetHeight::from(100)));
         assert!(!views[0].ready);
         assert_eq!(views[0].action, None);
         assert_eq!(views[0].blocked_on, Some(Blocker::Signature));
@@ -2011,13 +2025,13 @@ mod tests {
         // Only a PROVED transaction is broadcastable (proving is a separate earlier step).
         let mut proved = tx(1, transfer(0), MigrationTxState::Proved);
         proved.depends_on = vec![MigrationTransferId(0)];
-        proved.scheduled_height = BlockHeight::from_u32(5);
+        proved.scheduled_height = TargetHeight::from(5);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), proved]);
 
         // Not due yet (target below scheduled height).
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(4)),
+                DuenessTargets::at(TargetHeight::from(4)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2026,7 +2040,7 @@ mod tests {
         // Due and deps mined.
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(5)),
+                DuenessTargets::at(TargetHeight::from(5)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2037,7 +2051,7 @@ mod tests {
         s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(5)),
+                DuenessTargets::at(TargetHeight::from(5)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2051,7 +2065,7 @@ mod tests {
         };
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(5)),
+                DuenessTargets::at(TargetHeight::from(5)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2069,7 +2083,7 @@ mod tests {
             scheduled_transfer(0, 0, 100, 500, MigrationTxState::Proved),
             scheduled_transfer(1, 1, 150, 200, MigrationTxState::Proved),
         ]);
-        let due = DuenessTargets::at(BlockHeight::from_u32(600));
+        let due = DuenessTargets::at(TargetHeight::from(600));
 
         // Broadcast: due longest, so by schedule (transfer 1), though it is stored second.
         assert_eq!(
@@ -2104,7 +2118,7 @@ mod tests {
         );
         // Rebuilding transfer 1 reschedules it past transfer 0 while keeping its slot, so the
         // stored-order candidate and the schedule-order candidate now differ.
-        s.transactions[1].scheduled_height = BlockHeight::from_u32(900);
+        s.transactions[1].scheduled_height = TargetHeight::from(900);
         s.transactions[1].expiry_height = BlockHeight::from_u32(950);
         assert_eq!(
             s.next_rebuildable(due, &BTreeSet::new(), &[]),
@@ -2122,7 +2136,7 @@ mod tests {
         ]);
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(600)),
+                DuenessTargets::at(TargetHeight::from(600)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2130,7 +2144,7 @@ mod tests {
         );
     }
 
-    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
+    /// A transfer with the given anchor boundary and scheduled height, in the given
     /// lifecycle state (never expiring, like `tx`).
     fn scheduled_transfer(
         id: u32,
@@ -2141,7 +2155,7 @@ mod tests {
     ) -> MigrationTransaction {
         let mut t = tx(id, transfer(crossing), state);
         t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
-        t.scheduled_height = BlockHeight::from_u32(broadcast);
+        t.scheduled_height = TargetHeight::from(broadcast);
         t
     }
 
@@ -2224,14 +2238,14 @@ mod tests {
 
         // 1) Layer 0 is signed and due -> prove it first, then broadcast it once proved.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(0, prep(0, 0))],
             }
         );
         s.transactions[0].state = MigrationTxState::Proved;
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(0)
             }
@@ -2242,21 +2256,21 @@ mod tests {
             txid: TxId::from_bytes([1; 32]),
         };
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Waiting
         );
 
         // 3) Layer 0 mined -> layer 1 becomes provable, then broadcastable.
         s.transactions[0].state = mined(10);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(1, prep(1, 0))],
             }
         );
         s.transactions[1].state = MigrationTxState::Proved;
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             }
@@ -2265,14 +2279,14 @@ mod tests {
         // 4) Layer 1 mined -> the transfer becomes provable, then broadcastable.
         s.transactions[1].state = mined(11);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(2, transfer(0))],
             }
         );
         s.transactions[2].state = MigrationTxState::Proved;
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(2)
             }
@@ -2281,7 +2295,7 @@ mod tests {
         // 5) Everything mined -> complete.
         s.transactions[2].state = mined(12);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Complete
         );
     }
@@ -2289,17 +2303,17 @@ mod tests {
     #[test]
     fn next_step_waiting_when_schedule_not_reached() {
         let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
-        xfer.scheduled_height = BlockHeight::from_u32(50);
+        xfer.scheduled_height = TargetHeight::from(50);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
         // The transfer is signed with deps mined but not due yet -> nothing else to do, waiting.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(20)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(20)), &[]),
             AdvanceStep::Waiting
         );
         // Once due, the first step on a still-`Signed` transaction is to PROVE it (broadcasting is a
         // separate later step, once proved).
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(50)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(50)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(1, transfer(0))],
             }
@@ -2337,7 +2351,7 @@ mod tests {
             (5, 600),
             (6, 700),
         ] {
-            s.transactions[i].scheduled_height = BlockHeight::from_u32(h);
+            s.transactions[i].scheduled_height = TargetHeight::from(h);
             s.transactions[i].expiry_height = BlockHeight::from_u32(h + 140_000);
         }
         // The transfers carry drawn boundaries on the ZIP 318 grid (the state's interval);
@@ -2348,8 +2362,8 @@ mod tests {
 
         s.shift_schedule(
             &crate::scheduling::BlockSpacing::UNIFORM,
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(100_000),
+            TargetHeight::from(0),
+            TargetHeight::from(100_000),
             &mut ChaCha8Rng::seed_from_u64(7),
         );
 
@@ -2450,7 +2464,7 @@ mod tests {
         // The next step for a terminal migration is Complete (no action), so a driver never
         // broadcasts or builds for it; a Signed transaction is NOT offered for broadcast.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Complete
         );
 
@@ -2546,10 +2560,10 @@ mod tests {
         l1.depends_on = vec![MigrationTransferId(0)];
         let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTransferId(1)];
-        xfer.scheduled_height = BlockHeight::from_u32(30);
+        xfer.scheduled_height = TargetHeight::from(30);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), l1, xfer]);
 
-        let views = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(100)));
+        let views = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(100)));
         assert_eq!(views.len(), 3);
 
         // tx 0: mined -> done, not ready, no blocker.
@@ -2570,13 +2584,13 @@ mod tests {
     #[test]
     fn transaction_statuses_block_on_schedule() {
         let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
-        xfer.scheduled_height = BlockHeight::from_u32(30);
+        xfer.scheduled_height = TargetHeight::from(30);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
         // Deps mined but not due at target 20 -> blocked on schedule; ready at target 30.
-        let blocked = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(20)));
+        let blocked = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(20)));
         assert!(!blocked[1].ready);
         assert_eq!(blocked[1].blocked_on, Some(Blocker::Schedule));
-        let ready = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(30)));
+        let ready = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(30)));
         assert!(ready[1].ready);
         assert_eq!(ready[1].action, Some(NextAction::Prove));
     }
@@ -2589,16 +2603,16 @@ mod tests {
         let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTransferId(0)];
         xfer.anchor_boundary = Some(BlockHeight::from_u32(40));
-        xfer.scheduled_height = BlockHeight::from_u32(60);
+        xfer.scheduled_height = TargetHeight::from(60);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
 
         // `target_height` is `tip + 1`. At tip 49 (target 50) the boundary is only 9 blocks
         // below the tip -> not yet provable, blocked on the anchor boundary.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(50)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(50)), &[]),
             AdvanceStep::Waiting
         );
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(50)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(50)));
         assert!(!v[1].ready);
         assert_eq!(v[1].blocked_on, Some(Blocker::AnchorBoundary));
 
@@ -2610,7 +2624,7 @@ mod tests {
             "the settling target below tracks the constant"
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(1, transfer(0))],
             }
@@ -2619,16 +2633,16 @@ mod tests {
         // Once proved, it is NOT broadcast until its scheduled height arrives.
         s.transactions[1].state = MigrationTxState::Proved;
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(42)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(42)), &[]),
             AdvanceStep::Waiting
         );
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(42)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(42)));
         assert!(!v[1].ready);
         assert_eq!(v[1].blocked_on, Some(Blocker::Schedule));
 
         // At the scheduled height it becomes broadcastable.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(60)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(60)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             }
@@ -2654,7 +2668,7 @@ mod tests {
         // preserving the pre-expiry behaviour of every other test in this module.
         let s = state_with(vec![tx(0, transfer(0), MigrationTxState::Proved)]);
         assert!(
-            s.expired_transactions(DuenessTargets::at(BlockHeight::from_u32(1_000_000)))
+            s.expired_transactions(DuenessTargets::at(TargetHeight::from(1_000_000)))
                 .is_empty()
         );
     }
@@ -2664,13 +2678,13 @@ mod tests {
         // A proved transfer valid only up to height 50. `target_height` is `tip + 1`, i.e. the height
         // of the next block it could be mined into.
         let mut xfer = tx_expiring(1, transfer(0), MigrationTxState::Proved, 50);
-        xfer.scheduled_height = BlockHeight::from_u32(40);
+        xfer.scheduled_height = TargetHeight::from(40);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
 
         // At target 50 (tip 49) it can still be mined -> broadcastable.
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(50)),
+                DuenessTargets::at(TargetHeight::from(50)),
                 &BTreeSet::new(),
                 &[]
             ),
@@ -2679,14 +2693,14 @@ mod tests {
         // At target 51 (tip 50) expiry has passed (51 > 50) -> not broadcastable, must be rebuilt.
         assert_eq!(
             s.next_broadcastable(
-                DuenessTargets::at(BlockHeight::from_u32(51)),
+                DuenessTargets::at(TargetHeight::from(51)),
                 &BTreeSet::new(),
                 &[]
             ),
             None
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
@@ -2696,14 +2710,14 @@ mod tests {
         s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
             s.provable_targets(
-                DuenessTargets::at(BlockHeight::from_u32(51)),
+                DuenessTargets::at(TargetHeight::from(51)),
                 &BTreeSet::new(),
                 &[],
             ),
             Vec::new()
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
@@ -2715,13 +2729,13 @@ mod tests {
         let xfer = tx_expiring(1, transfer(0), MigrationTxState::Proved, 50);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
 
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(51)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(51)));
         assert!(!v[1].ready);
         assert_eq!(v[1].action, None);
         assert_eq!(v[1].blocked_on, Some(Blocker::Expired));
         assert_eq!(v[1].expiry_height, BlockHeight::from_u32(50));
         assert_eq!(
-            s.expired_transactions(DuenessTargets::at(BlockHeight::from_u32(51))),
+            s.expired_transactions(DuenessTargets::at(TargetHeight::from(51))),
             vec![MigrationTransferId(1)]
         );
     }
@@ -2732,10 +2746,10 @@ mod tests {
         // was included in time and must never be reported as expired or offered for rebuild.
         let s = state_with(vec![tx_expiring(0, transfer(0), mined(40), 50)]);
         assert!(
-            s.expired_transactions(DuenessTargets::at(BlockHeight::from_u32(1_000)))
+            s.expired_transactions(DuenessTargets::at(TargetHeight::from(1_000)))
                 .is_empty()
         );
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(1_000)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(1_000)));
         assert_eq!(v[0].blocked_on, None);
     }
 
@@ -2751,7 +2765,7 @@ mod tests {
 
         // Target 51: transfer 1 is provable (no boundary, deps mined, due), transfer 2 is expired.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(1, transfer(0))],
             }
@@ -2761,7 +2775,7 @@ mod tests {
             txid: TxId::from_bytes([3; 32]),
         };
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(2)
             }
@@ -2789,13 +2803,13 @@ mod tests {
         let s = state_with(vec![expired_prep, dependent]);
 
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Replan
         );
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(51)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(51)));
         assert_eq!(v[0].blocked_on, Some(Blocker::Expired));
         assert_eq!(
-            s.expired_transactions(DuenessTargets::at(BlockHeight::from_u32(51))),
+            s.expired_transactions(DuenessTargets::at(TargetHeight::from(51))),
             vec![MigrationTransferId(0)]
         );
     }
@@ -2816,7 +2830,7 @@ mod tests {
         let s = state_with(vec![expired_prep, expired_xfer]);
 
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
@@ -2835,7 +2849,7 @@ mod tests {
         )]);
         s.status = MigrationStatus::Failed;
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(1_000)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(1_000)), &[]),
             AdvanceStep::Complete
         );
     }
@@ -2875,7 +2889,7 @@ mod tests {
 
         // At target 51 the preparation is expired: all four are dead.
         let dead: alloc::vec::Vec<_> = s
-            .dead_set(DuenessTargets::at(BlockHeight::from_u32(51)))
+            .dead_set(DuenessTargets::at(TargetHeight::from(51)))
             .into_iter()
             .collect();
         assert_eq!(
@@ -2889,7 +2903,7 @@ mod tests {
         );
         // At target 50 the preparation is still live: only the marked transfer and its dependent.
         let dead: alloc::vec::Vec<_> = s
-            .dead_set(DuenessTargets::at(BlockHeight::from_u32(50)))
+            .dead_set(DuenessTargets::at(TargetHeight::from(50)))
             .into_iter()
             .collect();
         assert_eq!(dead, vec![MigrationTransferId(2), MigrationTransferId(3)]);
@@ -2912,7 +2926,7 @@ mod tests {
         s.transactions[1].unsatisfiable = marked(40);
         assert!(s.replan_required());
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(2)
             }
@@ -2921,7 +2935,7 @@ mod tests {
             txid: TxId::from_bytes([9; 32]),
         };
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -2944,14 +2958,14 @@ mod tests {
         s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             }
         );
         s.transactions[1].state = mined(60);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -2965,14 +2979,14 @@ mod tests {
             tx_expiring(1, transfer(0), MigrationTxState::Proved, 50),
         ]);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
         );
         s.transactions[1].unsatisfiable = marked(45);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -2997,7 +3011,7 @@ mod tests {
         s.transactions[1].unsatisfiable = marked(40);
         assert!(s.replan_required());
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -3016,14 +3030,14 @@ mod tests {
             tx_expiring(2, transfer(1), MigrationTxState::Proved, 50),
         ]);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
         );
         assert_eq!(
             s.next_step(
-                DuenessTargets::at(BlockHeight::from_u32(51)),
+                DuenessTargets::at(TargetHeight::from(51)),
                 &[MigrationTransferId(1)]
             ),
             AdvanceStep::Rebuild {
@@ -3032,7 +3046,7 @@ mod tests {
         );
         assert_eq!(
             s.next_step(
-                DuenessTargets::at(BlockHeight::from_u32(51)),
+                DuenessTargets::at(TargetHeight::from(51)),
                 &[MigrationTransferId(1), MigrationTransferId(2)]
             ),
             AdvanceStep::Waiting
@@ -3047,7 +3061,7 @@ mod tests {
         // undue transfer, once mined, is value the replan need not carry. Only when it mines is
         // dead value all that remains.
         let mut live = tx(1, transfer(0), MigrationTxState::Proved);
-        live.scheduled_height = BlockHeight::from_u32(10_000);
+        live.scheduled_height = TargetHeight::from(10_000);
         let mut s = state_with_crossings(
             &[90_000_000, 10_000_000],
             15_000,
@@ -3060,12 +3074,12 @@ mod tests {
         s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Waiting
         );
         s.transactions[1].state = mined(60);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -3094,12 +3108,12 @@ mod tests {
         s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Waiting
         );
         s.transactions[1].state = mined(60);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -3124,7 +3138,7 @@ mod tests {
         let s = state_with(vec![expired_prep, expired_xfer]);
 
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(51)), &[]),
             AdvanceStep::Replan
         );
     }
@@ -3169,7 +3183,7 @@ mod tests {
         assert!(s.replan_required());
         assert_eq!(
             s.next_step(
-                DuenessTargets::at(BlockHeight::from_u32(100)),
+                DuenessTargets::at(TargetHeight::from(100)),
                 &[MigrationTransferId(2)]
             ),
             AdvanceStep::Replan
@@ -3198,7 +3212,7 @@ mod tests {
             awaiting,
         ]);
 
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(100)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(100)));
         assert_eq!(v[1].blocked_on, Some(Blocker::Unsatisfiable));
         assert!(!v[1].ready);
         assert_eq!(v[2].blocked_on, Some(Blocker::Unsatisfiable));
@@ -3212,14 +3226,14 @@ mod tests {
             tx(1, prep(0, 1), MigrationTxState::Signed),
         ]);
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(100)), &[]),
             AdvanceStep::Prove {
                 transactions: vec![pt(0, prep(0, 0)), pt(1, prep(0, 1))],
             }
         );
         assert_eq!(
             s.next_step(
-                DuenessTargets::at(BlockHeight::from_u32(100)),
+                DuenessTargets::at(TargetHeight::from(100)),
                 &[MigrationTransferId(0)]
             ),
             AdvanceStep::Prove {
@@ -3228,7 +3242,7 @@ mod tests {
         );
         assert_eq!(
             s.next_step(
-                DuenessTargets::at(BlockHeight::from_u32(100)),
+                DuenessTargets::at(TargetHeight::from(100)),
                 &[MigrationTransferId(0), MigrationTransferId(1)]
             ),
             AdvanceStep::Waiting
@@ -3246,7 +3260,7 @@ mod tests {
         dep.depends_on = vec![MigrationTransferId(1)];
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer, dep]);
 
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(100)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(100)));
         assert_eq!(v[1].blocked_on, Some(Blocker::Unsatisfiable));
         assert_eq!(v[2].blocked_on, Some(Blocker::Unsatisfiable));
 
@@ -3273,7 +3287,7 @@ mod tests {
         ]);
         let h = BlockHeight::from_u32(500);
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[
                 (
                     MigrationTransferId(1),
@@ -3316,7 +3330,7 @@ mod tests {
         ]);
         let h = BlockHeight::from_u32(500);
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[(
                 MigrationTransferId(0),
                 StepSatisfiability::Unsatisfiable {
@@ -3331,7 +3345,7 @@ mod tests {
             "Expired never marks"
         );
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[
                 (
                     MigrationTransferId(1),
@@ -3368,7 +3382,7 @@ mod tests {
         // Re-recording at a different height leaves the original stamp (first observation wins;
         // clearing is truncation's job alone).
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(700)),
+            DuenessTargets::at(TargetHeight::from(700)),
             &[(
                 MigrationTransferId(1),
                 StepSatisfiability::Unsatisfiable {
@@ -3399,7 +3413,7 @@ mod tests {
         let mut grandchild = tx(2, prep(2, 0), MigrationTxState::Signed);
         grandchild.depends_on = vec![MigrationTransferId(1)];
         let mut s = state_with(vec![prep0, dep, grandchild]);
-        s.record_satisfiability(DuenessTargets::at(BlockHeight::from_u32(60)), &[]);
+        s.record_satisfiability(DuenessTargets::at(TargetHeight::from(60)), &[]);
         assert_eq!(s.transactions[0].unsatisfiable_at(), None);
         assert_eq!(
             s.transactions[1].unsatisfiable_at(),
@@ -3419,7 +3433,7 @@ mod tests {
             },
             50,
         )]);
-        s2.record_satisfiability(DuenessTargets::at(BlockHeight::from_u32(50)), &[]);
+        s2.record_satisfiability(DuenessTargets::at(TargetHeight::from(50)), &[]);
         assert!(s2.transactions.iter().all(|t| t.unsatisfiable.is_none()));
     }
 
@@ -3439,7 +3453,7 @@ mod tests {
         let mut dep = tx(2, prep(1, 0), MigrationTxState::Signed);
         dep.depends_on = vec![MigrationTransferId(0), MigrationTransferId(1)];
         let mut s = state_with(vec![a, b, dep]);
-        s.record_satisfiability(DuenessTargets::at(BlockHeight::from_u32(600)), &[]);
+        s.record_satisfiability(DuenessTargets::at(TargetHeight::from(600)), &[]);
         assert_eq!(
             s.transactions[2].unsatisfiable_at(),
             Some(BlockHeight::from_u32(50))
@@ -3551,7 +3565,7 @@ mod tests {
         ]);
         let h = BlockHeight::from_u32(500);
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[
                 (
                     MigrationTransferId(0),
@@ -3642,7 +3656,7 @@ mod tests {
         s.transactions[1].unsatisfiable =
             Some((BlockHeight::from_u32(500), UnsatisfiableKind::Inherited));
 
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(600)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(600)));
         assert_eq!(v[0].blocked_on, Some(Blocker::Unsatisfiable));
         assert_eq!(
             v[0].unsatisfiable_kind,
@@ -3673,7 +3687,7 @@ mod tests {
         // re-marks it — first-observation-wins applies only to LIVE marks.
         let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[(
                 MigrationTransferId(0),
                 StepSatisfiability::Unsatisfiable {
@@ -3687,7 +3701,7 @@ mod tests {
         s.truncate_to_height(BlockHeight::from_u32(400));
         assert_eq!(s.transactions[0].unsatisfiable_at(), None);
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[(
                 MigrationTransferId(0),
                 StepSatisfiability::Unsatisfiable {
@@ -3757,7 +3771,7 @@ mod tests {
             tx(0, transfer(0), MigrationTxState::Proved),
             tx(1, transfer(1), MigrationTxState::Proved),
         ]);
-        let target = BlockHeight::from_u32(50);
+        let target = TargetHeight::from(50);
         assert_eq!(
             s.next_step(DuenessTargets::at(target), &[]),
             AdvanceStep::Broadcast {
@@ -3800,7 +3814,7 @@ mod tests {
     /// outranks expiry and the state-derived blockers.
     #[test]
     fn statuses_rank_awaiting_reevaluation_below_unsatisfiable_and_above_expired() {
-        let target = BlockHeight::from_u32(100);
+        let target = TargetHeight::from(100);
         let mut s = state_with(vec![
             tx(0, transfer(0), MigrationTxState::Proved),
             tx(1, transfer(1), MigrationTxState::Proved),
@@ -3867,7 +3881,7 @@ mod tests {
             "a report above it named a chain the wallet no longer holds",
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(50)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(50)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -3936,7 +3950,7 @@ mod tests {
 
         assert_eq!(s.transactions[0].unsatisfiable, None);
         assert_eq!(s.transactions[1].broadcast_failure_at, None);
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(102)));
+        let v = s.transaction_statuses(DuenessTargets::at(TargetHeight::from(102)));
         assert_eq!(v[0].blocked_on, None, "a mined row carries no blocker");
         assert_eq!(v[0].unsatisfiable_kind, None);
         assert_eq!(v[1].blocked_on, None);
@@ -3953,7 +3967,7 @@ mod tests {
         let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Proved)]);
         s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(100));
         s.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(120)),
+            DuenessTargets::at(TargetHeight::from(120)),
             &[(
                 MigrationTransferId(0),
                 StepSatisfiability::Unsatisfiable {
@@ -3982,21 +3996,21 @@ mod tests {
     /// and a transposed pair (estimate first) must not be able to lower the served target.
     #[test]
     fn dueness_targets_clamps_an_estimate_below_the_scanned_frontier() {
-        let behind = DuenessTargets::new(BlockHeight::from_u32(100), BlockHeight::from_u32(60));
-        assert_eq!(behind.scanned(), BlockHeight::from_u32(100));
+        let behind = DuenessTargets::new(TargetHeight::from(100), TargetHeight::from(60));
+        assert_eq!(behind.scanned(), TargetHeight::from(100));
         assert_eq!(
             behind.effective(),
-            BlockHeight::from_u32(100),
+            TargetHeight::from(100),
             "an estimate behind the scan is clamped up to it"
         );
-        let ahead = DuenessTargets::new(BlockHeight::from_u32(100), BlockHeight::from_u32(160));
-        assert_eq!(ahead.scanned(), BlockHeight::from_u32(100));
-        assert_eq!(ahead.effective(), BlockHeight::from_u32(160));
-        let degenerate = DuenessTargets::at(BlockHeight::from_u32(100));
+        let ahead = DuenessTargets::new(TargetHeight::from(100), TargetHeight::from(160));
+        assert_eq!(ahead.scanned(), TargetHeight::from(100));
+        assert_eq!(ahead.effective(), TargetHeight::from(160));
+        let degenerate = DuenessTargets::at(TargetHeight::from(100));
         assert_eq!(degenerate.scanned(), degenerate.effective());
         assert_eq!(
             degenerate,
-            DuenessTargets::new(BlockHeight::from_u32(100), BlockHeight::from_u32(100)),
+            DuenessTargets::new(TargetHeight::from(100), TargetHeight::from(100)),
             "`at` is the equal pair `new` builds from two equal heights"
         );
     }
@@ -4012,13 +4026,13 @@ mod tests {
         ]);
 
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(500)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(500)), &[]),
             AdvanceStep::Waiting,
             "the scanned frontier alone considers nothing due"
         );
         assert_eq!(
             s.next_step(
-                DuenessTargets::new(BlockHeight::from_u32(500), BlockHeight::from_u32(1_501)),
+                DuenessTargets::new(TargetHeight::from(500), TargetHeight::from(1_501)),
                 &[],
             ),
             AdvanceStep::Broadcast {
@@ -4027,8 +4041,8 @@ mod tests {
             "the estimate serves the schedule"
         );
         let v = s.transaction_statuses(DuenessTargets::new(
-            BlockHeight::from_u32(500),
-            BlockHeight::from_u32(1_501),
+            TargetHeight::from(500),
+            TargetHeight::from(1_501),
         ));
         assert!(v[1].ready);
         assert_eq!(v[1].action, Some(NextAction::Broadcast));
@@ -4050,8 +4064,7 @@ mod tests {
             scheduled_transfer(2, 1, 40, 1_500, MigrationTxState::Proved),
         ]);
         // Scanned 1_501 (the wallet cannot see the expiry at 1_600 either way), estimate 1_700.
-        let targets =
-            DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700));
+        let targets = DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700));
 
         assert_eq!(
             s.next_step(targets, &[]),
@@ -4083,7 +4096,7 @@ mod tests {
         // And the withhold is exactly the estimate's doing: read at the scanned frontier alone,
         // the doomed transfer is the first one offered.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(1_501)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(1_501)), &[]),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             }
@@ -4104,13 +4117,13 @@ mod tests {
             },
             1_600,
         );
-        source.scheduled_height = BlockHeight::from_u32(1_000);
+        source.scheduled_height = TargetHeight::from(1_000);
         let mut dependent = scheduled_transfer(1, 0, 40, 1_500, MigrationTxState::Signed);
         dependent.depends_on = vec![MigrationTransferId(0)];
         let s = state_with(vec![source, dependent]);
 
         let overshooting =
-            DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700));
+            DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700));
         assert!(
             s.dead_set(overshooting).is_empty(),
             "an estimated expiry is not a dead-set seed"
@@ -4130,7 +4143,7 @@ mod tests {
 
         // Once the wallet has actually scanned past the expiry, every one of those becomes the
         // determination it always would have been.
-        let scanned = DuenessTargets::at(BlockHeight::from_u32(1_700));
+        let scanned = DuenessTargets::at(TargetHeight::from(1_700));
         assert_eq!(s.dead_set(scanned).len(), 2, "source and dependent alike");
         assert_eq!(
             s.expired_transactions(scanned),
@@ -4152,14 +4165,14 @@ mod tests {
 
         assert_eq!(
             s.next_step(
-                DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700)),
+                DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700)),
                 &[],
             ),
             AdvanceStep::Waiting,
             "the transfer is withheld, not condemned to a re-signing"
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(1_700)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(1_700)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             },
@@ -4180,14 +4193,14 @@ mod tests {
 
         assert_eq!(
             s.next_step(
-                DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700)),
+                DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700)),
                 &[],
             ),
             AdvanceStep::Waiting,
             "no live work, but no determination either: the honest answer is to wait"
         );
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(1_700)), &[]),
+            s.next_step(DuenessTargets::at(TargetHeight::from(1_700)), &[]),
             AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             },
@@ -4217,7 +4230,7 @@ mod tests {
 
         let mut overshot = build();
         overshot.record_satisfiability(
-            DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700)),
+            DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700)),
             &[],
         );
         assert_eq!(
@@ -4226,7 +4239,7 @@ mod tests {
         );
 
         let mut scanned = build();
-        scanned.record_satisfiability(DuenessTargets::at(BlockHeight::from_u32(1_700)), &[]);
+        scanned.record_satisfiability(DuenessTargets::at(TargetHeight::from(1_700)), &[]);
         assert_eq!(
             scanned.transactions[1].unsatisfiable,
             Some((BlockHeight::from_u32(1_600), UnsatisfiableKind::Inherited)),
@@ -4242,8 +4255,7 @@ mod tests {
         let mut doomed = scheduled_transfer(1, 0, 40, 1_500, MigrationTxState::Signed);
         doomed.expiry_height = BlockHeight::from_u32(1_600);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), doomed]);
-        let targets =
-            DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700));
+        let targets = DuenessTargets::new(TargetHeight::from(1_501), TargetHeight::from(1_700));
 
         assert!(!s.prove_ready(&s.transactions[1], targets));
         assert_eq!(s.next_step(targets, &[]), AdvanceStep::Waiting);
@@ -4274,8 +4286,7 @@ mod tests {
             tx(0, prep(0, 0), mined(10)),
             scheduled_transfer(1, 0, 1_500, 1_400, MigrationTxState::Signed),
         ]);
-        let targets =
-            DuenessTargets::new(BlockHeight::from_u32(1_510), BlockHeight::from_u32(1_700));
+        let targets = DuenessTargets::new(TargetHeight::from(1_510), TargetHeight::from(1_700));
 
         assert!(
             !s.prove_ready(&s.transactions[1], targets),
@@ -4289,7 +4300,7 @@ mod tests {
         // One more scanned block and the boundary is deep enough, whatever the estimate says.
         assert_eq!(
             s.next_step(
-                DuenessTargets::new(BlockHeight::from_u32(1_511), BlockHeight::from_u32(1_700)),
+                DuenessTargets::new(TargetHeight::from(1_511), TargetHeight::from(1_700)),
                 &[],
             ),
             AdvanceStep::Prove {

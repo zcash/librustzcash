@@ -12,6 +12,7 @@
 use orchard::keys::SpendAuthorizingKey;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
@@ -86,7 +87,7 @@ fn assert_preview_matches_commit(
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let state = commit_preparation(
         &regtest_network(true),
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         backend,
         &sk(seed),
         plan,
@@ -231,7 +232,7 @@ fn every_transfer_spends_the_note_its_producer_mints() {
         let (state, transfer_funding) =
             zcash_pool_migration::engine::commit_preparation_with_funding(
                 &regtest_network(true),
-                BlockHeight::from_u32(TARGET_HEIGHT),
+                TargetHeight::from(TARGET_HEIGHT),
                 &mut backend,
                 &sk(seed),
                 &plan,
@@ -409,7 +410,7 @@ fn commits_the_whole_migration_in_one_pass() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let state = commit_preparation(
         &params,
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &sk(seed),
         &plan,
@@ -480,7 +481,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let state = commit_preparation(
         &params,
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &sk(seed),
         &plan,
@@ -622,7 +623,7 @@ fn external_signing_batches_by_action_budget() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let (mut state, unsigned) = build_preparation_unsigned(
         &params,
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &plan,
         &mut rng,
@@ -691,7 +692,7 @@ fn every_committed_transaction_has_a_derivable_txid() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let state = commit_preparation(
         &regtest_network(true),
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &sk(seed),
         &plan,
@@ -736,7 +737,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let mut state = commit_preparation(
         &regtest_network(true),
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &sk(seed),
         &plan,
@@ -776,7 +777,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
     advance_migration(
         &mut backend,
         &mut state,
-        DuenessTargets::at(BlockHeight::from_u32(TARGET_HEIGHT + 10)),
+        DuenessTargets::at(TargetHeight::from(TARGET_HEIGHT + 10)),
         &AdvanceConfig::new(
             ReorgSettleDepth::new(10),
             zcash_pool_migration::scheduling::BlockSpacing::UNIFORM,
