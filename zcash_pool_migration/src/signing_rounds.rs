@@ -35,7 +35,7 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU32, NonZeroUsize};
 
-use zcash_protocol::consensus::BlockHeight;
+use zcash_primitives::transaction::TargetHeight;
 
 use crate::{
     denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
@@ -129,7 +129,7 @@ pub struct PlannedTx {
     kind: MigrationTxKind,
     actions: u32,
     depends_on: Vec<MigrationTransferId>,
-    scheduled_height: Option<BlockHeight>,
+    scheduled_height: Option<TargetHeight>,
 }
 
 impl PlannedTx {
@@ -140,7 +140,7 @@ impl PlannedTx {
         id: MigrationTransferId,
         kind: MigrationTxKind,
         depends_on: Vec<MigrationTransferId>,
-        scheduled_height: Option<BlockHeight>,
+        scheduled_height: Option<TargetHeight>,
     ) -> Self {
         Self {
             id,
@@ -183,8 +183,8 @@ impl PlannedTx {
         &self.depends_on
     }
 
-    /// The height at which this transaction is scheduled to broadcast — the value the commit
-    /// stores as
+    /// The target height at which this transaction is scheduled: the first height at which it is
+    /// to be mined, broadcast once the chain tip is one below it — the value the commit stores as
     /// [`MigrationTransaction::scheduled_height`](crate::engine::MigrationTransaction::scheduled_height).
     ///
     /// Not a promise of when it WILL broadcast: a dependency that mines late holds a transaction
@@ -196,7 +196,7 @@ impl PlannedTx {
     /// which `commit_preparation` refuses to build. The row is still reported, so that no id is
     /// renumbered by the absence.
     #[must_use]
-    pub const fn scheduled_height(&self) -> Option<BlockHeight> {
+    pub const fn scheduled_height(&self) -> Option<TargetHeight> {
         self.scheduled_height
     }
 

@@ -30,8 +30,7 @@ use {
     zcash_client_backend::{
         data_api::{
             Account as _, SentTransaction, SentTransactionOutput,
-            anchor_retention::PoolMigrationParams, wallet::TargetHeight,
-            zip318::classify_decrypted_tx,
+            anchor_retention::PoolMigrationParams, zip318::classify_decrypted_tx,
         },
         decrypt_transaction,
         wallet::{Note, Recipient},
@@ -554,7 +553,7 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         // The scheduled height is the target height the transaction was built to be mined at.
-        let target_height = TargetHeight::from(row.scheduled_height());
+        let target_height = row.scheduled_height();
         let created = time::OffsetDateTime::from(self.clock.now());
         let sent = SentTransaction::new(
             &tx,
@@ -809,6 +808,7 @@ mod check_step_satisfiability {
     };
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
+    use zcash_primitives::transaction::TargetHeight;
     use zcash_protocol::TxId;
     use zcash_protocol::consensus::{BlockHeight, BranchId};
     use zcash_protocol::local_consensus::LocalNetwork;
@@ -970,7 +970,7 @@ mod check_step_satisfiability {
             MigrationTxKind::Transfer { crossing: 0 },
             vec![0xAB],
             Vec::new(),
-            BlockHeight::from_u32(0),
+            TargetHeight::from(0),
             BlockHeight::from_u32(expiry),
             None,
             TxId::from_bytes([0; 32]),
@@ -996,7 +996,7 @@ mod check_step_satisfiability {
             MigrationTxKind::Transfer { crossing: 0 },
             vec![0xAB],
             Vec::new(),
-            BlockHeight::from_u32(0),
+            TargetHeight::from(0),
             BlockHeight::from_u32(0),
             None,
             TxId::from_bytes([9; 32]),
@@ -1054,7 +1054,7 @@ mod check_step_satisfiability {
             kind,
             pczt_anchored_at(anchor),
             Vec::new(),
-            BlockHeight::from_u32(0),
+            TargetHeight::from(0),
             BlockHeight::from_u32(0),
             boundary,
             // The row's id is the one its lifecycle state carries, where the state has one: the
@@ -2088,6 +2088,7 @@ mod truncation_follows_the_wallet {
     use zcash_pool_migration::satisfiability::{ReplanThreshold, UnsatisfiableKind};
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
+    use zcash_primitives::transaction::TargetHeight;
     use zcash_protocol::TxId;
     use zcash_protocol::consensus::BlockHeight;
     use zcash_protocol::value::Zatoshis;
@@ -2117,7 +2118,7 @@ mod truncation_follows_the_wallet {
             },
             vec![0xAB],
             Vec::new(),
-            BlockHeight::from_u32(0),
+            TargetHeight::from(0),
             BlockHeight::from_u32(0),
             None,
             // One txid per row: where the lifecycle state carries one, that IS the row's.
@@ -2318,6 +2319,7 @@ mod truncation_follows_the_wallet {
 #[cfg(test)]
 mod tests {
     use super::{Error, PoolMigrations, init_migration_tables};
+    use zcash_primitives::transaction::TargetHeight;
     use zcash_protocol::TxId;
 
     use proptest::prelude::*;
@@ -2525,7 +2527,7 @@ mod tests {
                 MigrationTxKind::Transfer { crossing: 0 },
                 vec![0xAB; 4],
                 Vec::new(),
-                BlockHeight::from_u32(10),
+                TargetHeight::from(10),
                 BlockHeight::from_u32(0),
                 None,
                 txid,
@@ -2739,7 +2741,7 @@ mod tests {
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1],
             Vec::new(),
-            BlockHeight::from_u32(5),
+            TargetHeight::from(5),
             BlockHeight::from_u32(0),
             None,
             TxId::from_bytes([0xB0; 32]),
@@ -2756,7 +2758,7 @@ mod tests {
             MigrationTxKind::Preparation { layer: 0, index: 1 },
             vec![2],
             Vec::new(),
-            BlockHeight::from_u32(5),
+            TargetHeight::from(5),
             BlockHeight::from_u32(0),
             None,
             TxId::from_bytes([0xC0; 32]),
@@ -3097,7 +3099,7 @@ mod tests {
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1, 2, 3],
             depends_on.clone(),
-            BlockHeight::from_u32(100),
+            TargetHeight::from(100),
             BlockHeight::from_u32(200),
             anchor_boundary,
             TxId::from_bytes([0; 32]),
@@ -3112,7 +3114,7 @@ mod tests {
             MigrationTxKind::Transfer { crossing: 0 },
             vec![4, 5, 6],
             depends_on,
-            BlockHeight::from_u32(100),
+            TargetHeight::from(100),
             BlockHeight::from_u32(200),
             anchor_boundary,
             TxId::from_bytes([1; 32]),
@@ -3185,7 +3187,7 @@ mod tests {
                 MigrationTxKind::Transfer { crossing },
                 vec![id as u8],
                 Vec::new(),
-                BlockHeight::from_u32(100),
+                TargetHeight::from(100),
                 BlockHeight::from_u32(200),
                 None,
                 TxId::from_bytes([0; 32]),
@@ -3279,7 +3281,7 @@ mod tests {
                 MigrationTxKind::Transfer { crossing: 0 },
                 vec![1, 2, 3],
                 Vec::new(),
-                BlockHeight::from_u32(100),
+                TargetHeight::from(100),
                 BlockHeight::from_u32(200),
                 None,
                 TxId::from_bytes([0; 32]),
@@ -3370,7 +3372,7 @@ mod tests {
                 },
                 vec![1, 2, 3],
                 depends_on,
-                BlockHeight::from_u32(100),
+                TargetHeight::from(100),
                 BlockHeight::from_u32(0),
                 None,
                 TxId::from_bytes([0; 32]),
@@ -3402,7 +3404,7 @@ mod tests {
         );
         let as_of_height = BlockHeight::from_u32(500);
         state.record_satisfiability(
-            DuenessTargets::at(BlockHeight::from_u32(600)),
+            DuenessTargets::at(TargetHeight::from(600)),
             &[(
                 MigrationTransferId::new(0),
                 StepSatisfiability::Unsatisfiable {

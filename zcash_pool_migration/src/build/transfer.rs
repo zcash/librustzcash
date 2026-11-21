@@ -24,6 +24,7 @@
 use rand_core::{CryptoRng, Rng};
 
 use orchard::keys::{FullViewingKey, Scope};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
 use zcash_primitives::transaction::fees::zip317::{
     FeeError as Zip317FeeError, FeeRule as Zip317FeeRule,
@@ -77,7 +78,7 @@ const IRONWOOD_TRANSFER_PADDING: BundlePadding = BundlePadding {
 #[allow(clippy::too_many_arguments)]
 pub fn build_transfer_pczt<P, R>(
     params: &P,
-    target_height: u32,
+    target_height: TargetHeight,
     expiry_height: u32,
     orchard_fvk: &FullViewingKey,
     note: orchard::note::Note,
@@ -91,7 +92,7 @@ where
 {
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),
-        BlockHeight::from_u32(target_height),
+        BlockHeight::from(target_height),
         BundlePadding::DEFAULT,
         IRONWOOD_TRANSFER_PADDING,
     )
@@ -168,7 +169,7 @@ mod tests {
             let rng = ChaCha8Rng::seed_from_u64(crossing_value);
             let result = build_transfer_pczt(
                 &params,
-                target_height,
+                TargetHeight::from(target_height),
                 expiry_height,
                 &fvk,
                 note,
@@ -209,7 +210,7 @@ mod tests {
 
         let pczt = build_transfer_pczt(
             &regtest_network(true),
-            100,
+            TargetHeight::from(100),
             140,
             &fvk,
             note,

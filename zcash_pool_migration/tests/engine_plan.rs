@@ -10,6 +10,7 @@
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{COIN, Zatoshis};
@@ -300,7 +301,7 @@ fn stores_loads_and_updates_a_migration() {
         MigrationTxKind::Transfer { crossing: 0 },
         vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
         Vec::new(),
-        BlockHeight::from_u32(2_000_100),
+        TargetHeight::from(2_000_100),
         BlockHeight::from_u32(2_069_220),
         None,
         TxId::from_bytes([0; 32]),

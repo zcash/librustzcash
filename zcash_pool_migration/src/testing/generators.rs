@@ -9,7 +9,7 @@ use core::num::{NonZeroU32, NonZeroUsize};
 
 use proptest::prelude::*;
 
-use zcash_primitives::transaction::testing::arb_txid;
+use zcash_primitives::transaction::testing::{arb_target_height, arb_txid};
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::Zatoshis;
@@ -228,7 +228,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_migration_tx_kind(),
         prop::collection::vec(any::<u8>(), 0..64),
         prop::collection::vec(arb_migration_transfer_id(), 0..4),
-        arb_block_height(),
+        arb_target_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
         arb_txid(),

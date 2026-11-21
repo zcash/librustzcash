@@ -65,7 +65,10 @@ use zcash_protocol::{
     zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS},
 };
 
-use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
+use zcash_primitives::transaction::{
+    TargetHeight,
+    fees::{FeeRule as _, transparent, zip317},
+};
 
 #[cfg(feature = "orchard")]
 use crate::satisfiability::{DuenessTargets, UnsatisfiableCause};
@@ -469,10 +472,12 @@ pub struct MigrationTransaction {
     /// dependency graph; empty for an independent transaction).
     #[getset(get = "pub")]
     pub(crate) depends_on: Vec<MigrationTransferId>,
-    /// The height at which to broadcast (for a transfer; a preparation transaction waits for its
-    /// dependencies to mine and a boundary to pass rather than a fixed height).
+    /// The target height at which this transaction is scheduled: the first height at which it is
+    /// to be mined, so it is broadcast once the chain tip is one below it (for a transfer; a
+    /// preparation transaction waits for its dependencies to mine and a boundary to pass rather
+    /// than a fixed height).
     #[getset(get_copy = "pub")]
-    pub(crate) scheduled_height: BlockHeight,
+    pub(crate) scheduled_height: TargetHeight,
     /// The height after which the transaction can no longer be mined (ZIP 203) and its part must
     /// be carried by an entirely new, freshly signed transaction: a transfer via
     /// [`rebuild_expired_transfer`] / [`rebuild_expired_transfer_unsigned`] (detection via
@@ -602,7 +607,7 @@ impl MigrationTransaction {
         kind: MigrationTxKind,
         pczt: Vec<u8>,
         depends_on: Vec<MigrationTransferId>,
-        scheduled_height: BlockHeight,
+        scheduled_height: TargetHeight,
         expiry_height: BlockHeight,
         anchor_boundary: Option<BlockHeight>,
         txid: TxId,
@@ -986,7 +991,7 @@ impl MigrationState {
 pub struct MigrationPlan {
     denominations: DenominationPlan,
     preparation: PreparationPlan,
-    prep_schedule: Vec<Vec<BlockHeight>>,
+    prep_schedule: Vec<Vec<TargetHeight>>,
     schedule: Vec<Schedule>,
 }
 
@@ -1184,7 +1189,7 @@ impl MigrationPlan {
     /// each layer based past
     /// the previous layer's last height plus a mining margin, so the transactions are temporally
     /// decoupled from one another while the layers stay serialized.
-    pub fn prep_schedule(&self) -> &[Vec<BlockHeight>] {
+    pub fn prep_schedule(&self) -> &[Vec<TargetHeight>] {
         &self.prep_schedule
     }
 
@@ -1365,7 +1370,7 @@ impl MigrationPlan {
     /// [`commit_preparation`] would itself reject as [`CommitError::InconsistentPlan`]. Such a
     /// transaction still gets a row, with no height, rather than being dropped: every id after it,
     /// and every dependency naming one, is defined by its POSITION in the list.
-    fn prep_scheduled_height(&self, layer: usize, index: usize) -> Option<BlockHeight> {
+    fn prep_scheduled_height(&self, layer: usize, index: usize) -> Option<TargetHeight> {
         self.prep_schedule
             .get(layer)
             .and_then(|heights| heights.get(index))
@@ -1833,10 +1838,9 @@ where
     let commit_height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
-    // Scheduled heights are TARGET heights (`chain_tip + 1`), so the schedules are based at the
-    // target height at which the plan is committed: no transaction is scheduled at a height that
-    // is already mined.
-    let commit_target = commit_height + 1;
+    // The schedules are based at the target height at which the plan is committed, one above the
+    // chain tip: no transaction is scheduled at a height that is already mined.
+    let commit_target = TargetHeight::from(commit_height + 1);
     // The anchor grid and delay distributions come from the backend, not from this function's
     // caller: the grid must be the one the backend retains its anchor checkpoints on. The block
     // spacing comes from the network, and converts both into blocks at each height.
@@ -1900,7 +1904,7 @@ where
     // cluster), with the tighter preparation spacing since no anchor bucketing constrains them.
     // Each later layer's schedule bases past the previous layer's last height plus a mining
     // margin, keeping the layers serialized.
-    let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
+    let mut prep_schedule: Vec<Vec<TargetHeight>> = Vec::with_capacity(preparation.layer_count());
     let mut layer_base = commit_target;
     for layer in preparation.layers() {
         let heights = scheduling::schedule_prep_heights(
@@ -1910,24 +1914,26 @@ where
             layer.len(),
             rng,
         );
-        layer_base = heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
+        layer_base = TargetHeight::from(
+            heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS,
+        );
         prep_schedule.push(heights);
     }
     // After the loop, `layer_base` estimates the height at which the last preparation transaction
     // has mined and its funding notes are witnessable.
-    let est_last_prep_height = layer_base;
+    let est_last_prep_height = BlockHeight::from(layer_base);
 
     // Lower-bound the FIRST scheduled transfer so that every transfer is guaranteed a candidate
     // anchor boundary: the funding notes exist only once the preparation has mined, and a boundary
     // must then exist above their creation, observed by the tip each transfer is broadcast from
-    // (see [`scheduling::earliest_transfer_target`]). Basing the schedule at this bound, rather
+    // (see [`scheduling::earliest_scheduled_height`]). Basing the schedule at this bound, rather
     // than the commit target height, keeps the drawn inter-arrival gaps intact while making an
     // empty candidate set impossible for a plan committed at (or reasonably near) its planning
     // height.
     let nu63_activation = params
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
-    let schedule_base = commit_target.max(scheduling::earliest_transfer_target(
+    let schedule_base = commit_target.max(scheduling::earliest_scheduled_height(
         grid,
         nu63_activation,
         est_last_prep_height,
@@ -2976,7 +2982,9 @@ where
                 ),
                 nu63_activation,
                 funding_height,
-                scanned_tip,
+                // A proof made now is for a transaction whose target height is one above the
+                // scanned tip.
+                TargetHeight::from(scanned_tip + 1),
                 rng,
             ) {
                 Some(fresh) => Some(fresh),
@@ -3073,7 +3081,7 @@ fn interpret_input_not_available(
     }
 
     state.record_satisfiability(
-        DuenessTargets::at(as_of + 1),
+        DuenessTargets::at(TargetHeight::from(as_of + 1)),
         &[(
             id,
             StepSatisfiability::Unsatisfiable {
@@ -3444,7 +3452,8 @@ where
     }
 
     // The height of the next block this transfer could be mined into, against which expiry is judged.
-    let target_height = backend.chain_tip_height().map_err(RebuildError::Backend)? + 1;
+    let target_height =
+        TargetHeight::from(backend.chain_tip_height().map_err(RebuildError::Backend)? + 1);
 
     // Read everything the rebuild needs from the persisted state before the mutable borrow below.
     let tx = state
@@ -3590,14 +3599,17 @@ where
         .max()
         .map_or(target_height, |latest| latest.max(target_height));
     let spacing = scheduling::BlockSpacing::for_network(params);
-    let scheduled_height =
-        spacing.advance(chain_base, sched_params.transfer_delay().draw(&mut *rng));
+    let scheduled_height = scheduling::advance_target(
+        &spacing,
+        chain_base,
+        sched_params.transfer_delay().draw(&mut *rng),
+    );
     let expiry_height = scheduling::expiry_height(&spacing, scheduled_height);
     let anchor_boundary = scheduling::draw_anchor_boundary(
         scheduling::AnchorGrid::new(sched_params.anchor_bucket_interval(), spacing),
         nu63_activation,
         funding_creation,
-        scheduling::broadcast_tip(scheduled_height),
+        scheduled_height,
         rng,
     )
     .ok_or(RebuildError::NoCandidateAnchor)?;
@@ -3608,7 +3620,7 @@ where
     // signed anew below (in-process) or by the external signer.
     let pczt = crate::build::build_transfer_pczt(
         params,
-        u32::from(target_height),
+        target_height,
         u32::from(expiry_height),
         &fvk,
         note,
@@ -3866,10 +3878,10 @@ struct MintedNote {
 /// ([`CommitError::MigrationInProgress`]): a committed migration is resumed from the store, or
 /// cancelled, never rebuilt over.
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
-/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
-/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
-/// a specific policy.
+/// `params` is the network, `target_height` the target height the transactions are built at (one
+/// above the chain tip, post-NU6.3), `rng` a cryptographically secure RNG, and `replan_threshold`
+/// the policy stamped on the committed migration (see [`MigrationState::replan_threshold`]) — pass
+/// [`ReplanThreshold::DEFAULT`] absent a specific policy.
 ///
 /// `sk` is the account's Orchard spending key, and every transaction of the run is signed with its
 /// spend authority before this returns. It is an argument rather than something `backend` holds so
@@ -3886,7 +3898,7 @@ struct MintedNote {
 #[cfg(feature = "orchard")]
 pub fn commit_preparation<P, B, R>(
     params: &P,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     backend: &mut B,
     sk: &orchard::keys::SpendingKey,
     plan: &MigrationPlan,
@@ -3925,14 +3937,14 @@ where
 /// `replace_migration`, and drive the broadcasts through the normal state machine (proving remains a
 /// consumer responsibility, at broadcast time).
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
-/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
-/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
-/// a specific policy.
+/// `params` is the network, `target_height` the target height the transactions are built at (one
+/// above the chain tip, post-NU6.3), `rng` a cryptographically secure RNG, and `replan_threshold`
+/// the policy stamped on the committed migration (see [`MigrationState::replan_threshold`]) — pass
+/// [`ReplanThreshold::DEFAULT`] absent a specific policy.
 #[cfg(feature = "orchard")]
 pub fn build_preparation_unsigned<P, B, R>(
     params: &P,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
@@ -3964,7 +3976,7 @@ where
 #[cfg(feature = "orchard")]
 fn commit_preparation_inner<P, B, R>(
     params: &P,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
@@ -4012,7 +4024,7 @@ where
 #[cfg(all(feature = "orchard", any(test, feature = "test-dependencies")))]
 pub fn commit_preparation_with_funding<P, B, R>(
     params: &P,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     backend: &mut B,
     sk: &orchard::keys::SpendingKey,
     plan: &MigrationPlan,
@@ -4055,7 +4067,7 @@ where
 #[cfg(feature = "orchard")]
 struct Committer<'a, P, B, R> {
     params: &'a P,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     backend: &'a mut B,
     rng: &'a mut R,
     signing: Signing<'a>,
@@ -4088,7 +4100,7 @@ where
     /// and initialize the empty accumulators.
     fn start(
         params: &'a P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         backend: &'a mut B,
         rng: &'a mut R,
         signing: Signing<'a>,
@@ -4289,7 +4301,7 @@ where
             // whole-`self` method call (like `resolve_prep_spends` above) is interleaved.
             let (pczt, placed) = build_prep_tx(
                 self.params,
-                u32::from(self.target_height),
+                self.target_height,
                 u32::from(expiry_height),
                 &self.fvk,
                 spends,
@@ -4431,7 +4443,9 @@ where
             .prep_schedule()
             .last()
             .and_then(|layer| layer.last())
-            .map_or(self.target_height, |&h| h + EST_PREP_LAYER_MINING_BLOCKS);
+            .map_or(BlockHeight::from(self.target_height), |&h| {
+                h + EST_PREP_LAYER_MINING_BLOCKS
+            });
         // The anchor draw needs the NU6.3 activation height; derive it from `params` here rather
         // than carrying it as a field (it is a pure function of the network).
         let nu63_activation = self
@@ -4490,7 +4504,7 @@ where
 
             let pczt = build_transfer_pczt(
                 self.params,
-                u32::from(self.target_height),
+                self.target_height,
                 u32::from(expiry_height),
                 &self.fvk,
                 note,
@@ -4503,7 +4517,7 @@ where
                 anchor_grid,
                 nu63_activation,
                 est_last_prep_height,
-                scheduling::broadcast_tip(scheduled_height),
+                scheduled_height,
                 self.rng,
             )
             .ok_or(CommitError::StalePlan)?;
@@ -5063,7 +5077,7 @@ pub(crate) mod tests {
         // layer, and each layer starts past the previous one (temporal decoupling with layer
         // serialization).
         assert_eq!(plan.prep_schedule().len(), plan.preparation().layer_count());
-        let mut prev_layer_end = BlockHeight::from_u32(2_000_000);
+        let mut prev_layer_end = TargetHeight::from(2_000_000);
         for (layer, heights) in plan.preparation().layers().iter().zip(plan.prep_schedule()) {
             assert_eq!(heights.len(), layer.len());
             let mut prev = prev_layer_end;
@@ -5082,9 +5096,9 @@ pub(crate) mod tests {
             .last()
             .and_then(|layer| layer.last())
             .copied()
-            .unwrap_or(BlockHeight::from_u32(2_000_000))
+            .unwrap_or(TargetHeight::from(2_000_000))
             + EST_PREP_LAYER_MINING_BLOCKS;
-        let earliest = crate::scheduling::earliest_transfer_target(
+        let earliest = crate::scheduling::earliest_scheduled_height(
             crate::scheduling::AnchorGrid::new(
                 crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM,
@@ -5356,7 +5370,7 @@ pub(crate) mod tests {
             Zatoshis::const_from_u64(19_000_000),
         )
         .expect("the stored parts are consistent");
-        let height = |h: u32| BlockHeight::from_u32(2_000_000 + h);
+        let height = |h: u32| TargetHeight::from(2_000_000 + h);
         // Real drawn schedules, in the layers' shape: nothing here turns on the heights, but a
         // fixture that could not have been drawn is a fixture that proves less.
         let mut rng = ChaCha8Rng::seed_from_u64(41);
@@ -5752,7 +5766,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -5844,7 +5858,7 @@ mod commit_tests {
                                 interval,
                                 crate::scheduling::BlockSpacing::UNIFORM
                             )
-                            .boundary_at_or_below(tx.scheduled_height)
+                            .boundary_at_or_below(tx.scheduled_height.saturating_sub(1))
                         )
                     );
                 }
@@ -5904,7 +5918,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let (state, unsigned) = build_preparation_unsigned(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &plan,
             &mut rng,
@@ -5932,7 +5946,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let (anonymous_state, _) = build_preparation_unsigned(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut anonymous,
             &plan,
             &mut rng,
@@ -5985,7 +5999,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6004,7 +6018,7 @@ mod commit_tests {
 
         // Advance the chain tip past the transfer's expiry, so it can no longer be mined.
         backend.tip = old.expiry_height + 1;
-        let target = backend.chain_tip_height().unwrap() + 1;
+        let target = TargetHeight::from(backend.chain_tip_height().unwrap() + 1);
         assert!(
             state
                 .expired_transactions(DuenessTargets::at(target))
@@ -6057,7 +6071,7 @@ mod commit_tests {
                         interval,
                         crate::scheduling::BlockSpacing::UNIFORM
                     )
-                    .boundary_at_or_below(new.scheduled_height)
+                    .boundary_at_or_below(new.scheduled_height.saturating_sub(1))
                 )
         );
 
@@ -6121,7 +6135,7 @@ mod commit_tests {
             let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
             let mut state = commit_preparation(
                 &params,
-                BlockHeight::from_u32(TARGET_HEIGHT),
+                TargetHeight::from(TARGET_HEIGHT),
                 &mut backend,
                 &sk(seed),
                 &plan,
@@ -6139,7 +6153,7 @@ mod commit_tests {
                 .max()
                 .expect("three transfers");
             backend.tip = last_expiry + 1;
-            let target = backend.chain_tip_height().unwrap() + 1;
+            let target = TargetHeight::from(backend.chain_tip_height().unwrap() + 1);
 
             // Rebuild the cohort in the order the drive loop serves it: earliest schedule first.
             let mut cohort = state.expired_transactions(DuenessTargets::at(target));
@@ -6168,15 +6182,16 @@ mod commit_tests {
                     .find(|t| t.id == id)
                     .expect("the rebuilt transfer is stored in place")
                     .scheduled_height;
+                let (fresh_height, previous_height) = (u32::from(fresh), u32::from(previous));
                 assert!(
                     fresh >= previous,
                     "a rebuilt schedule chains past the previous one (seed {seed}): \
-                     {fresh} < {previous}"
+                     {fresh_height} < {previous_height}"
                 );
                 assert!(
-                    u32::from(fresh) - u32::from(previous) <= cap,
+                    fresh_height - previous_height <= cap,
                     "the chained gap is a single drawn delay (seed {seed}): \
-                     {previous} -> {fresh}"
+                     {previous_height} -> {fresh_height}"
                 );
                 previous = fresh;
             }
@@ -6201,7 +6216,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6243,7 +6258,7 @@ mod commit_tests {
 
         // The proof went unused: the broadcast window lapsed and the transfer expired.
         backend.tip = old.expiry_height + 1;
-        let target = backend.chain_tip_height().unwrap() + 1;
+        let target = TargetHeight::from(backend.chain_tip_height().unwrap() + 1);
         assert!(
             state
                 .expired_transactions(DuenessTargets::at(target))
@@ -6299,7 +6314,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6364,7 +6379,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6407,7 +6422,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let (mut state, unsigned) = build_preparation_unsigned(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &plan,
             &mut rng,
@@ -6494,7 +6509,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6546,7 +6561,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6570,7 +6585,7 @@ mod commit_tests {
         // driving from `expired_transactions` would hand to the rebuild. Still refused, rather
         // than rebuilt against a note the wallet has seen spent.
         backend.tip = state.transactions[0].expiry_height + 1;
-        let target = backend.chain_tip_height().unwrap() + 1;
+        let target = TargetHeight::from(backend.chain_tip_height().unwrap() + 1);
         assert!(
             state
                 .expired_transactions(DuenessTargets::at(target))
@@ -6597,7 +6612,7 @@ mod commit_tests {
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             Vec::new(),
             Vec::new(),
-            BlockHeight::from_u32(0),
+            TargetHeight::from(0),
             BlockHeight::from_u32(0),
             None,
             TxId::from_bytes([7; 32]),
@@ -6669,8 +6684,8 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         // A drawn preparation schedule in the layers' shape, each layer based past the previous
         // one, exactly as `plan_migration` draws it.
-        let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::new();
-        let mut layer_base = BlockHeight::from_u32(2_000_000);
+        let mut prep_schedule: Vec<Vec<TargetHeight>> = Vec::new();
+        let mut layer_base = TargetHeight::from(2_000_000);
         for layer in preparation.layers() {
             let heights = crate::scheduling::schedule_prep_heights(
                 &crate::scheduling::SchedulingParams::ZIP_318,
@@ -6679,8 +6694,9 @@ mod commit_tests {
                 layer.len(),
                 &mut rng,
             );
-            layer_base =
-                heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
+            layer_base = TargetHeight::from(
+                heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS,
+            );
             prep_schedule.push(heights);
         }
         // Floor the transfer schedule so every transfer has a candidate anchor boundary above
@@ -6690,13 +6706,13 @@ mod commit_tests {
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .expect("NU6.3 is active on the test network")
         };
-        let schedule_base = crate::scheduling::earliest_transfer_target(
+        let schedule_base = crate::scheduling::earliest_scheduled_height(
             crate::scheduling::AnchorGrid::new(
                 crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM,
             ),
             nu63_activation,
-            layer_base,
+            BlockHeight::from(layer_base),
         );
         let schedule = crate::scheduling::schedule(
             &crate::scheduling::SchedulingParams::ZIP_318,
@@ -6730,7 +6746,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk,
             &plan,
@@ -6853,7 +6869,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -6928,7 +6944,7 @@ mod commit_tests {
         let mut rng2 = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7049,7 +7065,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let (mut state, unsigned) = build_preparation_unsigned(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &plan,
             &mut rng,
@@ -7112,7 +7128,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let (_state, unsigned) = build_preparation_unsigned(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &plan,
             &mut rng,
@@ -7207,7 +7223,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let refused = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &foreign,
             &plan,
@@ -7230,7 +7246,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7255,7 +7271,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7304,7 +7320,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7317,7 +7333,7 @@ mod commit_tests {
         assert!(matches!(
             commit_preparation(
                 &params,
-                BlockHeight::from_u32(TARGET_HEIGHT),
+                TargetHeight::from(TARGET_HEIGHT),
                 &mut backend,
                 &sk(seed),
                 &plan,
@@ -7334,7 +7350,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 3);
         commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7359,7 +7375,7 @@ mod commit_tests {
         assert!(matches!(
             commit_preparation(
                 &regtest_network(true),
-                BlockHeight::from_u32(TARGET_HEIGHT),
+                TargetHeight::from(TARGET_HEIGHT),
                 &mut backend,
                 &sk(seed),
                 &plan,
@@ -7384,7 +7400,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7486,7 +7502,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7675,7 +7691,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let mut state = commit_preparation(
             &params,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,
@@ -7836,7 +7852,7 @@ mod commit_tests {
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
         let state = commit_preparation(
             &regtest_network(true),
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
             &mut backend,
             &sk(seed),
             &plan,

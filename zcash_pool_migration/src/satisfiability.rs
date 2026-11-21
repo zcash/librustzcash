@@ -20,6 +20,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use rand_core::{CryptoRng, Rng};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
@@ -434,8 +435,8 @@ impl AdvanceConfig {
 /// than by call-site discipline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DuenessTargets {
-    scanned: BlockHeight,
-    effective: BlockHeight,
+    scanned: TargetHeight,
+    effective: TargetHeight,
 }
 
 impl DuenessTargets {
@@ -446,7 +447,7 @@ impl DuenessTargets {
     /// `estimated` is clamped up to `scanned`: an estimate that lags the wallet's own observations
     /// is simply less informed than they are, and letting it lower the effective target would
     /// withhold work the chain data already justifies.
-    pub fn new(scanned: BlockHeight, estimated: BlockHeight) -> Self {
+    pub fn new(scanned: TargetHeight, estimated: TargetHeight) -> Self {
         Self {
             scanned,
             effective: core::cmp::max(scanned, estimated),
@@ -458,7 +459,7 @@ impl DuenessTargets {
     ///
     /// Every judgment is then made at the same height, which is exactly the single-target behavior
     /// that preceded this type.
-    pub const fn at(target: BlockHeight) -> Self {
+    pub const fn at(target: TargetHeight) -> Self {
         Self {
             scanned: target,
             effective: target,
@@ -467,14 +468,14 @@ impl DuenessTargets {
 
     /// The target backed by CHAIN DATA (the wallet's fully-scanned frontier, plus one): the height
     /// every persisted verdict and every destructive judgment is made at.
-    pub const fn scanned(&self) -> BlockHeight {
+    pub const fn scanned(&self) -> TargetHeight {
         self.scanned
     }
 
     /// The target the SCHEDULE is served at (the estimated chain tip, plus one; never below
     /// [`scanned`](Self::scanned)): the height dueness is judged at, and the height a doomed
     /// broadcast is withheld from.
-    pub const fn effective(&self) -> BlockHeight {
+    pub const fn effective(&self) -> TargetHeight {
         self.effective
     }
 }
@@ -485,7 +486,7 @@ impl DuenessTargets {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Advance {
     step: AdvanceStep,
-    next: Option<(BlockHeight, StepKind)>,
+    next: Option<(TargetHeight, StepKind)>,
 }
 
 impl Advance {
@@ -516,7 +517,7 @@ impl Advance {
     /// [`Replan`](AdvanceStep::Replan) or [`Reevaluate`](AdvanceStep::Reevaluate), whose outcome
     /// supersedes or re-decides the plan — carries `None`, and the call that follows the
     /// execution reports the fresh outlook.
-    pub const fn next(&self) -> Option<(BlockHeight, StepKind)> {
+    pub const fn next(&self) -> Option<(TargetHeight, StepKind)> {
         self.next
     }
 }
@@ -1027,10 +1028,10 @@ pub fn advance_migration<St: PoolMigrationWrite, R: Rng + CryptoRng>(
                 let spacing = config.block_spacing();
                 if spacing.exceeds(
                     BlockHeight::from_u32(overdue_from),
-                    served,
+                    BlockHeight::from(served),
                     overdue_tolerance,
                 ) {
-                    state.shift_schedule(&spacing, BlockHeight::from_u32(scheduled), served, rng);
+                    state.shift_schedule(&spacing, TargetHeight::from(scheduled), served, rng);
                     dirty = true;
                     continue;
                 }
@@ -1127,7 +1128,7 @@ fn upcoming_after(
     step: &AdvanceStep,
     targets: DuenessTargets,
     set_aside: &[MigrationTransferId],
-) -> Option<(BlockHeight, StepKind)> {
+) -> Option<(TargetHeight, StepKind)> {
     match step {
         AdvanceStep::Complete
         | AdvanceStep::Replan
@@ -1345,7 +1346,7 @@ mod advance_tests {
             kind,
             pczt: Vec::new(),
             depends_on: Vec::new(),
-            scheduled_height: BlockHeight::from_u32(0),
+            scheduled_height: TargetHeight::from(0),
             expiry_height: BlockHeight::from_u32(0),
             anchor_boundary: None,
             txid,
@@ -1399,7 +1400,7 @@ mod advance_tests {
     ) -> MigrationTransaction {
         let mut t = tx(id, transfer(crossing), state);
         t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
-        t.scheduled_height = BlockHeight::from_u32(broadcast);
+        t.scheduled_height = TargetHeight::from(broadcast);
         t
     }
 
@@ -1583,7 +1584,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1648,7 +1649,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1699,7 +1700,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1738,7 +1739,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1773,7 +1774,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1803,7 +1804,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut waiting,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1855,7 +1856,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1919,7 +1920,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -1978,7 +1979,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -2016,7 +2017,7 @@ mod advance_tests {
         advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -2058,7 +2059,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -2107,7 +2108,7 @@ mod advance_tests {
                 // A second preparation layer, not yet due, so not itself actionable.
                 {
                     let mut t = tx(2, prep(1, 0), MigrationTxState::Signed);
-                    t.scheduled_height = BlockHeight::from_u32(90_000);
+                    t.scheduled_height = TargetHeight::from(90_000);
                     t
                 },
                 behind_unmined_dep,
@@ -2127,7 +2128,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            DuenessTargets::at(TargetHeight::from(1601)),
             &config(),
             &mut rng(),
         )
@@ -2181,7 +2182,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             ),
@@ -2212,7 +2213,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             ),
@@ -2257,7 +2258,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             )
@@ -2282,7 +2283,7 @@ mod advance_tests {
             "testimony never marks",
         );
         assert_eq!(
-            state.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(1601)))[1]
+            state.transaction_statuses(DuenessTargets::at(TargetHeight::from(1601)))[1]
                 .blocked_on(),
             Some(crate::state::Blocker::AwaitingReevaluation),
         );
@@ -2295,7 +2296,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1701)),
+                DuenessTargets::at(TargetHeight::from(1701)),
                 &config(),
                 &mut rng()
             )
@@ -2327,7 +2328,7 @@ mod advance_tests {
     fn advance_adjudicates_a_reported_broadcast_into_marks_and_a_replan() {
         let mut prep_layer_1 = tx(1, prep(1, 0), MigrationTxState::Proved);
         prep_layer_1.depends_on = vec![MigrationTransferId(0)];
-        prep_layer_1.scheduled_height = BlockHeight::from_u32(1500);
+        prep_layer_1.scheduled_height = TargetHeight::from(1500);
         let mut first = scheduled_transfer(2, 0, 1440, 90_000, MigrationTxState::Signed);
         first.depends_on = vec![MigrationTransferId(1)];
         let mut second = scheduled_transfer(3, 1, 1440, 90_000, MigrationTxState::Signed);
@@ -2346,7 +2347,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1701)),
+                DuenessTargets::at(TargetHeight::from(1701)),
                 &config(),
                 &mut rng()
             )
@@ -2407,7 +2408,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             )
@@ -2462,7 +2463,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             )
@@ -2517,7 +2518,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
+                DuenessTargets::at(TargetHeight::from(1601)),
                 &config(),
                 &mut rng()
             )
@@ -2574,7 +2575,7 @@ mod advance_tests {
         // by the estimate — within the overdue-shift tolerance, so the schedule holds — and
         // neither is due by the scan, and the first one's expiry lies in the doomed window
         // `1501 <= 1695 < 1701`.
-        let targets = DuenessTargets::new(BlockHeight::from_u32(1501), BlockHeight::from_u32(1701));
+        let targets = DuenessTargets::new(TargetHeight::from(1501), TargetHeight::from(1701));
 
         assert_eq!(
             advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
@@ -2604,7 +2605,7 @@ mod advance_tests {
             advance_migration(
                 &mut store,
                 &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1691)),
+                DuenessTargets::at(TargetHeight::from(1691)),
                 &config(),
                 &mut rng(),
             )
@@ -2642,7 +2643,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::new(BlockHeight::from_u32(1_011), BlockHeight::from_u32(2_001)),
+            DuenessTargets::new(TargetHeight::from(1_011), TargetHeight::from(2_001)),
             &config(),
             &mut rng(),
         )
@@ -2733,7 +2734,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance)),
+            DuenessTargets::at(TargetHeight::from(1_000 + tolerance)),
             &config(),
             &mut rng(),
         )
@@ -2759,7 +2760,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance + 1)),
+            DuenessTargets::at(TargetHeight::from(1_000 + tolerance + 1)),
             &config(),
             &mut rng(),
         )
@@ -2812,7 +2813,7 @@ mod advance_tests {
         advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance)),
+            DuenessTargets::at(TargetHeight::from(1_000 + tolerance)),
             &nu7_config,
             &mut rng(),
         )
@@ -2826,7 +2827,7 @@ mod advance_tests {
         advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1_000 + tolerance + 1)),
+            DuenessTargets::at(TargetHeight::from(1_000 + tolerance + 1)),
             &nu7_config,
             &mut rng(),
         )
@@ -2885,7 +2886,7 @@ mod advance_tests {
         let step = advance_migration(
             &mut store,
             &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(2_001)),
+            DuenessTargets::at(TargetHeight::from(2_001)),
             &config(),
             &mut rng(),
         )
@@ -2912,10 +2913,10 @@ mod advance_tests {
     #[test]
     fn outlook_after_a_prove_is_the_broadcast_that_follows() {
         let mut prep_tx = tx(1, prep(0, 0), MigrationTxState::Signed);
-        prep_tx.scheduled_height = BlockHeight::from_u32(1_000);
+        prep_tx.scheduled_height = TargetHeight::from(1_000);
         let mut state = state_with_crossings(&[100_000_000], vec![prep_tx]);
         let mut store = TestStore::new(1_000, []);
-        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+        let targets = DuenessTargets::at(TargetHeight::from(1_001));
 
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
@@ -2926,7 +2927,7 @@ mod advance_tests {
         );
         assert_eq!(
             advance.next(),
-            Some((BlockHeight::from_u32(1_000), StepKind::Broadcast)),
+            Some((TargetHeight::from(1_000), StepKind::Broadcast)),
             "once proved, its broadcast is servable at its own (already-due) schedule"
         );
 
@@ -2946,7 +2947,7 @@ mod advance_tests {
         );
         assert_eq!(
             advance.next(),
-            Some((BlockHeight::from_u32(1_200), StepKind::Broadcast)),
+            Some((TargetHeight::from(1_200), StepKind::Broadcast)),
             "the proof leaves nothing until the transfer's own broadcast window"
         );
     }
@@ -2968,14 +2969,14 @@ mod advance_tests {
             ],
         );
         let mut store = TestStore::new(1_000, []);
-        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+        let targets = DuenessTargets::at(TargetHeight::from(1_001));
 
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
         assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
-            Some((BlockHeight::from_u32(1_200), StepKind::Broadcast)),
+            Some((TargetHeight::from(1_200), StepKind::Broadcast)),
             "the earliest floor wins: the broadcast window, not the later prove"
         );
 
@@ -2999,7 +3000,7 @@ mod advance_tests {
         );
         assert_eq!(
             advance.next(),
-            Some((BlockHeight::from_u32(1_000), StepKind::Broadcast)),
+            Some((TargetHeight::from(1_000), StepKind::Broadcast)),
             "the other due broadcast follows in the same session (its floor is already reached)"
         );
     }
@@ -3030,7 +3031,7 @@ mod advance_tests {
                 },
             )],
         );
-        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+        let targets = DuenessTargets::at(TargetHeight::from(1_001));
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
         assert_eq!(advance.step(), &AdvanceStep::Waiting);
@@ -3102,7 +3103,7 @@ mod advance_tests {
                 },
             )],
         );
-        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+        let targets = DuenessTargets::at(TargetHeight::from(1_001));
 
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
@@ -3121,7 +3122,7 @@ mod advance_tests {
         assert_eq!(store.replaced.get(), 0, "a deferral records nothing");
         assert_eq!(
             advance.next(),
-            Some((BlockHeight::from_u32(1_500), StepKind::Broadcast)),
+            Some((TargetHeight::from(1_500), StepKind::Broadcast)),
             "the outlook assumes the survivor proved and skips the set-aside member"
         );
     }

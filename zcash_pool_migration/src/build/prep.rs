@@ -56,6 +56,7 @@ use alloc::vec::Vec;
 use rand_core::{CryptoRng, Rng};
 
 use orchard::keys::{FullViewingKey, Scope};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
 use zcash_primitives::transaction::fees::zip317::{
     FeeError as Zip317FeeError, FeeRule as Zip317FeeRule,
@@ -124,7 +125,7 @@ pub type PlacedPrepOutput = (u32, PrepOutput, orchard::note::Note);
 #[allow(clippy::too_many_arguments)]
 pub fn build_prep_tx<P, R>(
     params: &P,
-    target_height: u32,
+    target_height: TargetHeight,
     expiry_height: u32,
     orchard_fvk: &FullViewingKey,
     spends: Vec<orchard::note::Note>,
@@ -157,7 +158,7 @@ where
     // type is irrelevant: nothing is added to it, so no Ironwood bundle is emitted).
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),
-        BlockHeight::from_u32(target_height),
+        BlockHeight::from(target_height),
         BundlePadding {
             bundle_required: false,
             pad_to_minimum: Some(PREP_TX_ACTIONS as u8),
@@ -269,7 +270,7 @@ mod tests {
     fn test_expiry() -> u32 {
         u32::from(crate::scheduling::expiry_height(
             &crate::scheduling::BlockSpacing::UNIFORM,
-            BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
         ))
     }
 
@@ -312,7 +313,7 @@ mod tests {
             let rng = ChaCha8Rng::seed_from_u64(note_seed);
             let (pczt, placed) = build_prep_tx(
                 &params,
-                TARGET_HEIGHT,
+                TargetHeight::from(TARGET_HEIGHT),
                 test_expiry(),
                 &fvk,
                 spends,
@@ -346,7 +347,7 @@ mod tests {
             let rng = ChaCha8Rng::seed_from_u64(note_seed);
             let (pczt, placed) = build_prep_tx(
                 &params,
-                100,
+                TargetHeight::from(100),
                 test_expiry(),
                 &fvk,
                 vec![note],
@@ -390,7 +391,7 @@ mod tests {
             let (note, _path, _anchor) = single_note_witness(&fvk, n_out as u64 * COIN + fee, 11);
             let (pczt, _) = build_prep_tx(
                 &params,
-                TARGET_HEIGHT,
+                TargetHeight::from(TARGET_HEIGHT),
                 test_expiry(),
                 &fvk,
                 vec![note],
@@ -415,7 +416,7 @@ mod tests {
         let params = regtest_network(true);
         let (pczt, placed) = build_prep_tx(
             &params,
-            100,
+            TargetHeight::from(100),
             test_expiry(),
             &fvk,
             vec![note],
@@ -438,7 +439,7 @@ mod tests {
 
         let no_spends = build_prep_tx(
             &params,
-            100,
+            TargetHeight::from(100),
             test_expiry(),
             &fvk,
             Vec::new(),
@@ -451,7 +452,7 @@ mod tests {
         let (note, _path, _anchor) = single_note_witness(&fvk, COIN + prep_fee(), 3);
         let no_outputs = build_prep_tx(
             &params,
-            100,
+            TargetHeight::from(100),
             test_expiry(),
             &fvk,
             vec![note],
@@ -468,7 +469,7 @@ mod tests {
         let (note2, _path2, _anchor2) = single_note_witness(&fvk, 1_000 * COIN, 4);
         let over_budget = build_prep_tx(
             &params,
-            100,
+            TargetHeight::from(100),
             test_expiry(),
             &fvk,
             vec![note2],

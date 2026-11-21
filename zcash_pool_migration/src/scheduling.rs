@@ -77,6 +77,7 @@ use core::fmt;
 use core::num::NonZeroU32;
 
 use rand_core::{CryptoRng, Rng};
+use zcash_primitives::transaction::TargetHeight;
 use zcash_protocol::consensus::BlockHeight;
 
 /// The block-height grid defining the BOUNDARY blocks that a transfer may anchor to.
@@ -419,15 +420,15 @@ pub use zcash_protocol::zip318::{ANCHOR_AGE_CAP, EXPIRY_MODULUS, EXPIRY_WINDOW};
 /// delay draw) to its canonical [`expiry_height`](Self::expiry_height).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Schedule {
-    scheduled_height: BlockHeight,
+    scheduled_height: TargetHeight,
     expiry_height: BlockHeight,
 }
 
 impl Schedule {
     /// The target height of this transfer: the first height at which it can be mined (a wallet may
     /// broadcast once its chain tip is one below it). A cumulative sum of per-part delays from the
-    /// commit height; see [`schedule_heights`].
-    pub fn scheduled_height(&self) -> BlockHeight {
+    /// commit target height; see [`schedule_heights`].
+    pub fn scheduled_height(&self) -> TargetHeight {
         self.scheduled_height
     }
 
@@ -516,6 +517,31 @@ fn gen_index<R: Rng>(rng: &mut R, bound: usize) -> usize {
     }
 }
 
+/// Advance the target height `height` by `reference_blocks` reference blocks, converted into
+/// blocks by `spacing` (see [`BlockSpacing::advance`]). Saturates at `u32::MAX`.
+pub(crate) fn advance_target(
+    spacing: &BlockSpacing,
+    height: TargetHeight,
+    reference_blocks: u32,
+) -> TargetHeight {
+    TargetHeight::from(spacing.advance(BlockHeight::from(height), reference_blocks))
+}
+
+/// The target height that is as long after `height` as `to` is after `from` (see
+/// [`BlockSpacing::shift`]), or `height` when `to` is not after `from`. Saturates at `u32::MAX`.
+pub(crate) fn shift_target(
+    spacing: &BlockSpacing,
+    height: TargetHeight,
+    from: TargetHeight,
+    to: TargetHeight,
+) -> TargetHeight {
+    TargetHeight::from(spacing.shift(
+        BlockHeight::from(height),
+        BlockHeight::from(from),
+        BlockHeight::from(to),
+    ))
+}
+
 /// The cumulative-heights core shared by [`schedule_heights`] and
 /// [`schedule_prep_heights`]: starting at `start`, advance a running height by an
 /// independently drawn delay, in reference blocks converted by `spacing`, for each of the `n`
@@ -524,44 +550,45 @@ fn gen_index<R: Rng>(rng: &mut R, bound: usize) -> usize {
 /// overflowing (`BlockHeight`'s delta addition saturates).
 fn cumulative_scheduled_heights<R: Rng>(
     spacing: &BlockSpacing,
-    start: BlockHeight,
+    start: TargetHeight,
     n: usize,
     draw: impl Fn(&mut R) -> u32,
     rng: &mut R,
-) -> Vec<BlockHeight> {
+) -> Vec<TargetHeight> {
     let mut heights = Vec::with_capacity(n);
     let mut height = start;
     for _ in 0..n {
-        height = spacing.advance(height, draw(rng));
+        height = advance_target(spacing, height, draw(rng));
         heights.push(height);
     }
     heights
 }
 
-/// Compute the per-part scheduled heights: starting at `commit_height`, advance a running
-/// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
-/// (ZIP 318 CUMULATIVE MUST). Each delay is a number of reference blocks, which `spacing` converts
-/// into blocks, so the schedule spans the same time on either side of NU7 activation. The returned
-/// vector has length `n_parts`, is non-decreasing, and every entry is `>= commit_height`. Heights
+/// Compute the per-part scheduled target heights: starting at `commit_target` (the target height at
+/// which the schedule is committed, or a later floor), advance a running height by an
+/// independently drawn `params.transfer_delay()` for each of the `n_parts` transfers (ZIP 318
+/// CUMULATIVE MUST). Each delay is a number of reference blocks, which `spacing` converts into
+/// blocks, so the schedule spans the same time on either side of NU7 activation. The returned
+/// vector has length `n_parts`, is non-decreasing, and every entry is `>= commit_target`. Heights
 /// saturate at `u32::MAX` rather than overflowing.
 pub fn schedule_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     spacing: &BlockSpacing,
-    commit_height: BlockHeight,
+    commit_target: TargetHeight,
     n_parts: usize,
     rng: &mut R,
-) -> Vec<BlockHeight> {
+) -> Vec<TargetHeight> {
     let delay = params.transfer_delay();
     cumulative_scheduled_heights(
         spacing,
-        commit_height,
+        commit_target,
         n_parts,
         |rng| delay.draw_inner(rng),
         rng,
     )
 }
 
-/// Compute per-transaction scheduled heights for one PREPARATION layer: starting at
+/// Compute per-transaction scheduled target heights for one PREPARATION layer: starting at
 /// `start`, advance a running height by an independently drawn `params.preparation_delay()`, in
 /// reference blocks converted by `spacing`, for each of the `n_txs` transactions. The returned
 /// vector has length `n_txs`, is non-decreasing, and
@@ -572,23 +599,25 @@ pub fn schedule_heights<R: Rng + CryptoRng>(
 pub fn schedule_prep_heights<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     spacing: &BlockSpacing,
-    start: BlockHeight,
+    start: TargetHeight,
     n_txs: usize,
     rng: &mut R,
-) -> Vec<BlockHeight> {
+) -> Vec<TargetHeight> {
     let delay = params.preparation_delay();
     cumulative_scheduled_heights(spacing, start, n_txs, |rng| delay.draw_inner(rng), rng)
 }
 
-/// The canonical rolling EXPIRY height for a transfer at `current_height` (ZIP 318 EXPIRY MUST):
-/// the most recent multiple of [`EXPIRY_MODULUS`] at or below `current_height`, plus
-/// [`EXPIRY_WINDOW`] (`2 * EXPIRY_MODULUS`).
+/// The canonical rolling EXPIRY height for a transaction scheduled at `scheduled_height` (ZIP 318
+/// EXPIRY MUST), on a chain with the given `spacing`: [`zcash_protocol::zip318::expiry_height`]
+/// evaluated at that target height.
 ///
 /// This is a pure function of the height (it reveals nothing per-wallet) and guarantees between one
 /// and two [`EXPIRY_MODULUS`] periods (about 1 to 2 months) of remaining validity: the result is
-/// always strictly greater than `current_height` and at most `EXPIRY_WINDOW` above it. Saturates at
-/// `u32::MAX`.
-pub use zcash_protocol::zip318::expiry_height;
+/// always strictly greater than `scheduled_height` and at most [`EXPIRY_WINDOW`] above it.
+/// Saturates at `u32::MAX`.
+pub fn expiry_height(spacing: &BlockSpacing, scheduled_height: TargetHeight) -> BlockHeight {
+    zcash_protocol::zip318::expiry_height(spacing, BlockHeight::from(scheduled_height))
+}
 
 /// Compute the MINIMAL schedule of sync/proving wake-ups covering `transfers`, each given as
 /// `(id, anchor_boundary, scheduled_height)` — for a committed migration, a transfer's drawn
@@ -627,7 +656,7 @@ pub use zcash_protocol::zip318::expiry_height;
 pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
     params: &WakeupParams,
     current_tip: BlockHeight,
-    transfers: &[(T, BlockHeight, BlockHeight)],
+    transfers: &[(T, BlockHeight, TargetHeight)],
     rng: &mut R,
 ) -> Result<Vec<SyncWakeup<T>>, WakeupScheduleError<T>> {
     let tip = u32::from(current_tip);
@@ -639,9 +668,9 @@ pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
     // (deadline already below the tip).
     let mut overdue: Vec<T> = Vec::new();
     let mut windows: Vec<(u32, u32, T)> = Vec::new();
-    for &(id, anchor, broadcast) in transfers {
+    for &(id, anchor, scheduled) in transfers {
         let a = u32::from(anchor);
-        let b = u32::from(broadcast);
+        let b = u32::from(scheduled);
         if b <= a.saturating_add(1) {
             return Err(WakeupScheduleError::InfeasibleTransfer(id));
         }
@@ -729,18 +758,18 @@ pub fn schedule_sync_wakeups<T: Copy, R: Rng + CryptoRng>(
     Ok(wakeups)
 }
 
-/// Assemble a [`Schedule`] for each part: draw the cumulative scheduled heights from `commit_height`
-/// (see [`schedule_heights`]) and pair each with its canonical [`expiry_height`], both on
-/// a chain with the given `spacing`. Returns one [`Schedule`] per part, in the (already shuffled)
-/// part order the caller passes.
+/// Assemble a [`Schedule`] for each part: draw the cumulative scheduled target heights from
+/// `commit_target` (see [`schedule_heights`]) and pair each with its canonical [`expiry_height`],
+/// both on a chain with the given `spacing`. Returns one [`Schedule`] per part, in the (already
+/// shuffled) part order the caller passes.
 pub fn schedule<R: Rng + CryptoRng>(
     params: &SchedulingParams,
     spacing: &BlockSpacing,
-    commit_height: BlockHeight,
+    commit_target: TargetHeight,
     n_parts: usize,
     rng: &mut R,
 ) -> Vec<Schedule> {
-    schedule_heights(params, spacing, commit_height, n_parts, rng)
+    schedule_heights(params, spacing, commit_target, n_parts, rng)
         .into_iter()
         .map(|scheduled_height| Schedule {
             scheduled_height,
@@ -783,23 +812,24 @@ fn draw_anchor_age<R: Rng>(rng: &mut R) -> u32 {
 /// The CANDIDATE ANCHOR SET is the boundaries of `grid` that are simultaneously:
 /// - (a) strictly above `nu63_activation` (the NU6.3 activation height),
 /// - (b) at or after `funding_creation_height` (the funding note's creation height), and
-/// - (c) at or before the most recent boundary at or below `chain_tip_height` (the chain tip the
-///   wallet has observed at proving time).
+/// - (c) strictly before the most recent boundary at or below the chain tip from which the
+///   transaction is broadcast, one below `target_height`.
 ///
-/// The most recent boundary is derived internally via [`AnchorGrid::boundary_at_or_below`], so
-/// `chain_tip_height` may be any observed height; it need not itself be a boundary. A
-/// recency-weighted age `a` in `[1, ANCHOR_AGE_CAP]` is drawn (`Geometric(1/2)`) and the candidate
-/// is the boundary `a` boundaries before the most recent one; a draw exceeding [`ANCHOR_AGE_CAP`] or
-/// landing outside the candidate set is discarded and redrawn. Because age is always `>= 1`, the
-/// chosen boundary is always strictly below the most recent boundary.
+/// `target_height` is the transaction's target height: at proving time, the wallet's observed
+/// chain tip plus one; for a transfer drawn against its schedule, its scheduled height. It need
+/// not be adjacent to a boundary. A recency-weighted age `a` in `[1, ANCHOR_AGE_CAP]` is drawn
+/// (`Geometric(1/2)`) and the candidate is the boundary `a` boundaries before the most recent one;
+/// a draw exceeding [`ANCHOR_AGE_CAP`] or landing outside the candidate set is discarded and
+/// redrawn. Because age is always `>= 1`, the chosen boundary is always strictly below the most
+/// recent boundary at the broadcast tip.
 pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
     grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
-    chain_tip_height: BlockHeight,
+    target_height: TargetHeight,
     rng: &mut R,
 ) -> Option<BlockHeight> {
-    let most_recent = grid.boundary_at_or_below(chain_tip_height);
+    let most_recent = most_recent_boundary_at_broadcast(grid, target_height);
     let (lowest, highest) =
         candidate_boundary_bounds(grid, nu63_activation, funding_creation_height, most_recent)?;
     Some(sample_recency_weighted_boundary(
@@ -830,19 +860,23 @@ pub fn draw_anchor_boundary<R: Rng + CryptoRng>(
 /// proving time, with the real mined heights in hand.) The prior boundary also subsumes the
 /// NU6.3-activation bound, which it satisfies by construction.
 ///
-/// Returns `None` when no candidate at or above `prior_boundary` lies strictly below the most
-/// recent boundary at `scheduled_height` — possible only when the prior boundary was itself
-/// drawn against a tip past the new schedule (a proving-time re-draw followed by a small shift);
-/// the caller keeps the prior boundary, which remains provable.
+/// `scheduled_height` is the transfer's NEW scheduled target height; as in
+/// [`draw_anchor_boundary`], the most recent boundary is the one at or below the tip it is
+/// broadcast from, one below it.
+///
+/// Returns `None` when no candidate at or above `prior_boundary` lies strictly below that most
+/// recent boundary — possible only when the prior boundary was itself drawn against a tip past
+/// the new schedule (a proving-time re-draw followed by a small shift); the caller keeps the prior
+/// boundary, which remains provable.
 ///
 /// [`prove_transfer`]: crate::engine::prove_transfer
 pub fn redraw_anchor_boundary<R: Rng + CryptoRng>(
     grid: AnchorGrid,
     prior_boundary: BlockHeight,
-    scheduled_height: BlockHeight,
+    scheduled_height: TargetHeight,
     rng: &mut R,
 ) -> Option<BlockHeight> {
-    let most_recent = grid.boundary_at_or_below(scheduled_height);
+    let most_recent = most_recent_boundary_at_broadcast(grid, scheduled_height);
     // Highest candidate: strictly below the most recent boundary (age >= 1).
     let highest = grid.boundary_before(most_recent)?;
     let lowest = grid.boundary_at_or_above(prior_boundary);
@@ -856,6 +890,13 @@ pub fn redraw_anchor_boundary<R: Rng + CryptoRng>(
         most_recent,
         rng,
     ))
+}
+
+/// The most recent boundary of `grid` at or below the chain tip from which a transaction with
+/// target height `target_height` is broadcast, `target_height - 1` (saturating at zero). This is
+/// the single place where an anchor draw converts a target height to a chain tip.
+fn most_recent_boundary_at_broadcast(grid: AnchorGrid, target_height: TargetHeight) -> BlockHeight {
+    grid.boundary_at_or_below(target_height.saturating_sub(1))
 }
 
 /// The rejection-sampling core shared by [`draw_anchor_boundary`] and
@@ -892,7 +933,7 @@ fn sample_recency_weighted_boundary<R: Rng>(
 /// if the set is empty. Encodes the three candidate-set conditions of [`draw_anchor_boundary`]:
 /// the highest usable boundary is the one strictly below `most_recent` (age `>= 1`), and the
 /// lowest is the first boundary that is both strictly above `nu63_activation` and at or after
-/// `funding_creation_height`. `most_recent` is the boundary derived from the observed chain tip.
+/// `funding_creation_height`. `most_recent` is the most recent boundary at the broadcast tip.
 fn candidate_boundary_bounds(
     grid: AnchorGrid,
     nu63_activation: BlockHeight,
@@ -920,43 +961,26 @@ fn lowest_candidate_boundary(
     above_activation.max(at_or_after_funding)
 }
 
-/// The first chain height at which a transfer's candidate anchor set (see
-/// [`draw_anchor_boundary`]) is non-empty: the boundary after the LOWEST candidate, which is the
-/// first boundary strictly above `nu63_activation` and at or after `funding_creation_height`. A
-/// transfer whose observed chain tip is at or after this height always has at least one boundary
-/// to anchor to, so a schedule that places every broadcast at or after it never needs an anchor
-/// fallback; the scheduler MUST NOT place a transfer before it.
+/// The earliest target height at which a transfer funded by a note created at
+/// `funding_creation_height` may be scheduled: the lowest target height whose candidate anchor set
+/// (see [`draw_anchor_boundary`]) is non-empty.
+///
+/// The lowest candidate boundary is the first boundary strictly above `nu63_activation` and at or
+/// after `funding_creation_height`. Because the most recent boundary is never drawn, it becomes
+/// drawable once the next boundary is the most recent one at the broadcast tip; the returned
+/// target height is one above that next boundary. The scheduler MUST NOT place a transfer below
+/// it. Saturates at `u32::MAX`.
 pub fn earliest_scheduled_height(
     grid: AnchorGrid,
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
-) -> BlockHeight {
-    grid.boundary_after(lowest_candidate_boundary(
+) -> TargetHeight {
+    let first_viable_broadcast_tip = grid.boundary_after(lowest_candidate_boundary(
         grid,
         nu63_activation,
         funding_creation_height,
-    ))
-}
-
-/// The earliest scheduled TARGET height (`chain_tip + 1`, the first height the transaction can be
-/// mined at) for a transfer whose funding note is created at `funding_creation_height`.
-///
-/// A transfer scheduled at target height `h` is broadcast from tip `h - 1`, and its candidate
-/// anchor set must be non-empty there; [`earliest_scheduled_height`] is the first such tip, so the
-/// earliest target height is one above it. Saturates at `u32::MAX`.
-pub(crate) fn earliest_transfer_target(
-    grid: AnchorGrid,
-    nu63_activation: BlockHeight,
-    funding_creation_height: BlockHeight,
-) -> BlockHeight {
-    earliest_scheduled_height(grid, nu63_activation, funding_creation_height) + 1
-}
-
-/// The latest chain tip from which a transaction scheduled at TARGET height `scheduled_height`
-/// (`chain_tip + 1`) is broadcast: `scheduled_height - 1`, saturating at zero. An anchor drawn for
-/// a scheduled transaction is drawn against this tip.
-pub(crate) fn broadcast_tip(scheduled_height: BlockHeight) -> BlockHeight {
-    scheduled_height - 1
+    ));
+    TargetHeight::from(first_viable_broadcast_tip + 1)
 }
 
 #[cfg(test)]
@@ -975,6 +999,11 @@ mod tests {
     /// Shorthand [`BlockHeight`] constructor for test literals.
     fn bh(h: u32) -> BlockHeight {
         BlockHeight::from_u32(h)
+    }
+
+    /// Shorthand [`TargetHeight`] constructor for test literals.
+    fn th(h: u32) -> TargetHeight {
+        TargetHeight::from(h)
     }
 
     /// The ZIP 318 parameters, under which every golden vector in this module was captured.
@@ -1249,7 +1278,7 @@ mod tests {
         let wakeups = schedule_sync_wakeups(
             &WakeupParams::DEFAULT,
             bh(0),
-            &[(7u32, bh(1440), bh(1600))],
+            &[(7u32, bh(1440), th(1600))],
             &mut rng(1),
         )
         .expect("feasible");
@@ -1271,7 +1300,7 @@ mod tests {
                 schedule_sync_wakeups(
                     &WakeupParams::DEFAULT,
                     bh(0),
-                    &[(id, bh(a), bh(b))],
+                    &[(id, bh(a), th(b))],
                     &mut rng(1)
                 ),
                 Err(WakeupScheduleError::InfeasibleTransfer(id)),
@@ -1287,7 +1316,7 @@ mod tests {
         let wakeups = schedule_sync_wakeups(
             &WakeupParams::new(10, 0),
             bh(0),
-            &[(0u32, bh(144), bh(1000)), (1, bh(288), bh(1100))],
+            &[(0u32, bh(144), th(1000)), (1, bh(288), th(1100))],
             &mut rng(1),
         )
         .expect("feasible");
@@ -1303,7 +1332,7 @@ mod tests {
         let wakeups = schedule_sync_wakeups(
             &WakeupParams::new(10, 0),
             bh(0),
-            &[(0u32, bh(144), bh(300)), (1, bh(1440), bh(2001))],
+            &[(0u32, bh(144), th(300)), (1, bh(1440), th(2001))],
             &mut rng(1),
         )
         .expect("feasible");
@@ -1323,9 +1352,9 @@ mod tests {
             &WakeupParams::new(10, 0),
             bh(5000),
             &[
-                (0u32, bh(144), bh(300)), // deadline 299 < 5000: overdue
-                (1, bh(4320), bh(6000)), // window [4330, 5999] contains 5000: absorbed into the immediate wake-up
-                (2, bh(7200), bh(8000)), // ready 7210: its own group
+                (0u32, bh(144), th(300)), // deadline 299 < 5000: overdue
+                (1, bh(4320), th(6000)), // window [4330, 5999] contains 5000: absorbed into the immediate wake-up
+                (2, bh(7200), th(8000)), // ready 7210: its own group
             ],
             &mut rng(1),
         )
@@ -1346,8 +1375,8 @@ mod tests {
             &WakeupParams::DEFAULT, // jitter cap 12: a separate group would almost surely jitter off 5000
             bh(5000),
             &[
-                (0u32, bh(144), bh(300)), // deadline 299 < 5000: overdue
-                (1, bh(4320), bh(6000)),  // window [4330, 5999] contains 5000: absorbed
+                (0u32, bh(144), th(300)), // deadline 299 < 5000: overdue
+                (1, bh(4320), th(6000)),  // window [4330, 5999] contains 5000: absorbed
             ],
             &mut rng(1),
         )
@@ -1367,10 +1396,10 @@ mod tests {
             &WakeupParams::new(10, 0),
             bh(100),
             &[
-                (0u32, bh(10), bh(50)), // overdue
-                (1, bh(50), bh(106)), // window clamps to [100, 105]: absorbed by the mandatory point
-                (2, bh(92), bh(111)), // window [102, 110]
-                (3, bh(96), bh(301)), // window [106, 300]: groups with the previous one
+                (0u32, bh(10), th(50)), // overdue
+                (1, bh(50), th(106)), // window clamps to [100, 105]: absorbed by the mandatory point
+                (2, bh(92), th(111)), // window [102, 110]
+                (3, bh(96), th(301)), // window [106, 300]: groups with the previous one
             ],
             &mut rng(1),
         )
@@ -1389,7 +1418,7 @@ mod tests {
         let wakeups = schedule_sync_wakeups(
             &WakeupParams::new(10, 0),
             bh(0),
-            &[(0u32, bh(100), bh(104))], // window would be [110, 103]; ready clamps to 103
+            &[(0u32, bh(100), th(104))], // window would be [110, 103]; ready clamps to 103
             &mut rng(1),
         )
         .expect("feasible");
@@ -1403,7 +1432,7 @@ mod tests {
         let wakeups = schedule_sync_wakeups(
             &WakeupParams::new(0, 0),
             bh(0),
-            &[(0u32, bh(100), bh(300))],
+            &[(0u32, bh(100), th(300))],
             &mut rng(1),
         )
         .expect("feasible");
@@ -1440,10 +1469,10 @@ mod tests {
             tip in 0u32..3_000_000,
             xs in prop::collection::vec((0u32..2_000_000, 2u32..100_000), 1..40),
         ) {
-            let transfers: Vec<(usize, BlockHeight, BlockHeight)> = xs
+            let transfers: Vec<(usize, BlockHeight, TargetHeight)> = xs
                 .iter()
                 .enumerate()
-                .map(|(i, &(a, gap))| (i, bh(a), bh(a + gap)))
+                .map(|(i, &(a, gap))| (i, bh(a), th(a + gap)))
                 .collect();
             let wakeups =
                 schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(tip), &transfers, &mut rng(seed))
@@ -1492,10 +1521,10 @@ mod tests {
             tip in 0u32..15_000,
             xs in prop::collection::vec((0u32..10_000, 2u32..2_000), 1..8),
         ) {
-            let transfers: Vec<(usize, BlockHeight, BlockHeight)> = xs
+            let transfers: Vec<(usize, BlockHeight, TargetHeight)> = xs
                 .iter()
                 .enumerate()
-                .map(|(i, &(a, gap))| (i, bh(a), bh(a + gap)))
+                .map(|(i, &(a, gap))| (i, bh(a), th(a + gap)))
                 .collect();
             let wakeups =
                 schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(tip), &transfers, &mut rng(seed))
@@ -1531,9 +1560,9 @@ mod tests {
         transfers: &[(u32, u32, u32)],
         expected: &[(u32, &[u32])],
     ) {
-        let input: Vec<(u32, BlockHeight, BlockHeight)> = transfers
+        let input: Vec<(u32, BlockHeight, TargetHeight)> = transfers
             .iter()
-            .map(|&(id, a, b)| (id, bh(a), bh(b)))
+            .map(|&(id, a, b)| (id, bh(a), th(b)))
             .collect();
         let wakeups = schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(0), &input, &mut rng(seed))
             .expect("feasible");
@@ -1675,9 +1704,9 @@ mod tests {
                                       n in 0usize..40,
                                       seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
+            let hs = schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, th(commit), n, &mut r);
             prop_assert_eq!(hs.len(), n);
-            let mut prev = bh(commit);
+            let mut prev = th(commit);
             for h in hs {
                 prop_assert!(h >= prev);
                 prev = h;
@@ -1694,7 +1723,7 @@ mod tests {
         let hs: Vec<u32> = schedule_heights(
             &P,
             &crate::scheduling::BlockSpacing::UNIFORM,
-            bh(commit),
+            th(commit),
             n,
             &mut rng(seed),
         )
@@ -1758,9 +1787,9 @@ mod tests {
                                             n in 0usize..40,
                                             seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_prep_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(start), n, &mut r);
+            let hs = schedule_prep_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, th(start), n, &mut r);
             prop_assert_eq!(hs.len(), n);
-            let mut prev = bh(start);
+            let mut prev = th(start);
             for h in hs {
                 prop_assert!(h >= prev);
                 prop_assert!(u32::from(h) - u32::from(prev) <= PREP_DELAY_CAP.get());
@@ -1802,7 +1831,7 @@ mod tests {
         /// anchoring point (expiry - EXPIRY_WINDOW) is a multiple of EXPIRY_MODULUS (EXPIRY MUST).
         #[test]
         fn expiry_in_rolling_window(current in 0u32..(u32::MAX - EXPIRY_WINDOW)) {
-            let e = u32::from(expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(current)));
+            let e = u32::from(expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, th(current)));
             prop_assert!(e > current, "expiry {e} must exceed current {current}");
             prop_assert!(e <= current + EXPIRY_WINDOW);
             // The anchor is a multiple of EXPIRY_MODULUS.
@@ -1816,20 +1845,20 @@ mod tests {
     fn expiry_examples() {
         // At an exact modulus boundary the window is the full 2 * EXPIRY_MODULUS.
         assert_eq!(
-            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(0)),
+            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, th(0)),
             bh(EXPIRY_WINDOW)
         );
         assert_eq!(
             expiry_height(
                 &crate::scheduling::BlockSpacing::UNIFORM,
-                bh(EXPIRY_MODULUS)
+                th(EXPIRY_MODULUS)
             ),
             bh(EXPIRY_MODULUS + EXPIRY_WINDOW)
         );
         // Just before the next modulus, validity is just over one modulus.
         let just_before = EXPIRY_MODULUS - 1;
         assert_eq!(
-            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, bh(just_before)),
+            expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, th(just_before)),
             bh(EXPIRY_WINDOW)
         );
     }
@@ -1858,6 +1887,9 @@ mod tests {
     }
 
     // --- draw_anchor_boundary -----------------------------------------------------------------
+    //
+    // These tests are phrased in observed chain tips; a draw for a broadcast from tip `t` takes
+    // the target height `t + 1`.
 
     /// A valid arrangement of the anchor-draw inputs whose candidate set is guaranteed non-empty:
     /// picks an activation height, a chain tip whose most recent boundary is at least a few
@@ -1895,7 +1927,7 @@ mod tests {
             let mut r = rng(seed);
             let blocks = i.block_count().get();
             let most_recent = u32::from(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).boundary_at_or_below(bh(tip)));
-            let chosen = draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(tip), &mut r);
+            let chosen = draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), th(tip + 1), &mut r);
             prop_assert!(chosen.is_some());
             let b = u32::from(chosen.unwrap());
             prop_assert!(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM).is_boundary(bh(b)));
@@ -1922,8 +1954,8 @@ mod tests {
             let mut r_boundary = rng(seed);
             for _ in 0..16 {
                 prop_assert_eq!(
-                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(boundary_tip + offset), &mut r_offset),
-                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), bh(boundary_tip), &mut r_boundary)
+                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), th(boundary_tip + offset + 1), &mut r_offset),
+                    draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), th(boundary_tip + 1), &mut r_boundary)
                 );
             }
         }
@@ -1941,7 +1973,7 @@ mod tests {
                     crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
                     bh(0),
                     bh(0),
-                    bh(0),
+                    th(1),
                     &mut r
                 ),
                 None
@@ -1951,7 +1983,7 @@ mod tests {
                     crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
                     bh(0),
                     bh(0),
-                    bh(blocks),
+                    th(blocks + 1),
                     &mut r
                 ),
                 None
@@ -1962,7 +1994,7 @@ mod tests {
                     crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
                     bh(0),
                     bh(0),
-                    bh(2 * blocks - 1),
+                    th(2 * blocks - 1 + 1),
                     &mut r
                 ),
                 None
@@ -1971,8 +2003,8 @@ mod tests {
     }
 
     proptest! {
-        /// [`earliest_scheduled_height`] is the exact viability threshold: a tip at that height
-        /// always yields an anchor, and a tip one block earlier never does.
+        /// [`earliest_scheduled_height`] is the exact viability threshold: a transfer scheduled at
+        /// that target height always draws an anchor, and one scheduled a block earlier never does.
         #[test]
         fn earliest_scheduled_height_is_the_viability_threshold(act in 0u32..1_000_000,
                                                                funding_offset in 0u32..2_000,
@@ -1984,16 +2016,16 @@ mod tests {
             let mut r = rng(seed);
             prop_assert!(
                 draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest, &mut r).is_some(),
-                "a tip at the earliest scheduled height must have a candidate boundary"
+                "the earliest scheduled height must have a candidate boundary"
             );
             let mut r = rng(seed);
             prop_assert!(
-                draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), earliest - 1, &mut r).is_none(),
-                "a tip below the earliest scheduled height must not"
+                draw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(act), bh(funding), TargetHeight::from(earliest - 1), &mut r).is_none(),
+                "a target height below the earliest scheduled height must not"
             );
         }
 
-        /// A transfer schedule based at [`earliest_transfer_target`] whose first drawn delay is
+        /// A transfer schedule based at [`earliest_scheduled_height`] whose first drawn delay is
         /// zero puts its first transfer AT that target height. That transfer is broadcast from tip
         /// `target - 1`, and a candidate anchor boundary must already exist there.
         #[test]
@@ -2003,7 +2035,7 @@ mod tests {
                                                                 seed in any::<u64>()) {
             let grid = AnchorGrid::new(interval(blocks), BlockSpacing::UNIFORM);
             let funding = act + funding_offset;
-            let base = earliest_transfer_target(grid, bh(act), bh(funding));
+            let base = earliest_scheduled_height(grid, bh(act), bh(funding));
             let first_target = cumulative_scheduled_heights(
                 &BlockSpacing::UNIFORM,
                 base,
@@ -2012,33 +2044,30 @@ mod tests {
                 &mut rng(seed),
             )[0];
             prop_assert_eq!(first_target, base);
-            let tip = first_target - 1;
             prop_assert!(
-                draw_anchor_boundary(grid, bh(act), bh(funding), tip, &mut rng(seed)).is_some(),
-                "a zero-delay transfer at target {} has no candidate anchor at its broadcast tip {}",
+                draw_anchor_boundary(grid, bh(act), bh(funding), first_target, &mut rng(seed))
+                    .is_some(),
+                "a zero-delay transfer at target {} has no candidate anchor at its broadcast tip",
                 u32::from(first_target),
-                u32::from(tip),
             );
         }
 
         /// A transfer whose scheduled target height lands exactly on a boundary `B` is broadcast
         /// from tip `B - 1`, where the most recent boundary is the one before `B`. Neither the
-        /// schedule-time draw nor the overdue-shift redraw, each made against the scheduled
-        /// height's [`broadcast_tip`] as the engine makes them, may choose that boundary (age 0 at
-        /// the broadcast tip); every choice lies at least one boundary below it.
+        /// schedule-time draw nor the overdue-shift redraw may choose that boundary (age 0 at the
+        /// broadcast tip); every choice lies at least one boundary below it.
         #[test]
         fn transfer_scheduled_on_a_boundary_never_draws_age_zero(blocks in 1u32..500u32,
                                                                  target_boundaries in 4u32..200u32,
                                                                  seed in any::<u64>()) {
             let grid = AnchorGrid::new(interval(blocks), BlockSpacing::UNIFORM);
-            let scheduled = bh(target_boundaries * blocks);
-            prop_assert!(grid.is_boundary(scheduled));
+            let scheduled = th(target_boundaries * blocks);
+            prop_assert!(grid.is_boundary(BlockHeight::from(scheduled)));
             let age_zero = grid.boundary_at_or_below(scheduled - 1);
             let mut r = rng(seed);
             for _ in 0..16 {
-                let drawn =
-                    draw_anchor_boundary(grid, bh(0), bh(0), broadcast_tip(scheduled), &mut r)
-                        .expect("a candidate exists below the broadcast tip");
+                let drawn = draw_anchor_boundary(grid, bh(0), bh(0), scheduled, &mut r)
+                    .expect("a candidate exists below the broadcast tip");
                 prop_assert!(
                     drawn < age_zero,
                     "draw for target {} chose {}, the age-0 boundary at tip {}",
@@ -2046,9 +2075,8 @@ mod tests {
                     u32::from(drawn),
                     u32::from(scheduled - 1),
                 );
-                let redrawn =
-                    redraw_anchor_boundary(grid, bh(blocks), broadcast_tip(scheduled), &mut r)
-                        .expect("a candidate exists below the broadcast tip");
+                let redrawn = redraw_anchor_boundary(grid, bh(blocks), scheduled, &mut r)
+                    .expect("a candidate exists below the broadcast tip");
                 prop_assert!(
                     redrawn < age_zero,
                     "redraw for target {} chose {}, the age-0 boundary at tip {}",
@@ -2074,7 +2102,7 @@ mod tests {
                     crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM),
                     bh(0),
                     bh(funding),
-                    bh(tip),
+                    th(tip + 1),
                     &mut r
                 ),
                 None
@@ -2104,7 +2132,7 @@ mod tests {
                         ),
                         bh(act),
                         bh(funding),
-                        bh(chain_tip),
+                        th(chain_tip + 1),
                         &mut r,
                     )
                     .unwrap(),
@@ -2182,8 +2210,9 @@ mod tests {
         ) {
             let i = interval(blocks);
             let prior = prior_bucket.saturating_mul(blocks);
-            let chosen = redraw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(prior), bh(broadcast), &mut rng(seed));
-            let most_recent = broadcast - (broadcast % blocks);
+            let chosen = redraw_anchor_boundary(crate::scheduling::AnchorGrid::new(i, crate::scheduling::BlockSpacing::UNIFORM), bh(prior), th(broadcast), &mut rng(seed));
+            let broadcast_tip = broadcast.saturating_sub(1);
+            let most_recent = broadcast_tip - (broadcast_tip % blocks);
             match chosen {
                 Some(b) => {
                     let b = u32::from(b);
@@ -2216,7 +2245,7 @@ mod tests {
                     crate::scheduling::BlockSpacing::UNIFORM
                 ),
                 bh(1_872),
-                bh(1_900),
+                th(1_900),
                 &mut rng(1)
             ),
             None,
@@ -2229,7 +2258,7 @@ mod tests {
                     crate::scheduling::BlockSpacing::UNIFORM
                 ),
                 bh(1_728),
-                bh(1_900),
+                th(1_900),
                 &mut rng(1)
             ),
             Some(bh(1_728)),
@@ -2257,9 +2286,9 @@ mod tests {
             let p = SchedulingParams::ZIP_318;
             let after = BlockSpacing::with_nu7_activation(bh(0));
             let uniform = schedule_heights(
-                &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
+                &p, &BlockSpacing::UNIFORM, th(commit), n, &mut rng(seed),
             );
-            let scaled = schedule_heights(&p, &after, bh(commit), n, &mut rng(seed));
+            let scaled = schedule_heights(&p, &after, th(commit), n, &mut rng(seed));
             for (u, s) in uniform.iter().zip(&scaled) {
                 prop_assert_eq!(u32::from(*s) - commit, R * (u32::from(*u) - commit));
             }
@@ -2279,10 +2308,10 @@ mod tests {
             let activation = commit + to_activation;
             let spacing = BlockSpacing::with_nu7_activation(bh(activation));
             let uniform = schedule_heights(
-                &p, &BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed),
+                &p, &BlockSpacing::UNIFORM, th(commit), n, &mut rng(seed),
             );
             let crossing =
-                schedule_heights(&p, &spacing, bh(commit), n, &mut rng(seed));
+                schedule_heights(&p, &spacing, th(commit), n, &mut rng(seed));
             for (u, c) in uniform.iter().zip(&crossing) {
                 let u = u32::from(*u);
                 let expected = if u <= activation { u } else { activation + R * (u - activation) };
@@ -2304,7 +2333,7 @@ mod tests {
             );
             let scaled = R * AnchorBucketInterval::ZIP_318.block_count().get();
             let b = u32::from(
-                draw_anchor_boundary(grid, bh(activation), bh(activation), bh(tip), &mut rng(seed))
+                draw_anchor_boundary(grid, bh(activation), bh(activation), th(tip + 1), &mut rng(seed))
                     .expect("candidates exist far above activation"),
             );
             let most_recent = u32::from(grid.boundary_at_or_below(bh(tip)));
@@ -2322,14 +2351,14 @@ mod tests {
             schedule_heights(
                 &short,
                 &crate::scheduling::BlockSpacing::UNIFORM,
-                bh(2_000_000),
+                th(2_000_000),
                 8,
                 &mut rng(5)
             ),
             schedule_heights(
                 &P,
                 &crate::scheduling::BlockSpacing::UNIFORM,
-                bh(2_000_000),
+                th(2_000_000),
                 8,
                 &mut rng(5)
             ),
@@ -2350,9 +2379,10 @@ mod tests {
                 short.anchor_bucket_interval(),
                 crate::scheduling::BlockSpacing::UNIFORM
             )
-            .is_boundary(earliest)
+            .is_boundary(earliest - 1)
         );
-        assert_eq!(u32::from(earliest), 1_116); // 1_104 (first boundary >= funding) + 12
+        // 1_104 (the first boundary at or after funding) + 12, as the broadcast tip, plus one.
+        assert_eq!(u32::from(earliest), 1_117);
         assert!(
             earliest
                 < earliest_scheduled_height(
@@ -2375,7 +2405,7 @@ mod tests {
                 ),
                 act,
                 funding,
-                bh(5_000),
+                th(5_000 + 1),
                 &mut r,
             )
             .expect("the candidate set is non-empty");
@@ -2409,7 +2439,7 @@ mod tests {
                         ),
                         bh(act),
                         bh(funding),
-                        bh(tip),
+                        th(tip + 1),
                         &mut r
                     ),
                     Some(bh(2 * blocks))
@@ -2434,7 +2464,7 @@ mod tests {
         let schedules = schedule(
             &P,
             &crate::scheduling::BlockSpacing::UNIFORM,
-            bh(commit),
+            th(commit),
             n,
             &mut rng(seed),
         );
@@ -2460,7 +2490,7 @@ mod tests {
             schedule_heights(
                 &P,
                 &crate::scheduling::BlockSpacing::UNIFORM,
-                bh(commit),
+                th(commit),
                 n,
                 &mut rng(seed)
             )
@@ -2476,7 +2506,7 @@ mod tests {
                 e,
                 u32::from(expiry_height(
                     &crate::scheduling::BlockSpacing::UNIFORM,
-                    bh(b)
+                    th(b)
                 )),
                 "expiry {e} != expiry_height(&crate::scheduling::BlockSpacing::UNIFORM, {b})"
             );
@@ -2527,16 +2557,16 @@ mod tests {
                                                n in 0usize..24,
                                                seed in any::<u64>()) {
             let mut r = rng(seed);
-            let schedules = schedule(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut r);
+            let schedules = schedule(&P, &crate::scheduling::BlockSpacing::UNIFORM, th(commit), n, &mut r);
             prop_assert_eq!(schedules.len(), n);
             // Scheduled heights follow the cumulative delay rule (same RNG => same heights).
-            let broadcast: Vec<BlockHeight> =
+            let broadcast: Vec<TargetHeight> =
                 schedules.iter().map(|s| s.scheduled_height()).collect();
             prop_assert_eq!(
                 &broadcast,
-                &schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, bh(commit), n, &mut rng(seed))
+                &schedule_heights(&P, &crate::scheduling::BlockSpacing::UNIFORM, th(commit), n, &mut rng(seed))
             );
-            let mut prev = bh(commit);
+            let mut prev = th(commit);
             for s in &schedules {
                 prop_assert!(s.scheduled_height() >= prev, "scheduled heights must be non-decreasing");
                 prev = s.scheduled_height();

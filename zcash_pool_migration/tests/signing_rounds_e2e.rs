@@ -23,7 +23,8 @@ use core::num::NonZeroU32;
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
-use zcash_protocol::{consensus::BlockHeight, value::COIN};
+use zcash_primitives::transaction::TargetHeight;
+use zcash_protocol::value::COIN;
 
 use orchard::keys::SpendAuthorizingKey;
 use zcash_pool_migration::build::sign_pczt;
@@ -124,7 +125,7 @@ fn keystone_external_signing_end_to_end() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
     let (mut state, unsigned) = build_preparation_unsigned(
         &params,
-        BlockHeight::from_u32(TARGET_HEIGHT),
+        TargetHeight::from(TARGET_HEIGHT),
         &mut backend,
         &plan,
         &mut rng,
