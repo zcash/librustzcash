@@ -873,7 +873,7 @@ impl MigrationState {
                         && let Some(fresh) = crate::scheduling::redraw_anchor_boundary(
                             grid,
                             prior,
-                            tx.scheduled_height,
+                            crate::scheduling::broadcast_tip(tx.scheduled_height),
                             rng,
                         )
                     {
