@@ -3152,33 +3152,22 @@ fn parse_tx<P: consensus::Parameters>(
 
         let expiry_height = tx_data.expiry_height();
         if expiry_height > BlockHeight::from(0) {
-            #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
-            let tx_data = TransactionData::from_parts(
+            TransactionData::from_parts_with_value_pool_deltas(
                 tx_data.version(),
                 BranchId::for_height(params, expiry_height),
                 tx_data.lock_time(),
                 expiry_height,
+                tx_data.value_pool_deltas().clone(),
                 tx_data.transparent_bundle().cloned(),
                 tx_data.sprout_bundle().cloned(),
                 tx_data.sapling_bundle().cloned(),
                 tx_data.orchard_bundle().cloned(),
-            );
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            let tx_data = TransactionData::from_parts_with_zip233(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.zip233_amount(),
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            );
-            tx_data
-                .freeze()
-                .map(|t| (expiry_height, t))
-                .map_err(SqliteClientError::from)
+                tx_data.ironwood_bundle().cloned(),
+                tx_data.coinbase_bundle().cloned(),
+            )
+            .freeze()
+            .map(|t| (expiry_height, t))
+            .map_err(SqliteClientError::from)
         } else if let Some(fallback_height) = fallback_height {
             // Unmined with no expiry, so no epoch is recorded for it. The branch ID
             // does not affect parsing (absent from the pre-v5 serialized form; v5
@@ -6361,8 +6350,18 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        ::orchard::tree::MerkleHashOrchard, incrementalmerkletree::Hashable as _,
-        shardtree::error::ShardTreeError, zcash_client_backend::data_api::WalletCommitmentTrees,
+        ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::Hashable as _,
+        proptest::{
+            strategy::{Strategy, ValueTree},
+            test_runner::TestRunner,
+        },
+        shardtree::error::ShardTreeError,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_primitives::transaction::{
+            TransactionData, TxVersion,
+            components::orchard::testing::arb_ironwood_bundle_for_version,
+        },
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
@@ -6924,6 +6923,48 @@ mod tests {
             parse_tx(&MAIN_NETWORK, &raw, None, Some(BlockHeight::from(0)), None),
             Err(SqliteClientError::CorruptedData(_))
         ));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn parse_tx_uncached_expiry_preserves_v6_ironwood() {
+        let expiry_height = MAIN_NETWORK
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("NU6.3 has an activation height");
+        let mut runner = TestRunner::deterministic();
+        let ironwood = arb_ironwood_bundle_for_version(TxVersion::V6)
+            .prop_filter("an Ironwood bundle is required", Option::is_some)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        let original = TransactionData::from_parts_v6(
+            BranchId::Nu6_3,
+            0,
+            expiry_height,
+            None,
+            None,
+            None,
+            ironwood,
+        )
+        .freeze()
+        .unwrap();
+        let mut raw = vec![];
+        original.write(&mut raw).unwrap();
+
+        for cached_expiry in [None, Some(BlockHeight::from(0))] {
+            let (height, parsed) =
+                parse_tx(&MAIN_NETWORK, &raw, None, cached_expiry, None).unwrap();
+            assert_eq!(height, expiry_height);
+            assert_eq!(parsed.txid(), original.txid());
+            assert!(parsed.ironwood_bundle().is_some());
+            assert_eq!(
+                parsed.ironwood_bundle().unwrap().value_balance(),
+                original.ironwood_bundle().unwrap().value_balance(),
+            );
+            let mut rewritten = vec![];
+            parsed.write(&mut rewritten).unwrap();
+            assert_eq!(rewritten, raw);
+        }
     }
 
     /// A stored unmined transaction with a zero expiry height (e.g. a coinbase

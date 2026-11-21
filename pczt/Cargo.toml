@@ -67,10 +67,12 @@ incrementalmerkletree.workspace = true
 proptest.workspace = true
 rand = { workspace = true, features = ["sys_rng"] }
 rand_chacha.workspace = true
+redjubjub.workspace = true
 ripemd.workspace = true
 secp256k1.workspace = true
 sha2.workspace = true
 shardtree.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = [
     "test-dependencies",
     "transparent-inputs",
@@ -92,6 +94,7 @@ orchard = [
     "dep:pasta_curves",
     "orchard/zeroize",
     "dep:zcash_note_encryption",
+    "zcash_primitives?/orchard",
 ]
 
 ## Enables functionality that requires Sapling protocol types.
@@ -103,6 +106,7 @@ sapling = [
     "dep:sapling",
     "dep:zcash_note_encryption",
     "sapling/zeroize",
+    "zcash_primitives?/sapling",
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.
@@ -114,7 +118,13 @@ transparent = [
 ]
 
 ## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
-zcp-builder = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
+## This does not enable proof creation.
+zcp-builder = [
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "transparent",
+]
 
 #! ### PCZT roles behind feature flags
 #!

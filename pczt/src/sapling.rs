@@ -85,6 +85,7 @@ pub struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
+    #[getset(get = "pub")]
     #[serde_as(as = "Option<[_; 64]>")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 

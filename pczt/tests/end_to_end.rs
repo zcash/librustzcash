@@ -1,4 +1,4 @@
-use std::{convert::Infallible, num::NonZeroU8, sync::OnceLock};
+use std::{convert::Infallible, sync::OnceLock};
 
 use ::transparent::{
     address::{Script, TransparentAddress},
@@ -29,14 +29,17 @@ use pczt::{
 use rand::{SeedableRng, rand_core::UnwrapErr, rngs::SysRng};
 use rand_chacha::ChaCha20Rng;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
-use zcash_keys::keys::transparent::{
-    AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex, zip48,
-};
+#[cfg(zcash_unstable = "nu8")]
+use std::num::NonZeroU8;
+use zcash_keys::keys::transparent::{AccountPrivKey, IncomingViewingKey};
+#[cfg(zcash_unstable = "nu8")]
+use zcash_keys::keys::transparent::{NonHardenedChildIndex, zip48};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder, BundlePadding, DeferredPcztBuilder, PcztResult},
     fees::zip317,
     sighash::{PrecomputedSighashData, SignableInput},
+    txid::to_txid,
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
@@ -465,6 +468,244 @@ fn transparent_p2sh_multisig_to_orchard() {
                         coin.value(),
                     )
                     .unwrap(),
+                ))
+                .as_ref()
+                .to_owned(),
+        )
+    };
+    let checker = zcash_script::interpreter::CallbackTransactionSignatureChecker {
+        sighash: &sighasher,
+        lock_time: tx.lock_time().into(),
+        is_final: txin.sequence() == 0xFFFFFFFF,
+    };
+    assert_eq!(
+        script::Raw::from_raw_parts(
+            txin.script_sig().0.to_bytes(),
+            p2sh_addr.script().to_bytes()
+        )
+        .eval(zcash_script::interpreter::Flags::all(), &checker),
+        Ok(true)
+    );
+}
+
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_transparent_p2sh_multisig_to_orchard() {
+    let params = nu8_test_network();
+    let rng = UnwrapErr(SysRng);
+
+    // Construct a 2-of-3 ZIP 48 P2SH account.
+    let account_sk =
+        |i| zip48::AccountPrivKey::from_seed(&params, &[i; 32], zip32::AccountId::ZERO).unwrap();
+    let account_sks = [account_sk(1), account_sk(2), account_sk(3)];
+    let key_info = account_sks
+        .iter()
+        .map(|sk| sk.to_account_pubkey())
+        .collect();
+    let fvk = zip48::FullViewingKey::standard(NonZeroU8::new(2).unwrap(), key_info).unwrap();
+
+    // Derive its first external address, and corresponding spending keys.
+    let (p2sh_addr, redeem_script) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    let transparent_sks = account_sks
+        .map(|sk| sk.derive_signing_key(zip32::Scope::External, NonHardenedChildIndex::ZERO));
+
+    // Create an Orchard account to receive funds.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already have a transparent coin.
+    let utxo = transparent::OutPoint::fake();
+    let coin = transparent::TxOut::new(
+        Zatoshis::const_from_u64(1_000_000),
+        p2sh_addr.script().into(),
+    );
+
+    // The transaction builder can't assume that the P2SH address receiving the coin was
+    // generated from a redeem script that didn't contain bad opcodes.
+    let redeem_script = redeem_script.weaken();
+
+    // Create the transaction's I/O.
+    let mut builder = Builder::new(
+        params,
+        12.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            ironwood_anchor: None,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
+        },
+    );
+    builder
+        .propose_version::<zip317::FeeRule>(zcash_primitives::transaction::TxVersion::V7)
+        .unwrap();
+    builder
+        .add_transparent_p2sh_input(redeem_script.clone(), utxo, coin.clone())
+        .unwrap();
+    builder
+        .add_orchard_change_output::<zip317::FeeRule>(
+            orchard_fvk.clone(),
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(100_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_orchard_change_output::<zip317::FeeRule>(
+            orchard_fvk.clone(),
+            Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
+            recipient,
+            Zatoshis::const_from_u64(880_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(rng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_v2_round_trip(&pczt);
+
+    // Finalize the I/O.
+    let pczt = IoFinalizer::new(pczt)
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap();
+    check_v2_round_trip(&pczt);
+
+    // Create proofs.
+    let pczt = Prover::new(pczt)
+        .create_orchard_proof(UnwrapErr(SysRng), post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .finish();
+    check_v2_round_trip(&pczt);
+
+    // The Orchard bundle has actions (the change outputs pair with fabricated
+    // spends), so sign them.
+    let pczt = {
+        let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+        let action_count = pczt.orchard().actions().len();
+        let mut signer = Signer::new(pczt).unwrap();
+        for index in 0..action_count {
+            match signer.sign_orchard(UnwrapErr(SysRng), index, &orchard_ask) {
+                Ok(())
+                | Err(pczt::roles::signer::Error::OrchardSign(
+                    orchard::pczt::SignerError::WrongSpendAuthorizingKey,
+                )) => {}
+                Err(e) => panic!("orchard action {index}: {e:?}"),
+            }
+        }
+        signer.finish()
+    };
+    check_v2_round_trip(&pczt);
+
+    // If we only sign with one of the signers, we can't finalize spends.
+    {
+        let mut signer = Signer::new(pczt.clone()).unwrap();
+        signer.sign_transparent(0, &transparent_sks[0]).unwrap();
+        assert!(matches!(
+            SpendFinalizer::new(signer.finish()).finalize_spends(),
+            Err(pczt::roles::spend_finalizer::Error::TransparentFinalize(
+                ::transparent::pczt::SpendFinalizerError::MissingSignature
+            ))
+        ));
+    }
+
+    // Sign the input with all three signers.
+    let mut signer = Signer::new(pczt).unwrap();
+    for sk in &transparent_sks {
+        signer.sign_transparent(0, sk).unwrap();
+    }
+    let pczt = signer.finish();
+    check_v2_round_trip(&pczt);
+
+    // A non-`SIGHASH_ALL` partial signature is refused at finalization even
+    // though three signatures are present, so a missing signature cannot mask
+    // it.
+    {
+        let partial = low_level_signer::Signer::new(pczt.clone())
+            .sign_transparent_with(|_, bundle, _| {
+                let input = &mut bundle.inputs_mut()[0];
+                let key = input.partial_signatures().keys().next().copied().unwrap();
+                let mut bad = vec![0xab; 64];
+                bad.push(SighashType::NONE.encode());
+                // Only the non-`ALL` signature remains, so a missing
+                // signature cannot mask the rejected one.
+                input.set_sighash_type(SighashType::NONE);
+                input.partial_signatures_mut().clear();
+                input.partial_signatures_mut().insert(key, bad);
+                Ok::<_, ::transparent::pczt::ParseError>(())
+            })
+            .unwrap()
+            .finish();
+        assert!(matches!(
+            SpendFinalizer::new(partial).finalize_spends(),
+            Err(pczt::roles::spend_finalizer::Error::TransparentFinalize(
+                ::transparent::pczt::SpendFinalizerError::DisallowedSighashType(_)
+            ))
+        ));
+    }
+
+    // Finalize spends. This will pick 2 of the signatures to use in the P2SH scriptSig.
+    let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
+    check_v2_round_trip(&pczt);
+
+    // Grab the transaction's effects here, as it's easier.
+    let tx_effects =
+        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap()).unwrap();
+
+    // We should now be able to extract the fully authorized transaction.
+    let tx = TransactionExtractor::new(pczt)
+        .extract(UnwrapErr(SysRng))
+        .unwrap();
+
+    assert_eq!(u32::from(tx.expiry_height()), 132);
+
+    // Validate the transaction.
+    let bundle = tx.transparent_bundle().unwrap();
+    assert_eq!(bundle.vin.len(), 1);
+    let txin = bundle.vin.first().unwrap();
+    // The scriptSig is OP_0, the two signatures the Finalizer chose, then the
+    // redeem script.
+    let script_sig = txin.script_sig().0.to_bytes();
+    assert_eq!(script_sig.first(), Some(&0x00)); // OP_0
+    let redeem_bytes = redeem_script.to_bytes();
+    assert!(script_sig.ends_with(&redeem_bytes[..]));
+    assert_ne!(script_sig.len(), redeem_bytes.len() + 1);
+    let sighasher = |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
+        let script_code = Script(script_code.clone());
+        let signable = ::transparent::sighash::SignableInput::from_parts(
+            bundle,
+            match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
+                (zcash_script::signature::SignedOutputs::All, true) => {
+                    SighashType::ALL_ANYONECANPAY
+                }
+                (zcash_script::signature::SignedOutputs::Single, false) => SighashType::SINGLE,
+                (zcash_script::signature::SignedOutputs::Single, true) => {
+                    SighashType::SINGLE_ANYONECANPAY
+                }
+                (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
+                (zcash_script::signature::SignedOutputs::None, true) => {
+                    SighashType::NONE_ANYONECANPAY
+                }
+            },
+            0,
+            &script_code,
+            coin.script_pubkey(),
+            coin.value(),
+        )
+        .unwrap();
+        Some(
+            tx_effects
+                .signature_hash(&SignableInput::V7(
+                    zcash_primitives::transaction::sighash::V7SignatureContext::Transparent(
+                        signable,
+                    ),
                 ))
                 .as_ref()
                 .to_owned(),
@@ -1561,6 +1802,8 @@ fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: None,
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
@@ -1580,9 +1823,341 @@ fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: Some(BlockHeight::from_u32(10)),
         nu7: None,
+        #[cfg(zcash_unstable = "nu8")]
+        nu8: None,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
+}
+
+/// A regtest network with NU7 activated at height 11 and NU8 at height 12,
+/// for exercising v7 transactions.
+#[cfg(zcash_unstable = "nu8")]
+fn nu8_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+    zcash_protocol::local_consensus::LocalNetwork {
+        nu7: Some(BlockHeight::from_u32(11)),
+        nu8: Some(BlockHeight::from_u32(12)),
+        ..nu6_3_test_network()
+    }
+}
+
+/// Builds an I/O-finalized PCZT that spends an Orchard note into an Ironwood
+/// output, with no transparent inputs.
+fn orchard_to_ironwood_pczt(
+    params: zcash_protocol::local_consensus::LocalNetwork,
+    target_height: BlockHeight,
+) -> Pczt {
+    let spend_fvk = orchard::keys::FullViewingKey::from(
+        &orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap(),
+    );
+    let recipient = spend_fvk.address_at(0u32, orchard::keys::Scope::External);
+    let rho = orchard::note::Rho::from_bytes(&[1; 32]).unwrap();
+    let rseed = (0u8..=255)
+        .find_map(|b| orchard::note::RandomSeed::from_bytes([b; 32], &rho).into_option())
+        .expect("at least one test rseed is valid");
+    let note = orchard::Note::from_parts(
+        recipient,
+        orchard::value::NoteValue::from_raw(100_000),
+        rho,
+        rseed,
+        orchard::note::NoteVersion::V2,
+    )
+    .unwrap();
+    let zero = MerkleHashOrchard::from_bytes(&[0; 32]).unwrap();
+    let merkle_path = orchard::tree::MerklePath::from_parts(0, [zero; 32]);
+    let orchard_anchor = merkle_path.root(note.commitment().into());
+
+    let mut builder = Builder::new(
+        params,
+        target_height,
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard_anchor),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::UNPADDED,
+        },
+    );
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(spend_fvk.clone(), note, merkle_path)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            None,
+            recipient,
+            Zatoshis::const_from_u64(85_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_orchard_change_output::<zip317::FeeRule>(
+            spend_fvk,
+            None,
+            recipient,
+            Zatoshis::const_from_u64(0),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+        .unwrap();
+
+    IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap()
+}
+
+/// With no transparent inputs, a v6 transaction's shielded sighash is its txid, so the
+/// effects a Signer signs over must carry every bundle of the transaction and be
+/// digested under the rules of its version.
+fn assert_shielded_sighash_is_txid(pczt: Pczt) {
+    let sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let effects = pczt.into_effects().unwrap();
+    assert!(effects.transparent_bundle().is_none());
+    assert!(
+        effects.ironwood_bundle().is_some(),
+        "extracting the PCZT's effects must keep its Ironwood bundle",
+    );
+
+    let txid = to_txid(
+        effects.version(),
+        effects.consensus_branch_id(),
+        &effects.txid_digests(),
+    )
+    .expect("a PCZT's effects are a v5 or later transaction");
+    assert_eq!(&sighash, txid.as_ref());
+}
+
+#[test]
+fn v6_ironwood_pczt_signs_over_its_txid() {
+    assert_shielded_sighash_is_txid(orchard_to_ironwood_pczt(
+        nu6_3_test_network(),
+        BlockHeight::from_u32(10),
+    ));
+}
+
+/// A v7 PCZT signs a distinct digest per action, per pool and per binding signature.
+///
+/// Every signature is created through the Signer's per-index accessors, extracted, and
+/// then verified against its own digest and against a sibling's. The Orchard bundle is
+/// padded to more than one action, so a shared digest cannot satisfy the check. The
+/// Transaction Extractor has to create the per-pool binding signatures itself, which
+/// only succeeds if the Orchard and Ironwood binding digests differ.
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_pczt_signs_each_action_and_binding_over_its_own_digest() {
+    use zcash_primitives::transaction::sighash::V7SignatureContext;
+
+    let rng = UnwrapErr(SysRng);
+
+    let sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
+    let ask = orchard::keys::SpendAuthorizingKey::from(&sk);
+    let spend_fvk = orchard::keys::FullViewingKey::from(&sk);
+    let recipient = spend_fvk.address_at(0u32, orchard::keys::Scope::External);
+    // Two notes from the same account, each spent by its own action.
+    let notes = [1u8, 2].map(|rho_byte| {
+        let rho = orchard::note::Rho::from_bytes(&[rho_byte; 32]).unwrap();
+        let rseed = (0u8..=255)
+            .find_map(|b| orchard::note::RandomSeed::from_bytes([b; 32], &rho).into_option())
+            .expect("at least one test rseed is valid");
+        orchard::Note::from_parts(
+            recipient,
+            orchard::value::NoteValue::from_raw(100_000),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        )
+        .unwrap()
+    });
+    // Both notes share one anchor and have their own witness.
+    let mut tree =
+        ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+    for note in &notes {
+        tree.append(
+            MerkleHashOrchard::from_cmx(&note.commitment().into()),
+            incrementalmerkletree::Retention::Marked,
+        )
+        .unwrap();
+    }
+    tree.checkpoint(9_999_999).unwrap();
+    let (orchard_anchor, merkle_paths) = {
+        let paths = [0u64, 1].map(|position| {
+            tree.witness_at_checkpoint_depth(position.into(), 0)
+                .unwrap()
+                .unwrap()
+        });
+        let anchor = paths[0].root(MerkleHashOrchard::from_cmx(&notes[0].commitment().into()));
+        (anchor, paths)
+    };
+
+    let mut builder = Builder::new(
+        nu8_test_network(),
+        BlockHeight::from_u32(12),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard_anchor.into()),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::UNPADDED,
+        },
+    );
+    builder
+        .propose_version::<zip317::FeeRule>(zcash_primitives::transaction::TxVersion::V7)
+        .unwrap();
+    for (note, merkle_path) in notes.iter().zip(merkle_paths) {
+        builder
+            .add_orchard_spend::<zip317::FeeRule>(spend_fvk.clone(), *note, merkle_path.into())
+            .unwrap();
+    }
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            None,
+            recipient,
+            Zatoshis::const_from_u64(85_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_orchard_change_output::<zip317::FeeRule>(
+            spend_fvk.clone(),
+            None,
+            recipient,
+            Zatoshis::const_from_u64(95_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+        .unwrap();
+    let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap();
+
+    let effects = pczt.clone().into_effects().unwrap();
+    assert_eq!(
+        effects.version(),
+        zcash_primitives::transaction::TxVersion::V7
+    );
+    effects
+        .check_v7_consensus_rules()
+        .expect("the extracted transaction's value pool deltas must balance");
+
+    let orchard_action_count = pczt.orchard().actions().len();
+    assert!(
+        orchard_action_count >= 2,
+        "two spends plus padding give the bundle two or more actions",
+    );
+    assert!(!pczt.ironwood().actions().is_empty());
+
+    let mut signer = Signer::new(pczt.clone()).unwrap();
+    let mut orchard_sighashes = Vec::new();
+    for index in 0..orchard_action_count {
+        let sighash = signer.orchard_sighash(index).unwrap();
+        assert!(
+            orchard_sighashes.iter().all(|other| other != &sighash),
+            "each Orchard action has its own digest",
+        );
+        // Padding actions use a dummy key already signed by the IO Finalizer.
+        match signer.sign_orchard(rng, index, &ask) {
+            Ok(())
+            | Err(pczt::roles::signer::Error::OrchardSign(
+                orchard::pczt::SignerError::WrongSpendAuthorizingKey,
+            )) => {}
+            Err(e) => panic!("orchard {index}: {e:?}"),
+        }
+        orchard_sighashes.push(sighash);
+    }
+
+    let mut ironwood_sighashes = Vec::new();
+    for index in 0..pczt.ironwood().actions().len() {
+        let sighash = signer.ironwood_sighash(index).unwrap();
+        assert!(
+            orchard_sighashes.iter().all(|other| other != &sighash),
+            "each Ironwood action has its own digest, distinct from Orchard's",
+        );
+        // The Ironwood bundle holds output-pairing dummy spends.
+        match signer.sign_ironwood(rng, index, &ask) {
+            Ok(())
+            | Err(pczt::roles::signer::Error::IronwoodSign(
+                orchard::pczt::SignerError::WrongSpendAuthorizingKey,
+            )) => {}
+            Err(e) => panic!("ironwood {index}: {e:?}"),
+        }
+        ironwood_sighashes.push(sighash);
+    }
+    let pczt = signer.finish();
+
+    // The Orchard and Ironwood binding signatures are created by the extractor over the
+    // empty context of their own pool, so their digests differ.
+    let sighash_data = PrecomputedSighashData::new_zip244(effects).unwrap();
+    let binding = |context| {
+        *sighash_data
+            .signature_hash(&SignableInput::V7(context))
+            .as_ref()
+    };
+    let orchard_binding = binding(V7SignatureContext::OrchardBinding);
+    let ironwood_binding = binding(V7SignatureContext::IronwoodBinding);
+    assert_ne!(orchard_binding, ironwood_binding);
+    assert!(
+        orchard_sighashes
+            .iter()
+            .chain(&ironwood_sighashes)
+            .all(|sighash| sighash != &orchard_binding && sighash != &ironwood_binding),
+        "a binding digest is distinct from every action digest",
+    );
+
+    let pczt = Prover::new(pczt)
+        .create_orchard_proof(rng, post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .create_ironwood_proof(rng, post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .finish();
+    let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
+    check_v2_round_trip(&pczt);
+
+    let tx = TransactionExtractor::new(pczt).extract(rng).unwrap();
+
+    let orchard = tx.orchard_bundle().unwrap();
+    for (index, action) in orchard.actions().iter().enumerate() {
+        action
+            .rk()
+            .verify(&orchard_sighashes[index], action.authorization())
+            .expect("Orchard action verifies over its own digest");
+    }
+    orchard
+        .binding_validating_key()
+        .verify(
+            &orchard_binding,
+            orchard.authorization().binding_signature(),
+        )
+        .expect("Orchard binding verifies over the Orchard binding digest");
+
+    let ironwood = tx.ironwood_bundle().unwrap();
+    for (index, action) in ironwood.actions().iter().enumerate() {
+        action
+            .rk()
+            .verify(&ironwood_sighashes[index], action.authorization())
+            .expect("Ironwood action verifies over its own digest");
+    }
+    ironwood
+        .binding_validating_key()
+        .verify(
+            &ironwood_binding,
+            ironwood.authorization().binding_signature(),
+        )
+        .expect("Ironwood binding verifies over the Ironwood binding digest");
+
+    // Cross-checks: a sibling digest does not verify the same signature.
+    let first_orchard = &orchard.actions()[0];
+    let first_ironwood = &ironwood.actions()[0];
+    first_orchard
+        .rk()
+        .verify(&ironwood_sighashes[0], first_orchard.authorization())
+        .expect_err("an Orchard action does not verify over an Ironwood digest");
+    first_ironwood
+        .rk()
+        .verify(&orchard_sighashes[0], first_ironwood.authorization())
+        .expect_err("an Ironwood action does not verify over an Orchard digest");
 }
 
 #[test]
@@ -2559,4 +3134,485 @@ fn deferred_anchors_require_v6() {
         ),
         Err(zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported(_))
     ));
+}
+
+/// A complete v7 Sapling round trip: two spends, one signed through the Signer
+/// and one applied externally, each verified against its own digest after
+/// extraction.
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_sapling_spends_use_per_index_sighashes() {
+    use zcash_primitives::transaction::sighash::V7SignatureContext;
+
+    let mut rng = UnwrapErr(SysRng);
+
+    // A Sapling account whose first two addresses receive a note each.
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(32))
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(133))
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(0))
+        .expect("the derivation path yields a valid key");
+    let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
+    let sapling_extsk_1 = sapling_extsk
+        .derive_child(zip32::ChildIndex::hardened(0))
+        .expect("the derivation path yields a valid key");
+    let dfvk_1 = sapling_extsk_1.to_diversifiable_full_viewing_key();
+    let (_, recipient_0) = sapling_dfvk.default_address();
+    let in_0 = zip32::Scope::External;
+    let (_, recipient_1) = dfvk_1.default_address();
+    let in_1 = zip32::Scope::External;
+
+    // Two spent notes in one tree.
+    let mut tree =
+        ShardTree::<_, 32, 16>::new(MemoryShardStore::<sapling::Node, u32>::empty(), 100);
+    let mut notes = Vec::new();
+    let mut note_fvks = Vec::new();
+    for (dfvk, recipient) in [(&sapling_dfvk, recipient_0), (&dfvk_1, recipient_1)] {
+        let note = {
+            let mut sapling_builder = sapling::builder::Builder::new(
+                sapling::note_encryption::Zip212Enforcement::On,
+                sapling::builder::BundleType::DEFAULT,
+                sapling::Anchor::empty_tree(),
+            );
+            sapling_builder
+                .add_output(
+                    None,
+                    recipient,
+                    sapling::value::NoteValue::from_raw(100_000),
+                    Memo::Empty.encode().into_bytes(),
+                )
+                .unwrap();
+            let (bundle, meta) = sapling_builder
+                .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
+                .unwrap()
+                .unwrap();
+            let output = bundle
+                .shielded_outputs()
+                .get(meta.output_index(0).unwrap())
+                .unwrap();
+            let domain = sapling::note_encryption::SaplingDomain::new(
+                sapling::note_encryption::Zip212Enforcement::On,
+            );
+            let (note, _, _) =
+                try_note_decryption(&domain, &dfvk.to_external_ivk().prepare(), output).unwrap();
+            note
+        };
+        tree.append(
+            sapling::Node::from_cmu(&note.cmu()),
+            incrementalmerkletree::Retention::Marked,
+        )
+        .unwrap();
+        notes.push(note);
+        note_fvks.push(dfvk.fvk().clone());
+    }
+    tree.checkpoint(9_999_999).unwrap();
+    let (anchor, merkle_paths) = {
+        let paths = [0u64, 1].map(|position| {
+            tree.witness_at_checkpoint_depth(position.into(), 0)
+                .unwrap()
+                .unwrap()
+        });
+        let anchor = paths[0].root(sapling::Node::from_cmu(&notes[0].cmu()));
+        (anchor.into(), paths)
+    };
+
+    let mut builder = Builder::new(
+        nu8_test_network(),
+        BlockHeight::from_u32(1_000_000),
+        BuildConfig::Standard {
+            sapling_anchor: Some(anchor),
+            orchard_anchor: None,
+            ironwood_anchor: None,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
+        },
+    );
+    builder
+        .propose_version::<zip317::FeeRule>(zcash_primitives::transaction::TxVersion::V7)
+        .unwrap();
+    for ((note, fvk), merkle_path) in notes.iter().zip(&note_fvks).zip(merkle_paths) {
+        builder
+            .add_sapling_spend::<zip317::FeeRule>(fvk.clone(), note.clone(), merkle_path)
+            .unwrap();
+    }
+    builder
+        .add_sapling_output::<zip317::FeeRule>(
+            Some(sapling_dfvk.to_ovk(in_0)),
+            recipient_0,
+            Zatoshis::const_from_u64(80_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_sapling_output::<zip317::FeeRule>(
+            Some(dfvk_1.to_ovk(in_1)),
+            recipient_1,
+            Zatoshis::const_from_u64(110_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        sapling_meta,
+        ..
+    } = builder
+        .build_for_pczt(UnwrapErr(SysRng), &zip317::FeeRule::standard())
+        .unwrap();
+
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    let pczt = IoFinalizer::new(pczt)
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap();
+
+    // The prover needs each spend's proof generation key.
+    let indices = [
+        sapling_meta.spend_index(0).unwrap(),
+        sapling_meta.spend_index(1).unwrap(),
+    ];
+    let extsks = [&sapling_extsk, &sapling_extsk_1];
+    let pczt = Updater::new(pczt)
+        .update_sapling_with(|mut updater| {
+            for (index, extsk) in indices.iter().zip(extsks) {
+                updater.update_spend_with(*index, |mut spend| {
+                    spend.set_proof_generation_key(extsk.expsk().proof_generation_key())
+                })?;
+            }
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+
+    let sapling_prover = LocalTxProver::bundled();
+    let pczt = Prover::new(pczt)
+        .create_sapling_proofs(UnwrapErr(SysRng), &sapling_prover, &sapling_prover)
+        .unwrap()
+        .finish();
+
+    // Sign spend 0 through the Signer, and apply spend 1's signature from a
+    // separate Signer over the same committed state.
+    let mut signer = Signer::new(pczt.clone()).unwrap();
+    let sighashes = [
+        signer.sapling_sighash(indices[0]).unwrap(),
+        signer.sapling_sighash(indices[1]).unwrap(),
+    ];
+    signer
+        .sign_sapling(UnwrapErr(SysRng), indices[0], extsks[0].expsk().ask())
+        .unwrap();
+    let external_sig = {
+        let mut other = Signer::new(pczt).unwrap();
+        other
+            .sign_sapling(UnwrapErr(SysRng), indices[1], extsks[1].expsk().ask())
+            .unwrap();
+        redjubjub::Signature::from(
+            other.finish().sapling().spends()[indices[1]]
+                .spend_auth_sig()
+                .unwrap(),
+        )
+    };
+    signer
+        .apply_sapling_signature(indices[1], external_sig)
+        .unwrap();
+    let pczt = signer.finish();
+
+    let tx_effects =
+        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap()).unwrap();
+
+    let (spend_vk, output_vk) = sapling_prover.verifying_keys();
+    let tx = TransactionExtractor::new(pczt)
+        .with_sapling(&spend_vk, &output_vk)
+        .extract(UnwrapErr(SysRng))
+        .unwrap();
+
+    let bundle = tx.sapling_bundle().unwrap();
+    for (position, sighash) in sighashes.iter().enumerate() {
+        let spend = &bundle.shielded_spends()[indices[position]];
+        // Its own digest verifies, and its sibling's does not.
+        assert!(spend.rk().verify(sighash, spend.spend_auth_sig()).is_ok());
+        let sibling = &sighashes[1 - position];
+        assert!(spend.rk().verify(sibling, spend.spend_auth_sig()).is_err());
+    }
+
+    // The binding signature verifies against the Sapling binding digest.
+    let binding_sighash =
+        tx_effects.signature_hash(&SignableInput::V7(V7SignatureContext::SaplingBinding));
+    let bundle = tx.sapling_bundle().unwrap();
+    let spends = bundle
+        .shielded_spends()
+        .iter()
+        .map(|spend| spend.cv())
+        .sum::<sapling::value::CommitmentSum>();
+    let outputs = bundle
+        .shielded_outputs()
+        .iter()
+        .map(|output| output.cv())
+        .sum::<sapling::value::CommitmentSum>();
+    let bvk = (spends - outputs).into_bvk(i64::from(*bundle.value_balance()));
+    assert!(
+        bvk.verify(
+            binding_sighash.as_ref(),
+            &bundle.authorization().binding_sig
+        )
+        .is_ok()
+    );
+}
+
+/// A v7 PCZT's transparent and shielded digests both commit to the transparent
+/// input's `scriptPubKey`, so changing that alone changes every one of them.
+/// The input value, all output values, and the rest of the transaction are
+/// identical between the two fixtures.
+#[test]
+#[cfg(zcash_unstable = "nu8")]
+fn v7_transparent_and_shielded_sighashes_commit_to_the_whole_transaction() {
+    let params = nu8_test_network();
+
+    // Two transparent keys: only the input's key, and so its `scriptPubKey`,
+    // differs between the fixtures. Outputs always pay the first one.
+    let sk_a = secp256k1::SecretKey::from_secret_bytes([1; 32]).unwrap();
+    let sk_b = secp256k1::SecretKey::from_secret_bytes([2; 32]).unwrap();
+    let p2pkh_addr = TransparentAddress::from_pubkey(&sk_a.public_key());
+
+    // A Sapling account with one note to spend.
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(32))
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(133))
+        .expect("the derivation path yields a valid key")
+        .derive_child(zip32::ChildIndex::hardened(0))
+        .expect("the derivation path yields a valid key");
+    let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
+    let (_, sapling_recipient) = sapling_dfvk.default_address();
+
+    let mut rng = UnwrapErr(SysRng);
+    let note = {
+        let mut sapling_builder = sapling::builder::Builder::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+            sapling::builder::BundleType::DEFAULT,
+            sapling::Anchor::empty_tree(),
+        );
+        sapling_builder
+            .add_output(
+                None,
+                sapling_recipient,
+                sapling::value::NoteValue::from_raw(100_000),
+                Memo::Empty.encode().into_bytes(),
+            )
+            .unwrap();
+        let (bundle, meta) = sapling_builder
+            .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
+            .unwrap()
+            .unwrap();
+        let output = bundle
+            .shielded_outputs()
+            .get(meta.output_index(0).unwrap())
+            .unwrap();
+        let domain = sapling::note_encryption::SaplingDomain::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+        );
+        let (note, _, _) =
+            try_note_decryption(&domain, &sapling_dfvk.to_external_ivk().prepare(), output)
+                .unwrap();
+        note
+    };
+    let (anchor, merkle_path) = {
+        let leaf = sapling::Node::from_cmu(&note.cmu());
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<sapling::Node, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(0.into(), 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path)
+    };
+
+    // Both fixtures use identical, deterministic randomness so that every
+    // Sapling effect, proof, and the transparent effects other than the input
+    // `scriptPubKey` are identical between them.
+    const FIXTURE_SEED: [u8; 32] = [0x42; 32];
+
+    // Builds the whole pipeline for a given transparent spending key.
+    let build = |sk: &secp256k1::SecretKey| {
+        let mut rng = ChaCha20Rng::from_seed(FIXTURE_SEED);
+        let pubkey = sk.public_key();
+        let input_addr = TransparentAddress::from_pubkey(&pubkey);
+        let coin = transparent::TxOut::new(
+            Zatoshis::const_from_u64(1_000_000),
+            input_addr.script().into(),
+        );
+        let mut builder = Builder::new(
+            params,
+            BlockHeight::from_u32(1_000_000),
+            BuildConfig::Standard {
+                sapling_anchor: Some(anchor),
+                orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
+        );
+        builder
+            .propose_version::<zip317::FeeRule>(zcash_primitives::transaction::TxVersion::V7)
+            .unwrap();
+        builder
+            .add_transparent_p2pkh_input(pubkey, transparent::OutPoint::fake(), coin)
+            .unwrap();
+        builder
+            .add_sapling_spend::<zip317::FeeRule>(
+                sapling_dfvk.fvk().clone(),
+                note.clone(),
+                merkle_path.clone(),
+            )
+            .unwrap();
+        builder
+            .add_sapling_output::<zip317::FeeRule>(
+                Some(sapling_dfvk.to_ovk(zip32::Scope::External)),
+                sapling_recipient,
+                Zatoshis::const_from_u64(500_000),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+        builder
+            .add_transparent_output(&p2pkh_addr, Zatoshis::const_from_u64(585_000))
+            .unwrap();
+        let PcztResult {
+            pczt_parts,
+            sapling_meta,
+            ..
+        } = builder
+            .build_for_pczt(&mut rng, &zip317::FeeRule::standard())
+            .unwrap();
+        let spend_index = sapling_meta.spend_index(0).unwrap();
+
+        let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+        let pczt = IoFinalizer::new(pczt).finalize_io(&mut rng).unwrap();
+        let pczt = Updater::new(pczt)
+            .update_sapling_with(|mut updater| {
+                updater.update_spend_with(spend_index, |mut spend| {
+                    spend.set_proof_generation_key(sapling_extsk.expsk().proof_generation_key())
+                })?;
+                Ok(())
+            })
+            .unwrap()
+            .finish();
+        let prover = LocalTxProver::bundled();
+        let pczt = Prover::new(pczt)
+            .create_sapling_proofs(&mut rng, &prover, &prover)
+            .unwrap()
+            .finish();
+
+        let unsigned = pczt.clone();
+        let mut signer = Signer::new(pczt).unwrap();
+        let transparent_sighash = signer.transparent_sighash(0).unwrap();
+        let sapling_sighash = signer.sapling_sighash(spend_index).unwrap();
+        signer.sign_transparent(0, sk).unwrap();
+        signer
+            .sign_sapling(&mut rng, spend_index, sapling_extsk.expsk().ask())
+            .unwrap();
+        let (spend_vk, output_vk) = prover.verifying_keys();
+        let pczt = SpendFinalizer::new(signer.finish())
+            .finalize_spends()
+            .unwrap();
+        let tx = TransactionExtractor::new(pczt)
+            .with_sapling(&spend_vk, &output_vk)
+            .extract(&mut rng)
+            .unwrap();
+
+        (
+            unsigned,
+            tx,
+            transparent_sighash,
+            sapling_sighash,
+            spend_index,
+        )
+    };
+
+    let (pczt_a, tx, transparent_sighash, sapling_sighash, spend_index) = build(&sk_a);
+    let (pczt_b, other_tx, other_transparent_sighash, other_sapling_sighash, _) = build(&sk_b);
+
+    // Everything except the input `scriptPubKey` is identical, so the digest
+    // differences below cannot come from fresh randomness.
+    assert_eq!(pczt_a.sapling(), pczt_b.sapling());
+    assert_eq!(pczt_a.ironwood(), pczt_b.ironwood());
+    assert_eq!(pczt_a.orchard(), pczt_b.orchard());
+
+    assert_eq!(
+        pczt_a.transparent().outputs(),
+        pczt_b.transparent().outputs()
+    );
+    assert_eq!(pczt_a.transparent().inputs().len(), 1);
+    assert_eq!(pczt_b.transparent().inputs().len(), 1);
+    let input_a = &pczt_a.transparent().inputs()[0];
+    let input_b = &pczt_b.transparent().inputs()[0];
+    assert_eq!(input_a.value(), input_b.value());
+    assert_eq!(input_a.prevout_txid(), input_b.prevout_txid());
+    assert_eq!(input_a.prevout_index(), input_b.prevout_index());
+    assert_eq!(input_a.sequence(), input_b.sequence());
+
+    assert_ne!(input_a.script_pubkey(), input_b.script_pubkey());
+
+    // The extracted effecting data agrees everywhere but the input script.
+    let tx_bundle = tx.transparent_bundle().unwrap();
+    let other_tx_bundle = other_tx.transparent_bundle().unwrap();
+    assert_eq!(tx_bundle.vout, other_tx_bundle.vout);
+    assert_eq!(tx_bundle.vin[0].prevout(), other_tx_bundle.vin[0].prevout());
+    assert_ne!(
+        tx_bundle.vin[0].script_sig().0.to_bytes(),
+        other_tx_bundle.vin[0].script_sig().0.to_bytes()
+    );
+
+    // Every per-input digest changed with the input `scriptPubKey`.
+    assert_ne!(transparent_sighash, other_transparent_sighash);
+    assert_ne!(sapling_sighash, other_sapling_sighash);
+
+    let bundle = tx.transparent_bundle().unwrap();
+    let txin = &bundle.vin[0];
+    let script_sig = txin.script_sig().0.to_bytes();
+    let (sig_bytes, pubkey_bytes) = {
+        // `push(sig) push(pubkey)`.
+        let (len, rest) = (script_sig[0] as usize, &script_sig[1..]);
+        let sig = &rest[..len];
+        let (len, rest) = (rest[len] as usize, &rest[len + 1..]);
+        (sig, &rest[..len])
+    };
+    let signature = secp256k1::ecdsa::Signature::from_der(&sig_bytes[..sig_bytes.len() - 1])
+        .expect("the extracted signature is DER");
+    let pubkey = secp256k1::PublicKey::from_slice(pubkey_bytes).unwrap();
+    assert!(
+        signature
+            .verify(
+                secp256k1::Message::from_digest(transparent_sighash),
+                &pubkey
+            )
+            .is_ok()
+    );
+    assert!(
+        signature
+            .verify(
+                secp256k1::Message::from_digest(other_transparent_sighash),
+                &pubkey
+            )
+            .is_err()
+    );
+
+    let sapling_bundle = tx.sapling_bundle().unwrap();
+    let spend = &sapling_bundle.shielded_spends()[spend_index];
+    assert!(
+        spend
+            .rk()
+            .verify(&sapling_sighash, spend.spend_auth_sig())
+            .is_ok()
+    );
+    assert!(
+        spend
+            .rk()
+            .verify(&other_sapling_sighash, spend.spend_auth_sig())
+            .is_err()
+    );
 }

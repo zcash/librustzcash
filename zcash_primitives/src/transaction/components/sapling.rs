@@ -14,18 +14,20 @@ use ::sapling::{
     value::ValueCommitment,
 };
 use redjubjub::SpendAuth;
-use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
-use zcash_protocol::{
-    consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
-    value::ZatBalance,
-};
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD};
+use zcash_protocol::value::ZatBalance;
 
 use super::GROTH_PROOF_SIZE;
-use crate::transaction::Transaction;
+use crate::transaction::bytes::{
+    SaplingBundleBytes, SaplingOutputBytes, SaplingOutputV4Bytes, SaplingSpendBytes,
+    SaplingSpendV4Bytes, V4SaplingBundleBytes,
+};
+#[cfg(zcash_unstable = "nu8")]
+use crate::transaction::bytes::{V7SaplingAuthBytes, V7SaplingBundleBytes};
 
 /// The size in bytes of a Sapling spend description in its v4 (pre-NU5) serialized form, as
-/// written by the internal `write_spend_v4` encoder.
+/// written by [`SaplingSpendV4Bytes`].
 ///
 /// This is the full per-spend cost on the wire in a version 4 transaction: the value
 /// commitment, the anchor, the nullifier, the randomized spending key, the Groth16 proof,
@@ -66,6 +68,8 @@ const NULLIFIER_BYTE_SIZE: usize = 32;
 const RK_BYTE_SIZE: usize = 32;
 /// The size in bytes of the encoding of a Sapling spend authorization signature.
 const SPEND_AUTH_SIG_BYTE_SIZE: usize = 64;
+/// The size in bytes of the encoding of a Sapling binding signature.
+const BINDING_SIG_BYTE_SIZE: usize = 64;
 /// The size in bytes of the encoding of a Sapling anchor (a Jubjub base field element).
 const ANCHOR_BYTE_SIZE: usize = 32;
 /// The size in bytes of the encoding of a Sapling extracted note commitment.
@@ -96,9 +100,7 @@ pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip2
 
 /// A map from one bundle authorization to another.
 ///
-/// For use with [`TransactionData::map_authorization`].
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+/// For use with `TransactionData::map_authorization`.
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
     fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
@@ -108,10 +110,8 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 
 /// The identity map.
 ///
-/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// This can be used with `TransactionData::map_authorization` when you want to map the
 /// authorization of a subset of a transaction's bundles.
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_proof(
         &mut self,
@@ -207,7 +207,9 @@ fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<Spen
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<redjubjub::Signature<SpendAuth>> {
+pub(crate) fn read_spend_auth_sig<R: Read>(
+    mut reader: R,
+) -> io::Result<redjubjub::Signature<SpendAuth>> {
     let mut sig = [0; 64];
     reader.read_exact(&mut sig)?;
     Ok(redjubjub::Signature::from(sig))
@@ -220,7 +222,8 @@ pub fn temporary_zcashd_read_spend_v4<R: Read>(
     read_spend_v4(reader)
 }
 
-fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
+#[cfg(feature = "temporary-zcashd")]
+pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
     // Consensus rules (§4.4) & (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
@@ -244,32 +247,6 @@ fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authoriz
     ))
 }
 
-fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>) -> io::Result<()> {
-    writer.write_all(&spend.cv().to_bytes())?;
-    writer.write_all(spend.anchor().to_repr().as_ref())?;
-    writer.write_all(&spend.nullifier().0)?;
-    writer.write_all(&<[u8; 32]>::from(*spend.rk()))?;
-    writer.write_all(spend.zkproof())?;
-    writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
-}
-
-fn write_spend_v5_without_witness_data<W: Write>(
-    mut writer: W,
-    spend: &SpendDescription<Authorized>,
-) -> io::Result<()> {
-    writer.write_all(&spend.cv().to_bytes())?;
-    writer.write_all(&spend.nullifier().0)?;
-    writer.write_all(&<[u8; 32]>::from(*spend.rk()))
-}
-
-fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
-    let cv = read_value_commitment(&mut reader)?;
-    let nullifier = read_nullifier(&mut reader)?;
-    let rk = read_rk(&mut reader)?;
-
-    Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
-}
-
 #[cfg(feature = "temporary-zcashd")]
 pub fn temporary_zcashd_read_output_v4<R: Read>(
     mut reader: R,
@@ -277,7 +254,10 @@ pub fn temporary_zcashd_read_output_v4<R: Read>(
     read_output_v4(&mut reader)
 }
 
-fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<GrothProofBytes>> {
+#[cfg(feature = "temporary-zcashd")]
+pub(crate) fn read_output_v4<R: Read>(
+    mut reader: &mut R,
+) -> io::Result<OutputDescription<GrothProofBytes>> {
     // Consensus rules (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::check_output()
@@ -319,50 +299,300 @@ pub fn temporary_zcashd_write_output_v4<W: Write>(
 }
 
 pub(crate) fn write_output_v4<W: Write>(
-    mut writer: W,
+    writer: W,
     output: &OutputDescription<GrothProofBytes>,
 ) -> io::Result<()> {
-    writer.write_all(&output.cv().to_bytes())?;
-    writer.write_all(output.cmu().to_bytes().as_ref())?;
-    writer.write_all(output.ephemeral_key().as_ref())?;
-    writer.write_all(output.enc_ciphertext())?;
-    writer.write_all(output.out_ciphertext())?;
-    writer.write_all(output.zkproof())
+    SaplingOutputV4Bytes::from_output_v4(output).write(writer)
 }
 
-fn write_output_v5_without_proof<W: Write>(
-    mut writer: W,
-    output: &OutputDescription<GrothProofBytes>,
-) -> io::Result<()> {
-    writer.write_all(&output.cv().to_bytes())?;
-    writer.write_all(output.cmu().to_bytes().as_ref())?;
-    writer.write_all(output.ephemeral_key().as_ref())?;
-    writer.write_all(output.enc_ciphertext())?;
-    writer.write_all(output.out_ciphertext())
+impl SaplingSpendBytes {
+    /// Interprets this effecting data as a version 5 Sapling spend description.
+    ///
+    /// Validates the value commitment and randomized validating key.
+    pub(crate) fn to_spend_v5(&self) -> io::Result<SpendDescriptionV5> {
+        Ok(SpendDescriptionV5::from_parts(
+            read_value_commitment(&self.cv()[..])?,
+            read_nullifier(&self.nullifier()[..])?,
+            read_rk(&self.rk()[..])?,
+        ))
+    }
 }
 
-fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
-    let cv = read_value_commitment(&mut reader)?;
-    let cmu = read_cmu(&mut reader)?;
+impl SaplingOutputBytes {
+    /// Interprets this output description as a version 5 Sapling output.
+    ///
+    /// Validates the value commitment and note commitment.
+    pub(crate) fn to_output_v5(&self) -> io::Result<OutputDescriptionV5> {
+        Ok(OutputDescriptionV5::from_parts(
+            read_value_commitment(&self.cv()[..])?,
+            read_cmu(&self.cmu()[..])?,
+            EphemeralKeyBytes(*self.ephemeral_key()),
+            *self.enc_ciphertext(),
+            *self.out_ciphertext(),
+        ))
+    }
+}
 
-    // Consensus rules (§4.5):
-    // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
-    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
-    reader.read_exact(&mut ephemeral_key.0)?;
+impl SaplingSpendV4Bytes {
+    /// Interprets this description as a version 4 Sapling spend.
+    ///
+    /// Validates the value commitment, anchor, and randomized validating key.
+    pub(crate) fn to_spend_v4(&self) -> io::Result<SpendDescription<Authorized>> {
+        Ok(SpendDescription::from_parts(
+            read_value_commitment(&self.cv()[..])?,
+            read_base(&self.anchor()[..], "anchor")?,
+            read_nullifier(&self.nullifier()[..])?,
+            read_rk(&self.rk()[..])?,
+            *self.zkproof(),
+            redjubjub::Signature::from(*self.spend_auth_sig()),
+        ))
+    }
+}
 
-    let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
-    let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
-    reader.read_exact(&mut enc_ciphertext)?;
-    reader.read_exact(&mut out_ciphertext)?;
+impl SaplingOutputV4Bytes {
+    /// Interprets this description as a version 4 Sapling output.
+    ///
+    /// Validates the value commitment and note commitment.
+    pub(crate) fn to_output_v4(&self) -> io::Result<OutputDescription<GrothProofBytes>> {
+        Ok(OutputDescription::from_parts(
+            read_value_commitment(&self.cv()[..])?,
+            read_cmu(&self.cmu()[..])?,
+            EphemeralKeyBytes(*self.ephemeral_key()),
+            *self.enc_ciphertext(),
+            *self.out_ciphertext(),
+            *self.zkproof(),
+        ))
+    }
+}
 
-    Ok(OutputDescriptionV5::from_parts(
-        cv,
-        cmu,
-        ephemeral_key,
-        enc_ciphertext,
-        out_ciphertext,
-    ))
+impl V4SaplingBundleBytes {
+    /// Interprets this bundle as an authorized Sapling bundle.
+    ///
+    /// The binding signature is a transaction-level field in the version 4
+    /// format, so the caller supplies it. Returns `None` for an empty bundle,
+    /// matching the representation used by `TransactionData`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle is non-empty but no binding signature is
+    /// supplied, if a spend or output description is invalid, or if the balance
+    /// is out of range or is nonzero for an empty bundle.
+    pub fn to_authorized(
+        &self,
+        binding_sig: Option<[u8; BINDING_SIG_BYTE_SIZE]>,
+    ) -> io::Result<Option<Bundle<Authorized, ZatBalance>>> {
+        let value_balance = value_balance_from_raw(self.value_balance())?;
+        if self.is_empty() {
+            if value_balance != ZatBalance::zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "an empty Sapling bundle must have zero value balance",
+                ));
+            }
+            if binding_sig.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a Sapling binding signature is present for an empty bundle",
+                ));
+            }
+            return Ok(None);
+        }
+
+        let binding_sig = binding_sig.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a non-empty Sapling bundle requires a binding signature",
+            )
+        })?;
+
+        let spends = self
+            .spends()
+            .iter()
+            .map(SaplingSpendV4Bytes::to_spend_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+        let outputs = self
+            .outputs()
+            .iter()
+            .map(SaplingOutputV4Bytes::to_output_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Bundle::from_parts(
+            spends,
+            outputs,
+            value_balance,
+            Authorized {
+                binding_sig: redjubjub::Signature::from(binding_sig),
+            },
+        ))
+    }
+}
+
+impl SaplingBundleBytes {
+    /// Interprets this bundle as an authorized Sapling bundle.
+    ///
+    /// The value balance, anchor, proofs, and signatures are validated by the
+    /// same decoders used for the v5 wire format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bundle is empty, or if a field is invalid.
+    pub fn to_authorized(&self) -> io::Result<Bundle<Authorized, ZatBalance>> {
+        if self.spends().is_empty() && self.outputs().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Sapling bundle has no typed representation",
+            ));
+        }
+
+        let anchor = self
+            .anchor()
+            .map(|anchor| read_base(&mut &anchor[..], "anchor"))
+            .transpose()?;
+
+        let spends = self
+            .spends()
+            .iter()
+            .zip(
+                self.spend_proofs()
+                    .iter()
+                    .zip(self.spend_auth_sigs().iter()),
+            )
+            .map(|(spend, (proof, sig))| {
+                let spend = spend.to_spend_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                let spend_auth_sig = read_spend_auth_sig(&mut &sig[..])?;
+                Ok(spend.into_spend_description(
+                    anchor.expect("a non-empty spend list has an anchor"),
+                    zkproof,
+                    spend_auth_sig,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let outputs = self
+            .outputs()
+            .iter()
+            .zip(self.output_proofs().iter())
+            .map(|(output, proof)| {
+                let output = output.to_output_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                Ok(output.into_output_description(zkproof))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let binding_sig = self.binding_sig().copied().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a non-empty Sapling bundle requires a binding signature",
+            )
+        })?;
+
+        Ok(Bundle::from_parts(
+            spends,
+            outputs,
+            value_balance_from_raw(self.value_balance())?,
+            Authorized {
+                binding_sig: redjubjub::Signature::from(binding_sig),
+            },
+        )
+        .expect("a non-empty Sapling bundle has a typed representation"))
+    }
+}
+
+#[cfg(zcash_unstable = "nu8")]
+impl V7SaplingAuthBytes {
+    /// Interprets effecting and authorizing data as an authorized Sapling bundle.
+    ///
+    /// The value balance is not part of the v7 bundle encoding; it lives in
+    /// `mValuePoolDeltas` and is supplied by the caller.
+    pub fn to_authorized(
+        &self,
+        effects: &V7SaplingBundleBytes,
+        value_balance: ZatBalance,
+    ) -> io::Result<Bundle<Authorized, ZatBalance>> {
+        if effects.spends().is_empty() && effects.outputs().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "an empty Sapling bundle has no typed representation",
+            ));
+        }
+
+        if effects.spends().is_empty() != self.anchor().is_none()
+            || self.spend_proofs().len() != effects.spends().len()
+            || self.spend_auth_sigs().len() != effects.spends().len()
+            || self.output_proofs().len() != effects.outputs().len()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Sapling authorizing fields do not correspond to effecting fields",
+            ));
+        }
+
+        let binding_sig = self.binding_sig().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v7 Sapling effecting data has no authorizing data",
+            )
+        })?;
+        if !binding_sig.sighash_info().is_v0() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported Sapling binding signature sighash variant",
+            ));
+        }
+
+        let anchor = self
+            .anchor()
+            .map(|anchor| read_base(&mut &anchor[..], "anchor"))
+            .transpose()?;
+
+        let spends = effects
+            .spends()
+            .iter()
+            .zip(
+                self.spend_proofs()
+                    .iter()
+                    .zip(self.spend_auth_sigs().iter()),
+            )
+            .map(|(spend, (proof, sig))| {
+                if !sig.sighash_info().is_v0() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported Sapling spend authorization sighash variant",
+                    ));
+                }
+                let spend = spend.to_spend_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                let spend_auth_sig = read_spend_auth_sig(&mut &sig.signature()[..])?;
+                Ok(spend.into_spend_description(
+                    anchor.expect("a non-empty spend list has an anchor"),
+                    zkproof,
+                    spend_auth_sig,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let outputs = effects
+            .outputs()
+            .iter()
+            .zip(self.output_proofs().iter())
+            .map(|(output, proof)| {
+                let output = output.to_output_v5()?;
+                let zkproof = read_zkproof(&mut &proof[..])?;
+                Ok(output.into_output_description(zkproof))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Bundle::from_parts(
+            spends,
+            outputs,
+            value_balance,
+            Authorized {
+                binding_sig: redjubjub::Signature::from(*binding_sig.signature()),
+            },
+        )
+        .expect("a non-empty Sapling bundle has a typed representation"))
+    }
 }
 
 /// Reads the Sapling components of a v4 transaction.
@@ -380,6 +610,7 @@ pub fn temporary_zcashd_read_v4_components<R: Read>(
 }
 
 /// Reads the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
 #[allow(clippy::type_complexity)]
 pub(crate) fn read_v4_components<R: Read>(
     mut reader: R,
@@ -390,14 +621,19 @@ pub(crate) fn read_v4_components<R: Read>(
     Vec<OutputDescription<GrothProofBytes>>,
 )> {
     if tx_has_sapling {
-        let vb = Transaction::read_amount(&mut reader)?;
-        #[allow(clippy::redundant_closure)]
-        let ss: Vec<SpendDescription<Authorized>> =
-            Vector::read(&mut reader, |r| read_spend_v4(r))?;
-        #[allow(clippy::redundant_closure)]
-        let so: Vec<OutputDescription<GrothProofBytes>> =
-            Vector::read(&mut reader, |r| read_output_v4(r))?;
-        Ok((vb, ss, so))
+        let bundle = V4SaplingBundleBytes::read(&mut reader)?;
+        let value_balance = value_balance_from_raw(bundle.value_balance())?;
+        let spends = bundle
+            .spends()
+            .iter()
+            .map(SaplingSpendV4Bytes::to_spend_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+        let outputs = bundle
+            .outputs()
+            .iter()
+            .map(SaplingOutputV4Bytes::to_output_v4)
+            .collect::<io::Result<Vec<_>>>()?;
+        Ok((value_balance, spends, outputs))
     } else {
         Ok((ZatBalance::zero(), vec![], vec![]))
     }
@@ -414,93 +650,41 @@ pub fn temporary_zcashd_write_v4_components<W: Write>(
 }
 
 /// Writes the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
 pub(crate) fn write_v4_components<W: Write>(
     mut writer: W,
     bundle: Option<&Bundle<Authorized, ZatBalance>>,
     tx_has_sapling: bool,
 ) -> io::Result<()> {
     if tx_has_sapling {
-        writer.write_all(
-            &bundle
-                .map_or(ZatBalance::zero(), |b| *b.value_balance())
-                .to_i64_le_bytes(),
-        )?;
-        Vector::write(
-            &mut writer,
-            bundle.map_or(&[], |b| b.shielded_spends()),
-            |w, e| write_spend_v4(w, e),
-        )?;
-        Vector::write(
-            &mut writer,
-            bundle.map_or(&[], |b| b.shielded_outputs()),
-            |w, e| write_output_v4(w, e),
-        )?;
+        let bytes = match bundle {
+            Some(bundle) => V4SaplingBundleBytes::from_bundle(bundle),
+            None => V4SaplingBundleBytes::from_parts(
+                i64::from_le_bytes(ZatBalance::zero().to_i64_le_bytes()),
+                vec![],
+                vec![],
+            ),
+        };
+        bytes.write(&mut writer)
     } else if bundle.is_some() {
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Sapling components may not be present if Sapling is not active.",
-        ));
+        ))
+    } else {
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Reads a [`Bundle`] from a v5 transaction format.
+#[cfg(all(feature = "sapling", feature = "temporary-zcashd"))]
 #[allow(clippy::redundant_closure)]
 pub(crate) fn read_v5_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<Bundle<Authorized, ZatBalance>>> {
-    let sd_v5s = Vector::read(&mut reader, read_spend_v5)?;
-    let od_v5s = Vector::read(&mut reader, read_output_v5)?;
-    let n_spends = sd_v5s.len();
-    let n_outputs = od_v5s.len();
-    let value_balance = if n_spends > 0 || n_outputs > 0 {
-        Transaction::read_amount(&mut reader)?
-    } else {
-        ZatBalance::zero()
-    };
-
-    let anchor = if n_spends > 0 {
-        Some(read_base(&mut reader, "anchor")?)
-    } else {
-        None
-    };
-
-    let v_spend_proofs = Array::read(&mut reader, n_spends, |r| read_zkproof(r))?;
-    let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| read_spend_auth_sig(r))?;
-    let v_output_proofs = Array::read(&mut reader, n_outputs, |r| read_zkproof(r))?;
-
-    let binding_sig = if n_spends > 0 || n_outputs > 0 {
-        let mut sig = [0; 64];
-        reader.read_exact(&mut sig)?;
-        Some(redjubjub::Signature::from(sig))
-    } else {
-        None
-    };
-
-    let shielded_spends = sd_v5s
-        .into_iter()
-        .zip(v_spend_proofs.into_iter().zip(v_spend_auth_sigs))
-        .map(|(sd_5, (zkproof, spend_auth_sig))| {
-            // the following `unwrap` is safe because we know n_spends > 0.
-            sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
-        })
-        .collect();
-
-    let shielded_outputs = od_v5s
-        .into_iter()
-        .zip(v_output_proofs)
-        .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
-        .collect();
-
-    Ok(binding_sig.and_then(|binding_sig| {
-        Bundle::from_parts(
-            shielded_spends,
-            shielded_outputs,
-            value_balance,
-            Authorized { binding_sig },
-        )
-    }))
+    SaplingBundleBytes::read(&mut reader)?
+        .map(|bundle| bundle.to_authorized())
+        .transpose()
 }
 
 /// Writes a [`Bundle`] in the v5 transaction format.
@@ -508,48 +692,13 @@ pub(crate) fn write_v5_bundle<W: Write>(
     mut writer: W,
     sapling_bundle: Option<&Bundle<Authorized, ZatBalance>>,
 ) -> io::Result<()> {
-    if let Some(bundle) = sapling_bundle {
-        Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
-            write_spend_v5_without_witness_data(w, e)
-        })?;
+    let bytes = sapling_bundle.map(SaplingBundleBytes::from_bundle);
+    SaplingBundleBytes::write_opt(&mut writer, bytes.as_ref())
+}
 
-        Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
-            write_output_v5_without_proof(w, e)
-        })?;
-
-        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-            writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-        }
-        if !bundle.shielded_spends().is_empty() {
-            writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
-        }
-
-        Array::write(
-            &mut writer,
-            bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
-            |w, e| w.write_all(e),
-        )?;
-        Array::write(
-            &mut writer,
-            bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
-            |w, e| w.write_all(&<[u8; 64]>::from(**e)),
-        )?;
-
-        Array::write(
-            &mut writer,
-            bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
-            |w, e| w.write_all(e),
-        )?;
-
-        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
-        }
-    } else {
-        CompactSize::write(&mut writer, 0)?;
-        CompactSize::write(&mut writer, 0)?;
-    }
-
-    Ok(())
+fn value_balance_from_raw(value: i64) -> io::Result<ZatBalance> {
+    ZatBalance::from_i64(value)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -566,7 +715,35 @@ pub mod testing {
         )(
             bundle in t_sap::arb_bundle(value_balance)
         ) -> Option<Bundle<Authorized, ZatBalance>> {
-            bundle
+            // A serialized bundle carries a single bundle-wide anchor, but the
+            // strategy generates one per spend, so normalize them.
+            bundle.map(|bundle| {
+                let Some(anchor) = bundle.shielded_spends().first().map(|spend| *spend.anchor()) else {
+                    return bundle;
+                };
+                let spends = bundle
+                    .shielded_spends()
+                    .iter()
+                    .map(|spend| {
+                        ::sapling::bundle::SpendDescription::from_parts(
+                            spend.cv().clone(),
+                            anchor,
+                            *spend.nullifier(),
+                            *spend.rk(),
+                            *spend.zkproof(),
+                            *spend.spend_auth_sig(),
+                        )
+                    })
+                    .collect();
+
+                Bundle::from_parts(
+                    spends,
+                    bundle.shielded_outputs().to_vec(),
+                    *bundle.value_balance(),
+                    *bundle.authorization(),
+                )
+                .expect("a bundle with spends has a typed representation")
+            })
         }
     }
 
@@ -591,10 +768,68 @@ mod tests {
     use super::{
         ANCHOR_BYTE_SIZE, CMU_BYTE_SIZE, EPHEMERAL_KEY_BYTE_SIZE, GROTH_PROOF_SIZE,
         NULLIFIER_BYTE_SIZE, OUTPUT_DESCRIPTION_SIZE, RK_BYTE_SIZE, SPEND_AUTH_SIG_BYTE_SIZE,
-        SPEND_DESCRIPTION_SIZE, VALUE_COMMITMENT_BYTE_SIZE, testing::arb_bundle, write_output_v4,
-        write_spend_v4,
+        SPEND_DESCRIPTION_SIZE, SaplingOutputBytes, SaplingOutputV4Bytes, SaplingSpendBytes,
+        SaplingSpendV4Bytes, VALUE_COMMITMENT_BYTE_SIZE, testing::arb_bundle, write_output_v4,
     };
     use ff::PrimeField;
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        value::MAX_BALANCE,
+    };
+
+    use super::V4SaplingBundleBytes;
+    use crate::transaction::{
+        Transaction, TxVersion,
+        bytes::{
+            LegacyTransactionBodyBytes, LegacyTransparentBundleBytes, TransactionBodyBytes,
+            TransactionBytes,
+        },
+    };
+
+    #[test]
+    fn v4_empty_sapling_rejects_nonzero_balances() {
+        // One zatoshi is sufficient to violate the empty-bundle invariant;
+        // MAX_MONEY + 1 additionally violates the monetary range.
+        const NONZERO_BALANCE: i64 = 1;
+        let out_of_range = MAX_BALANCE + NONZERO_BALANCE;
+        for balance in [
+            NONZERO_BALANCE,
+            -NONZERO_BALANCE,
+            out_of_range,
+            -out_of_range,
+        ] {
+            let sapling = V4SaplingBundleBytes::from_parts(balance, vec![], vec![]);
+            assert_eq!(
+                sapling.to_authorized(None).unwrap_err().kind(),
+                io::ErrorKind::InvalidData,
+            );
+
+            let raw = TransactionBytes::from_parts(
+                TxVersion::V4,
+                None,
+                0,
+                BlockHeight::from_u32(0),
+                TransactionBodyBytes::Legacy(
+                    LegacyTransactionBodyBytes::from_parts(
+                        LegacyTransparentBundleBytes::default(),
+                        Some(sapling),
+                        None,
+                        None,
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+            let mut wire = Vec::new();
+            raw.write(&mut wire).unwrap();
+            assert_eq!(
+                Transaction::read(&wire[..], BranchId::Sapling)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidData,
+            );
+        }
+    }
 
     // Returns the number of bytes `write` emits.
     fn encoded_len(write: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> usize {
@@ -604,6 +839,35 @@ mod tests {
     }
 
     proptest! {
+        #[test]
+        fn sapling_byte_conversion_preserves_fields(bundle in arb_bundle()) {
+            if let Some(bundle) = bundle {
+                for spend in bundle.shielded_spends() {
+                    let bytes = SaplingSpendV4Bytes::from_spend_v4(spend);
+                    let typed = bytes.to_spend_v4().unwrap();
+                    prop_assert_eq!(SaplingSpendV4Bytes::from_spend_v4(&typed), bytes);
+
+                    let bytes = SaplingSpendBytes::from_spend_v5(spend);
+                    let typed = bytes.to_spend_v5().unwrap().into_spend_description(
+                        *spend.anchor(),
+                        *spend.zkproof(),
+                        *spend.spend_auth_sig(),
+                    );
+                    prop_assert_eq!(SaplingSpendBytes::from_spend_v5(&typed), bytes);
+                }
+                for output in bundle.shielded_outputs() {
+                    let bytes = SaplingOutputV4Bytes::from_output_v4(output);
+                    let typed = bytes.to_output_v4().unwrap();
+                    prop_assert_eq!(SaplingOutputV4Bytes::from_output_v4(&typed), bytes);
+
+                    let bytes = SaplingOutputBytes::from_output_v5(output);
+                    let typed = bytes.to_output_v5().unwrap()
+                        .into_output_description(*output.zkproof());
+                    prop_assert_eq!(SaplingOutputBytes::from_output_v5(&typed), bytes);
+                }
+            }
+        }
+
         /// `SPEND_DESCRIPTION_SIZE` is what callers divide a per-spend byte budget by to bound a
         /// spend count, so it must equal what the v4 encoder actually writes, not merely what the
         /// constant's own arithmetic says. Measure a real spend description rather than restating
@@ -622,7 +886,7 @@ mod tests {
             let bundle = bundle.unwrap();
             let spend = &bundle.shielded_spends()[0];
             prop_assert_eq!(
-                encoded_len(|w| write_spend_v4(w, spend)),
+                encoded_len(|w| SaplingSpendV4Bytes::from_spend_v4(spend).write(w)),
                 SPEND_DESCRIPTION_SIZE
             );
 

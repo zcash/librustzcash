@@ -27,7 +27,12 @@ zcash_primitives.workspace = true
 document-features.workspace = true
 
 [features]
-default = ["multicore"]
+default = ["circuits", "multicore"]
+
+## Enables creating proofs and the typed Sapling and Orchard APIs.
+## Both shielded protocol domains are enabled. `--no-default-features`
+## leaves proof creation off unless this feature is enabled.
+circuits = ["zcash_primitives/circuits"]
 
 ## Enables multithreading support for creating proofs.
 multicore = ["zcash_primitives/multicore"]

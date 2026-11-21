@@ -5,6 +5,10 @@
 changelog = "pczt/CHANGELOG.md"
 tag_prefix = "pczt-"
 
+[zcash]
+changelog = "zcash/CHANGELOG.md"
+tag_prefix = "zcash-"
+
 [zcash_client_backend]
 changelog = "zcash_client_backend/CHANGELOG.md"
 tag_prefix = "zcash_client_backend-"
@@ -17,9 +21,17 @@ tag_prefix = "zcash_client_sqlite-"
 changelog = "zcash_keys/CHANGELOG.md"
 tag_prefix = "zcash_keys-"
 
+[zcash_pool_migration]
+changelog = "zcash_pool_migration/CHANGELOG.md"
+tag_prefix = "zcash_pool_migration-"
+
 [zcash_primitives]
 changelog = "zcash_primitives/CHANGELOG.md"
 tag_prefix = "zcash_primitives-"
+
+[zcash_protocol]
+changelog = "components/zcash_protocol/CHANGELOG.md"
+tag_prefix = "zcash_protocol-"
 
 [zcash_transparent]
 changelog = "zcash_transparent/CHANGELOG.md"

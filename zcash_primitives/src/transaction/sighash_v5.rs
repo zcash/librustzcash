@@ -14,7 +14,7 @@ use zcash_protocol::value::Zatoshis;
 use crate::{
     encoding::StateWrite,
     transaction::{
-        Authorization, TransactionData, TransparentDigests, Zip244Digests,
+        Authorization, TransactionData, TransparentDigests, TxVersion, Zip244Digests,
         coinbase::transparent_bundle_is_coinbase,
         components::transparent::{write_outpoint, write_script},
         sighash::SignableInput,
@@ -74,14 +74,47 @@ impl TransparentInputsDigests {
     /// Computes the digests for `bundle` if a [ZIP 244] signature hash of a transaction
     /// containing `bundle` commits to them.
     ///
-    /// Returns `None` if `bundle` is a coinbase bundle or has no inputs.
+    /// Returns `None` if `bundle` has no inputs, or is a pre-v7 coinbase bundle.
+    /// Version 7 determines coinbase status from a separate bundle, not a null prevout.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2-transparent-sig-digest
     pub(crate) fn for_bundle<A: TransparentAuthorizingContext<Zatoshis>>(
+        version: TxVersion,
         bundle: &transparent::Bundle<A, Zatoshis>,
     ) -> Option<Self> {
+        #[cfg(zcash_unstable = "nu8")]
+        if version == TxVersion::V7 {
+            return (!bundle.vin.is_empty()).then(|| Self::new(bundle));
+        }
+        let _ = version;
         (!transparent_bundle_is_coinbase(bundle) && !bundle.vin.is_empty())
             .then(|| Self::new(bundle))
+    }
+
+    /// Returns the digests of a transaction with no transparent inputs: a personalized
+    /// hash of the empty byte array for each field.
+    #[cfg(zcash_unstable = "nu8")]
+    pub(crate) fn empty() -> Self {
+        TransparentInputsDigests {
+            amounts: hasher(ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION).finalize(),
+            scripts: hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION).finalize(),
+        }
+    }
+
+    /// Returns [ZIP 248 §S.3] amounts sig digest.
+    ///
+    /// [ZIP 248 §S.3]: https://zips.z.cash/zip-0248#s-3-amounts_sig_digest
+    #[cfg(zcash_unstable = "nu8")]
+    pub(crate) fn amounts(&self) -> &Blake2bHash {
+        &self.amounts
+    }
+
+    /// Returns [ZIP 248 §S.4] scriptpubkeys sig digest.
+    ///
+    /// [ZIP 248 §S.4]: https://zips.z.cash/zip-0248#s-4-scriptpubkeys_sig_digest
+    #[cfg(zcash_unstable = "nu8")]
+    pub(crate) fn scripts(&self) -> &Blake2bHash {
+        &self.scripts
     }
 }
 
@@ -91,6 +124,17 @@ impl TransparentInputsDigests {
 /// by [`TransparentInputsDigests::for_bundle`]. If they are `None` while the bundle has
 /// non-coinbase inputs, this function computes them, in time linear in the number of inputs.
 pub(super) fn transparent_sig_digest<A: TransparentAuthorizingContext<Zatoshis>>(
+    tx_data: Option<(
+        &transparent::Bundle<A, Zatoshis>,
+        &TransparentDigests<Blake2bHash>,
+    )>,
+    inputs_digests: Option<&TransparentInputsDigests>,
+    input: &SignableInput<'_>,
+) -> Blake2bHash {
+    transparent_sig_digest_inner(tx_data, inputs_digests, input)
+}
+
+fn transparent_sig_digest_inner<A: TransparentAuthorizingContext<Zatoshis>>(
     tx_data: Option<(
         &transparent::Bundle<A, Zatoshis>,
         &TransparentDigests<Blake2bHash>,
@@ -198,7 +242,7 @@ pub(crate) fn v5_signature_hash<
     // The caller must provide the transparent digests if and only if the transaction has a
     // transparent component.
     assert_eq!(
-        tx.transparent_bundle.is_some(),
+        tx.transparent_bundle().is_some(),
         txid_parts.transparent_digests.is_some()
     );
 
@@ -207,8 +251,7 @@ pub(crate) fn v5_signature_hash<
         tx.consensus_branch_id,
         txid_parts.header_digest,
         transparent_sig_digest(
-            tx.transparent_bundle
-                .as_ref()
+            tx.transparent_bundle()
                 .zip(txid_parts.transparent_digests.as_ref()),
             inputs_digests,
             signable_input,

@@ -20,6 +20,9 @@ use zcash_script::{
 
 use crate::transaction::{Authorization, TransactionData};
 
+#[cfg(zcash_unstable = "nu8")]
+use crate::transaction::TxVersion;
+
 #[cfg(feature = "circuits")]
 use ::transparent::builder::TransparentBuilder;
 
@@ -206,14 +209,20 @@ pub fn coinbase_input(
 
 /// Returns `true` if `tx` is a coinbase transaction.
 ///
-/// A transaction is a coinbase transaction if it has a transparent bundle with exactly
-/// one input, and that input's `prevout` is [`OutPoint::NULL`]. A transaction with no
-/// transparent bundle is not a coinbase transaction. The consensus rules place further
-/// requirements on the shielded parts of a coinbase transaction; this function does not
-/// check them.
+/// A version 7 transaction is a coinbase transaction if and only if it has a
+/// coinbase bundle, which replaces the identified input below. An earlier
+/// transaction is a coinbase transaction if it has a transparent bundle with
+/// exactly one input, and that input's `prevout` is [`OutPoint::NULL`]. The
+/// consensus rules place further requirements on the shielded parts of a
+/// coinbase transaction; this function does not check them.
 pub fn is_coinbase<A: Authorization>(tx: &TransactionData<A>) -> bool {
-    tx.transparent_bundle()
-        .is_some_and(transparent_bundle_is_coinbase)
+    match tx.version() {
+        #[cfg(zcash_unstable = "nu8")]
+        TxVersion::V7 => tx.coinbase_bundle().is_some(),
+        _ => tx
+            .transparent_bundle()
+            .is_some_and(transparent_bundle_is_coinbase),
+    }
 }
 
 /// Returns `true` if `bundle` is the transparent part of a coinbase transaction.
@@ -429,7 +438,9 @@ mod tests {
             BlockHeight::from_u32(NO_EXPIRY_HEIGHT),
             transparent_bundle,
             None,
+            #[cfg(feature = "sapling")]
             None,
+            #[cfg(feature = "orchard")]
             None,
         )
     }
@@ -443,5 +454,65 @@ mod tests {
             OutPoint::fake()
         )])))));
         assert!(!is_coinbase(&transaction(None)));
+    }
+
+    /// A version 7 transaction with the given transparent bundle, coinbase or not.
+    #[cfg(zcash_unstable = "nu8")]
+    fn v7_transaction(
+        transparent_bundle: Option<Bundle<Authorized, Zatoshis>>,
+        coinbase: bool,
+    ) -> TransactionData<crate::transaction::Authorized> {
+        let coinbase_bundle = coinbase.then(|| {
+            crate::transaction::zip248::CoinbaseBundle::from_parts(
+                BlockHeight::from_u32(100),
+                Zatoshis::const_from_u64(1_000),
+                Zatoshis::ZERO,
+                vec![],
+                vec![],
+                None,
+            )
+            .unwrap()
+        });
+
+        TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            NO_LOCK_TIME,
+            BlockHeight::from_u32(100),
+            crate::transaction::zip248::ValuePoolDeltas::empty(),
+            transparent_bundle,
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            coinbase_bundle,
+        )
+    }
+
+    /// A v7 transaction is a coinbase transaction exactly when it has a coinbase
+    /// bundle, whether or not it has a transparent bundle.
+    #[test]
+    #[cfg(zcash_unstable = "nu8")]
+    fn v7_coinbase_is_identified_by_its_coinbase_bundle() {
+        assert!(is_coinbase(&v7_transaction(None, true)));
+        assert!(is_coinbase(&v7_transaction(
+            Some(bundle(vec![input(OutPoint::fake())])),
+            true
+        )));
+    }
+
+    /// A v7 non-coinbase transaction is not a coinbase transaction even when it has
+    /// the legacy null-prevout input.
+    #[test]
+    #[cfg(zcash_unstable = "nu8")]
+    fn v7_non_coinbase_ignores_the_null_prevout_rule() {
+        assert!(!is_coinbase(&v7_transaction(None, false)));
+        assert!(!is_coinbase(&v7_transaction(
+            Some(bundle(vec![input(OutPoint::NULL)])),
+            false
+        )));
     }
 }

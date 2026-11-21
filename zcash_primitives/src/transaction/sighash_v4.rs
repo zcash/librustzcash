@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
+#[cfg(feature = "sapling")]
 use ff::PrimeField;
 
+#[cfg(feature = "sapling")]
 use ::sapling::bundle::{GrothProofBytes, OutputDescription, SpendDescription};
 use ::transparent::{
     bundle::{self as transparent, TxIn, TxOut},
@@ -9,10 +11,11 @@ use ::transparent::{
 };
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
+#[cfg(feature = "sapling")]
+use super::components::sapling as sapling_serialization;
 use super::{
     Authorization, TransactionData, TransparentDigests, Zip143Digests,
     components::{
-        sapling as sapling_serialization,
         sprout::JsDescription,
         transparent::{write_outpoint, write_script, write_txout},
     },
@@ -24,7 +27,9 @@ const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSequencHash";
 const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
+#[cfg(feature = "sapling")]
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
+#[cfg(feature = "sapling")]
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 
 macro_rules! update_hash {
@@ -102,6 +107,7 @@ fn joinsplits_hash(
         .hash(&data)
 }
 
+#[cfg(feature = "sapling")]
 fn sapling_spends_hash<
     A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
 >(
@@ -121,6 +127,7 @@ fn sapling_spends_hash<
         .hash(&data)
 }
 
+#[cfg(feature = "sapling")]
 fn sapling_outputs_hash(outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(outputs.len() * 948);
     for s_out in outputs {
@@ -137,6 +144,7 @@ fn sapling_outputs_hash(outputs: &[OutputDescription<GrothProofBytes>]) -> Blake
 ///
 /// [ZIP 143]: https://zips.z.cash/zip-0143
 /// [ZIP 243]: https://zips.z.cash/zip-0243
+#[cfg(feature = "sapling")]
 pub(crate) fn zip143_digests<
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
@@ -144,12 +152,10 @@ pub(crate) fn zip143_digests<
     tx: &TransactionData<A>,
 ) -> Zip143Digests<Blake2bHash> {
     let vin = tx
-        .transparent_bundle
-        .as_ref()
+        .transparent_bundle()
         .map_or(&[][..], |b| b.vin.as_slice());
     let vout = tx
-        .transparent_bundle
-        .as_ref()
+        .transparent_bundle()
         .map_or(&[][..], |b| b.vout.as_slice());
 
     Zip143Digests {
@@ -159,20 +165,44 @@ pub(crate) fn zip143_digests<
             outputs_digest: outputs_hash(vout),
         },
         joinsplits: tx
-            .sprout_bundle
-            .as_ref()
+            .sprout_bundle()
             .filter(|b| !b.joinsplits.is_empty())
             .map(|b| joinsplits_hash(tx.consensus_branch_id, &b.joinsplits, &b.joinsplit_pubkey)),
         sapling_spends: tx
-            .sapling_bundle
-            .as_ref()
+            .sapling_bundle()
             .filter(|b| !b.shielded_spends().is_empty())
             .map(|b| sapling_spends_hash(b.shielded_spends())),
         sapling_outputs: tx
-            .sapling_bundle
-            .as_ref()
+            .sapling_bundle()
             .filter(|b| !b.shielded_outputs().is_empty())
             .map(|b| sapling_outputs_hash(b.shielded_outputs())),
+    }
+}
+
+/// Computes ZIP 143 digests without constructing Sapling domain values.
+#[cfg(not(feature = "sapling"))]
+pub(crate) fn zip143_digests<A: Authorization>(
+    tx: &TransactionData<A>,
+) -> Zip143Digests<Blake2bHash> {
+    let vin = tx
+        .transparent_bundle()
+        .map_or(&[][..], |b| b.vin.as_slice());
+    let vout = tx
+        .transparent_bundle()
+        .map_or(&[][..], |b| b.vout.as_slice());
+
+    Zip143Digests {
+        transparent: TransparentDigests {
+            prevouts_digest: prevout_hash(vin),
+            sequence_digest: sequence_hash(vin),
+            outputs_digest: outputs_hash(vout),
+        },
+        joinsplits: tx
+            .sprout_bundle()
+            .filter(|b| !b.joinsplits.is_empty())
+            .map(|b| joinsplits_hash(tx.consensus_branch_id, &b.joinsplits, &b.joinsplit_pubkey)),
+        sapling_spends: None,
+        sapling_outputs: None,
     }
 }
 
@@ -221,7 +251,7 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
         {
             h.update(digests.transparent.outputs_digest.as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match (tx.transparent_bundle.as_ref(), signable_input) {
+            match (tx.transparent_bundle(), signable_input) {
                 (Some(b), SignableInput::Transparent(input)) if input.index() < &b.vout.len() => {
                     h.update(single_output_hash(&b.vout[*input.index()]).as_bytes())
                 }
@@ -255,14 +285,21 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
         h.update(&tx.lock_time.to_le_bytes());
         h.update(&u32::from(tx.expiry_height).to_le_bytes());
         if tx.version.has_sapling() {
+            #[cfg(feature = "sapling")]
             h.update(&tx.sapling_value_balance().to_i64_le_bytes());
+            #[cfg(not(feature = "sapling"))]
+            h.update(&0i64.to_le_bytes());
         }
         h.update(&u32::from(hash_type).to_le_bytes());
 
         match signable_input {
             SignableInput::Shielded => (),
+            #[cfg(zcash_unstable = "nu8")]
+            // A v4 transaction is never v7, so a v7 context signs as a shielded input
+            // here; its transparent variant is unreachable through this path.
+            SignableInput::V7(_) => (),
             SignableInput::Transparent(input) => {
-                if let Some(bundle) = tx.transparent_bundle.as_ref() {
+                if let Some(bundle) = tx.transparent_bundle() {
                     let mut data = vec![];
                     write_outpoint(&mut data, bundle.vin[*input.index()].prevout()).unwrap();
                     write_script(&mut data, input.script_code()).unwrap();
