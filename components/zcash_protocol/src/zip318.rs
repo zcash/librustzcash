@@ -13,9 +13,13 @@
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
-use core::num::NonZeroU32;
+use core::{num::NonZeroU32, ops::ControlFlow, time::Duration};
 
-use crate::consensus::{BlockHeight, NU7_POW_TARGET_SPACING_RATIO, NetworkUpgrade, Parameters};
+use crate::consensus::{
+    BlockHeight, NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_POW_TARGET_SPACING,
+    POST_NU7_POW_TARGET_SPACING, POW_TARGET_SPACING_CHANGES, Parameters, PowTargetSpacingChange,
+    pow_target_spacing_schedule, sum_of_spacings,
+};
 use crate::value::{COIN, Zatoshis};
 
 /// The base of the denomination scale: every denomination is a multiple of a power of this radix.
@@ -211,116 +215,311 @@ fn rolling_expiry(
     BlockHeight::from_u32(u32::try_from(expiry).unwrap_or(u32::MAX))
 }
 
+/// The target spacing of a [ZIP 318] reference block: 75 seconds, the target spacing from Blossom
+/// activation until NU7 activation.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const REFERENCE_BLOCK_SPACING: Duration = POST_BLOSSOM_POW_TARGET_SPACING;
+
+/// [`REFERENCE_BLOCK_SPACING`] in whole seconds, the unit of a [`BlockSpacing`]'s time coordinate.
+const REFERENCE_BLOCK_SECS: u64 = REFERENCE_BLOCK_SPACING.as_secs();
+
+/// Returns the number of blocks at the target spacing `spacing` that one reference block spans, or
+/// `None` unless `spacing` is a whole number of seconds that divides [`REFERENCE_BLOCK_SPACING`].
+const fn blocks_per_reference_block_at(spacing: Duration) -> Option<NonZeroU32> {
+    let secs = spacing.as_secs();
+    if spacing.subsec_nanos() != 0 || secs == 0 || !REFERENCE_BLOCK_SECS.is_multiple_of(secs) {
+        return None;
+    }
+    let ratio = REFERENCE_BLOCK_SECS / secs;
+    if ratio > u32::MAX as u64 {
+        return None;
+    }
+    NonZeroU32::new(ratio as u32)
+}
+
+/// Returns whether every spacing in `changes` spans a whole number of blocks per reference block.
+const fn spacings_divide_the_reference_spacing(changes: &[PowTargetSpacingChange]) -> bool {
+    let mut i = 0;
+    while i < changes.len() {
+        if blocks_per_reference_block_at(changes[i].spacing).is_none() {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const _: () = assert!(
+    spacings_divide_the_reference_spacing(&POW_TARGET_SPACING_CHANGES),
+    "every consensus target spacing must divide the ZIP 318 reference block spacing"
+);
+
+/// The number of blocks one reference block spans at the reference spacing.
+const ONE_BLOCK_PER_REFERENCE_BLOCK: NonZeroU32 = NonZeroU32::MIN;
+
+/// The number of blocks one reference block spans from NU7 activation.
+const NU7_BLOCKS_PER_REFERENCE_BLOCK: NonZeroU32 =
+    match blocks_per_reference_block_at(POST_NU7_POW_TARGET_SPACING) {
+        Some(ratio) => ratio,
+        None => panic!("the NU7 target spacing divides the reference block spacing"),
+    };
+
+const _: () = assert!(
+    NU7_BLOCKS_PER_REFERENCE_BLOCK.get() == NU7_POW_TARGET_SPACING_RATIO,
+    "the NU7 spacing ratio relates the reference and post-NU7 target spacings"
+);
+
+/// The largest number of segments a [`BlockSpacing`] holds: one per change of the consensus
+/// target spacing.
+const MAX_SPACING_SEGMENTS: usize = POW_TARGET_SPACING_CHANGES.len();
+
+/// A run of heights, from `start` until the next segment, over which one reference block spans
+/// `blocks_per_reference_block` blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SpacingSegment {
+    start: BlockHeight,
+    blocks_per_reference_block: NonZeroU32,
+}
+
+impl SpacingSegment {
+    /// The target spacing of each block in this segment, in seconds.
+    fn block_secs(&self) -> u64 {
+        REFERENCE_BLOCK_SECS / u64::from(self.blocks_per_reference_block.get())
+    }
+}
+
+/// The maximal run of heights containing a given height over which the target spacing is
+/// constant.
+struct SpacingRun {
+    /// The first height of the run.
+    start: u64,
+    /// The first height after the run, or `None` if the run extends past every height.
+    end: Option<u64>,
+    /// The number of blocks one reference block spans in the run.
+    blocks_per_reference_block: NonZeroU32,
+}
+
 /// The block spacing of a chain, for converting [ZIP 318] durations into block heights.
 ///
-/// ZIP 318 states each duration as a number of REFERENCE BLOCKS: blocks at the 75-second target
-/// spacing. From NU7 activation the target spacing is 25 seconds, so the same duration spans
-/// [`NU7_POW_TARGET_SPACING_RATIO`] times as many blocks. A duration that starts before activation
-/// and ends after it keeps its exact length: its part before activation counts one block per
-/// reference block, and its part after activation counts the ratio.
+/// ZIP 318 states each duration as a number of REFERENCE BLOCKS: blocks at the
+/// [`REFERENCE_BLOCK_SPACING`] of 75 seconds. A `BlockSpacing` maps heights to times
+/// piecewise-linearly, with one segment per change of the target block spacing. Within a segment a
+/// reference block spans [`blocks_per_reference_block`](Self::blocks_per_reference_block) blocks,
+/// and a duration that crosses a change keeps its exact length, each part counting the blocks of
+/// its own segment.
 ///
+/// Every height a `BlockSpacing` takes or returns is a TARGET height: the first height at which a
+/// transaction can be mined. [ZIP 208] and [ZIP 218] give the block at height `h` the target
+/// spacing [`pow_target_spacing`] at `h`, so the time from target height `h` to target height
+/// `h + 1` is the time to mine block `h`, the target spacing at `h`. The time from target height
+/// `from` to target height `to` is therefore
+/// [`target_time_between`]`(from - 1, to - 1)`, the time to mine the blocks `from..to`, at every
+/// height from Blossom activation on. Every height before Blossom activation is treated as having
+/// the reference spacing instead; ZIP 318 never measures a duration across those heights, and
+/// treating them so keeps every reference block a whole number of blocks.
+///
+/// [`pow_target_spacing`]: crate::consensus::pow_target_spacing
+/// [`target_time_between`]: crate::consensus::target_time_between
+/// [ZIP 208]: https://zips.z.cash/zip-0208
+/// [ZIP 218]: https://zips.z.cash/zip-0218
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockSpacing {
-    nu7_activation: Option<BlockHeight>,
+    /// The segments in order of height, as a prefix of `Some` entries. Their starts strictly
+    /// increase, and each segment's spacing differs from the spacing before it (the reference
+    /// spacing, for the first), so that equal mappings have equal representations.
+    segments: [Option<SpacingSegment>; MAX_SPACING_SEGMENTS],
 }
 
 impl BlockSpacing {
-    /// The spacing of a chain on which NU7 does not activate: one block per reference block at
-    /// every height.
+    /// The spacing of a chain on which the target spacing never changes from the reference spacing:
+    /// one block per reference block at every height.
     pub const UNIFORM: Self = Self {
-        nu7_activation: None,
+        segments: [None; MAX_SPACING_SEGMENTS],
     };
 
-    /// The spacing of the chain that `params` describe.
+    /// The spacing of the chain that `params` describe, following every change of the target
+    /// spacing that activates on it.
     pub fn for_network<P: Parameters>(params: &P) -> Self {
-        Self {
-            nu7_activation: params.activation_height(NetworkUpgrade::Nu7),
-        }
+        Self::from_schedule(pow_target_spacing_schedule(
+            params,
+            &POW_TARGET_SPACING_CHANGES,
+        ))
+        .expect(
+            "the consensus schedule has `MAX_SPACING_SEGMENTS` changes, each dividing the \
+             reference spacing",
+        )
     }
 
-    /// The spacing of a chain on which NU7 activates at `nu7_activation`.
+    /// The spacing of a chain on which NU7 activates at `nu7_activation` and the target spacing
+    /// changes nowhere else.
     pub const fn with_nu7_activation(nu7_activation: BlockHeight) -> Self {
-        Self {
-            nu7_activation: Some(nu7_activation),
+        let mut segments = [None; MAX_SPACING_SEGMENTS];
+        segments[0] = Some(SpacingSegment {
+            start: nu7_activation,
+            blocks_per_reference_block: NU7_BLOCKS_PER_REFERENCE_BLOCK,
+        });
+        Self { segments }
+    }
+
+    /// The spacing of the chain `params` describe under the spacing changes `changes` in place of
+    /// the consensus ones, or `None` if it does not fit in a `BlockSpacing`.
+    #[cfg(all(test, feature = "local-consensus"))]
+    fn with_changes<P: Parameters>(params: &P, changes: &[PowTargetSpacingChange]) -> Option<Self> {
+        Self::from_schedule(pow_target_spacing_schedule(params, changes))
+    }
+
+    /// Builds the spacing whose segments start at the given heights with the given target
+    /// spacings, in order of non-decreasing height. Returns `None` if a spacing does not divide
+    /// [`REFERENCE_BLOCK_SPACING`], or if more than [`MAX_SPACING_SEGMENTS`] segments remain once
+    /// changes that leave the spacing unchanged, or are superseded at the same height, are removed.
+    fn from_schedule(schedule: impl IntoIterator<Item = (BlockHeight, Duration)>) -> Option<Self> {
+        let mut segments: [Option<SpacingSegment>; MAX_SPACING_SEGMENTS] =
+            [None; MAX_SPACING_SEGMENTS];
+        let mut len: usize = 0;
+        for (start, spacing) in schedule {
+            let blocks_per_reference_block = blocks_per_reference_block_at(spacing)?;
+            // A change at the same height as the previous one supersedes it.
+            if let Some(last) = len.checked_sub(1)
+                && segments[last].is_some_and(|segment| segment.start == start)
+            {
+                segments[last] = None;
+                len = last;
+            }
+            let prior = len
+                .checked_sub(1)
+                .and_then(|last| segments[last])
+                .map_or(ONE_BLOCK_PER_REFERENCE_BLOCK, |segment| {
+                    segment.blocks_per_reference_block
+                });
+            if blocks_per_reference_block != prior {
+                *segments.get_mut(len)? = Some(SpacingSegment {
+                    start,
+                    blocks_per_reference_block,
+                });
+                len += 1;
+            }
+        }
+        Some(Self { segments })
+    }
+
+    /// The segments of this spacing, in order of height.
+    fn segments(&self) -> impl Iterator<Item = SpacingSegment> + '_ {
+        self.segments.iter().map_while(|segment| *segment)
+    }
+
+    /// The run of heights containing `height` over which the spacing is constant.
+    fn run_containing(&self, height: u64) -> SpacingRun {
+        let current = self
+            .segments()
+            .take_while(|segment| u64::from(segment.start) <= height)
+            .last();
+        SpacingRun {
+            start: current.map_or(0, |segment| u64::from(segment.start)),
+            end: self
+                .segments()
+                .map(|segment| u64::from(segment.start))
+                .find(|start| *start > height),
+            blocks_per_reference_block: current.map_or(ONE_BLOCK_PER_REFERENCE_BLOCK, |segment| {
+                segment.blocks_per_reference_block
+            }),
         }
     }
 
-    /// The NU7 activation height of this chain, if NU7 activates on it.
-    pub fn nu7_activation(&self) -> Option<BlockHeight> {
-        self.nu7_activation
-    }
-
-    /// The number of blocks that one reference block spans at `height`: 1 before NU7 activation,
-    /// and [`NU7_POW_TARGET_SPACING_RATIO`] from activation.
+    /// The number of blocks that one reference block spans at `height`: the reference spacing
+    /// divided by the target spacing there. On a chain where NU7 is the only change of the target
+    /// spacing after Blossom, this is 1 before NU7 activation and [`NU7_POW_TARGET_SPACING_RATIO`]
+    /// from activation.
     pub fn blocks_per_reference_block(&self, height: BlockHeight) -> u32 {
-        match self.nu7_activation {
-            Some(activation) if height >= activation => NU7_POW_TARGET_SPACING_RATIO,
-            _ => 1,
-        }
+        self.run_containing(u64::from(height))
+            .blocks_per_reference_block
+            .get()
     }
 
-    /// Returns the height that is `reference_blocks` reference blocks after `from`. Saturates at
-    /// `u32::MAX`.
+    /// Returns the least height whose time after `from` is at least `reference_blocks` reference
+    /// blocks. Saturates at `u32::MAX`.
+    ///
+    /// The result is exactly that long after `from` unless the duration ends in a segment whose
+    /// target spacing does not divide that of every earlier segment it crosses, in which case it
+    /// rounds up to the next height. Successive advances therefore compose,
+    /// `advance(advance(h, a), b) == advance(h, a + b)`, on every chain on which each target
+    /// spacing divides every earlier one, as the consensus spacings do.
     pub fn advance(&self, from: BlockHeight, reference_blocks: u32) -> BlockHeight {
-        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        self.height_at(self.time_of(from) + u64::from(reference_blocks) * ratio)
+        self.height_at(self.time_of(from) + u64::from(reference_blocks) * REFERENCE_BLOCK_SECS)
     }
 
-    /// Returns the height that is as long after `height` as `to` is after `from`, or `height` when
-    /// `to` is not after `from`. Saturates at `u32::MAX`.
+    /// Returns the least height whose time after `height` is at least the time from `from` to
+    /// `to`, or `height` when `to` is not after `from`. Saturates at `u32::MAX`.
+    ///
+    /// As with [`advance`](Self::advance), the result rounds up to the next height when no
+    /// height is exactly that long after `height`, which can happen only on a chain on which some
+    /// target spacing does not divide an earlier one.
     pub fn shift(&self, height: BlockHeight, from: BlockHeight, to: BlockHeight) -> BlockHeight {
         let elapsed = self.time_of(to).saturating_sub(self.time_of(from));
         self.height_at(self.time_of(height) + elapsed)
     }
 
-    /// Returns whether `to` is more than `reference_blocks` reference blocks after `from`.
+    /// Returns whether the time from `from` to `to` is more than `reference_blocks` reference
+    /// blocks.
+    ///
+    /// `exceeds(from, advance(from, d), d)` is `false` whenever [`advance`](Self::advance) lands
+    /// exactly, which it does on every chain on which each target spacing divides every earlier
+    /// one; where it rounds up, the advanced height lies strictly more than `d` reference blocks
+    /// after `from`.
     pub fn exceeds(&self, from: BlockHeight, to: BlockHeight, reference_blocks: u32) -> bool {
-        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        self.time_of(to).saturating_sub(self.time_of(from)) > u64::from(reference_blocks) * ratio
+        self.time_of(to).saturating_sub(self.time_of(from))
+            > u64::from(reference_blocks) * REFERENCE_BLOCK_SECS
     }
 
-    /// The NU7 activation height as a `u64`, or one past `u32::MAX` when NU7 does not activate,
-    /// so that every height is below it.
-    fn activation(&self) -> u64 {
-        self.nu7_activation
-            .map_or(u64::from(u32::MAX) + 1, |h| u64::from(u32::from(h)))
-    }
-
-    /// The time at which `height` is reached, in units of the post-NU7 target spacing, measured
-    /// from the genesis block. Each block before activation adds the spacing ratio, and each block
-    /// from activation adds one.
+    /// The time at which target height `height` is reached, in seconds from the genesis block:
+    /// the sum of the target spacings of the blocks at the heights below `height`.
     fn time_of(&self, height: BlockHeight) -> u64 {
-        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        let activation = self.activation();
-        let h = u64::from(u32::from(height));
-        if h <= activation {
-            h * ratio
-        } else {
-            activation * ratio + (h - activation)
-        }
+        sum_of_spacings(
+            REFERENCE_BLOCK_SPACING,
+            self.segments()
+                .map(|segment| (segment.start, Duration::from_secs(segment.block_secs()))),
+            0,
+            u64::from(height),
+        )
+        .as_secs()
     }
 
-    /// The least height reached at or after `time`. Saturates at `u32::MAX`.
+    /// The least height reached at or after `time`, in seconds from the genesis block. Saturates
+    /// at `u32::MAX`.
     fn height_at(&self, time: u64) -> BlockHeight {
-        let ratio = u64::from(NU7_POW_TARGET_SPACING_RATIO);
-        let activation = self.activation();
-        let h = if time <= activation * ratio {
-            time.div_ceil(ratio)
-        } else {
-            activation + (time - activation * ratio)
-        };
+        // The run in which `time` is reached: its first height, the time of that height, and the
+        // spacing of its blocks in seconds.
+        let (ControlFlow::Break((run_start, run_time, block_secs))
+        | ControlFlow::Continue((run_start, run_time, block_secs))) = self.segments().try_fold(
+            (0u64, 0u64, REFERENCE_BLOCK_SECS),
+            |(run_start, run_time, block_secs), segment| {
+                let start = u64::from(segment.start);
+                let end_time = run_time + start.saturating_sub(run_start) * block_secs;
+                if time <= end_time {
+                    ControlFlow::Break((run_start, run_time, block_secs))
+                } else {
+                    ControlFlow::Continue((start, end_time, segment.block_secs()))
+                }
+            },
+        );
+        let h = run_start + time.saturating_sub(run_time).div_ceil(block_secs);
         BlockHeight::from_u32(u32::try_from(h).unwrap_or(u32::MAX))
     }
 }
 
 /// The boundary heights of an [`AnchorBucketInterval`] on a chain with a given [`BlockSpacing`].
 ///
-/// The interval is a number of reference blocks. Before NU7 activation a height is a boundary when
-/// it is a multiple of the interval. From activation it is a boundary when it is a multiple of the
-/// interval times [`NU7_POW_TARGET_SPACING_RATIO`], which keeps the boundaries the same time apart.
-/// Every boundary from activation is also a multiple of the interval, so a wallet that retains the
-/// checkpoint at every multiple of the interval retains every boundary.
+/// The interval is a number of reference blocks. A height is a boundary when it is a multiple of
+/// the interval times the [`BlockSpacing::blocks_per_reference_block`] at that height, which keeps
+/// the boundaries within each segment of the spacing the same time apart. Every boundary is
+/// therefore also a multiple of the interval, so a wallet that retains the checkpoint at every
+/// multiple of the interval retains every boundary.
+///
+/// On a chain where NU7 is the only change of the target spacing after Blossom, a height before
+/// NU7 activation is a boundary when it is a multiple of the interval, and a height from
+/// activation is a boundary when it is a multiple of the interval times
+/// [`NU7_POW_TARGET_SPACING_RATIO`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AnchorGrid {
     interval: AnchorBucketInterval,
@@ -343,57 +542,47 @@ impl AnchorGrid {
         self.spacing
     }
 
-    /// The distance in blocks between boundaries at heights from `height` onward, while the
-    /// spacing does not change.
-    fn step_at(&self, height: u64) -> u64 {
-        let ratio = if height >= self.spacing.activation() {
-            NU7_POW_TARGET_SPACING_RATIO
-        } else {
-            1
-        };
-        u64::from(self.interval.block_count().get()) * u64::from(ratio)
+    /// The distance in blocks between successive boundaries within `run`.
+    fn step_in(&self, run: &SpacingRun) -> u64 {
+        u64::from(self.interval.block_count().get())
+            * u64::from(run.blocks_per_reference_block.get())
     }
 
     /// Returns whether `height` is a boundary of this grid, i.e. whether the checkpoint at
     /// `height` is retained as a durable anchor.
     pub fn is_boundary(&self, height: BlockHeight) -> bool {
-        let h = u64::from(u32::from(height));
-        h.is_multiple_of(self.step_at(h))
+        let h = u64::from(height);
+        h.is_multiple_of(self.step_in(&self.spacing.run_containing(h)))
     }
 
     /// Returns the greatest boundary height that does not exceed `height`.
     pub fn boundary_at_or_below(&self, height: BlockHeight) -> BlockHeight {
-        let h = u64::from(u32::from(height));
-        let activation = self.spacing.activation();
-        let below = if h >= activation {
-            let candidate = h - h % self.step_at(h);
-            if candidate >= activation {
-                candidate
-            } else {
-                // No boundary lies in `[activation, h]`. Activation is positive here, because 0
-                // is a boundary of every step, so the greatest boundary below activation exists.
-                let last_before = activation - 1;
-                last_before - last_before % self.step_at(last_before)
+        let mut h = u64::from(height);
+        let below = loop {
+            let run = self.spacing.run_containing(h);
+            let candidate = h - h % self.step_in(&run);
+            if candidate >= run.start {
+                break candidate;
             }
-        } else {
-            h - h % self.step_at(h)
+            // No boundary lies in `[run.start, h]`. The run's start is positive here, because 0
+            // is a boundary of every step, so an earlier run exists.
+            h = run.start - 1;
         };
         BlockHeight::from_u32(u32::try_from(below).expect("at most `height`"))
     }
 
     /// Returns the least boundary height that is not below `height`. Saturates at `u32::MAX`.
     pub fn boundary_at_or_above(&self, height: BlockHeight) -> BlockHeight {
-        let h = u64::from(u32::from(height));
-        let activation = self.spacing.activation();
-        let round_up = |h: u64, step: u64| h.div_ceil(step) * step;
-        let above = if h >= activation {
-            round_up(h, self.step_at(h))
-        } else {
-            let candidate = round_up(h, self.step_at(h));
-            if candidate < activation {
-                candidate
-            } else {
-                round_up(activation, self.step_at(activation))
+        let mut h = u64::from(height);
+        let above = loop {
+            let run = self.spacing.run_containing(h);
+            let step = self.step_in(&run);
+            let candidate = h.div_ceil(step) * step;
+            match run.end {
+                // No boundary lies in `[h, run.end)`, so the least one is at or after the next
+                // run's start.
+                Some(end) if candidate >= end => h = end,
+                _ => break candidate,
             }
         };
         BlockHeight::from_u32(u32::try_from(above).unwrap_or(u32::MAX))
@@ -1603,6 +1792,375 @@ mod tests {
                         decided = Some(settled);
                     }
                 }
+            }
+        }
+    }
+
+    /// Spacing on chains that [`LocalNetwork`] describes, including chains with a further change
+    /// of the target spacing after NU7.
+    #[cfg(feature = "local-consensus")]
+    mod local_network_spacing {
+        use core::{num::NonZeroU32, time::Duration};
+
+        use proptest::prelude::*;
+
+        use crate::{
+            consensus::{
+                BlockHeight, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING,
+                POST_NU7_POW_TARGET_SPACING, PowTargetSpacingChange, pow_target_spacing,
+                pow_target_spacing_with, target_time_between, target_time_between_with,
+            },
+            local_consensus::LocalNetwork,
+        };
+
+        use super::super::{
+            AnchorBucketInterval, AnchorGrid, BlockSpacing, EXPIRY_MODULUS,
+            REFERENCE_BLOCK_SPACING, expiry_height,
+        };
+
+        /// The upgrade standing in for a hypothetical upgrade after NU7 that changes the target
+        /// spacing again. NU6 has no spacing change of its own; it is used here only because no
+        /// upgrade after NU7 exists to key the hypothetical change to, and the schedule takes
+        /// effect in list order, not in upgrade order.
+        const LATER_UPGRADE: NetworkUpgrade = NetworkUpgrade::Nu6;
+        /// The target spacing from the hypothetical later upgrade: one fifth of the post-NU7
+        /// spacing, so that one reference block spans 15 blocks.
+        const LATER_SPACING: Duration = Duration::from_secs(5);
+        /// The number of blocks one reference block spans at [`LATER_SPACING`].
+        const LATER_BLOCKS_PER_REFERENCE_BLOCK: u32 = 15;
+        /// The number of blocks one reference block spans at the post-NU7 spacing.
+        const NU7_BLOCKS_PER_REFERENCE_BLOCK: u32 = 3;
+        /// A hypothetical later target spacing that does not divide the post-NU7 spacing, so that
+        /// a duration crossing into it need not land exactly on a height.
+        const UNEVEN_LATER_SPACING: Duration = Duration::from_secs(15);
+        /// The number of blocks one reference block spans at [`UNEVEN_LATER_SPACING`].
+        const UNEVEN_BLOCKS_PER_REFERENCE_BLOCK: u32 = 5;
+        /// The NU7 spacing change followed by the hypothetical later one.
+        const CHANGES: [PowTargetSpacingChange; 2] = [
+            PowTargetSpacingChange {
+                upgrade: NetworkUpgrade::Nu7,
+                spacing: POST_NU7_POW_TARGET_SPACING,
+            },
+            PowTargetSpacingChange {
+                upgrade: LATER_UPGRADE,
+                spacing: LATER_SPACING,
+            },
+        ];
+
+        /// The consensus spacing changes followed by the hypothetical later one.
+        const CHANGES_FROM_BLOSSOM: [PowTargetSpacingChange; 3] = [
+            PowTargetSpacingChange {
+                upgrade: NetworkUpgrade::Blossom,
+                spacing: POST_BLOSSOM_POW_TARGET_SPACING,
+            },
+            CHANGES[0],
+            CHANGES[1],
+        ];
+
+        /// A local network on which only Blossom, NU7, and [`LATER_UPGRADE`] can activate.
+        fn network(blossom: Option<u32>, nu7: Option<u32>, later: Option<u32>) -> LocalNetwork {
+            LocalNetwork {
+                overwinter: None,
+                sapling: None,
+                blossom: blossom.map(BlockHeight::from_u32),
+                heartwood: None,
+                canopy: None,
+                nu5: None,
+                nu6: later.map(BlockHeight::from_u32),
+                nu6_1: None,
+                nu6_2: None,
+                nu6_3: None,
+                nu7: nu7.map(BlockHeight::from_u32),
+                #[cfg(zcash_unstable = "nutachyon")]
+                nu_tachyon: None,
+            }
+        }
+
+        /// The spacing under [`CHANGES`] of a chain on which NU7 activates at `nu7` and the later
+        /// upgrade at `later`.
+        fn two_changes(nu7: u32, later: u32) -> BlockSpacing {
+            BlockSpacing::with_changes(&network(None, Some(nu7), Some(later)), &CHANGES)
+                .expect("both spacings divide the reference spacing")
+        }
+
+        /// The number of blocks one reference block spans at `h` under [`CHANGES`], per the
+        /// specification: the later change takes effect once NU7 has also activated.
+        fn specified_ratio(nu7: u32, later: u32, h: u32) -> u32 {
+            if h >= nu7 && h >= later {
+                LATER_BLOCKS_PER_REFERENCE_BLOCK
+            } else if h >= nu7 {
+                NU7_BLOCKS_PER_REFERENCE_BLOCK
+            } else {
+                1
+            }
+        }
+
+        /// The least target height at least `d` reference blocks after target height `h`, found
+        /// by walking block by block: the step from target height `height` to `height + 1` is the
+        /// time to mine the block at `height`, the target spacing there, whose number of blocks
+        /// per reference block `ratio` gives.
+        fn walk(ratio: impl Fn(u32) -> u32, h: u32, d: u32) -> u32 {
+            let reference_secs = REFERENCE_BLOCK_SPACING.as_secs();
+            let target = u64::from(d) * reference_secs;
+            let mut elapsed = 0u64;
+            let mut height = h;
+            while elapsed < target {
+                elapsed += reference_secs / u64::from(ratio(height));
+                height += 1;
+            }
+            height
+        }
+
+        /// The height reached by advancing `d` reference blocks from `h` under [`CHANGES`].
+        fn specified_advance(nu7: u32, later: u32, h: u32, d: u32) -> u32 {
+            walk(|height| specified_ratio(nu7, later, height), h, d)
+        }
+
+        #[test]
+        fn the_later_spacing_is_one_fifteenth_of_a_reference_block() {
+            assert_eq!(
+                LATER_SPACING * LATER_BLOCKS_PER_REFERENCE_BLOCK,
+                REFERENCE_BLOCK_SPACING
+            );
+            assert_eq!(
+                POST_NU7_POW_TARGET_SPACING * NU7_BLOCKS_PER_REFERENCE_BLOCK,
+                REFERENCE_BLOCK_SPACING
+            );
+        }
+
+        #[test]
+        fn schedules_that_do_not_fit_are_rejected() {
+            let net = network(None, Some(10), Some(20));
+            // A spacing that does not divide the reference spacing.
+            let uneven = [PowTargetSpacingChange {
+                upgrade: NetworkUpgrade::Nu7,
+                spacing: Duration::from_secs(10),
+            }];
+            assert_eq!(BlockSpacing::with_changes(&net, &uneven), None);
+            // More distinct changes than a `BlockSpacing` holds.
+            let too_many = [
+                CHANGES[0],
+                CHANGES[1],
+                PowTargetSpacingChange {
+                    upgrade: NetworkUpgrade::Nu6_1,
+                    spacing: REFERENCE_BLOCK_SPACING,
+                },
+            ];
+            let net_with_third = LocalNetwork {
+                nu6_1: Some(BlockHeight::from_u32(30)),
+                ..net
+            };
+            assert_eq!(BlockSpacing::with_changes(&net_with_third, &too_many), None);
+            // Changes that leave the spacing unchanged take no room.
+            let redundant = [
+                PowTargetSpacingChange {
+                    upgrade: NetworkUpgrade::Blossom,
+                    spacing: POST_BLOSSOM_POW_TARGET_SPACING,
+                },
+                CHANGES[0],
+            ];
+            assert_eq!(
+                BlockSpacing::with_changes(&network(Some(5), Some(10), None), &redundant),
+                Some(BlockSpacing::with_nu7_activation(BlockHeight::from_u32(10)))
+            );
+        }
+
+        proptest! {
+            /// On a chain where NU7 is the only change of the target spacing after Blossom, the
+            /// spacing derived from the consensus schedule is the NU7-only spacing.
+            #[test]
+            fn for_network_matches_the_nu7_only_spacing(
+                blossom in proptest::option::of(0u32..1_000),
+                nu7 in proptest::option::of(0u32..1_000),
+            ) {
+                let expected = match (blossom, nu7) {
+                    // NU7 changes the spacing once Blossom has also activated.
+                    (Some(b), Some(n)) => {
+                        BlockSpacing::with_nu7_activation(BlockHeight::from_u32(b.max(n)))
+                    }
+                    _ => BlockSpacing::UNIFORM,
+                };
+                prop_assert_eq!(
+                    BlockSpacing::for_network(&network(blossom, nu7, None)),
+                    expected
+                );
+            }
+
+            #[test]
+            fn advance_walks_each_segment_at_its_own_spacing(
+                nu7 in 0u32..2_000,
+                later in 0u32..2_000,
+                h in 0u32..3_000,
+                d in 0u32..300,
+            ) {
+                let s = two_changes(nu7, later);
+                prop_assert_eq!(
+                    s.blocks_per_reference_block(BlockHeight::from_u32(h)),
+                    specified_ratio(nu7, later, h)
+                );
+                prop_assert_eq!(
+                    u32::from(s.advance(BlockHeight::from_u32(h), d)),
+                    specified_advance(nu7, later, h, d)
+                );
+            }
+
+            #[test]
+            fn successive_advances_compose_across_both_changes(
+                nu7 in 0u32..2_000,
+                later in 0u32..2_000,
+                h in 0u32..3_000,
+                d1 in 0u32..300,
+                d2 in 0u32..300,
+            ) {
+                let s = two_changes(nu7, later);
+                let h = BlockHeight::from_u32(h);
+                prop_assert_eq!(s.advance(s.advance(h, d1), d2), s.advance(h, d1 + d2));
+            }
+
+            #[test]
+            fn shift_and_exceeds_agree_with_advance_across_both_changes(
+                nu7 in 0u32..2_000,
+                later in 0u32..2_000,
+                from in 0u32..3_000,
+                h in 0u32..3_000,
+                d in 0u32..300,
+            ) {
+                let s = two_changes(nu7, later);
+                let (from, h) = (BlockHeight::from_u32(from), BlockHeight::from_u32(h));
+                let to = s.advance(from, d);
+                prop_assert_eq!(s.shift(from, from, to), to);
+                prop_assert_eq!(s.shift(h, from, to), s.advance(h, d));
+                prop_assert_eq!(s.shift(h, to, from), h);
+                prop_assert!(!s.exceeds(from, to, d));
+                prop_assert!(s.exceeds(from, to + 1, d));
+            }
+
+            #[test]
+            fn grid_boundaries_follow_the_spacing_of_each_segment(
+                nu7 in 0u32..2_000,
+                later in 0u32..2_000,
+                i in 1u32..20,
+                h in 0u32..3_000,
+            ) {
+                let grid = AnchorGrid::new(
+                    AnchorBucketInterval::custom(NonZeroU32::new(i).expect("nonzero")),
+                    two_changes(nu7, later),
+                );
+                let is = |h: u32| h.is_multiple_of(i * specified_ratio(nu7, later, h));
+                prop_assert_eq!(grid.is_boundary(BlockHeight::from_u32(h)), is(h));
+
+                let below = u32::from(grid.boundary_at_or_below(BlockHeight::from_u32(h)));
+                prop_assert!(below <= h && is(below));
+                prop_assert!((below + 1..=h).all(|x| !is(x)));
+
+                let above = u32::from(grid.boundary_at_or_above(BlockHeight::from_u32(h)));
+                prop_assert!(above >= h && is(above));
+                prop_assert!((h..above).all(|x| !is(x)));
+
+                let before = grid.boundary_before(BlockHeight::from_u32(h)).map(u32::from);
+                prop_assert_eq!(before, (0..h).rev().find(|x| is(*x)));
+                let after = u32::from(grid.boundary_after(BlockHeight::from_u32(h)));
+                prop_assert_eq!(Some(after), (h + 1..).find(|x| is(*x)));
+            }
+
+            /// The time from target height `from` to target height `to` is the consensus target
+            /// time to mine the blocks `from..to`, at every height from Blossom activation on,
+            /// with several spacing changes after Blossom.
+            #[test]
+            fn elapsed_time_is_the_target_time_between(
+                blossom in 0u32..1_000,
+                nu7 in proptest::option::of(0u32..2_000),
+                later in proptest::option::of(0u32..2_000),
+                from_offset in 0u32..2_000,
+                to in 0u32..3_000,
+            ) {
+                let net = network(Some(blossom), nu7, later);
+                let from = blossom + from_offset;
+                // The time to mine the blocks `from..to`, given the target spacing of one block
+                // and the target time between two blocks. That is
+                // `between(from - 1, to - 1)`; from target height 0, which has no block below it,
+                // it is the spacing of block 0 plus `between(0, to - 1)`.
+                let mining_time = |spacing_at: &dyn Fn(BlockHeight) -> Duration,
+                                   between: &dyn Fn(BlockHeight, BlockHeight) -> Duration| {
+                    if to <= from {
+                        0
+                    } else if from == 0 {
+                        let genesis = BlockHeight::from_u32(0);
+                        (spacing_at(genesis) + between(genesis, BlockHeight::from_u32(to - 1)))
+                            .as_secs()
+                    } else {
+                        between(BlockHeight::from_u32(from - 1), BlockHeight::from_u32(to - 1))
+                            .as_secs()
+                    }
+                };
+                let (from_height, to_height) =
+                    (BlockHeight::from_u32(from), BlockHeight::from_u32(to));
+
+                let s = BlockSpacing::with_changes(&net, &CHANGES_FROM_BLOSSOM)
+                    .expect("the changes after Blossom fit");
+                prop_assert_eq!(
+                    s.time_of(to_height).saturating_sub(s.time_of(from_height)),
+                    mining_time(
+                        &|h| pow_target_spacing_with(&CHANGES_FROM_BLOSSOM, &net, h),
+                        &|a, b| target_time_between_with(&CHANGES_FROM_BLOSSOM, &net, a, b),
+                    )
+                );
+
+                // The same holds for the consensus schedule itself.
+                let consensus = BlockSpacing::for_network(&net);
+                prop_assert_eq!(
+                    consensus.time_of(to_height).saturating_sub(consensus.time_of(from_height)),
+                    mining_time(
+                        &|h| pow_target_spacing(&net, h),
+                        &|a, b| target_time_between(&net, a, b),
+                    )
+                );
+            }
+
+            /// When a later spacing does not divide an earlier one, `advance` rounds up to the
+            /// least height at least the duration later.
+            #[test]
+            fn advance_rounds_up_where_a_later_spacing_does_not_divide(
+                nu7 in 0u32..2_000,
+                later in 0u32..2_000,
+                h in 0u32..3_000,
+                d in 0u32..300,
+            ) {
+                let changes = [
+                    CHANGES[0],
+                    PowTargetSpacingChange {
+                        upgrade: LATER_UPGRADE,
+                        spacing: UNEVEN_LATER_SPACING,
+                    },
+                ];
+                let s = BlockSpacing::with_changes(&network(None, Some(nu7), Some(later)), &changes)
+                    .expect("both spacings divide the reference spacing");
+                let ratio = |height: u32| {
+                    if height >= nu7 && height >= later {
+                        UNEVEN_BLOCKS_PER_REFERENCE_BLOCK
+                    } else if height >= nu7 {
+                        NU7_BLOCKS_PER_REFERENCE_BLOCK
+                    } else {
+                        1
+                    }
+                };
+                prop_assert_eq!(
+                    u32::from(s.advance(BlockHeight::from_u32(h), d)),
+                    walk(ratio, h, d)
+                );
+            }
+
+            #[test]
+            fn expiry_after_the_later_change_uses_its_scaled_modulus(
+                nu7 in 0u32..10_000_000,
+                later in 0u32..10_000_000,
+                offset in 0u32..10_000_000,
+            ) {
+                let s = two_changes(nu7, later);
+                let h = nu7.max(later) + offset;
+                let modulus = LATER_BLOCKS_PER_REFERENCE_BLOCK * EXPIRY_MODULUS;
+                let expiry = u32::from(expiry_height(&s, BlockHeight::from_u32(h)));
+                prop_assert_eq!(expiry, h - h % modulus + 2 * modulus);
             }
         }
     }

@@ -8,6 +8,9 @@ use super::{
     Parameters, TEST_NETWORK, pow_target_spacing, target_time_between,
 };
 
+#[cfg(feature = "local-consensus")]
+use super::{PowTargetSpacingChange, pow_target_spacing_with, target_time_between_with};
+
 /// A local network on which only Blossom and NU7 can activate, at the given heights.
 #[cfg(feature = "local-consensus")]
 fn spacing_test_network(
@@ -240,6 +243,80 @@ fn target_time_between_matches_the_sum_of_per_block_spacings() {
                         per_block_sum,
                         "from {from}, to {to}, network {network:?}"
                     );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "local-consensus")]
+fn a_further_spacing_change_extends_the_per_height_spacing() {
+    /// The upgrade standing in for a hypothetical later upgrade that changes the spacing again.
+    const LATER_UPGRADE: NetworkUpgrade = NetworkUpgrade::Nu6;
+    /// The target spacing from the hypothetical later upgrade.
+    const LATER_SPACING: Duration = Duration::from_secs(5);
+    /// The consensus spacing changes followed by the hypothetical later one.
+    const CHANGES: [PowTargetSpacingChange; 3] = [
+        PowTargetSpacingChange {
+            upgrade: NetworkUpgrade::Blossom,
+            spacing: POST_BLOSSOM_POW_TARGET_SPACING,
+        },
+        PowTargetSpacingChange {
+            upgrade: NetworkUpgrade::Nu7,
+            spacing: POST_NU7_POW_TARGET_SPACING,
+        },
+        PowTargetSpacingChange {
+            upgrade: LATER_UPGRADE,
+            spacing: LATER_SPACING,
+        },
+    ];
+    /// Candidate activation heights. Pairing every candidate with every other covers each upgrade
+    /// never activating, and each activating before, with, and after the others.
+    const ACTIVATIONS: [Option<BlockHeight>; 4] = [
+        None,
+        Some(BlockHeight(2)),
+        Some(BlockHeight(4)),
+        Some(BlockHeight(7)),
+    ];
+    /// Every range whose endpoints both lie below this height is checked; it exceeds every
+    /// candidate activation height.
+    const HEIGHT_LIMIT: u32 = 10;
+
+    for blossom in ACTIVATIONS {
+        for nu7 in ACTIVATIONS {
+            for later in ACTIVATIONS {
+                let mut network = spacing_test_network(blossom, nu7);
+                network.nu6 = later;
+                // A change is in effect once it and every earlier change have activated.
+                let specified_spacing = |height: BlockHeight| {
+                    let active = |upgrade| network.is_nu_active(upgrade, height);
+                    if !active(NetworkUpgrade::Blossom) {
+                        PRE_BLOSSOM_POW_TARGET_SPACING
+                    } else if !active(NetworkUpgrade::Nu7) {
+                        POST_BLOSSOM_POW_TARGET_SPACING
+                    } else if !active(LATER_UPGRADE) {
+                        POST_NU7_POW_TARGET_SPACING
+                    } else {
+                        LATER_SPACING
+                    }
+                };
+                for from in (0..HEIGHT_LIMIT).map(BlockHeight) {
+                    assert_eq!(
+                        pow_target_spacing_with(&CHANGES, &network, from),
+                        specified_spacing(from),
+                        "height {from}, network {network:?}"
+                    );
+                    for to in (0..HEIGHT_LIMIT).map(BlockHeight) {
+                        let per_block_sum = (u32::from(from) + 1..=u32::from(to))
+                            .map(|h| specified_spacing(BlockHeight(h)))
+                            .sum::<Duration>();
+                        assert_eq!(
+                            target_time_between_with(&CHANGES, &network, from, to),
+                            per_block_sum,
+                            "from {from}, to {to}, network {network:?}"
+                        );
+                    }
                 }
             }
         }

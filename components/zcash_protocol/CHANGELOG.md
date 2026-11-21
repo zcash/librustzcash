@@ -10,9 +10,25 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
+
 ### Changed
 - `zcash_protocol::TxId::from_hex` now returns
   `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
+- `zcash_protocol::zip318::BlockSpacing::for_network` now applies the NU7
+  spacing change from the first height at which both Blossom and NU7 are
+  active, as `zcash_protocol::consensus::pow_target_spacing` does. On a network
+  where NU7 activates and Blossom never does, it now returns
+  `BlockSpacing::UNIFORM`; where NU7 activates before Blossom, the change now
+  takes effect at Blossom activation. Results on networks where Blossom
+  activates at or before NU7 are unchanged.
+
+### Removed
+- `zcash_protocol::zip318::BlockSpacing::nu7_activation`. Use
+  `BlockSpacing::blocks_per_reference_block` to find the spacing at a height,
+  or `Parameters::activation_height(NetworkUpgrade::Nu7)` for the NU7
+  activation height.
 
 ## [0.11.0] - 2026-10-21
 
