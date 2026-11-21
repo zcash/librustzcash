@@ -774,8 +774,40 @@ mod parse {
     }
 
     /// Parses valid characters which may appear in parameter values.
+    ///
+    /// A `%` is only consumed when it begins a valid `pct-encoded` production
+    /// (`"%" HEXDIG HEXDIG`); a bare `%` or one not followed by two
+    /// hexadecimal digits ends the value, so that URIs that cannot be parsed
+    /// according to the grammar are rejected rather than silently decoded as
+    /// literal text (ZIP 321: "Purported ZIP 321 URIs that cannot be parsed
+    /// according to the above grammar MUST NOT be accepted").
     pub fn qchars(input: &str) -> IResult<&str, &str> {
-        alphanum_or("-._~!$'()*+,;:@%")(input)
+        let bytes = input.as_bytes();
+        let mut consumed = 0;
+        while consumed < bytes.len() {
+            if bytes[consumed] == b'%' {
+                // pct-encoded = "%" HEXDIG HEXDIG
+                if bytes.len() - consumed < 3
+                    || !bytes[consumed + 1].is_ascii_hexdigit()
+                    || !bytes[consumed + 2].is_ascii_hexdigit()
+                {
+                    break;
+                }
+                consumed += 3;
+            } else {
+                let c = input[consumed..]
+                    .chars()
+                    .next()
+                    .expect("input is non-empty");
+                if !(c.is_alphanum() || "-._~!$'()*+,;:@".contains(c)) {
+                    break;
+                }
+                consumed += c.len_utf8();
+            }
+        }
+        // All indices at which we stop are character boundaries: '%' is
+        // ASCII, and every other character is consumed whole.
+        Ok((&input[consumed..], &input[..consumed]))
     }
 
     /// Parses valid characters that may appear in parameter names.
@@ -1328,5 +1360,51 @@ mod tests {
             let serialized = parsed.to_uri();
             assert_eq!(serialized, uri)
         }
+    }
+}
+
+#[cfg(test)]
+mod pct_encoded_tests {
+    use super::TransactionRequest;
+
+    const TADDR: &str = "tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+
+    /// `qchar` only includes `%` as part of a `pct-encoded` production
+    /// (`"%" HEXDIG HEXDIG`), so a value containing a bare `%` or a `%` not
+    /// followed by two hexadecimal digits cannot be parsed according to the
+    /// grammar, and such URIs MUST NOT be accepted.
+    #[test]
+    fn bare_percent_is_rejected() {
+        for value in ["50%", "%", "a%2", "%zz", "a%2G", "%1", "abc%"] {
+            let uri = format!("zcash:{TADDR}?label={value}");
+            assert!(
+                TransactionRequest::from_uri(&uri).is_err(),
+                "value {value:?} must be rejected"
+            );
+        }
+    }
+
+    /// Valid `pct-encoded` sequences are unaffected.
+    #[test]
+    fn valid_pct_encoded_is_accepted() {
+        let uri = format!("zcash:{TADDR}?label=Thank%20you%21");
+        let request = TransactionRequest::from_uri(&uri).unwrap();
+        assert_eq!(
+            request
+                .payments()
+                .get(&0)
+                .unwrap()
+                .label()
+                .map(|s| s.as_str()),
+            Some("Thank you!")
+        );
+    }
+
+    /// A truncated `%` sequence makes the whole URI unparseable, rather than
+    /// being silently decoded to literal text.
+    #[test]
+    fn truncated_pct_encoded_is_rejected() {
+        let uri = format!("zcash:{TADDR}?label=50%25&message=100%");
+        assert!(TransactionRequest::from_uri(&uri).is_err());
     }
 }
