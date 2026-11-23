@@ -188,6 +188,11 @@ pub(crate) fn parse(input: &str, currency: Currency) -> Result<UtxoPaymentReques
 
 fn validate_address(address: &str, currency: Currency) -> Result<Network, Error> {
     if let Ok((hrp, _, _)) = bech32::segwit::decode(address) {
+        // BIP-173 defines an uppercase form so QR codes can use alphanumeric
+        // mode, and Bitcoin Core / BTCPay Server emit it. `segwit::decode`
+        // accepts it but returns the hrp with its case intact, so "BC1..."
+        // matched no arm below and every such QR code was rejected.
+        let hrp = hrp.to_lowercase();
         let network = match (currency, hrp.as_str()) {
             (Currency::Bitcoin, "bc") | (Currency::Litecoin, "ltc") => Network::Mainnet,
             (Currency::Bitcoin, "tb") | (Currency::Litecoin, "tltc") => Network::Testnet,
