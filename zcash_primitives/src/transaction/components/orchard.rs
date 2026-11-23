@@ -7,12 +7,12 @@ use nonempty::NonEmpty;
 
 use core::mem::size_of;
 use orchard::{
-    Action, Anchor, ValuePool,
+    Action, Anchor, EncodedAction, ValuePool,
     bundle::{Authorization, Authorized, BundleVersion, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     note_encryption::{ENC_CIPHERTEXT_SIZE, NoteBytesData},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
-    value::ValueCommitment,
+    value::{EncodedValueCommitment, ValueCommitment},
 };
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
@@ -64,6 +64,10 @@ pub const ACTION_SIZE: usize = VALUE_COMMITMENT_BYTE_SIZE
     + ENC_CIPHERTEXT_SIZE
     + OUT_CIPHERTEXT_SIZE;
 
+/// Four actions provide eight public points to the Pasta batch decoder; validating each
+/// group before reading the next also bounds work on malformed input.
+const ACTIONS_PER_POINT_BATCH: usize = 4;
+
 /// The size in bytes of an Orchard/Ironwood spend authorization signature, as encoded
 /// separately from the action description in the bundle's `vSpendAuthSigs` array.
 pub const SPEND_AUTH_SIG_SIZE: usize = 64;
@@ -100,12 +104,98 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
+// On malformed or truncated input, replay the already-read action bytes with the ordinary
+// decoder. This preserves errors from an earlier point or field before a later read failure.
+fn first_action_error(
+    actions: &[[u8; ACTION_SIZE]],
+    partial: &[u8],
+    read_error: io::Error,
+) -> io::Error {
+    for bytes in actions {
+        if let Err(error) = read_action_without_auth(bytes.as_slice()) {
+            return error;
+        }
+    }
+    match read_action_without_auth(partial) {
+        Err(error)
+            if error.kind() != io::ErrorKind::UnexpectedEof
+                || read_error.kind() == io::ErrorKind::UnexpectedEof =>
+        {
+            error
+        }
+        _ => read_error,
+    }
+}
+
+fn read_encoded_action(bytes: &[u8; ACTION_SIZE]) -> io::Result<EncodedAction<()>> {
+    let mut reader = bytes.as_slice();
+    let cv_net = EncodedValueCommitment::read(&mut reader)?;
+    let nf = read_nullifier(&mut reader)?;
+    let rk = read_verification_key(&mut reader)?;
+    let cmx = read_cmx(&mut reader)?;
+    let encrypted_note = read_note_ciphertext(&mut reader)?;
+    Ok(EncodedAction::from_parts(
+        cv_net,
+        nf,
+        rk,
+        cmx,
+        encrypted_note,
+        (),
+    ))
+}
+
+fn decode_action_chunk(bytes: &[[u8; ACTION_SIZE]]) -> io::Result<Vec<Action<()>>> {
+    let mut parts = Vec::with_capacity(bytes.len());
+    for action in bytes {
+        match read_encoded_action(action) {
+            Ok(part) => parts.push(part),
+            Err(error) => return Err(first_action_error(bytes, &[], error)),
+        }
+    }
+    Action::from_encoded_parts(parts).map_err(|error| {
+        first_action_error(
+            bytes,
+            &[],
+            io::Error::new(io::ErrorKind::InvalidData, error),
+        )
+    })
+}
+
+fn read_actions_without_auth<R: Read>(mut reader: R) -> io::Result<Vec<Action<()>>> {
+    let count: usize = CompactSize::read_t(&mut reader)?;
+    let mut pending = Vec::<[u8; ACTION_SIZE]>::with_capacity(count.min(ACTIONS_PER_POINT_BATCH));
+    let mut decoded = Vec::new();
+    for index in 0..count {
+        let mut action = [0; ACTION_SIZE];
+        let mut filled = 0;
+        while filled < ACTION_SIZE {
+            match reader.read(&mut action[filled..]) {
+                Ok(0) => {
+                    let error = io::Error::from(io::ErrorKind::UnexpectedEof);
+                    return Err(first_action_error(&pending, &action[..filled], error));
+                }
+                Ok(n) => filled += n,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => {
+                    return Err(first_action_error(&pending, &action[..filled], error));
+                }
+            }
+        }
+        pending.push(action);
+        if pending.len() == ACTIONS_PER_POINT_BATCH || index + 1 == count {
+            let chunk = decode_action_chunk(&pending)?;
+            decoded.extend(chunk);
+            pending.clear();
+        }
+    }
+    Ok(decoded)
+}
+
 fn read_bundle<R: Read>(
     mut reader: R,
     bundle_version: Option<BundleVersion>,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    #[allow(clippy::redundant_closure)]
-    let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
+    let actions_without_auth = read_actions_without_auth(&mut reader)?;
     if actions_without_auth.is_empty() {
         Ok(None)
     } else {
@@ -528,17 +618,95 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::{string::ToString, vec::Vec};
+
+    use corez::io::Read;
 
     use orchard::{bundle::testing::arb_action, note::NoteVersion, value::NoteValue};
     use proptest::prelude::*;
+    use zcash_encoding::{CompactSize, Vector};
 
     use super::{
-        ACTION_SIZE, ENC_CIPHERTEXT_SIZE, EPHEMERAL_KEY_BYTE_SIZE, NOTE_COMMITMENT_BYTE_SIZE,
-        NULLIFIER_BYTE_SIZE, OUT_CIPHERTEXT_SIZE, VALUE_COMMITMENT_BYTE_SIZE,
-        VERIFICATION_KEY_BYTE_SIZE, io, write_action_without_auth, write_cmx,
-        write_note_ciphertext, write_nullifier, write_value_commitment, write_verification_key,
+        ACTION_SIZE, ACTIONS_PER_POINT_BATCH, ENC_CIPHERTEXT_SIZE, EPHEMERAL_KEY_BYTE_SIZE,
+        NOTE_COMMITMENT_BYTE_SIZE, NULLIFIER_BYTE_SIZE, OUT_CIPHERTEXT_SIZE,
+        VALUE_COMMITMENT_BYTE_SIZE, VERIFICATION_KEY_BYTE_SIZE, io, read_action_without_auth,
+        read_actions_without_auth, write_action_without_auth, write_cmx, write_note_ciphertext,
+        write_nullifier, write_value_commitment, write_verification_key,
     };
+
+    /// A full point batch followed by a complete batch and one final action.
+    const TEST_ACTION_COUNT: usize = ACTIONS_PER_POINT_BATCH * 2 + 1;
+    /// The encoded value commitment begins the action.
+    const CV_OFFSET: usize = 0;
+    /// The randomized verification key follows the value commitment and nullifier.
+    const RK_OFFSET: usize = VALUE_COMMITMENT_BYTE_SIZE + NULLIFIER_BYTE_SIZE;
+    /// The ephemeral key follows the randomized key and note commitment.
+    const EPK_OFFSET: usize = RK_OFFSET + VERIFICATION_KEY_BYTE_SIZE + NOTE_COMMITMENT_BYTE_SIZE;
+    /// A byte that is not part of the encoded actions vector.
+    const TRAILING_BYTE: u8 = 0xa5;
+
+    fn assert_same_actions<R: Read, S: Read>(serial_reader: R, batch_reader: S) {
+        #[allow(clippy::redundant_closure)]
+        let serial = Vector::read(serial_reader, |reader| read_action_without_auth(reader));
+        let batched = read_actions_without_auth(batch_reader);
+        match (serial, batched) {
+            (Ok(serial), Ok(batched)) => {
+                assert_eq!(serial.len(), batched.len());
+                for (serial, batched) in serial.iter().zip(&batched) {
+                    assert_eq!(serial.cv_net().to_bytes(), batched.cv_net().to_bytes());
+                    assert_eq!(
+                        serial.nullifier().to_bytes(),
+                        batched.nullifier().to_bytes()
+                    );
+                    assert_eq!(
+                        <[u8; VERIFICATION_KEY_BYTE_SIZE]>::from(serial.rk()),
+                        <[u8; VERIFICATION_KEY_BYTE_SIZE]>::from(batched.rk())
+                    );
+                    assert_eq!(serial.cmx().to_bytes(), batched.cmx().to_bytes());
+                    assert_eq!(
+                        serial.encrypted_note().epk_bytes,
+                        batched.encrypted_note().epk_bytes
+                    );
+                    assert_eq!(
+                        serial.encrypted_note().enc_ciphertext.0,
+                        batched.encrypted_note().enc_ciphertext.0
+                    );
+                    assert_eq!(
+                        serial.encrypted_note().out_ciphertext,
+                        batched.encrypted_note().out_ciphertext
+                    );
+                }
+            }
+            (Err(serial), Err(batched)) => {
+                assert_eq!(serial.kind(), batched.kind());
+                assert_eq!(serial.to_string(), batched.to_string());
+            }
+            (serial, batched) => panic!("different acceptance: {serial:?} vs {batched:?}"),
+        }
+    }
+
+    struct ErrorOnce<'a> {
+        remaining: &'a [u8],
+        before_error: usize,
+        error: io::ErrorKind,
+        emitted: bool,
+    }
+
+    impl Read for ErrorOnce<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.emitted {
+                return self.remaining.read(buf);
+            }
+            if self.before_error == 0 {
+                self.emitted = true;
+                return Err(io::Error::from(self.error));
+            }
+            let limit = buf.len().min(self.before_error);
+            let read = self.remaining.read(&mut buf[..limit])?;
+            self.before_error -= read;
+            Ok(read)
+        }
+    }
 
     // Returns the number of bytes `write` emits.
     fn encoded_len(write: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> usize {
@@ -592,6 +760,90 @@ mod tests {
                 encoded_len(|w| write_note_ciphertext(w, action.encrypted_note())),
                 EPHEMERAL_KEY_BYTE_SIZE + ENC_CIPHERTEXT_SIZE + OUT_CIPHERTEXT_SIZE
             );
+        }
+
+        #[test]
+        fn batched_actions_match_serial_decoding(
+            action in arb_action(
+                NoteVersion::V2,
+                NoteValue::from_raw(1),
+                NoteValue::from_raw(1),
+            ),
+            chosen_action in 0..TEST_ACTION_COUNT,
+            chosen_field in prop_oneof![
+                Just((CV_OFFSET, VALUE_COMMITMENT_BYTE_SIZE, u8::MAX)),
+                Just((RK_OFFSET, VERIFICATION_KEY_BYTE_SIZE, u8::MAX)),
+                Just((EPK_OFFSET, EPHEMERAL_KEY_BYTE_SIZE, u8::MAX)),
+                Just((EPK_OFFSET, EPHEMERAL_KEY_BYTE_SIZE, 0)),
+            ],
+            truncate_at in 0..(TEST_ACTION_COUNT * ACTION_SIZE),
+        ) {
+            let mut encoded = Vec::new();
+            CompactSize::write(&mut encoded, TEST_ACTION_COUNT)
+                .expect("writing the vector length to a Vec cannot fail");
+            let prefix_size = encoded.len();
+            for _ in 0..TEST_ACTION_COUNT {
+                write_action_without_auth(&mut encoded, &action)
+                    .expect("writing an action to a Vec cannot fail");
+            }
+            assert_same_actions(encoded.as_slice(), encoded.as_slice());
+
+            let mut empty = Vec::new();
+            CompactSize::write(&mut empty, 0).expect("writing to a Vec cannot fail");
+            assert_same_actions(empty.as_slice(), empty.as_slice());
+            let mut single = Vec::new();
+            CompactSize::write(&mut single, 1).expect("writing to a Vec cannot fail");
+            write_action_without_auth(&mut single, &action)
+                .expect("writing an action to a Vec cannot fail");
+            assert_same_actions(single.as_slice(), single.as_slice());
+
+            let mut with_trailing_byte = encoded.clone();
+            with_trailing_byte.push(TRAILING_BYTE);
+            let mut reader = with_trailing_byte.as_slice();
+            assert_eq!(
+                read_actions_without_auth(&mut reader)
+                    .expect("the generated actions have valid encodings")
+                    .len(),
+                TEST_ACTION_COUNT
+            );
+            prop_assert_eq!(reader, &[TRAILING_BYTE]);
+
+            let (field_offset, field_size, replacement) = chosen_field;
+            let mut corrupted = encoded.clone();
+            let start = prefix_size + chosen_action * ACTION_SIZE + field_offset;
+            corrupted[start..start + field_size].fill(replacement);
+            assert_same_actions(corrupted.as_slice(), corrupted.as_slice());
+            corrupted.truncate(prefix_size + truncate_at);
+            assert_same_actions(corrupted.as_slice(), corrupted.as_slice());
+
+            let mut last_chunk_error = encoded.clone();
+            let last_epk = prefix_size + (TEST_ACTION_COUNT - 1) * ACTION_SIZE + EPK_OFFSET;
+            last_chunk_error[last_epk..last_epk + EPHEMERAL_KEY_BYTE_SIZE].fill(0);
+            assert_same_actions(last_chunk_error.as_slice(), last_chunk_error.as_slice());
+
+            let mut truncated = encoded.clone();
+            truncated.truncate(prefix_size + truncate_at);
+            assert_same_actions(truncated.as_slice(), truncated.as_slice());
+            let after_first_chunk =
+                prefix_size + ACTIONS_PER_POINT_BATCH * ACTION_SIZE + truncate_at % ACTION_SIZE;
+            let mut truncated_last_chunk = encoded.clone();
+            truncated_last_chunk.truncate(after_first_chunk);
+            assert_same_actions(truncated_last_chunk.as_slice(), truncated_last_chunk.as_slice());
+
+            let mut earlier_error = truncated_last_chunk;
+            earlier_error[prefix_size + CV_OFFSET..prefix_size + CV_OFFSET + VALUE_COMMITMENT_BYTE_SIZE]
+                .fill(u8::MAX);
+            assert_same_actions(earlier_error.as_slice(), earlier_error.as_slice());
+
+            for error in [io::ErrorKind::Interrupted, io::ErrorKind::Other] {
+                let reader = || ErrorOnce {
+                    remaining: encoded.as_slice(),
+                    before_error: after_first_chunk,
+                    error,
+                    emitted: false,
+                };
+                assert_same_actions(reader(), reader());
+            }
         }
     }
 }

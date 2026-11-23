@@ -162,13 +162,6 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.orchard]]
-version = "0.16.0"
-when = "2026-09-30"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.pairing]]
 version = "0.24.0"
 when = "2026-09-15"
@@ -177,8 +170,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pasta_curves]]
-version = "0.6.0"
-when = "2026-09-25"
+version = "0.6.3"
+when = "2026-11-16"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
