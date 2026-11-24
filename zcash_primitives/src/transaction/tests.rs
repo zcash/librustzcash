@@ -2,6 +2,7 @@ use proptest::prelude::*;
 #[cfg(all(test, feature = "std"))]
 use {
     crate::transaction::{JsDescription, sprout},
+    alloc::boxed::Box,
     memuse::DynamicUsage,
 };
 
@@ -1569,5 +1570,43 @@ proptest! {
         fn boxed_bytes<B: DynamicUsage>(bundle: Option<&B>) -> usize {
             bundle.map_or(0, |bundle| size_of::<B>() + bundle.dynamic_usage())
         }
+    }
+}
+
+/// Attach PHGR13 JoinSplits to a generated Overwinter transaction.
+#[cfg(all(test, feature = "std"))]
+fn with_joinsplits(transaction: Transaction, count: usize) -> Transaction {
+    // Serialized size of a PHGR13 JoinSplit description in a V3 transaction.
+    const DESCRIPTION_BYTES: usize = 1802;
+
+    let description = JsDescription::read(&[0; DESCRIPTION_BYTES][..], false).unwrap();
+    let mut data = transaction.into_data();
+
+    data.sprout_bundle = Some(Box::new(sprout::Bundle {
+        joinsplits: vec![description; count],
+        joinsplit_pubkey: [0; 32],
+        joinsplit_sig: [0; 64],
+    }));
+
+    data.freeze().unwrap()
+}
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    /// Adding a nonempty Sprout bundle retains its box and JoinSplit vector.
+    #[test]
+    fn dynamic_usage_counts_added_joinsplits(
+        transaction in arb_tx(BranchId::Overwinter),
+        count in 1_usize..8,
+    ) {
+        let original_bytes = transaction.dynamic_usage();
+        let transaction = with_joinsplits(transaction, count);
+
+        let bundle = transaction.sprout_bundle().unwrap();
+        let expected = original_bytes + size_of::<sprout::Bundle>()
+            + bundle.joinsplits.capacity() * size_of::<JsDescription>();
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
     }
 }
