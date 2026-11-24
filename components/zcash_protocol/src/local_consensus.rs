@@ -57,7 +57,8 @@ pub struct LocalNetwork {
     pub nu6_3: Option<BlockHeight>,
     /// The NU7 activation height for this network, or `None` if NU7 never activates.
     pub nu7: Option<BlockHeight>,
-    /// The NU8 activation height for this network, or `None` if NU8 never activates.
+    /// The experimental NU8 activation height for this local network, or `None`
+    /// if NU8 never activates. This does not specify ZIP 248 deployment.
     #[cfg(zcash_unstable = "nu8")]
     pub nu8: Option<BlockHeight>,
     /// The NuTachyon activation height for this network, or `None` if NuTachyon

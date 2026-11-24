@@ -41,12 +41,22 @@ pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
 pub const V6_VERSION_GROUP_ID: u32 = 0xD884B698;
 
-/// Transaction version 7, introduced by the NuTachyon network upgrade.
+/// Experimental transaction version 7, specified in [ZIP 248](https://zips.z.cash/zip-0248).
+///
+/// This crate provisionally associates it with the unstable NU8 upgrade;
+/// ZIP 248 does not yet specify deployment.
 #[cfg(zcash_unstable = "nu8")]
 pub const V7_TX_VERSION: u32 = 7;
-/// The placeholder version group ID for Zcash v7 transactions ("tach" in ASCII).
+/// The placeholder version group ID for Zcash v7 transactions.
+///
+/// [ZIP 248] requires a nonzero version group ID but has not yet assigned one,
+/// so this value is a placeholder and must not be treated as final. Its bytes
+/// are the ASCII string `nu_8` read as a big-endian word, which keeps the
+/// placeholder recognizable while it is in use.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
 #[cfg(zcash_unstable = "nu8")]
-pub const V7_VERSION_GROUP_ID: u32 = 0x74616368;
+pub const V7_VERSION_GROUP_ID: u32 = 0x6E755F38;
 
 /// The maximum size in bytes of a Zcash block, and therefore the maximum size of any single
 /// transaction within one.

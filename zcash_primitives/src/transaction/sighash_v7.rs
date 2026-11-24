@@ -7,7 +7,7 @@ use ::transparent::sighash::TransparentAuthorizingContext;
 use crate::transaction::{
     Authorization, TransactionData, Zip244Digests,
     sighash::SignableInput,
-    sighash_v5::{TransparentInputsDigests, transparent_sig_digest},
+    sighash_v5::{TransparentInputsDigests, transparent_sig_digest_v7},
     txid::{
         ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION, hash_v7_effects_bundles, hasher,
         tx_hash_personalization, v7_bundle_digest_entries,
@@ -24,13 +24,17 @@ use crate::transaction::{
 /// For transactions with transparent inputs, `transparent_effects_digest` in the
 /// effects bundles is replaced with `transparent_sig_digest`.
 ///
+/// [S.2](https://zips.z.cash/zip-0248#s-2-value_pool_deltas_sig_digest) is the
+/// [T.2](https://zips.z.cash/zip-0248#t-2-value-pool-deltas-digest) value pool
+/// deltas digest, unchanged for every `hash_type`.
+///
 /// Sapling and Orchard sighash uses `SIGHASH_ALL` (`hash_type = 0x01`).
 ///
 /// `inputs_digests` are the digests of the transparent inputs of `tx`, as computed by
-/// [`TransparentInputsDigests::for_bundle`]; see [`transparent_sig_digest`].
+/// [`TransparentInputsDigests::for_bundle`]; see `transparent_sig_digest`.
 #[cfg(zcash_unstable = "nu8")]
 pub(crate) fn v7_signature_hash<
-    TA: TransparentAuthorizingContext,
+    TA: TransparentAuthorizingContext<zcash_protocol::value::Zatoshis>,
     A: Authorization<TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
@@ -40,19 +44,22 @@ pub(crate) fn v7_signature_hash<
 ) -> Blake2bHash {
     let personal = tx_hash_personalization(tx.consensus_branch_id());
 
-    // VP deltas digest (same as txid). As in `to_hash_v7`, `None` means the
-    // caller supplied a ZIP 244 digest tree rather than a v7 one.
+    // S.2 is the T.2 value pool deltas digest. `to_hash_v7` requires it, and
+    // since S.2 is the complete T.2 digest, no entry is filtered out for any
+    // `hash_type`. `None` here means the caller supplied a digest tree built by
+    // something other than a v7-capable digester.
     debug_assert!(
         txid_parts.value_pool_deltas_digest.is_some(),
-        "v7 digests must come from TransactionData::{{digest_v7, txid_digests}}"
+        "v7 digests must come from TransactionData::{{digest, txid_digests}}"
     );
     let vp_deltas_digest = txid_parts
         .value_pool_deltas_digest
         .unwrap_or_else(|| hasher(ZCASH_V7_VP_DELTAS_HASH_PERSONALIZATION).finalize());
 
     // For the signature bundles digest, replace transparent_effects_digest
-    // with transparent_sig_digest when signing transparent inputs.
-    let transparent_sig = transparent_sig_digest(
+    // with transparent_sig_digest when signing transparent inputs. ZIP 248 S.3.0e
+    // keeps the transaction's sequence digest even under SIGHASH_ANYONECANPAY.
+    let transparent_sig = transparent_sig_digest_v7(
         tx.transparent_bundle()
             .zip(txid_parts.transparent_digests.as_ref()),
         inputs_digests,

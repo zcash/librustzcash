@@ -11,6 +11,11 @@ use zcash_encoding::Vector;
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 use zcash_script::script;
 
+use crate::transaction::bytes::{
+    LegacyTransparentInputBytes, TransparentOutPointBytes, TransparentOutputBytes,
+    TransparentOutputValueBytes,
+};
+
 /// The length of a transaction ID in the transaction encoding.
 const TXID_SIZE: usize = 32;
 
@@ -77,10 +82,13 @@ pub fn read_txin<R: Read>(mut reader: R) -> io::Result<TxIn<Authorized>> {
 /// sequence number.
 ///
 /// Returns an error only if `writer` fails.
-pub fn write_txin<W: Write>(mut writer: W, txin: &TxIn<Authorized>) -> io::Result<()> {
-    write_outpoint(&mut writer, txin.prevout())?;
-    write_script(&mut writer, txin.script_sig())?;
-    writer.write_all(&txin.sequence().to_le_bytes())
+pub fn write_txin<W: Write>(writer: W, txin: &TxIn<Authorized>) -> io::Result<()> {
+    LegacyTransparentInputBytes::write_components(
+        writer,
+        &TransparentOutPointBytes::from(txin.prevout()),
+        &txin.script_sig().0.0,
+        txin.sequence(),
+    )
 }
 
 /// Reads a transparent output: an 8-byte little-endian value followed by a
@@ -102,9 +110,12 @@ pub fn read_txout<R: Read>(mut reader: R) -> io::Result<TxOut<Zatoshis>> {
 /// `scriptPubKey`.
 ///
 /// Returns an error only if `writer` fails.
-pub fn write_txout<W: Write>(mut writer: W, txout: &TxOut<Zatoshis>) -> io::Result<()> {
-    writer.write_all(&txout.value().to_i64_le_bytes())?;
-    write_script(&mut writer, txout.script_pubkey())
+pub fn write_txout<W: Write>(writer: W, txout: &TxOut<Zatoshis>) -> io::Result<()> {
+    TransparentOutputBytes::write_components(
+        writer,
+        TransparentOutputValueBytes::from_i64(i64::from_le_bytes(txout.value().to_i64_le_bytes())),
+        &txout.script_pubkey().0.0,
+    )
 }
 
 /// Returns the amount of value that `bundle` adds to or removes from the transparent
