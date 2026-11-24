@@ -1,6 +1,9 @@
-#[cfg(all(test, feature = "std"))]
-use memuse::DynamicUsage;
 use proptest::prelude::*;
+#[cfg(all(test, feature = "std"))]
+use {
+    crate::transaction::{JsDescription, sprout},
+    memuse::DynamicUsage,
+};
 
 #[cfg(test)]
 use {
@@ -1531,8 +1534,8 @@ proptest! {
             zip233_amount: _,
             // Fields with dynamic allocations
             transparent_bundle,
+            sprout_bundle,
             // TODO: Account for the remaining bundles.
-            sprout_bundle: _,
             sapling_bundle: _,
             orchard_bundle: _,
             ironwood_bundle: _,
@@ -1551,6 +1554,12 @@ proptest! {
                 expected += output.script_pubkey().0.0.capacity();
             }
         }
+
+        if let Some(sprout_bundle) = sprout_bundle {
+            expected += size_of::<sprout::Bundle>()
+                + sprout_bundle.joinsplits.capacity() * size_of::<JsDescription>();
+        }
+
 
         prop_assert_eq!(transaction.dynamic_usage(), expected);
         prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
