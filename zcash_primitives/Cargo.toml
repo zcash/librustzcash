@@ -99,6 +99,7 @@ std = [
     "sapling/std",
     "orchard/std",
     "transparent/std",
+    "zcash_protocol/std",
 ]
 
 ## Enables the experimental ZIP 233 transaction amount when combined with

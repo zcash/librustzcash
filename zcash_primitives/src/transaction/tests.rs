@@ -1535,8 +1535,8 @@ proptest! {
             // Fields with dynamic allocations
             transparent_bundle,
             sprout_bundle,
+            sapling_bundle,
             // TODO: Account for the remaining bundles.
-            sapling_bundle: _,
             orchard_bundle: _,
             ironwood_bundle: _,
         } = data;
@@ -1560,8 +1560,13 @@ proptest! {
                 + sprout_bundle.joinsplits.capacity() * size_of::<JsDescription>();
         }
 
+        expected += boxed_bytes(sapling_bundle.as_deref());
 
         prop_assert_eq!(transaction.dynamic_usage(), expected);
         prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
+
+        fn boxed_bytes<B: DynamicUsage>(bundle: Option<&B>) -> usize {
+            bundle.map_or(0, |bundle| size_of::<B>() + bundle.dynamic_usage())
+        }
     }
 }
