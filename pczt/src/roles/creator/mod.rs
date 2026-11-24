@@ -45,6 +45,13 @@ pub enum Error {
     /// The transaction version implied by the consensus branch ID does not carry an
     /// Ironwood bundle.
     IronwoodNotSupported,
+    /// The requested transaction version is not valid under the consensus
+    /// branch ID.
+    #[cfg(zcash_unstable = "nu8")]
+    V7NotActivated,
+    /// The v7 expiry height exceeds the maximum permitted by ZIP 248.
+    #[cfg(zcash_unstable = "nu8")]
+    InvalidExpiryHeight,
     /// The consensus branch ID does not correspond to any known network upgrade.
     UnknownConsensusBranchId,
     /// The network upgrade for the consensus branch ID predates the v5
@@ -70,6 +77,32 @@ fn consensus_branch_id_for_pczt(consensus_branch_id: u32) -> Result<BranchId, Er
     }
 }
 
+/// Returns whether the v7 transaction format is activated under `branch_id`.
+///
+/// This mirrors `TxVersion::V7::valid_in_branch` without naming
+/// `zcash_primitives`, which is an optional dependency that a standalone PCZT
+/// build need not enable.
+#[cfg(zcash_unstable = "nu8")]
+fn v7_activated(branch_id: BranchId) -> bool {
+    match branch_id {
+        BranchId::Nu8 => true,
+        #[cfg(zcash_unstable = "nutachyon")]
+        BranchId::NuTachyon => true,
+        BranchId::Sprout
+        | BranchId::Overwinter
+        | BranchId::Sapling
+        | BranchId::Blossom
+        | BranchId::Heartwood
+        | BranchId::Canopy
+        | BranchId::Nu5
+        | BranchId::Nu6
+        | BranchId::Nu6_1
+        | BranchId::Nu6_2
+        | BranchId::Nu6_3
+        | BranchId::Nu7 => false,
+    }
+}
+
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
@@ -87,8 +120,10 @@ pub struct Creator {
 impl Creator {
     /// Creates a new PCZT for the given consensus branch ID.
     ///
-    /// The transaction version is implied by the consensus branch ID: the v6
-    /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
+    /// The transaction version is the oldest format valid under the consensus
+    /// branch ID: the v5 transaction format for upgrades before NU6.3, and the
+    /// v6 format from NU6.3 onward. V6 supports every currently defined pool,
+    /// so v7 remains an explicit opt-in through `Creator::new_v7`.
     /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
     /// [`Option::Some`]. For V6 and later transactions, either anchor may be
     /// [`Option::None`] and restored later.
@@ -105,29 +140,84 @@ impl Creator {
         sapling_anchor: Option<[u8; 32]>,
         orchard_anchor: Option<[u8; 32]>,
     ) -> Result<Self, Error> {
+        Self::with_version(
+            consensus_branch_id,
+            expiry_height,
+            coin_type,
+            sapling_anchor,
+            orchard_anchor,
+            false,
+        )
+    }
+
+    /// Creates a new PCZT that uses the v7 transaction format.
+    ///
+    /// The arguments and their constraints are those of [`Creator::new`], except
+    /// that `consensus_branch_id` must also activate the v7 format.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Creator::new`], or [`Error::V7NotActivated`] if
+    /// `consensus_branch_id` does not activate the v7 format, or
+    /// [`Error::InvalidExpiryHeight`] if `expiry_height` exceeds 499,999,999.
+    #[cfg(zcash_unstable = "nu8")]
+    pub fn new_v7(
+        consensus_branch_id: u32,
+        expiry_height: u32,
+        coin_type: u32,
+        sapling_anchor: Option<[u8; 32]>,
+        orchard_anchor: Option<[u8; 32]>,
+    ) -> Result<Self, Error> {
+        Self::with_version(
+            consensus_branch_id,
+            expiry_height,
+            coin_type,
+            sapling_anchor,
+            orchard_anchor,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_version(
+        consensus_branch_id: u32,
+        expiry_height: u32,
+        coin_type: u32,
+        sapling_anchor: Option<[u8; 32]>,
+        orchard_anchor: Option<[u8; 32]>,
+        v7: bool,
+    ) -> Result<Self, Error> {
         let branch_id = consensus_branch_id_for_pczt(consensus_branch_id)?;
 
-        let (tx_version, version_group_id) = match branch_id {
-            // Pre-NU5 branches are rejected by `consensus_branch_id_for_pczt`; NU5
-            // through NU6.2 use the v5 transaction format.
-            BranchId::Sprout
-            | BranchId::Overwinter
-            | BranchId::Sapling
-            | BranchId::Blossom
-            | BranchId::Heartwood
-            | BranchId::Canopy
-            | BranchId::Nu5
-            | BranchId::Nu6
-            | BranchId::Nu6_1
-            | BranchId::Nu6_2 => (V5_TX_VERSION, V5_VERSION_GROUP_ID),
-            BranchId::Nu6_3 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
-            BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+        #[cfg(zcash_unstable = "nu8")]
+        if v7 && expiry_height > crate::common::MAX_V7_EXPIRY_HEIGHT {
+            return Err(Error::InvalidExpiryHeight);
+        }
+
+        let (tx_version, version_group_id) = match (v7, branch_id) {
             #[cfg(zcash_unstable = "nu8")]
-            BranchId::Nu8 => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
-            #[cfg(all(zcash_unstable = "nutachyon", zcash_unstable = "nu8"))]
-            BranchId::NuTachyon => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
-            #[cfg(all(zcash_unstable = "nutachyon", not(zcash_unstable = "nu8")))]
-            BranchId::NuTachyon => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+            (true, _) if v7_activated(branch_id) => (V7_TX_VERSION, V7_VERSION_GROUP_ID),
+            #[cfg(zcash_unstable = "nu8")]
+            (true, _) => return Err(Error::V7NotActivated),
+            _ => match branch_id {
+                // Pre-NU5 branches are rejected by `consensus_branch_id_for_pczt`; NU5
+                // through NU6.2 use the v5 transaction format.
+                BranchId::Sprout
+                | BranchId::Overwinter
+                | BranchId::Sapling
+                | BranchId::Blossom
+                | BranchId::Heartwood
+                | BranchId::Canopy
+                | BranchId::Nu5
+                | BranchId::Nu6
+                | BranchId::Nu6_1
+                | BranchId::Nu6_2 => (V5_TX_VERSION, V5_VERSION_GROUP_ID),
+                BranchId::Nu6_3 | BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+                #[cfg(zcash_unstable = "nu8")]
+                BranchId::Nu8 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+                #[cfg(zcash_unstable = "nutachyon")]
+                BranchId::NuTachyon => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
+            },
         };
 
         Ok(Self {
@@ -163,7 +253,7 @@ impl Creator {
     /// Sets the Orchard flags for the PCZT.
     ///
     /// The flags are validated against, and encoded under, the Orchard bundle
-    /// version implied by the consensus branch ID passed to [`Creator::new`]
+    /// version implied by the consensus branch ID passed to the constructor ([`Creator::new`] or `Creator::new_v7`)
     /// (which also fixes the note-plaintext version).
     ///
     /// # Errors
@@ -191,7 +281,7 @@ impl Creator {
     /// # Errors
     ///
     /// Returns [`Error::IronwoodNotSupported`] if the transaction version implied by
-    /// the consensus branch ID passed to [`Creator::new`] does not carry an Ironwood
+    /// the consensus branch ID passed to the constructor ([`Creator::new`] or `Creator::new_v7`) does not carry an Ironwood
     /// bundle.
     pub fn with_ironwood_anchor(mut self, ironwood_anchor: [u8; 32]) -> Result<Self, Error> {
         let supports_ironwood = match self.tx_version {
@@ -212,7 +302,7 @@ impl Creator {
     /// # Errors
     ///
     /// Returns [`Error::IronwoodNotSupported`] if the transaction version implied by
-    /// the consensus branch ID passed to [`Creator::new`] does not carry an Ironwood
+    /// the consensus branch ID passed to the constructor ([`Creator::new`] or `Creator::new_v7`) does not carry an Ironwood
     /// bundle, or [`Error::UnrepresentableOrchardFlags`] if `flags` cannot be encoded
     /// under the Ironwood bundle version.
     #[cfg(feature = "orchard")]
@@ -395,7 +485,22 @@ mod tests {
 
         #[cfg(zcash_unstable = "nu8")]
         {
+            // V6 is the oldest format that supports every current pool, so it
+            // is the default even under NU8.
             let pczt = Creator::new(
+                BranchId::Nu8.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
+            assert_eq!(pczt.global.version_group_id, V6_VERSION_GROUP_ID);
+
+            let pczt = Creator::new_v7(
                 BranchId::Nu8.into(),
                 10_000_000,
                 133,
@@ -408,6 +513,49 @@ mod tests {
             assert_eq!(pczt.global.tx_version, V7_TX_VERSION);
             assert_eq!(pczt.global.version_group_id, V7_VERSION_GROUP_ID);
         }
+    }
+
+    #[cfg(all(zcash_unstable = "nu8", zcash_unstable = "nutachyon"))]
+    #[test]
+    fn nutachyon_defaults_to_v6() {
+        let pczt = Creator::new(
+            BranchId::NuTachyon.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
+
+        let pczt = Creator::new_v7(
+            BranchId::NuTachyon.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(pczt.global.tx_version, V7_TX_VERSION);
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    #[test]
+    fn v7_opt_in_requires_a_v7_branch() {
+        assert!(matches!(
+            Creator::new_v7(
+                BranchId::Nu7.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32])
+            ),
+            Err(Error::V7NotActivated)
+        ));
     }
 
     #[test]

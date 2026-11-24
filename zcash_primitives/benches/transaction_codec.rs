@@ -277,6 +277,152 @@ fn bench_codec(c: &mut Criterion, fixture: &Fixture) {
     group.finish();
 }
 
+#[cfg(zcash_unstable = "nu8")]
+mod v7 {
+    use std::hint::black_box;
+
+    use criterion::{BenchmarkId, Criterion, Throughput};
+    use transparent::{
+        address::Script,
+        bundle::{Authorization as TransparentAuthorization, Bundle, TxIn, TxOut},
+        sighash::{SighashType, SignableInput as TransparentInput, TransparentAuthorizingContext},
+    };
+    use zcash_primitives::transaction::{
+        Authorization, Authorized, Transaction, TransactionData,
+        sighash::{PrecomputedSighashData, SignableInput, V7SignatureContext},
+    };
+    use zcash_protocol::value::Zatoshis;
+
+    use super::{Fixture, INPUT_VALUE, script_pubkey};
+
+    /// One signature and a batch large enough to expose repeated transaction-wide work.
+    const CONTEXT_COUNTS: [usize; 2] = [1, 16];
+
+    #[derive(Debug)]
+    struct Prevouts(Vec<TxOut<Zatoshis>>);
+
+    impl TransparentAuthorization for Prevouts {
+        type ScriptSig = Script;
+    }
+
+    impl TransparentAuthorizingContext<Zatoshis> for Prevouts {
+        fn input_amounts(&self) -> Vec<Zatoshis> {
+            self.0.iter().map(TxOut::value).collect()
+        }
+
+        fn input_scriptpubkeys(&self) -> Vec<Script> {
+            self.0.iter().map(|p| p.script_pubkey().clone()).collect()
+        }
+    }
+
+    struct WithPrevouts;
+
+    impl Authorization for WithPrevouts {
+        type TransparentAuth = Prevouts;
+        type SaplingAuth = <Authorized as Authorization>::SaplingAuth;
+        type OrchardAuth = <Authorized as Authorization>::OrchardAuth;
+    }
+
+    fn precompute(tx: TransactionData<Authorized>) -> PrecomputedSighashData<WithPrevouts> {
+        PrecomputedSighashData::new(
+            tx.map_bundles(
+                |bundle| {
+                    bundle.map(|b| Bundle {
+                        authorization: Prevouts(
+                            b.vin
+                                .iter()
+                                .map(|_| TxOut::new(INPUT_VALUE, script_pubkey()))
+                                .collect(),
+                        ),
+                        vin: b
+                            .vin
+                            .into_iter()
+                            .map(|i| {
+                                TxIn::from_parts(
+                                    i.prevout().clone(),
+                                    i.script_sig().clone(),
+                                    i.sequence(),
+                                )
+                            })
+                            .collect(),
+                        vout: b.vout,
+                    })
+                },
+                |bundle| bundle,
+                |bundle| bundle,
+            ),
+            &(),
+        )
+        .unwrap()
+    }
+
+    pub(super) fn bench(c: &mut Criterion, fixture: &Fixture) {
+        let precomputed = precompute(fixture.tx.clone().into_data());
+        let roundtrip = precompute(
+            Transaction::read(fixture.wire.as_slice(), fixture.tx.consensus_branch_id())
+                .unwrap()
+                .into_data(),
+        );
+        let bundle = precomputed.tx().transparent_bundle().unwrap();
+        let script = script_pubkey();
+        let contexts: Vec<_> = (0..bundle.vin.len())
+            .map(|index| {
+                SignableInput::V7(V7SignatureContext::Transparent(
+                    TransparentInput::from_parts(
+                        bundle,
+                        SighashType::ALL,
+                        index,
+                        &script,
+                        &script,
+                        INPUT_VALUE,
+                    )
+                    .unwrap(),
+                ))
+            })
+            .collect();
+        let binding = SignableInput::V7(V7SignatureContext::OrchardBinding);
+        for context in contexts.iter().chain(std::iter::once(&binding)) {
+            assert_eq!(
+                precomputed.signature_hash(context).as_ref(),
+                roundtrip.signature_hash(context).as_ref()
+            );
+        }
+        let mut group = c.benchmark_group(format!("transaction_sighash/{}", fixture.name));
+        for count in CONTEXT_COUNTS {
+            group.throughput(Throughput::Elements(u64::try_from(count).unwrap()));
+            // Repeat the same binding context to isolate the per-call cost.
+            group.bench_with_input(
+                BenchmarkId::new("orchard_binding", count),
+                &count,
+                |b, &n| {
+                    b.iter(|| {
+                        for _ in 0..n {
+                            black_box(black_box(&precomputed).signature_hash(black_box(&binding)));
+                        }
+                    })
+                },
+            );
+            if count <= contexts.len() {
+                let batch = &contexts[..count];
+                group.bench_with_input(
+                    BenchmarkId::new("transparent", count),
+                    &batch,
+                    |b, batch| {
+                        b.iter(|| {
+                            for context in *batch {
+                                black_box(
+                                    black_box(&precomputed).signature_hash(black_box(context)),
+                                );
+                            }
+                        })
+                    },
+                );
+            }
+        }
+        group.finish();
+    }
+}
+
 fn bench_transaction_codec(c: &mut Criterion) {
     let versions = [
         TxVersion::V5,
@@ -287,6 +433,10 @@ fn bench_transaction_codec(c: &mut Criterion) {
         for input_count in INPUT_COUNTS {
             let fixture = fixture(version, input_count);
             bench_codec(c, &fixture);
+            #[cfg(zcash_unstable = "nu8")]
+            if version == TxVersion::V7 {
+                v7::bench(c, &fixture);
+            }
         }
     }
 }

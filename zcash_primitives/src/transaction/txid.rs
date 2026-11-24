@@ -10,19 +10,20 @@ use ::orchard::{
     ValuePool,
     bundle::{self as orchard, TxVersion as OrchardTxVersion},
 };
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
+use ::sapling::bundle::SpendDescription;
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
-#[cfg(any(feature = "sapling", feature = "orchard"))]
+#[cfg(any(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 use zcash_protocol::value::ZatBalance;
 use zcash_protocol::value::Zatoshis;
 #[cfg(feature = "sapling")]
-use {
-    ::sapling::bundle::{OutputDescription, SpendDescription},
-    ff::PrimeField,
-};
+use {::sapling::bundle::OutputDescription, ff::PrimeField};
 
 use zcash_protocol::consensus::{BlockHeight, BranchId};
 
 use super::components::transparent::{write_outpoint, write_script, write_txout};
+#[cfg(any(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+use super::zip248::V7DigestError;
 use super::{Authorization, Authorized, TransactionDigest};
 use super::{TransparentDigests, TxId, TxVersion, Zip244Digests};
 
@@ -35,7 +36,7 @@ use {
             V7EffectBundleBytes, V7OrchardAuthBytes, V7OrchardBundleBytes, V7SaplingAuthBytes,
             V7SaplingBundleBytes, ValuePoolDeltaBytes,
         },
-        zip248::{BundleDigestProvider, BundleId, BundleType, BundleVariant, V7DigestError},
+        zip248::{BundleDigestProvider, BundleId, BundleType, BundleVariant},
     },
     alloc::{collections::BTreeMap, vec::Vec},
     zcash_encoding::CompactSize,
@@ -245,7 +246,7 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut<Zatoshis>>>(vout: &[T]) -
 pub(crate) struct SaplingSpendDigestParts {
     pub cv: [u8; 32],
     pub nullifier: [u8; 32],
-    pub anchor: [u8; 32],
+    pub anchor: Option<[u8; 32]>,
     pub rk: [u8; 32],
 }
 
@@ -265,7 +266,7 @@ pub(crate) struct SaplingSpendDigestParts {
 pub(crate) fn hash_sapling_spends_parts(
     version: TxVersion,
     spends: impl IntoIterator<Item = SaplingSpendDigestParts>,
-) -> Blake2bHash {
+) -> Result<Blake2bHash, V7DigestError> {
     let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
     let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
     let mut nh = hasher(sapling_spends_noncompact_personalization(version));
@@ -286,7 +287,8 @@ pub(crate) fn hash_sapling_spends_parts(
             TxVersion::V7 => false,
         };
         if write_anchor {
-            nh.write_all(&spend.anchor).unwrap();
+            nh.write_all(&spend.anchor.ok_or(V7DigestError::MissingEffectingAnchor)?)
+                .unwrap();
         }
         nh.write_all(&spend.rk).unwrap();
     }
@@ -295,10 +297,10 @@ pub(crate) fn hash_sapling_spends_parts(
         h.write_all(ch.finalize().as_bytes()).unwrap();
         h.write_all(nh.finalize().as_bytes()).unwrap();
     }
-    h.finalize()
+    Ok(h.finalize())
 }
 
-#[cfg(feature = "sapling")]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
     version: TxVersion,
     shielded_spends: &[SpendDescription<A>],
@@ -310,10 +312,12 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
             .map(|s_spend| SaplingSpendDigestParts {
                 cv: s_spend.cv().to_bytes(),
                 nullifier: s_spend.nullifier().0,
-                anchor: s_spend.anchor().to_repr(),
+                anchor: Into::<Option<jubjub::Base>>::into(*s_spend.anchor())
+                    .map(|anchor| anchor.to_repr()),
                 rk: <[u8; 32]>::from(*s_spend.rk()),
             }),
     )
+    .expect("test spends carry effecting anchors")
 }
 
 /// The fields of a Sapling output that the effects digest commits to.
@@ -365,18 +369,14 @@ pub(crate) fn hash_sapling_outputs_parts(
 }
 
 #[cfg(feature = "sapling")]
-pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
-    hash_sapling_outputs_parts(
-        shielded_outputs
-            .iter()
-            .map(|s_out| SaplingOutputDigestParts {
-                cv: s_out.cv().to_bytes(),
-                cmu: s_out.cmu().to_bytes(),
-                ephemeral_key: s_out.ephemeral_key().0,
-                enc_ciphertext: *s_out.enc_ciphertext(),
-                out_ciphertext: *s_out.out_ciphertext(),
-            }),
-    )
+pub(crate) fn sapling_output_parts<A>(s_out: &OutputDescription<A>) -> SaplingOutputDigestParts {
+    SaplingOutputDigestParts {
+        cv: s_out.cv().to_bytes(),
+        cmu: s_out.cmu().to_bytes(),
+        ephemeral_key: s_out.ephemeral_key().0,
+        enc_ciphertext: *s_out.enc_ciphertext(),
+        out_ciphertext: *s_out.out_ciphertext(),
+    }
 }
 
 /// The txid commits to the hash of all transparent outputs. The
@@ -427,22 +427,25 @@ pub(crate) fn hash_transparent_txid_data(
 /// for v6 transactions the Sapling digest follows
 /// [ZIP 229](https://zips.z.cash/zip-0229).
 #[cfg(feature = "sapling")]
-fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
+pub(crate) fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     version: TxVersion,
     bundle: &sapling::Bundle<A, ZatBalance>,
-) -> Blake2bHash {
-    let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
-    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-        h.write_all(hash_sapling_spends(version, bundle.shielded_spends()).as_bytes())
-            .unwrap();
-
-        h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
-            .unwrap();
-
-        h.write_all(&bundle.value_balance().to_i64_le_bytes())
-            .unwrap();
-    }
-    h.finalize()
+) -> Result<Blake2bHash, V7DigestError> {
+    hash_sapling_effects_parts(
+        version,
+        *bundle.value_balance(),
+        bundle
+            .shielded_spends()
+            .iter()
+            .map(|spend| SaplingSpendDigestParts {
+                cv: spend.cv().to_bytes(),
+                nullifier: spend.nullifier().0,
+                anchor: Into::<Option<jubjub::Base>>::into(*spend.anchor())
+                    .map(|anchor| anchor.to_repr()),
+                rk: (*spend.rk()).into(),
+            }),
+        bundle.shielded_outputs().iter().map(sapling_output_parts),
+    )
 }
 
 fn hash_sapling_txid_empty() -> Blake2bHash {
@@ -556,18 +559,55 @@ fn hash_v7_coinbase_fields(bundle: &super::bytes::CoinbaseBundleBytes) -> Blake2
 pub(crate) fn hash_v7_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
 ) -> Blake2bHash {
-    let mut h = hasher(ZCASH_V7_SAPLING_HASH_PERSONALIZATION);
-    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-        // [ZIP 248 §T.3.2a]: spends_digest commits to nullifiers and
-        // (cv, rk) per spend, split into compact and non-compact sub-hashes.
-        h.write_all(hash_sapling_spends(TxVersion::V7, bundle.shielded_spends()).as_bytes())
+    hash_sapling_effects_parts(
+        TxVersion::V7,
+        *bundle.value_balance(),
+        bundle
+            .shielded_spends()
+            .iter()
+            .map(|spend| SaplingSpendDigestParts {
+                cv: spend.cv().to_bytes(),
+                nullifier: spend.nullifier().0,
+                anchor: None,
+                rk: (*spend.rk()).into(),
+            }),
+        bundle.shielded_outputs().iter().map(sapling_output_parts),
+    )
+    .expect("version 7 does not commit to anchors")
+}
+
+#[cfg(any(feature = "sapling", zcash_unstable = "nu8"))]
+pub(crate) fn hash_sapling_effects_parts(
+    version: TxVersion,
+    value_balance: ZatBalance,
+    spends: impl IntoIterator<Item = SaplingSpendDigestParts>,
+    outputs: impl IntoIterator<Item = SaplingOutputDigestParts>,
+) -> Result<Blake2bHash, V7DigestError> {
+    let mut spends = spends.into_iter().peekable();
+    let mut outputs = outputs.into_iter().peekable();
+    #[cfg(zcash_unstable = "nu8")]
+    let is_v7 = version == TxVersion::V7;
+    #[cfg(not(zcash_unstable = "nu8"))]
+    let is_v7 = false;
+    #[cfg(zcash_unstable = "nu8")]
+    let personalization = if is_v7 {
+        ZCASH_V7_SAPLING_HASH_PERSONALIZATION
+    } else {
+        ZCASH_SAPLING_HASH_PERSONALIZATION
+    };
+    #[cfg(not(zcash_unstable = "nu8"))]
+    let personalization = ZCASH_SAPLING_HASH_PERSONALIZATION;
+    let mut h = hasher(personalization);
+    if spends.peek().is_some() || outputs.peek().is_some() {
+        h.write_all(hash_sapling_spends_parts(version, spends)?.as_bytes())
             .unwrap();
-        // [ZIP 248 §T.3.2b]: outputs_digest commits to (cmu, epk, enc, cv, out)
-        // per output, split into compact, memo, and non-compact sub-hashes.
-        h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
+        h.write_all(hash_sapling_outputs_parts(outputs).as_bytes())
             .unwrap();
+        if !is_v7 {
+            h.write_all(&value_balance.to_i64_le_bytes()).unwrap();
+        }
     }
-    h.finalize()
+    Ok(h.finalize())
 }
 
 /// Implements [ZIP 248 §T.3.3](https://zips.z.cash/zip-0248#t-3-3-orchard-effects-digest).
@@ -623,6 +663,7 @@ struct OrchardPoolPersonalizations {
     actions_compact: &'static [u8; 16],
     actions_memos: &'static [u8; 16],
     actions_noncompact: &'static [u8; 16],
+    #[cfg(zcash_unstable = "nu8")]
     auth: &'static [u8; 16],
 }
 
@@ -632,6 +673,7 @@ const ORCHARD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolPe
     actions_compact: b"ZTxIdOrcActCHash",
     actions_memos: b"ZTxIdOrcActMHash",
     actions_noncompact: b"ZTxIdOrcActNHash",
+    #[cfg(zcash_unstable = "nu8")]
     auth: ZCASH_V7_ORCHARD_AUTH_HASH_PERSONALIZATION,
 };
 
@@ -651,6 +693,7 @@ const IRONWOOD_POOL_PERSONALIZATIONS: OrchardPoolPersonalizations = OrchardPoolP
     actions_compact: ZCASH_V7_IRONWOOD_ACTIONS_COMPACT_HASH_PERSONALIZATION,
     actions_memos: ZCASH_V7_IRONWOOD_ACTIONS_MEMOS_HASH_PERSONALIZATION,
     actions_noncompact: ZCASH_V7_IRONWOOD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION,
+    #[cfg(zcash_unstable = "nu8")]
     auth: ZCASH_V7_IRONWOOD_AUTH_HASH_PERSONALIZATION,
 };
 
@@ -724,26 +767,52 @@ fn hash_v7_orchard_protocol_effects(
     personalizations: &OrchardPoolPersonalizations,
 ) -> Blake2bHash {
     hash_orchard_actions_parts(
-        bundle
-            .actions()
-            .iter()
-            .map(|action| OrchardActionDigestParts {
-                cv: action.cv_net().to_bytes(),
-                nullifier: action.nullifier().to_bytes(),
-                rk: <[u8; 32]>::from(action.rk()),
-                cmx: action.cmx().to_bytes(),
-                ephemeral_key: action.encrypted_note().epk_bytes,
-                enc_ciphertext: action
-                    .encrypted_note()
-                    .enc_ciphertext
-                    .as_ref()
-                    .try_into()
-                    .expect("Orchard enc_ciphertext is 580 bytes"),
-                out_ciphertext: action.encrypted_note().out_ciphertext,
-            }),
+        bundle.actions().iter().map(typed_orchard_action_parts),
         bundle.flag_byte(),
         personalizations,
     )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn hash_orchard_txid_data(
+    version: TxVersion,
+    pool: ValuePool,
+    bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
+) -> Result<Blake2bHash, V7DigestError> {
+    #[cfg(zcash_unstable = "nu8")]
+    if version == TxVersion::V7 {
+        return Ok(match pool {
+            ValuePool::Orchard => hash_v7_orchard_effects(bundle),
+            ValuePool::Ironwood => hash_v7_ironwood_effects(bundle),
+        });
+    }
+    let (_, tx_version) = match pool {
+        ValuePool::Orchard => orchard_commitment_domain(version),
+        ValuePool::Ironwood if version == TxVersion::V6 => ironwood_v6_domain(),
+        ValuePool::Ironwood => return Err(V7DigestError::EffectsVersionMismatch),
+    };
+    bundle
+        .commitment(tx_version)
+        .map(|commitment| commitment.0)
+        .map_err(|error| match error {
+            ::orchard::bundle::CommitmentError::MissingAnchor => {
+                V7DigestError::MissingEffectingAnchor
+            }
+            _ => V7DigestError::EffectsVersionMismatch,
+        })
+}
+
+#[cfg(all(feature = "orchard", zcash_unstable = "nu8"))]
+fn typed_orchard_action_parts<A>(action: &::orchard::Action<A>) -> OrchardActionDigestParts {
+    OrchardActionDigestParts {
+        cv: action.cv_net().to_bytes(),
+        nullifier: action.nullifier().to_bytes(),
+        rk: action.rk().into(),
+        cmx: action.cmx().to_bytes(),
+        ephemeral_key: action.encrypted_note().epk_bytes,
+        enc_ciphertext: action.encrypted_note().enc_ciphertext.0,
+        out_ciphertext: action.encrypted_note().out_ciphertext,
+    }
 }
 
 /// Implements [ZIP 248 §A.1.0](https://zips.z.cash/zip-0248#a-1-0-transparent-auth-digest).
@@ -1020,36 +1089,29 @@ pub(crate) fn hash_v7_coinbase_effects_bytes(bundle: &CoinbaseBundleBytes) -> Bl
 /// over a byte-layer Sapling bundle.
 #[cfg(zcash_unstable = "nu8")]
 pub(crate) fn hash_v7_sapling_effects_bytes(bundle: &V7SaplingBundleBytes) -> Blake2bHash {
-    let mut h = hasher(ZCASH_V7_SAPLING_HASH_PERSONALIZATION);
-    if !(bundle.spends().is_empty() && bundle.outputs().is_empty()) {
-        let spends_digest = hash_sapling_spends_parts(
-            TxVersion::V7,
-            bundle.spends().iter().map(|spend| SaplingSpendDigestParts {
-                cv: *spend.cv(),
-                nullifier: *spend.nullifier(),
-                // The anchor is authorizing data in v7 and does not take part
-                // in the effects digest.
-                anchor: [0; 32],
-                rk: *spend.rk(),
+    hash_sapling_effects_parts(
+        TxVersion::V7,
+        ZatBalance::zero(),
+        bundle.spends().iter().map(|spend| SaplingSpendDigestParts {
+            cv: *spend.cv(),
+            nullifier: *spend.nullifier(),
+            // The anchor is authorizing data in v7 and does not take part
+            // in the effects digest.
+            anchor: None,
+            rk: *spend.rk(),
+        }),
+        bundle
+            .outputs()
+            .iter()
+            .map(|output| SaplingOutputDigestParts {
+                cv: *output.cv(),
+                cmu: *output.cmu(),
+                ephemeral_key: *output.ephemeral_key(),
+                enc_ciphertext: *output.enc_ciphertext(),
+                out_ciphertext: *output.out_ciphertext(),
             }),
-        );
-        h.write_all(spends_digest.as_bytes())
-            .expect("writing to a hasher is infallible");
-        h.write_all(
-            hash_sapling_outputs_parts(bundle.outputs().iter().map(|output| {
-                SaplingOutputDigestParts {
-                    cv: *output.cv(),
-                    cmu: *output.cmu(),
-                    ephemeral_key: *output.ephemeral_key(),
-                    enc_ciphertext: *output.enc_ciphertext(),
-                    out_ciphertext: *output.out_ciphertext(),
-                }
-            }))
-            .as_bytes(),
-        )
-        .expect("writing to a hasher is infallible");
-    }
-    h.finalize()
+    )
+    .expect("version 7 does not commit to anchors")
 }
 
 /// [ZIP 248 §T.3.3](https://zips.z.cash/zip-0248#t-3-3-orchard-effects-digest)
@@ -1245,12 +1307,16 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         &self,
         version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    ) -> Self::SaplingDigest {
-        #[cfg(zcash_unstable = "nu8")]
-        if version == TxVersion::V7 {
-            return sapling_bundle.map(hash_v7_sapling_effects);
-        }
-        sapling_bundle.map(|bundle| hash_sapling_txid_data(version, bundle))
+    ) -> Result<Self::SaplingDigest, V7DigestError> {
+        sapling_bundle
+            .map(|bundle| {
+                #[cfg(zcash_unstable = "nu8")]
+                if version == TxVersion::V7 {
+                    return Ok(hash_v7_sapling_effects(bundle));
+                }
+                hash_sapling_txid_data(version, bundle)
+            })
+            .transpose()
     }
 
     #[cfg(feature = "orchard")]
@@ -1258,35 +1324,21 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         &self,
         version: TxVersion,
         orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::OrchardDigest {
-        #[cfg(zcash_unstable = "nu8")]
-        if version == TxVersion::V7 {
-            return orchard_bundle.map(hash_v7_orchard_effects);
-        }
-        orchard_bundle.map(|b| {
-            let (_, tx_version) = orchard_commitment_domain(version);
-            b.commitment(tx_version)
-                .expect("Orchard bundle flags must be representable in their transaction format")
-                .0
-        })
+    ) -> Result<Self::OrchardDigest, V7DigestError> {
+        orchard_bundle
+            .map(|bundle| hash_orchard_txid_data(version, ValuePool::Orchard, bundle))
+            .transpose()
     }
 
     #[cfg(feature = "orchard")]
     fn digest_ironwood(
         &self,
-        _version: TxVersion,
+        version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::IronwoodDigest {
-        #[cfg(zcash_unstable = "nu8")]
-        if _version == TxVersion::V7 {
-            return ironwood_bundle.map(hash_v7_ironwood_effects);
-        }
-        ironwood_bundle.map(|b| {
-            let (_, tx_version) = ironwood_v6_domain();
-            b.commitment(tx_version)
-                .expect("Ironwood bundle flags must be representable")
-                .0
-        })
+    ) -> Result<Self::IronwoodDigest, V7DigestError> {
+        ironwood_bundle
+            .map(|bundle| hash_orchard_txid_data(version, ValuePool::Ironwood, bundle))
+            .transpose()
     }
 
     #[cfg(zcash_unstable = "nu8")]
@@ -1820,12 +1872,12 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
-    ) -> Self::SaplingDigest {
+    ) -> Result<Self::SaplingDigest, V7DigestError> {
         if version == TxVersion::V7 {
             let digest = hash_v7_sapling_auth(sapling_bundle);
-            (digest, sapling_bundle.map(|_| digest))
+            Ok((digest, sapling_bundle.map(|_| digest)))
         } else {
-            (sapling_witness_digest(version, sapling_bundle), None)
+            Ok((sapling_witness_digest(version, sapling_bundle), None))
         }
     }
 
@@ -1834,8 +1886,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
-    ) -> Self::SaplingDigest {
-        sapling_witness_digest(version, sapling_bundle)
+    ) -> Result<Self::SaplingDigest, V7DigestError> {
+        Ok(sapling_witness_digest(version, sapling_bundle))
     }
 
     #[cfg(all(feature = "orchard", zcash_unstable = "nu8"))]
@@ -1843,12 +1895,12 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         version: TxVersion,
         orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
-    ) -> Self::OrchardDigest {
+    ) -> Result<Self::OrchardDigest, V7DigestError> {
         if version == TxVersion::V7 {
             let digest = hash_v7_orchard_auth(orchard_bundle);
-            (digest, orchard_bundle.map(|_| digest))
+            Ok((digest, orchard_bundle.map(|_| digest)))
         } else {
-            (orchard_witness_digest(version, orchard_bundle), None)
+            Ok((orchard_witness_digest(version, orchard_bundle), None))
         }
     }
 
@@ -1857,8 +1909,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         version: TxVersion,
         orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
-    ) -> Self::OrchardDigest {
-        orchard_witness_digest(version, orchard_bundle)
+    ) -> Result<Self::OrchardDigest, V7DigestError> {
+        Ok(orchard_witness_digest(version, orchard_bundle))
     }
 
     #[cfg(all(feature = "orchard", zcash_unstable = "nu8"))]
@@ -1866,12 +1918,12 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
-    ) -> Self::IronwoodDigest {
+    ) -> Result<Self::IronwoodDigest, V7DigestError> {
         if version == TxVersion::V7 {
             let digest = hash_v7_ironwood_auth(ironwood_bundle);
-            (digest, ironwood_bundle.map(|_| digest))
+            Ok((digest, ironwood_bundle.map(|_| digest)))
         } else {
-            (ironwood_witness_digest(ironwood_bundle), None)
+            Ok((ironwood_witness_digest(ironwood_bundle), None))
         }
     }
 
@@ -1880,8 +1932,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         _version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
-    ) -> Self::IronwoodDigest {
-        ironwood_witness_digest(ironwood_bundle)
+    ) -> Result<Self::IronwoodDigest, V7DigestError> {
+        Ok(ironwood_witness_digest(ironwood_bundle))
     }
 
     #[cfg(zcash_unstable = "nu8")]
@@ -2357,7 +2409,8 @@ mod digest_path_tests {
                         &BlockTxCommitmentDigester,
                         version,
                         None,
-                    );
+                    )
+                    .unwrap();
                 assert!(v7.is_none(), "absent bundles have no tagged auth entry");
             }
             #[cfg(feature = "orchard")]
@@ -2367,14 +2420,16 @@ mod digest_path_tests {
                         &BlockTxCommitmentDigester,
                         version,
                         None,
-                    );
+                    )
+                    .unwrap();
                 assert!(v7.is_none(), "absent bundles have no tagged auth entry");
                 let (_, v7) =
                     <BlockTxCommitmentDigester as TransactionDigest<Authorized>>::digest_ironwood(
                         &BlockTxCommitmentDigester,
                         version,
                         None,
-                    );
+                    )
+                    .unwrap();
                 assert!(v7.is_none(), "absent bundles have no tagged auth entry");
             }
             let _ = version;
@@ -2393,7 +2448,8 @@ mod digest_path_tests {
                         Authorized,
                     >>::digest_sapling(
                         &BlockTxCommitmentDigester, version, Some(bundle)
-                    );
+                    )
+                    .unwrap();
                     if version == TxVersion::V7 {
                         assert_eq!(selected, super::hash_v7_sapling_auth(Some(bundle)));
                         assert_eq!(v7, Some(selected));

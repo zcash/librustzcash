@@ -5,7 +5,7 @@ use zcash_script::script;
 use crate::{
     address::Script,
     bundle::{Authorization, EffectsOnly, OutPoint, TxIn, TxOut},
-    sighash::TransparentAuthorizingContext,
+    sighash::{TransparentAuthorizingContext, TransparentSigningContext},
 };
 
 use super::Input;
@@ -18,8 +18,13 @@ impl<V: Copy + Debug> super::Bundle<V> {
     /// [regular `Bundle`]: crate::bundle::Bundle
     pub fn extract_effects(
         &self,
-    ) -> Result<Option<crate::bundle::Bundle<EffectsOnly<V>, V>>, TxExtractorError> {
-        self.to_tx_data(|_| Ok(()), |bundle| Ok(effects_only(bundle)))
+    ) -> Result<Option<crate::bundle::Bundle<EffectsOnly, V>>, TxExtractorError> {
+        self.to_tx_data(|_| Ok(()), |_| Ok(EffectsOnly))
+    }
+
+    /// Returns the genuine previous outputs in input order for signature hashing.
+    pub fn signing_context(&self) -> TransparentSigningContext<V> {
+        signing_context(self)
     }
 
     /// Extracts a fully authorized [regular `Bundle`] from this PCZT bundle.
@@ -37,7 +42,7 @@ impl<V: Copy + Debug> super::Bundle<V> {
                     .clone()
                     .ok_or(TxExtractorError::MissingScriptSig)
             },
-            |bundle| Ok(Unbound(effects_only(bundle))),
+            |bundle| Ok(Unbound(signing_context(bundle))),
         )
     }
 
@@ -92,20 +97,25 @@ pub enum TxExtractorError {
     MissingScriptSig,
 }
 
-fn effects_only<V: Copy>(bundle: &super::Bundle<V>) -> EffectsOnly<V> {
+fn signing_context<V: Copy>(bundle: &super::Bundle<V>) -> TransparentSigningContext<V> {
     let inputs = bundle
         .inputs
         .iter()
-        .map(|input| TxOut::new(input.value, Script::from(&input.script_pubkey)))
+        .map(|input| {
+            (
+                OutPoint::new(input.prevout_txid, input.prevout_index),
+                TxOut::new(input.value, Script::from(&input.script_pubkey)),
+            )
+        })
         .collect();
 
-    EffectsOnly { inputs }
+    TransparentSigningContext::new(inputs)
 }
 
 /// Authorizing data for a transparent bundle in a transaction that is just missing
 /// binding signatures.
 #[derive(Debug)]
-pub struct Unbound<V>(EffectsOnly<V>);
+pub struct Unbound<V>(TransparentSigningContext<V>);
 
 impl<V: Debug> Authorization for Unbound<V> {
     type ScriptSig = script::Sig;

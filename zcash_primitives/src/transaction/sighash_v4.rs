@@ -109,7 +109,11 @@ fn joinsplits_hash(
 
 #[cfg(feature = "sapling")]
 fn sapling_spends_hash<
-    A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    A: sapling::bundle::Authorization<
+            Anchor = jubjub::Base,
+            SpendProof = GrothProofBytes,
+            OutputProof = GrothProofBytes,
+        >,
 >(
     spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
@@ -146,7 +150,11 @@ fn sapling_outputs_hash(outputs: &[OutputDescription<GrothProofBytes>]) -> Blake
 /// [ZIP 243]: https://zips.z.cash/zip-0243
 #[cfg(feature = "sapling")]
 pub(crate) fn zip143_digests<
-    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    SA: sapling::bundle::Authorization<
+            Anchor = jubjub::Base,
+            SpendProof = GrothProofBytes,
+            OutputProof = GrothProofBytes,
+        >,
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
@@ -294,6 +302,10 @@ pub(crate) fn v4_signature_hash<A: Authorization>(
 
         match signable_input {
             SignableInput::Shielded => (),
+            #[cfg(zcash_unstable = "nu8")]
+            // A v4 transaction is never v7, so a v7 context signs as a shielded input
+            // here; its transparent variant is unreachable through this path.
+            SignableInput::V7(_) => (),
             SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle() {
                     let mut data = vec![];

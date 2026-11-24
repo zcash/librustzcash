@@ -111,7 +111,31 @@ fn read_bundle<R: Read>(
 }
 
 /// Converts an Orchard-protocol action from its wire representation to its typed form.
-fn action_from_bytes(action: &OrchardActionBytes) -> io::Result<Action<()>> {
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) fn effects_from_v7_bytes(
+    bytes: &crate::transaction::bytes::V7OrchardBundleBytes,
+    value_balance: ZatBalance,
+    version: BundleVersion,
+) -> io::Result<orchard::Bundle<orchard::bundle::EffectsOnly, ZatBalance>> {
+    let actions = bytes
+        .actions()
+        .iter()
+        .map(action_from_bytes)
+        .collect::<io::Result<Vec<_>>>()?;
+    let actions = NonEmpty::from_vec(actions)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty Orchard effects"))?;
+    orchard::Bundle::<orchard::bundle::EffectsOnly, _>::from_parts(
+        actions,
+        read_flags(&[bytes.flags()][..], version)?,
+        value_balance,
+        None,
+        orchard::bundle::EffectsOnly,
+        version,
+    )
+    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+pub(crate) fn action_from_bytes(action: &OrchardActionBytes) -> io::Result<Action<()>> {
     let cv_net = read_value_commitment(&mut &action.cv()[..])?;
     let nf_old = read_nullifier(&mut &action.nullifier()[..])?;
     let rk = read_verification_key(&mut &action.rk()[..])?;

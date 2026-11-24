@@ -360,8 +360,26 @@ impl BundleDigestProvider for SuppliedBundleDigests {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum V7DigestError {
+    /// A previous-output identifier is missing, extra, or differs from its input.
+    MismatchedTransparentInputContext {
+        /// The first context position without a matching transaction input.
+        index: usize,
+    },
+    /// The selected legacy format commits to an anchor that is absent.
+    MissingEffectingAnchor,
     /// The transaction is not a version 7 transaction.
     NotV7,
+    /// The bundle is not supported by the selected transaction format.
+    EffectsVersionMismatch,
+    /// Signature hashing requires one genuine previous output per transparent input.
+    MissingTransparentInputContext {
+        /// The number of transparent inputs.
+        expected: usize,
+        /// The number of supplied amounts.
+        amounts: usize,
+        /// The number of supplied scripts.
+        scripts: usize,
+    },
     /// A retained entry duplicates a typed bundle slot.
     DuplicateBundleType {
         /// The retained entry that conflicts with the typed bundle.
@@ -415,7 +433,24 @@ pub enum V7DigestError {
 impl fmt::Display for V7DigestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MismatchedTransparentInputContext { index } => {
+                write!(f, "previous output differs at input {index}")
+            }
+            Self::MissingEffectingAnchor => f.write_str("legacy effects require a real anchor"),
             Self::NotV7 => f.write_str("transaction is not a version 7 transaction"),
+            Self::EffectsVersionMismatch => {
+                f.write_str("bundle is not supported by this transaction format")
+            }
+            Self::MissingTransparentInputContext {
+                expected,
+                amounts,
+                scripts,
+            } => {
+                write!(
+                    f,
+                    "signature hashing needs {expected} previous outputs, but has {amounts} amounts and {scripts} scripts"
+                )
+            }
             Self::DuplicateBundleType { key } => write!(
                 f,
                 "retained bundle ({}, {}) duplicates a typed bundle slot",

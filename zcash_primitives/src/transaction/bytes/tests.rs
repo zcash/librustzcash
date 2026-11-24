@@ -7,6 +7,7 @@ use zcash_protocol::consensus::{BlockHeight, BranchId};
 use zcash_protocol::constants::MAX_BLOCK_BYTES;
 
 use crate::transaction::{
+    Authorization, Authorized, EffectsOnly, EffectsTransactionError, Transaction, TransactionData,
     TxVersion,
     bytes::transparent::{
         LegacyTransparentBundleBytes, LegacyTransparentInputBytes, TransparentOutPointBytes,
@@ -528,6 +529,219 @@ fn transparent_only_typed_v5_round_trip() {
     assert_eq!(reserialized, wire);
 }
 
+#[test]
+fn cached_effects_versions_access_and_authorized_defaults() {
+    for version in [TxVersion::V5, TxVersion::V6] {
+        let transparent = ::transparent::bundle::Bundle {
+            vin: vec![::transparent::bundle::TxIn::from_parts(
+                ::transparent::bundle::OutPoint::new([1; 32], 2),
+                (),
+                3,
+            )],
+            vout: vec![],
+            authorization: ::transparent::bundle::EffectsOnly,
+        };
+        let data = TransactionData::<EffectsOnly>::from_parts(
+            version,
+            BranchId::Nu7,
+            0,
+            1.into(),
+            Some(transparent),
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        );
+        let expected = crate::transaction::txid::to_txid(
+            version,
+            BranchId::Nu7,
+            &data.txid_digests(&()).unwrap(),
+        )
+        .unwrap();
+        let cached = Transaction::from_effects(data, &()).unwrap();
+        assert_eq!(cached.txid(), expected);
+        assert_eq!(cached.clone(), cached);
+        assert_eq!(
+            Transaction::from_effects(cached.clone().into_data().clone(), &())
+                .unwrap()
+                .txid(),
+            expected,
+        );
+        let borrowed: &TransactionData<EffectsOnly> = &cached;
+        assert_eq!(borrowed.version(), version);
+        assert_eq!(borrowed.transparent_bundle().unwrap().vin.len(), 1);
+        assert!(alloc::format!("{cached:?}").contains("TransactionData"));
+        let data = cached.into_data();
+        let other = Transaction::from_effects(data, &()).unwrap();
+        assert_eq!(other.txid(), expected);
+        let mut empty = other.into_data();
+        empty.transparent_bundle = Some(::transparent::bundle::Bundle {
+            vin: vec![],
+            vout: vec![],
+            authorization: ::transparent::bundle::EffectsOnly,
+        });
+        assert!(matches!(
+            Transaction::from_effects(empty, &()),
+            Err(EffectsTransactionError::InconsistentData(_))
+        ));
+    }
+
+    for version in [TxVersion::Sprout(2), TxVersion::V3, TxVersion::V4] {
+        let data = TransactionData::<EffectsOnly>::from_parts(
+            version,
+            BranchId::Canopy,
+            0,
+            1.into(),
+            None,
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        );
+        assert!(matches!(
+            Transaction::from_effects(data, &()),
+            Err(EffectsTransactionError::UnsupportedVersion(found)) if found == version
+        ));
+    }
+
+    // The root authorization marker need not implement Debug or PartialEq.
+    struct NoTraits;
+    impl Authorization for NoTraits {
+        type TransparentAuth = ::transparent::bundle::Authorized;
+        #[cfg(feature = "sapling")]
+        type SaplingAuth = ::sapling::bundle::Authorized;
+        #[cfg(feature = "orchard")]
+        type OrchardAuth = ::orchard::bundle::Authorized;
+    }
+    let data = TransactionData::<NoTraits>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu7,
+        0,
+        1.into(),
+        None,
+        None,
+        #[cfg(feature = "sapling")]
+        None,
+        #[cfg(feature = "orchard")]
+        None,
+    );
+    let cached = Transaction {
+        txid: crate::transaction::TxId::from_bytes([0; 32]),
+        data,
+    };
+    assert_eq!(cached, cached);
+    assert!(alloc::format!("{cached:?}").contains("TransactionData"));
+
+    let complete: Transaction = TransactionData::<Authorized>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu7,
+        0,
+        1.into(),
+        None,
+        None,
+        #[cfg(feature = "sapling")]
+        None,
+        #[cfg(feature = "orchard")]
+        None,
+    )
+    .freeze()
+    .unwrap();
+    let _: &Transaction<Authorized> = &complete;
+    assert_eq!(complete.clone(), complete);
+    let data: TransactionData<Authorized> = complete.into_data();
+    assert!(data.freeze().is_ok());
+}
+
+#[test]
+fn authorized_into_effects_preserves_transparent_data_and_rejects_legacy() {
+    for version in [
+        TxVersion::V5,
+        TxVersion::V6,
+        #[cfg(zcash_unstable = "nu8")]
+        TxVersion::V7,
+    ] {
+        let branch = match version {
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => BranchId::Nu8,
+            _ => BranchId::Nu7,
+        };
+        let transparent = legacy_transparent().into_authorized().unwrap().unwrap();
+        assert_ne!(
+            transparent.vin[0].script_sig(),
+            &::transparent::address::Script::default()
+        );
+        let original = TransactionData::<Authorized>::from_parts(
+            version,
+            branch,
+            0,
+            1.into(),
+            Some(transparent.clone()),
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        );
+        let data = original.clone().into_effects().unwrap();
+        let complete = original.freeze().unwrap();
+        let expected_txid = complete.txid();
+        let effects = complete.into_effects().unwrap();
+        assert_eq!(effects.txid(), expected_txid);
+        assert_eq!(
+            Transaction::from_effects(data, &()).unwrap().txid(),
+            expected_txid,
+        );
+        let bundle = effects.transparent_bundle().unwrap();
+        assert_eq!(bundle.vin[0].prevout(), transparent.vin[0].prevout());
+        assert_eq!(bundle.vin[0].sequence(), transparent.vin[0].sequence());
+        assert_eq!(bundle.vin[0].script_sig(), &());
+        assert_eq!(bundle.vout, transparent.vout);
+    }
+
+    for version in [TxVersion::Sprout(2), TxVersion::V3, TxVersion::V4] {
+        let data = TransactionData::<Authorized>::from_parts(
+            version,
+            BranchId::Canopy,
+            0,
+            0.into(),
+            None,
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+        );
+        assert!(matches!(
+            data.clone().into_effects(),
+            Err(EffectsTransactionError::UnsupportedVersion(found)) if found == version
+        ));
+        assert!(matches!(
+            data.freeze().unwrap().into_effects(),
+            Err(EffectsTransactionError::UnsupportedVersion(found)) if found == version
+        ));
+    }
+
+    let sprout = sprout_bundle(true).into_bundle().unwrap();
+    let inconsistent = TransactionData::<Authorized>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu7,
+        0,
+        0.into(),
+        None,
+        Some(sprout),
+        #[cfg(feature = "sapling")]
+        None,
+        #[cfg(feature = "orchard")]
+        None,
+    );
+    assert!(matches!(
+        inconsistent.into_effects(),
+        Err(EffectsTransactionError::InconsistentData(_))
+    ));
+}
+
 #[cfg(not(feature = "sapling"))]
 #[test]
 fn typed_read_rejects_disabled_sapling_bundle() {
@@ -579,12 +793,11 @@ mod v7 {
     use alloc::collections::BTreeMap;
 
     use proptest::prelude::*;
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    use proptest::strategy::ValueTree;
 
     use super::*;
-    use crate::transaction::{
-        Authorized, Transaction, TransactionData,
-        zip248::{SuppliedBundleDigests, V7DigestError},
-    };
+    use crate::transaction::zip248::{SuppliedBundleDigests, V7DigestError};
 
     fn v7_transparent() -> TransparentBundleBytes {
         let effects = TransparentEffectsBytes::from_parts(
@@ -1265,6 +1478,32 @@ mod v7 {
                 vec![effect.clone()],
                 vec![auth.clone()],
             ));
+            for bytes in [bytes.clone(), v7_tx(v7_body(vec![], vec![effect.clone()]))] {
+                let projected =
+                    TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                        bytes.clone(),
+                        BranchId::Sprout,
+                    )
+                    .unwrap();
+                assert!(projected.uninterpreted_auth_bundles().is_empty());
+                assert_eq!(
+                    projected.uninterpreted_effect_bundles(),
+                    &BTreeMap::from([(bundle_type, effect.clone())])
+                );
+                assert_eq!(
+                    crate::transaction::txid::to_txid_v7(
+                        BranchId::Nu8.into(),
+                        &projected.txid_digests(&()).unwrap()
+                    ),
+                    bytes.v7_txid(&()).unwrap(),
+                );
+                let cached = Transaction::from_effects(projected, &()).unwrap();
+                assert_eq!(cached.txid(), bytes.v7_txid(&()).unwrap());
+                assert_eq!(
+                    cached.uninterpreted_effect_bundles(),
+                    &BTreeMap::from([(bundle_type, effect.clone())])
+                );
+            }
             let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
             assert_eq!(
                 data.uninterpreted_effect_bundles(),
@@ -1281,6 +1520,396 @@ mod v7 {
             let mut wire = Vec::new();
             bytes.write(&mut wire).unwrap();
             assert_eq!(TransactionBytes::read(&wire[..]).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn cached_effects_v7_transparent_only_without_authorization_or_prevouts() {
+        let fixture = v7_transparent_effect_only();
+        for (inputs, outputs) in [(true, false), (false, true), (true, true)] {
+            let effect = TransparentEffectsBytes::from_parts(
+                if inputs {
+                    fixture.effects().inputs().to_vec()
+                } else {
+                    vec![]
+                },
+                if outputs {
+                    fixture.effects().outputs().to_vec()
+                } else {
+                    vec![]
+                },
+            );
+            let bytes = v7_tx(v7_body(
+                vec![],
+                vec![V7EffectBundleBytes::Transparent(effect)],
+            ));
+            let mut wire = Vec::new();
+            bytes.write(&mut wire).unwrap();
+            let data = TransactionData::<EffectsOnly>::from_effects_bytes(
+                TransactionBytes::read(&wire[..]).unwrap(),
+                BranchId::Sprout,
+            )
+            .unwrap();
+            let cached = Transaction::from_effects(data, &()).unwrap();
+            assert_eq!(cached.txid(), bytes.v7_txid(&()).unwrap());
+            let bundle = cached.transparent_bundle().unwrap();
+            assert_eq!(!bundle.vin.is_empty(), inputs);
+            assert_eq!(!bundle.vout.is_empty(), outputs);
+        }
+    }
+
+    #[test]
+    fn v7_effects_projection_retains_exact_opaque_keys_without_auth() {
+        /// A variant outside the registry.
+        const UNKNOWN_VARIANT: u64 = 7;
+        for key in [
+            BundleId::new(
+                BundleType::from_u64(99),
+                BundleVariant::from_u64(UNKNOWN_VARIANT),
+            ),
+            BundleId::new(
+                BundleType::SAPLING,
+                BundleVariant::from_u64(UNKNOWN_VARIANT),
+            ),
+            BundleId::new(
+                BundleType::ORCHARD,
+                BundleVariant::from_u64(UNKNOWN_VARIANT),
+            ),
+            BundleId::new(
+                BundleType::IRONWOOD,
+                BundleVariant::from_u64(UNKNOWN_VARIANT),
+            ),
+        ] {
+            let effect = V7EffectBundleBytes::Opaque(
+                OpaqueEffectBundleBytes::from_parts(key, vec![1, 2, 3]).unwrap(),
+            );
+            let auth = V7AuthBundleBytes::Opaque(
+                OpaqueAuthBundleBytes::from_parts(key, vec![4, 5]).unwrap(),
+            );
+            for auth in [vec![auth], vec![]] {
+                let bytes = v7_tx(v7_body_with_auth(vec![], vec![effect.clone()], auth));
+                let mut wire = Vec::new();
+                bytes.write(&mut wire).unwrap();
+                let data = TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                    TransactionBytes::read(&wire[..]).unwrap(),
+                    BranchId::Sprout,
+                )
+                .unwrap();
+                assert_eq!(
+                    data.uninterpreted_effect_bundles(),
+                    &BTreeMap::from([(key.bundle_type(), effect.clone())])
+                );
+                assert!(data.uninterpreted_auth_bundles().is_empty());
+                assert_eq!(
+                    data.txid_digests(&()).unwrap_err(),
+                    crate::transaction::zip248::V7DigestError::MissingEffectsDigest { key }
+                );
+                let project = || {
+                    TransactionData::<EffectsOnly>::from_effects_bytes(bytes.clone(), BranchId::Nu8)
+                        .unwrap()
+                };
+                assert!(matches!(
+                    Transaction::from_effects(project(), &()),
+                    Err(EffectsTransactionError::Digest(
+                        V7DigestError::MissingEffectsDigest { key: found }
+                    )) if found == key
+                ));
+                let mut supplied = crate::transaction::zip248::SuppliedBundleDigests::new();
+                supplied
+                    .insert_effects(
+                        key,
+                        blake2b_simd::Params::new().hash_length(32).hash(b"effects"),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    crate::transaction::txid::to_txid_v7(
+                        BranchId::Nu8.into(),
+                        &data.txid_digests(&supplied).unwrap()
+                    ),
+                    bytes.v7_txid(&supplied).unwrap(),
+                );
+                let cached = Transaction::from_effects(data, &supplied).unwrap();
+                let cloned = cached.clone();
+                assert_eq!(
+                    cloned.uninterpreted_effect_bundles(),
+                    cached.uninterpreted_effect_bundles()
+                );
+                assert_eq!(
+                    Transaction::from_effects(cloned.into_data(), &supplied)
+                        .unwrap()
+                        .txid(),
+                    cached.txid(),
+                );
+                let other = Transaction::from_effects(project(), &supplied).unwrap();
+                assert_eq!(cached, other);
+                assert_eq!(cached.txid(), bytes.v7_txid(&supplied).unwrap());
+                assert_eq!(
+                    cached.uninterpreted_effect_bundles(),
+                    other.uninterpreted_effect_bundles()
+                );
+                let data = cached.into_data();
+                for version in [TxVersion::V5, TxVersion::V6] {
+                    let mut legacy = project();
+                    legacy.version = version;
+                    assert!(matches!(
+                        Transaction::from_effects(legacy, &supplied),
+                        Err(EffectsTransactionError::InconsistentData(_))
+                    ));
+                }
+                assert!(
+                    crate::transaction::sighash::PrecomputedSighashData::new_zip244_with_context(
+                        data,
+                        &supplied,
+                        &::transparent::sighash::TransparentSigningContext::new(vec![])
+                    )
+                    .is_ok()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn v7_effects_projection_rejects_invalid_supported_effects() {
+        let invalid = v7_tx(v7_body(
+            vec![],
+            vec![V7EffectBundleBytes::Transparent(
+                TransparentEffectsBytes::from_parts(vec![], vec![output(-1, &[0x51])]),
+            )],
+        ));
+        assert!(
+            TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                invalid,
+                BranchId::Nu8
+            )
+            .is_err()
+        );
+        #[cfg(feature = "sapling")]
+        assert!(
+            TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                v7_tx(v7_body(
+                    vec![],
+                    vec![V7EffectBundleBytes::Sapling(v7_sapling())]
+                )),
+                BranchId::Nu8,
+            )
+            .is_err()
+        );
+        #[cfg(feature = "orchard")]
+        for effect in [
+            V7EffectBundleBytes::Orchard(v7_orchard()),
+            V7EffectBundleBytes::Ironwood(v7_orchard()),
+        ] {
+            assert!(
+                TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                    v7_tx(v7_body(vec![], vec![effect])),
+                    BranchId::Nu8,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn v7_effects_projection_rejects_unsupported_formats_and_typed_ranges() {
+        let legacy = TransactionBytes::from_parts(
+            TxVersion::V5,
+            Some(BranchId::Nu5.into()),
+            0,
+            0.into(),
+            TransactionBodyBytes::V5(V5TransactionBodyBytes::from_parts(
+                LegacyTransparentBundleBytes::default(),
+                None,
+                None,
+            )),
+        )
+        .unwrap();
+        assert_eq!(
+            TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                legacy,
+                BranchId::Nu8
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidInput,
+        );
+        /// A branch ID not assigned by the consensus registry.
+        const UNKNOWN_BRANCH: u32 = 0x1234_5678;
+        let unknown_branch = TransactionBytes::from_parts(
+            TxVersion::V7,
+            Some(UNKNOWN_BRANCH),
+            0,
+            0.into(),
+            TransactionBodyBytes::V7(v7_body(vec![], vec![])),
+        )
+        .unwrap();
+        assert!(
+            TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                unknown_branch,
+                BranchId::Nu8
+            )
+            .is_err()
+        );
+        let invalid_amount = v7_tx(v7_body(
+            vec![zec_delta(BundleType::FEE.to_u64(), i64::MAX)],
+            vec![],
+        ));
+        assert_eq!(
+            TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                invalid_amount,
+                BranchId::Nu8
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidData,
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "sapling")]
+    fn v7_effects_projection_enabled_sapling_without_auth() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let strategy =
+            crate::transaction::components::sapling::testing::arb_bundle_for_version(TxVersion::V7)
+                .prop_filter("a nonempty Sapling bundle", Option::is_some);
+        let bundle = strategy.new_tree(&mut runner).unwrap().current().unwrap();
+        let bytes = v7_tx(v7_body(
+            vec![],
+            vec![V7EffectBundleBytes::Sapling(
+                V7SaplingBundleBytes::from_bundle(&bundle),
+            )],
+        ));
+        let data = TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+            bytes.clone(),
+            BranchId::Sprout,
+        )
+        .unwrap();
+        let effects = data.sapling_bundle().unwrap();
+        assert_eq!(
+            effects.shielded_spends().len(),
+            bundle.shielded_spends().len()
+        );
+        assert_eq!(
+            effects.shielded_outputs().len(),
+            bundle.shielded_outputs().len()
+        );
+        for (effect, spend) in effects
+            .shielded_spends()
+            .iter()
+            .zip(bundle.shielded_spends())
+        {
+            assert_eq!(effect.cv().to_bytes(), spend.cv().to_bytes());
+            assert_eq!(effect.nullifier(), spend.nullifier());
+            assert_eq!(effect.rk(), spend.rk());
+            assert!(effect.anchor().is_none());
+        }
+        if !effects.shielded_spends().is_empty() {
+            assert_eq!(
+                crate::transaction::txid::hash_sapling_txid_data(TxVersion::V5, effects)
+                    .unwrap_err(),
+                V7DigestError::MissingEffectingAnchor,
+            );
+        }
+        assert_eq!(
+            crate::transaction::txid::to_txid_v7(
+                BranchId::Nu8.into(),
+                &data.txid_digests(&()).unwrap()
+            ),
+            bytes.v7_txid(&()).unwrap(),
+        );
+        let cached = Transaction::from_effects(data, &()).unwrap();
+        assert_eq!(cached.txid(), bytes.v7_txid(&()).unwrap());
+        let data = cached.into_data();
+        assert!(
+            crate::transaction::sighash::PrecomputedSighashData::new_zip244_with_context(
+                data,
+                &(),
+                &::transparent::sighash::TransparentSigningContext::new(vec![])
+            )
+            .is_ok()
+        );
+        assert!(TransactionData::<Authorized>::from_bytes(bytes, BranchId::Nu8).is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn v7_effects_projection_enabled_orchard_and_ironwood_without_auth() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        for (bundle_type, version) in [
+            (
+                BundleType::ORCHARD,
+                ::orchard::bundle::BundleVersion::orchard_v3(),
+            ),
+            (
+                BundleType::IRONWOOD,
+                ::orchard::bundle::BundleVersion::ironwood_v3(),
+            ),
+        ] {
+            let bundle = crate::transaction::components::orchard::testing::rebuild_with_version(
+                bundle.clone(),
+                version,
+            );
+            let (effects, _) =
+                crate::transaction::components::orchard::v7_bundle_to_bytes(&bundle).unwrap();
+            let entry = if bundle_type == BundleType::ORCHARD {
+                V7EffectBundleBytes::Orchard(effects)
+            } else {
+                V7EffectBundleBytes::Ironwood(effects)
+            };
+            let bytes = v7_tx(v7_body(vec![], vec![entry]));
+            let data = TransactionData::<crate::transaction::EffectsOnly>::from_effects_bytes(
+                bytes.clone(),
+                BranchId::Sprout,
+            )
+            .unwrap();
+            let projected = if bundle_type == BundleType::ORCHARD {
+                data.orchard_bundle()
+            } else {
+                data.ironwood_bundle()
+            }
+            .unwrap();
+            assert!(projected.anchor().is_none());
+            assert_eq!(
+                crate::transaction::txid::hash_orchard_txid_data(
+                    TxVersion::V5,
+                    version.value_pool(),
+                    projected
+                )
+                .unwrap_err(),
+                if version.value_pool() == ::orchard::ValuePool::Orchard {
+                    V7DigestError::MissingEffectingAnchor
+                } else {
+                    V7DigestError::EffectsVersionMismatch
+                },
+            );
+            let effects = projected;
+            assert_eq!(effects.actions().len(), bundle.actions().len());
+            for (effect, action) in effects.actions().iter().zip(bundle.actions()) {
+                assert_eq!(effect.nullifier(), action.nullifier());
+                assert_eq!(effect.cmx(), action.cmx());
+            }
+            assert_eq!(
+                crate::transaction::txid::to_txid_v7(
+                    BranchId::Nu8.into(),
+                    &data.txid_digests(&()).unwrap()
+                ),
+                bytes.v7_txid(&()).unwrap(),
+            );
+            let cached = Transaction::from_effects(data, &()).unwrap();
+            assert_eq!(cached.txid(), bytes.v7_txid(&()).unwrap());
+            let data = cached.into_data();
+            assert!(
+                crate::transaction::sighash::PrecomputedSighashData::new_zip244_with_context(
+                    data,
+                    &(),
+                    &::transparent::sighash::TransparentSigningContext::new(vec![])
+                )
+                .is_ok()
+            );
+            assert!(TransactionData::<Authorized>::from_bytes(bytes, BranchId::Nu8).is_err());
         }
     }
 

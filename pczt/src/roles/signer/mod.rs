@@ -191,11 +191,20 @@ impl Signer {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
             },
-            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
-            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
-            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
+            |s| {
+                crate::extract_sapling_effects(s, anchor_requirement)
+                    .map_err(ExtractError::SaplingExtract)
+            },
+            |o| {
+                crate::extract_orchard_effects(o, anchor_requirement)
+                    .map_err(ExtractError::OrchardExtract)
+            },
+            |i| {
+                crate::extract_orchard_effects(i, anchor_requirement)
+                    .map_err(ExtractError::IronwoodExtract)
+            },
         )?;
-        let sighash_data = precompute_sighash_data(&global, tx_data)?;
+        let sighash_data = precompute_sighash_data(&global, tx_data, &transparent)?;
         let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
 
         Ok(Self {

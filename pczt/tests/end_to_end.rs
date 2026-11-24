@@ -239,8 +239,12 @@ fn transparent_to_orchard() {
     check_round_trip(&pczt);
 
     // Grab the transaction's effects here, as it's easier.
-    let tx_effects =
-        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap(), &()).unwrap();
+    let tx_effects = PrecomputedSighashData::new_zip244_with_context(
+        pczt.clone().into_effects().unwrap(),
+        &(),
+        &pczt.transparent_signing_context().unwrap(),
+    )
+    .unwrap();
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt)
@@ -420,8 +424,12 @@ fn transparent_p2sh_multisig_to_orchard() {
     check_round_trip(&pczt);
 
     // Grab the transaction's effects here, as it's easier.
-    let tx_effects =
-        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap(), &()).unwrap();
+    let tx_effects = PrecomputedSighashData::new_zip244_with_context(
+        pczt.clone().into_effects().unwrap(),
+        &(),
+        &pczt.transparent_signing_context().unwrap(),
+    )
+    .unwrap();
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt)

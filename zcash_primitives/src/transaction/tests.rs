@@ -3,8 +3,8 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Authorized, Transaction, TransactionData, TransactionDigest, TxVersion,
-        Zip244Digests,
+        Authorization, Authorized, EffectsOnly, Transaction, TransactionData, TransactionDigest,
+        TxVersion, Zip244Digests,
         coinbase::is_coinbase,
         sighash::{PrecomputedSighashData, SignableInput},
         sighash_v4::{v4_signature_hash, zip143_digests},
@@ -33,6 +33,9 @@ use {
 #[cfg(all(test, zcash_unstable = "nu8"))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 
+#[cfg(all(test, zcash_unstable = "nu8"))]
+use super::sighash_v7::v7_signature_hash;
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
 
@@ -55,7 +58,7 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
 
     let encoded = hex::decode(ENCODED).unwrap();
     let expected_digest = hex::decode(TX_DIGEST).unwrap();
-    let data = TransactionData::<TestUnauthorized>::from_parts_v6(
+    let data = TransactionData::<EffectsOnly>::from_parts_v6(
         BranchId::Nu7,
         0,
         EXPIRY_HEIGHT.into(),
@@ -65,12 +68,27 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
         None,
     );
     let digests = data.digest(TxIdDigester, &()).unwrap();
+    let cached = Transaction::from_effects(data, &()).unwrap();
+    assert_eq!(cached.txid().as_ref().as_slice(), expected_digest);
+    let data = cached.into_data();
     assert_eq!(
         digests.header_digest.as_bytes(),
         hex::decode(HEADER_DIGEST).unwrap()
     );
     assert_eq!(
         v6_signature_hash(&data, &SignableInput::Shielded, &digests, None).as_bytes(),
+        expected_digest,
+    );
+    assert_eq!(
+        PrecomputedSighashData::new_zip244_with_context(
+            data,
+            &(),
+            &::transparent::sighash::TransparentSigningContext::new(vec![])
+        )
+        .unwrap()
+        .signature_hash(&SignableInput::Shielded)
+        .as_ref()
+        .as_slice(),
         expected_digest,
     );
 
@@ -117,6 +135,60 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
         assert_eq!(explicit_zero.txid(), tx.txid());
         assert!(!TxVersion::V6.has_zip233(BranchId::Nu7));
     }
+}
+
+#[test]
+fn effects_only_v5_preserves_effecting_anchors() {
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let original = TransactionData::<Authorized>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu6_3,
+        0,
+        1.into(),
+        None,
+        None,
+        Some(test_sapling_bundle(&mut runner)),
+        Some(test_orchard_bundle(&mut runner)),
+    );
+    let effects = original.clone().into_effects().unwrap();
+    assert_eq!(
+        effects.sapling_bundle().unwrap().shielded_spends()[0]
+            .anchor()
+            .as_ref()
+            .unwrap(),
+        original.sapling_bundle().unwrap().shielded_spends()[0].anchor()
+    );
+    assert_eq!(
+        effects.orchard_bundle().unwrap().anchor().as_ref().unwrap(),
+        original.orchard_bundle().unwrap().anchor()
+    );
+    assert_eq!(
+        crate::transaction::txid::to_txid(
+            TxVersion::V5,
+            BranchId::Nu6_3,
+            &effects.txid_digests(&()).unwrap()
+        )
+        .unwrap(),
+        original.clone().freeze().unwrap().txid(),
+    );
+    let cached = Transaction::from_effects(effects, &()).unwrap();
+    assert_eq!(cached.txid(), original.clone().freeze().unwrap().txid());
+    let effects = cached.into_data();
+    let expected = PrecomputedSighashData::new_zip244(
+        with_test_transparent_auth(original, vec![], vec![]),
+        &(),
+    )
+    .unwrap();
+    let actual = PrecomputedSighashData::new_zip244_with_context(
+        effects,
+        &(),
+        &::transparent::sighash::TransparentSigningContext::new(vec![]),
+    )
+    .unwrap();
+    assert_eq!(
+        actual.signature_hash(&SignableInput::Shielded).as_ref(),
+        expected.signature_hash(&SignableInput::Shielded).as_ref()
+    );
 }
 
 #[test]
@@ -328,8 +400,7 @@ fn suggested_version_for_nu8_is_v6() {
     assert!(TxVersion::V7.valid_in_branch(BranchId::Nu8));
 }
 
-/// Cross-checks the v7 digest tree against values computed independently of this
-/// implementation, directly from the [ZIP 248] text with Python's
+/// Cross-checks the v7 digest tree against a separate transcription of [ZIP 248] with Python's
 /// `hashlib.blake2b` (see `scripts/zip248_vectors.py`):
 ///
 /// ```text
@@ -900,7 +971,7 @@ fn legacy_bundle_mapping_refreshes_shielded_deltas() {
             .unwrap()
         };
     for version in [TxVersion::V4, TxVersion::V5, TxVersion::V6] {
-        let original = TransactionData::from_parts_v6_or_v7(
+        let original = TransactionData::<Authorized>::from_parts_v6_or_v7(
             version,
             BranchId::Nu7,
             0,
@@ -1508,7 +1579,7 @@ fn v7_sapling_spends_digest_hashes_cv_and_rk_under_the_v6_personalization() {
     let parts = |anchor: [u8; 32]| SaplingSpendDigestParts {
         cv: [0x11; 32],
         nullifier: [0x22; 32],
-        anchor,
+        anchor: Some(anchor),
         rk: [0x44; 32],
     };
 
@@ -1516,7 +1587,11 @@ fn v7_sapling_spends_digest_hashes_cv_and_rk_under_the_v6_personalization() {
     // 248 §T.3.2a digests.
     let expected = "c1402185efee34caedd8e93cb2194686cd7b1e4373499257c7b8a74f85e5f381";
     assert_eq!(
-        hex::encode(hash_sapling_spends_parts(TxVersion::V7, [parts([0x33; 32])]).as_bytes()),
+        hex::encode(
+            hash_sapling_spends_parts(TxVersion::V7, [parts([0x33; 32])])
+                .unwrap()
+                .as_bytes()
+        ),
         expected,
     );
 
@@ -1558,7 +1633,8 @@ fn v6_sapling_auth_digest_uses_v6_domain_and_appends_anchor() {
         &BlockTxCommitmentDigester,
         TxVersion::V6,
         Some(&bundle),
-    );
+    )
+    .unwrap();
 
     #[cfg(zcash_unstable = "nu8")]
     let actual = actual.0;
@@ -1583,7 +1659,8 @@ fn v6_sapling_output_only_auth_digest_uses_v6_domain_without_anchor() {
         &BlockTxCommitmentDigester,
         TxVersion::V6,
         Some(&bundle),
-    );
+    )
+    .unwrap();
     #[cfg(zcash_unstable = "nu8")]
     let actual = actual.0;
 
@@ -1998,10 +2075,17 @@ fn zip_0244() {
         let precomputed = PrecomputedSighashData::new(txdata, &()).unwrap();
         let txdata = precomputed.tx();
 
-        // Computes the signature hash both from the precomputed digests and with the input
-        // digests computed on demand, and checks that the results agree.
+        // Compare cached signature hashes with independently recomputed input digests.
         let check_sighash = |signable_input: &SignableInput<'_>| {
-            let sighash = v5_signature_hash(txdata, signable_input, &txid_parts, None);
+            let inputs = txdata.transparent_bundle().and_then(|bundle| {
+                super::sighash_v5::TransparentInputsDigests::for_bundle(
+                    txdata.version(),
+                    bundle,
+                    &bundle.authorization,
+                )
+                .unwrap()
+            });
+            let sighash = v5_signature_hash(txdata, signable_input, &txid_parts, inputs.as_ref());
             assert_eq!(
                 precomputed.signature_hash(signable_input).as_ref(),
                 sighash.as_bytes()
@@ -2167,6 +2251,629 @@ fn zip_0233() {
     assert_ne!(tx.txid(), tx3.txid());
 }
 
+/// Deterministic vectors for the [ZIP 248 §Signature Digest] algorithm.
+///
+/// The expected digests use a separately executable Python transcription of [ZIP 248].
+/// This cross-check is not an independently developed or externally reviewed oracle.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
+/// [ZIP 248 §Signature Digest]: https://zips.z.cash/zip-0248#variant-0-signature-digest
+#[cfg(all(test, feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+mod v7_signature_digest_vectors {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use blake2b_simd::Params;
+    use corez::io::Write;
+
+    use super::{
+        super::{
+            sighash::{PrecomputedSighashData, SignableInput, V7SignatureContext},
+            transparent::OutPoint,
+            txid::{TxIdDigester, to_txid_v7},
+            zip248,
+        },
+        Script, TestUnauthorized, TransactionData, TxIn, TxVersion, transparent, v7_signature_hash,
+        with_test_transparent_auth,
+    };
+    use crate::{
+        encoding::StateWrite,
+        transaction::components::transparent::{write_outpoint, write_script},
+    };
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        value::{ZatBalance, Zatoshis},
+    };
+
+    /// Distinct prevout hashes for the two transparent inputs.
+    const PREVOUT_HASH: [[u8; 32]; 2] = [[0x11; 32], [0x22; 32]];
+    /// Output indices of the spent coins. Input 1 spends output 0, so its prevout index
+    /// differs from its own local index.
+    const PREVOUT_INDEX: [u32; 2] = [3, 0];
+    /// Values of the spent coins.
+    const VALUE: [u64; 2] = [1_000, 2_000];
+    /// Distinct `scriptPubKey` prefixes, each extended to a different total length.
+    const SCRIPT: [&[u8]; 2] = [&[0x51, 0x52, 0x53], &[0x76, 0xa9, 0x14]];
+    /// Extension of the second `scriptPubKey` to 25 bytes.
+    const SCRIPT_1: [u8; 22] = [0xab; 22];
+    /// Distinct `nSequence` values.
+    const SEQUENCE: [u32; 2] = [0x0102_0304, 0xffff_ffff];
+    /// The personalization of every variant 0 signature digest.
+    const PERSONAL: &[u8; 16] = b"ZcashSigHash_v7_";
+    /// The digest prefix length: S.1 through S.6, with one-byte encodings of the bundle
+    /// type and variant.
+    const PREFIX_LEN: usize = 1 + 32 + 32 + 32 + 1 + 1;
+
+    fn scripts() -> [Script; 2] {
+        let mut script_1 = SCRIPT[1].to_vec();
+        script_1.extend_from_slice(&SCRIPT_1);
+        [
+            Script(zcash_script::script::Code(SCRIPT[0].to_vec())),
+            Script(zcash_script::script::Code(script_1)),
+        ]
+    }
+
+    /// A version 7 transaction with two transparent inputs, one output, and
+    /// shielded bundles long enough for the two-index vectors below.
+    fn sighash_tx() -> TransactionData<TestUnauthorized> {
+        use proptest::strategy::{Strategy, ValueTree};
+
+        let mut runner = proptest::test_runner::TestRunner::new(proptest::test_runner::Config {
+            rng_seed: proptest::test_runner::RngSeed::Fixed(0x5A17),
+            ..Default::default()
+        });
+        let mut shielded = || {
+            let sapling = loop {
+                match crate::transaction::components::sapling::testing::arb_bundle_for_version(
+                    TxVersion::V6,
+                )
+                .new_tree(&mut runner)
+                .unwrap()
+                .current()
+                {
+                    Some(bundle) if bundle.shielded_spends().len() >= 2 => break bundle,
+                    _ => {}
+                }
+            };
+            let orchard = crate::transaction::components::orchard::testing::rebuild_with_version(
+                crate::transaction::components::orchard::testing::arb_bundle(2)
+                    .new_tree(&mut runner)
+                    .unwrap()
+                    .current(),
+                orchard::bundle::BundleVersion::orchard_v3(),
+            );
+            let ironwood = crate::transaction::components::orchard::testing::rebuild_with_version(
+                crate::transaction::components::orchard::testing::arb_bundle(2)
+                    .new_tree(&mut runner)
+                    .unwrap()
+                    .current(),
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            );
+            (sapling, orchard, ironwood)
+        };
+        let (sapling, orchard, ironwood) = shielded();
+
+        let scripts = scripts();
+        let transparent = transparent::Bundle {
+            vin: (0..2)
+                .map(|i| {
+                    TxIn::from_parts(
+                        OutPoint::new(PREVOUT_HASH[i], PREVOUT_INDEX[i]),
+                        Script::default(),
+                        SEQUENCE[i],
+                    )
+                })
+                .collect(),
+            vout: vec![transparent::TxOut::new(
+                Zatoshis::const_from_u64(2_500),
+                Script::default(),
+            )],
+            authorization: transparent::Authorized,
+        };
+
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_transparent(ZatBalance::from_i64(-((VALUE[0] + VALUE[1]) as i64)).unwrap())
+            .unwrap();
+        vp.set_fee(Zatoshis::const_from_u64(500)).unwrap();
+
+        let tx = TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from(100u32),
+            vp,
+            Some(transparent),
+            None,
+            Some(sapling),
+            Some(orchard),
+            Some(ironwood),
+            None,
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        with_test_transparent_auth(
+            tx,
+            VALUE.iter().map(|v| Zatoshis::const_from_u64(*v)).collect(),
+            scripts.to_vec(),
+        )
+    }
+
+    /// The expected signature context bytes of every vector, per [ZIP 248 §S.7] and the
+    /// bundle definitions. No context carries a length prefix.
+    ///
+    /// [ZIP 248 §S.7]: https://zips.z.cash/zip-0248#s-7-transparent-signature-context
+    fn contexts<'a>(
+        tx: &'a TransactionData<TestUnauthorized>,
+        scripts: &'a [Script; 2],
+    ) -> Vec<(&'static str, u8, V7SignatureContext<'a>, Vec<u8>)> {
+        let bundle = tx.transparent_bundle().unwrap();
+        let transparent = |i: usize| {
+            let mut context = Vec::new();
+            write_outpoint(&mut context, bundle.vin[i].prevout()).unwrap();
+            context.extend_from_slice(&(VALUE[i] as i64).to_le_bytes());
+            write_script(&mut context, &scripts[i]).unwrap();
+            context.extend_from_slice(&SEQUENCE[i].to_le_bytes());
+            context.extend_from_slice(&(i as u16).to_le_bytes());
+            context
+        };
+
+        vec![
+            (
+                "transparent-0",
+                0,
+                V7SignatureContext::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        ::transparent::sighash::SighashType::ALL,
+                        0,
+                        &scripts[0],
+                        &scripts[0],
+                        Zatoshis::const_from_u64(VALUE[0]),
+                    )
+                    .unwrap(),
+                ),
+                transparent(0),
+            ),
+            (
+                "transparent-1",
+                0,
+                V7SignatureContext::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        ::transparent::sighash::SighashType::ALL,
+                        1,
+                        &scripts[1],
+                        &scripts[1],
+                        Zatoshis::const_from_u64(VALUE[1]),
+                    )
+                    .unwrap(),
+                ),
+                transparent(1),
+            ),
+            (
+                "sapling-spend-0",
+                2,
+                V7SignatureContext::SaplingSpend { index: 0 },
+                0u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "sapling-spend-1",
+                2,
+                V7SignatureContext::SaplingSpend { index: 1 },
+                1u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "sapling-binding",
+                2,
+                V7SignatureContext::SaplingBinding,
+                vec![],
+            ),
+            (
+                "orchard-action-0",
+                3,
+                V7SignatureContext::OrchardAction { index: 0 },
+                0u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "orchard-action-1",
+                3,
+                V7SignatureContext::OrchardAction { index: 1 },
+                1u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "orchard-binding",
+                3,
+                V7SignatureContext::OrchardBinding,
+                vec![],
+            ),
+            (
+                "ironwood-action-0",
+                4,
+                V7SignatureContext::IronwoodAction { index: 0 },
+                0u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "ironwood-action-1",
+                4,
+                V7SignatureContext::IronwoodAction { index: 1 },
+                1u16.to_le_bytes().to_vec(),
+            ),
+            (
+                "ironwood-binding",
+                4,
+                V7SignatureContext::IronwoodBinding,
+                vec![],
+            ),
+        ]
+    }
+
+    /// Assembles a variant 0 preimage from its [ZIP 248 §Signature Digest] fields.
+    ///
+    /// [ZIP 248 §Signature Digest]: https://zips.z.cash/zip-0248#variant-0-signature-digest
+    fn preimage(
+        txid: &[u8; 32],
+        amounts: &[u8; 32],
+        scripts: &[u8; 32],
+        bundle_type: u8,
+        context: &[u8],
+    ) -> Vec<u8> {
+        let mut preimage = Vec::new();
+        // S.1
+        preimage.push(0x00);
+        // S.2
+        preimage.extend_from_slice(txid);
+        // S.3
+        preimage.extend_from_slice(amounts);
+        // S.4
+        preimage.extend_from_slice(scripts);
+        // S.5 and S.6, each `0` as a one-byte compactSize.
+        preimage.push(bundle_type);
+        preimage.push(0x00);
+        // S.7, with no length prefix.
+        preimage.extend_from_slice(context);
+        preimage
+    }
+
+    /// The amounts sig digest and `scriptPubKeys` sig digest of the inputs, which every
+    /// signature commits to.
+    fn input_digests() -> ([u8; 32], [u8; 32]) {
+        let scripts = scripts();
+
+        let mut amounts = StateWrite(
+            Params::new()
+                .hash_length(32)
+                .personal(b"ZTxTrAmountsHash")
+                .to_state(),
+        );
+        for value in VALUE {
+            amounts.write_all(&(value as i64).to_le_bytes()).unwrap();
+        }
+
+        let mut scripts_digest = StateWrite(
+            Params::new()
+                .hash_length(32)
+                .personal(b"ZTxTrScriptsHash")
+                .to_state(),
+        );
+        for script in &scripts {
+            write_script(&mut scripts_digest, script).unwrap();
+        }
+
+        (
+            amounts.finalize().as_bytes().try_into().unwrap(),
+            scripts_digest.finalize().as_bytes().try_into().unwrap(),
+        )
+    }
+
+    fn digest(preimage: &[u8]) -> [u8; 32] {
+        Params::new()
+            .hash_length(32)
+            .personal(PERSONAL)
+            .hash(preimage)
+            .as_bytes()
+            .try_into()
+            .unwrap()
+    }
+
+    /// Python-transcribed expected digests, in the order of [`contexts`].
+    fn expected_digest(name: &str) -> &'static str {
+        match name {
+            "transparent-0" => "71d4bbdfcf13027cdb7e26ddf1dfb3ab3a102f6f849f80f5d998158c09def3c0",
+            "transparent-1" => "7639ff9222b7ec04ba1756ae017b3128d00a5da1720a37d9d50b0dd6ad546188",
+            "sapling-spend-0" => "ac3d66182997040c7be5764919ad6fc52c63e6af13caadd79159bd81d6a69d23",
+            "sapling-spend-1" => "6f4418263a74d677dfba3c02f9eb260d2cbebfcdb7f184fe4fe1841633835582",
+            "sapling-binding" => "1e44b7992dffff7c8af203b0581da56e853d248a0cc4fbd47e014d3f3d9933dd",
+            "orchard-action-0" => {
+                "065518b371b7736a0bc7dac5e5734d3feae22185b9dc327ffaad0dae2f64291b"
+            }
+            "orchard-action-1" => {
+                "67aca543774a75b8fdb5acc51a84b6105b8da89c0ae7b645a5ee01c36d9f5841"
+            }
+            "orchard-binding" => "f4a373af063185388287b3609728e5edc538bce3dd4d76df80d231e0919cd6bf",
+            "ironwood-action-0" => {
+                "850e20797a7be38c009ed429ee9e5257ba4d5f16db7e874c1b0aa31244cf1d8e"
+            }
+            "ironwood-action-1" => {
+                "7dded93e8cd9b091c24961d61f7a273718a6a0fb3cc510c28a50b2ab0d53b0fa"
+            }
+            "ironwood-binding" => {
+                "1fbb13ec4c63f79193bfab281f0dd740895d2ef8004fb5de0224edd1c7656250"
+            }
+            other => panic!("unknown vector {other}"),
+        }
+    }
+
+    #[test]
+    fn v7_variant0_signature_digests_match_independent_vectors() {
+        let tx = sighash_tx();
+        let mut effects = Vec::new();
+        crate::transaction::bytes::V7SaplingBundleBytes::from_bundle(tx.sapling_bundle().unwrap())
+            .write_effects(&mut effects)
+            .unwrap();
+        let mut fixture = alloc::format!("sapling={}\n", hex::encode(effects));
+        for (name, bundle) in [
+            ("orchard", tx.orchard_bundle().unwrap()),
+            ("ironwood", tx.ironwood_bundle().unwrap()),
+        ] {
+            let (effects, _) =
+                crate::transaction::components::orchard::v7_bundle_to_bytes(bundle).unwrap();
+            let mut raw = Vec::new();
+            effects.write_effects(&mut raw).unwrap();
+            fixture.push_str(&alloc::format!("{name}={}\n", hex::encode(raw)));
+        }
+        assert_eq!(
+            fixture,
+            include_str!("../../../scripts/zip248_signature_effects.txt")
+        );
+        let scripts = scripts();
+        let parts = tx.digest(TxIdDigester, &()).unwrap();
+        let txid = to_txid_v7(tx.consensus_branch_id.into(), &parts);
+        let (amounts, scripts_digest) = input_digests();
+        let sighash_data = PrecomputedSighashData::new(sighash_tx(), &()).unwrap();
+
+        for (name, bundle_type, context, context_bytes) in contexts(&tx, &scripts) {
+            let preimage = preimage(
+                txid.as_ref(),
+                &amounts,
+                &scripts_digest,
+                bundle_type,
+                &context_bytes,
+            );
+
+            // S.7 is the final field, with no length prefix, so the preimage is exactly
+            // the fixed prefix plus the context.
+            assert_eq!(preimage.len(), PREFIX_LEN + context_bytes.len(), "{name}");
+            assert_eq!(&preimage[PREFIX_LEN..], &context_bytes[..], "{name}");
+
+            let expected = digest(&preimage);
+            assert_eq!(
+                hex::encode(expected),
+                expected_digest(name),
+                "{name}: preimage {}",
+                hex::encode(&preimage)
+            );
+            // The digest is a wrapping signature digest, not the txid.
+            assert_ne!(expected, *txid.as_ref(), "{name} must not be the txid");
+
+            let actual = sighash_data.signature_hash(&SignableInput::V7(context));
+            assert_eq!(actual.as_ref(), &expected, "{name}");
+        }
+    }
+
+    /// A per-input context names a position, so its bundle must exist.
+    #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    #[should_panic(expected = "requires a Sapling bundle")]
+    fn v7_sapling_spend_without_a_bundle_panics() {
+        let sighash_data = PrecomputedSighashData::new(no_input_tx(), &()).unwrap();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::SaplingSpend {
+            index: 0,
+        }));
+    }
+
+    #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    #[should_panic(expected = "requires an Orchard bundle")]
+    fn v7_orchard_action_without_a_bundle_panics() {
+        let sighash_data = PrecomputedSighashData::new(no_input_tx(), &()).unwrap();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::OrchardAction {
+            index: 0,
+        }));
+    }
+
+    #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    #[should_panic(expected = "requires an Ironwood bundle")]
+    fn v7_ironwood_action_without_a_bundle_panics() {
+        let sighash_data = PrecomputedSighashData::new(no_input_tx(), &()).unwrap();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::IronwoodAction {
+            index: 0,
+        }));
+    }
+
+    #[test]
+    #[cfg(feature = "sapling")]
+    #[should_panic(expected = "out of range")]
+    fn v7_sapling_spend_index_at_bundle_len_panics() {
+        let sighash_data = PrecomputedSighashData::new(sighash_tx(), &()).unwrap();
+        let len = sighash_data
+            .tx()
+            .sapling_bundle()
+            .unwrap()
+            .shielded_spends()
+            .len();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::SaplingSpend {
+            index: len,
+        }));
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    #[should_panic(expected = "out of range")]
+    fn v7_orchard_action_index_at_bundle_len_panics() {
+        let sighash_data = PrecomputedSighashData::new(sighash_tx(), &()).unwrap();
+        let len = sighash_data.tx().orchard_bundle().unwrap().actions().len();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::OrchardAction {
+            index: len,
+        }));
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    #[should_panic(expected = "out of range")]
+    fn v7_ironwood_action_index_at_bundle_len_panics() {
+        let sighash_data = PrecomputedSighashData::new(sighash_tx(), &()).unwrap();
+        let len = sighash_data.tx().ironwood_bundle().unwrap().actions().len();
+        sighash_data.signature_hash(&SignableInput::V7(V7SignatureContext::IronwoodAction {
+            index: len,
+        }));
+    }
+
+    /// [ZIP 248 §S.7.i](https://zips.z.cash/zip-0248#s-7-transparent-signature-context):
+    /// the transparent context is `prevout || value || scriptPubKey || nSequence ||
+    /// input_index`, and the index is the local one rather than the spent output's.
+    #[test]
+    fn v7_transparent_context_layout_follows_s7() {
+        let tx = sighash_tx();
+        let scripts = scripts();
+        let parts = tx.digest(TxIdDigester, &()).unwrap();
+        let txid = to_txid_v7(tx.consensus_branch_id.into(), &parts);
+        let (amounts, scripts_digest) = input_digests();
+        let sighash_data = PrecomputedSighashData::new(sighash_tx(), &()).unwrap();
+
+        for i in 0..2 {
+            let mut context = Vec::new();
+            write_outpoint(
+                &mut context,
+                tx.transparent_bundle().unwrap().vin[i].prevout(),
+            )
+            .unwrap();
+            context.extend_from_slice(&(VALUE[i] as i64).to_le_bytes());
+            write_script(&mut context, &scripts[i]).unwrap();
+            context.extend_from_slice(&SEQUENCE[i].to_le_bytes());
+            context.extend_from_slice(&(i as u16).to_le_bytes());
+
+            let preimage = preimage(txid.as_ref(), &amounts, &scripts_digest, 0, &context);
+            // S.7.i: 32-byte prevout hash, then its 4-byte index.
+            assert_eq!(&preimage[PREFIX_LEN..PREFIX_LEN + 32], &PREVOUT_HASH[i]);
+            assert_eq!(
+                &preimage[PREFIX_LEN + 32..PREFIX_LEN + 36],
+                &PREVOUT_INDEX[i].to_le_bytes()
+            );
+            // S.7.ii: 8-byte signed value.
+            assert_eq!(
+                &preimage[PREFIX_LEN + 36..PREFIX_LEN + 44],
+                &(VALUE[i] as i64).to_le_bytes()
+            );
+            // S.7.iii: compactSize length, then the script.
+            let script_len = preimage[PREFIX_LEN + 44] as usize;
+            assert_eq!(script_len, scripts[i].0.0.len());
+            let sequence_offset = PREFIX_LEN + 45 + script_len;
+            assert_eq!(
+                &preimage[sequence_offset..sequence_offset + 4],
+                &SEQUENCE[i].to_le_bytes()
+            );
+            // S.7.v: the local input index.
+            assert_eq!(&preimage[sequence_offset + 4..], &(i as u16).to_le_bytes());
+
+            let input = ::transparent::sighash::SignableInput::from_parts(
+                tx.transparent_bundle().unwrap(),
+                ::transparent::sighash::SighashType::ALL,
+                i,
+                &scripts[i],
+                &scripts[i],
+                Zatoshis::const_from_u64(VALUE[i]),
+            )
+            .unwrap();
+            assert_eq!(
+                sighash_data
+                    .signature_hash(&SignableInput::V7(V7SignatureContext::Transparent(input)))
+                    .as_ref(),
+                &digest(&preimage),
+            );
+        }
+    }
+
+    /// [ZIP 248 §S.3](https://zips.z.cash/zip-0248#s-3-amounts_sig_digest) and
+    /// [§S.4](https://zips.z.cash/zip-0248#s-4-scriptpubkeys_sig_digest): with no
+    /// transparent inputs, both are personalized hashes of the empty byte array, and the
+    /// digest is still not the txid.
+    /// A version 7 transaction with no transparent bundle.
+    fn no_input_tx() -> TransactionData<TestUnauthorized> {
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_fee(Zatoshis::const_from_u64(500)).unwrap();
+        TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from(100u32),
+            vp,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn v7_signature_without_transparent_inputs_uses_empty_input_digests() {
+        let tx = no_input_tx();
+        let parts = tx.digest(TxIdDigester, &()).unwrap();
+        let txid = to_txid_v7(tx.consensus_branch_id.into(), &parts);
+
+        let empty = |personal| {
+            Params::new()
+                .hash_length(32)
+                .personal(personal)
+                .hash(&[])
+                .as_bytes()
+                .try_into()
+                .unwrap()
+        };
+        let amounts: [u8; 32] = empty(b"ZTxTrAmountsHash");
+        let scripts: [u8; 32] = empty(b"ZTxTrScriptsHash");
+
+        let preimage_bytes = preimage(txid.as_ref(), &amounts, &scripts, 2, &[]);
+        let expected = digest(&preimage_bytes);
+        assert_ne!(expected, *txid.as_ref());
+
+        let sighash_data = PrecomputedSighashData::new(no_input_tx(), &()).unwrap();
+        assert_eq!(
+            sighash_data
+                .signature_hash(&SignableInput::V7(V7SignatureContext::SaplingBinding))
+                .as_ref(),
+            &expected,
+        );
+
+        // The same empty input digests serve every bundle and context. The
+        // transaction has no shielded bundle either, so use a binding context,
+        // which carries no index.
+        let preimage_bytes = preimage(txid.as_ref(), &amounts, &scripts, 4, &[]);
+        assert_eq!(
+            sighash_data
+                .signature_hash(&SignableInput::V7(V7SignatureContext::IronwoodBinding))
+                .as_ref(),
+            &digest(&preimage_bytes),
+        );
+
+        // The direct entry point with no digests supplied hashes the empty input digests
+        // rather than panicking.
+        assert_eq!(
+            v7_signature_hash(&tx, &V7SignatureContext::IronwoodBinding, &parts, None,).as_ref(),
+            &digest(&preimage_bytes),
+        );
+    }
+}
+
+/// `TxIdDigester` builds the complete v7 digest tree, so the conventional
+/// `digest(TxIdDigester)` path yields the same digests, and the same
+/// transaction identifier, as the transaction's own `txid_digests`/`txid`.
 #[test]
 #[cfg(zcash_unstable = "nu8")]
 fn v7_txid_digester_builds_the_complete_tree() {
@@ -4934,8 +5641,9 @@ mod v7_byte_digests {
     };
 
     use super::{
-        Authorized, Transaction, TransactionData, TxVersion, test_ironwood_bundle,
-        test_orchard_bundle, test_sapling_bundle, test_sapling_output_only_bundle,
+        Authorized, EffectsOnly, Transaction, TransactionData, TxVersion, test_ironwood_bundle,
+        test_orchard_bundle, test_sapling_bundle, test_sapling_output_only_bundle, tx_bytes,
+        with_test_transparent_auth,
     };
     use crate::transaction::{
         V7ConsensusError,
@@ -4945,9 +5653,14 @@ mod v7_byte_digests {
             TransactionBytes, V7AuthBundleBytes, V7EffectBundleBytes, V7OrchardAuthBytes,
             V7OrchardBundleBytes, V7SaplingAuthBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
         },
-        sighash::{PrecomputedSighashData, Zip244Error},
-        txid::{BlockTxCommitmentDigester, TxIdDigester},
+        sighash::{PrecomputedSighashData, SignableInput, V7SignatureContext, Zip244Error},
+        txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid_v7},
         zip248::{self, BundleId, SuppliedBundleDigests, V7DigestError},
+    };
+    use ::transparent::{
+        address::Script,
+        bundle::{Bundle as TransparentBundle, TxOut},
+        sighash::{SighashType, SignableInput as TransparentInput, TransparentSigningContext},
     };
 
     type TransactionWriter = fn(&Transaction, &mut Vec<u8>) -> corez::io::Result<()>;
@@ -5051,6 +5764,660 @@ mod v7_byte_digests {
         let mut encoded = Vec::new();
         tx.write(&mut encoded).unwrap();
         TransactionBytes::read(&encoded[..]).unwrap()
+    }
+
+    fn replace_auth(bytes: &TransactionBytes, auth: Vec<V7AuthBundleBytes>) -> TransactionBytes {
+        let body = bytes.body().as_v7().unwrap();
+        let bytes = TransactionBytes::from_parts(
+            bytes.version(),
+            bytes.raw_consensus_branch_id(),
+            bytes.lock_time(),
+            bytes.expiry_height(),
+            TransactionBodyBytes::V7(
+                V7TransactionBodyBytes::from_parts(
+                    body.value_pool_deltas().to_vec(),
+                    body.effect_bundles().to_vec(),
+                    auth,
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+        let mut encoded = Vec::new();
+        bytes.write(&mut encoded).unwrap();
+        TransactionBytes::read(&encoded[..]).unwrap()
+    }
+
+    #[test]
+    fn v7_effects_projection_never_interprets_authorizing_anchors() {
+        /// A non-canonical encoding in either shielded anchor field.
+        const INVALID_ANCHOR: [u8; 32] = [0xFF; 32];
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let full = typed_v7_tx(&mut runner, true, true, true, false);
+        let bytes = byte_tx(&full);
+        let auth = bytes
+            .body()
+            .as_v7()
+            .unwrap()
+            .auth_bundles()
+            .iter()
+            .map(|auth| match auth {
+                V7AuthBundleBytes::Sapling(auth) => {
+                    V7AuthBundleBytes::Sapling(V7SaplingAuthBytes::from_parts(
+                        Some(INVALID_ANCHOR),
+                        auth.spend_proofs().to_vec(),
+                        auth.spend_auth_sigs().to_vec(),
+                        auth.output_proofs().to_vec(),
+                        auth.binding_sig().cloned(),
+                    ))
+                }
+                V7AuthBundleBytes::Orchard(auth) => {
+                    V7AuthBundleBytes::Orchard(V7OrchardAuthBytes::from_parts(
+                        Some(INVALID_ANCHOR),
+                        auth.proof().to_vec(),
+                        auth.spend_auth_sigs().to_vec(),
+                        auth.binding_sig().cloned(),
+                    ))
+                }
+                V7AuthBundleBytes::Ironwood(auth) => {
+                    V7AuthBundleBytes::Ironwood(V7OrchardAuthBytes::from_parts(
+                        Some(INVALID_ANCHOR),
+                        auth.proof().to_vec(),
+                        auth.spend_auth_sigs().to_vec(),
+                        auth.binding_sig().cloned(),
+                    ))
+                }
+                auth => auth.clone(),
+            })
+            .collect();
+        let invalid_auth = replace_auth(&bytes, auth);
+        assert!(
+            TransactionData::<Authorized>::from_bytes(invalid_auth.clone(), BranchId::Nu8).is_err()
+        );
+        let effects =
+            TransactionData::<EffectsOnly>::from_effects_bytes(invalid_auth, BranchId::Nu8)
+                .unwrap();
+        assert_eq!(
+            to_txid_v7(BranchId::Nu8.into(), &effects.txid_digests(&()).unwrap()),
+            bytes.v7_txid(&()).unwrap()
+        );
+        assert!(effects.uninterpreted_auth_bundles().is_empty());
+        assert!(
+            effects
+                .sapling_bundle()
+                .unwrap()
+                .shielded_spends()
+                .iter()
+                .all(|spend| spend.anchor().is_none())
+        );
+        assert!(effects.orchard_bundle().unwrap().anchor().is_none());
+        assert!(effects.ironwood_bundle().unwrap().anchor().is_none());
+    }
+
+    #[test]
+    fn cached_effects_reject_inconsistent_manual_data_without_consensus_validation() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let full = typed_v7_tx(&mut runner, true, true, true, false);
+
+        let mut wrong_version = full.clone().into_effects().unwrap();
+        wrong_version.orchard_bundle = wrong_version.ironwood_bundle.take();
+        assert!(matches!(
+            Transaction::from_effects(wrong_version, &()),
+            Err(crate::transaction::EffectsTransactionError::Digest(
+                V7DigestError::EffectsVersionMismatch
+            ))
+        ));
+
+        let mut mismatched_balance = full.clone().into_effects().unwrap();
+        let balance = *mismatched_balance.sapling_bundle().unwrap().value_balance();
+        mismatched_balance
+            .value_pool_deltas
+            .set_sapling(if balance == ZatBalance::zero() {
+                ZatBalance::from_i64(1).unwrap()
+            } else {
+                ZatBalance::zero()
+            })
+            .unwrap();
+        assert!(matches!(
+            Transaction::from_effects(mismatched_balance, &()),
+            Err(crate::transaction::EffectsTransactionError::InconsistentData(_))
+        ));
+
+        let mut empty_bundle = full.clone().into_effects().unwrap();
+        empty_bundle.transparent_bundle = Some(TransparentBundle {
+            vin: vec![],
+            vout: vec![],
+            authorization: ::transparent::bundle::EffectsOnly,
+        });
+        assert!(matches!(
+            Transaction::from_effects(empty_bundle, &()),
+            Err(crate::transaction::EffectsTransactionError::InconsistentData(_))
+        ));
+
+        let mut missing_anchor = full.clone().into_effects().unwrap();
+        missing_anchor.version = TxVersion::V5;
+        missing_anchor.ironwood_bundle = None;
+        missing_anchor.value_pool_deltas = zip248::ValuePoolDeltas::empty();
+        assert!(matches!(
+            Transaction::from_effects(missing_anchor, &()),
+            Err(crate::transaction::EffectsTransactionError::Digest(
+                V7DigestError::MissingEffectingAnchor
+            ))
+        ));
+
+        let mut inactive_branch = full.into_effects().unwrap();
+        inactive_branch.consensus_branch_id = BranchId::Nu5;
+        assert!(Transaction::from_effects(inactive_branch, &()).is_ok());
+    }
+
+    #[test]
+    fn v7_effects_projection_signing_context_is_separate_and_checked() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let full = typed_v7_tx(&mut runner, true, true, true, false);
+        let bytes = replace_auth(&byte_tx(&full), vec![]);
+        let project = || {
+            TransactionData::<EffectsOnly>::from_effects_bytes(bytes.clone(), BranchId::Nu8)
+                .unwrap()
+        };
+        let prevout = full.transparent_bundle().unwrap().vin[0].prevout().clone();
+        let previous_output = TxOut::new(Zatoshis::from_u64(2000).unwrap(), Script::default());
+        let entry = (prevout, previous_output);
+        let surplus = TransparentSigningContext::new(vec![entry.clone(), entry.clone()]);
+        assert!(matches!(
+            PrecomputedSighashData::new_zip244_with_context(project(), &(), &surplus),
+            Err(Zip244Error::Digest(
+                V7DigestError::MissingTransparentInputContext {
+                    expected: 1,
+                    amounts: 2,
+                    scripts: 2,
+                }
+            ))
+        ));
+        let wrong = ::transparent::bundle::OutPoint::new([0xA5; 32], 7);
+        let mismatched = TransparentSigningContext::new(vec![(wrong, entry.1.clone())]);
+        assert!(matches!(
+            PrecomputedSighashData::new_zip244_with_context(project(), &(), &mismatched),
+            Err(Zip244Error::Digest(
+                V7DigestError::MismatchedTransparentInputContext { index: 0 }
+            ))
+        ));
+        let txid = project().txid_digests(&()).unwrap();
+        let valid = TransparentSigningContext::new(vec![entry]);
+        let precomputed =
+            PrecomputedSighashData::new_zip244_with_context(project(), &(), &valid).unwrap();
+        assert_eq!(
+            precomputed.tx().txid_digests(&()).unwrap().header_digest,
+            txid.header_digest
+        );
+    }
+
+    #[test]
+    fn v7_effects_projection_types_pruned_bundles_and_preserves_digests() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        for (sapling, orchard, ironwood) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+            (true, true, true),
+            (false, false, false),
+        ] {
+            let full = typed_v7_tx(
+                &mut runner,
+                sapling,
+                orchard,
+                ironwood,
+                sapling || orchard || ironwood,
+            );
+            // These annotations also enforce the concrete Authorized accessor API.
+            let _: Option<&::sapling::Bundle<::sapling::bundle::Authorized, ZatBalance>> =
+                full.sapling_bundle();
+            let _: Option<&::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>> =
+                full.orchard_bundle();
+            let _: Option<&::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>> =
+                full.ironwood_bundle();
+            let bytes = byte_tx(&full);
+            let expected_txid = bytes.v7_txid(&()).unwrap();
+            let authorized: Transaction = full.clone().freeze().unwrap();
+            let _: &Transaction<Authorized> = &authorized;
+            assert_eq!(authorized.txid(), expected_txid);
+            assert_eq!(authorized.clone(), authorized);
+            assert_eq!(
+                Transaction::read(tx_bytes(&authorized).as_slice(), BranchId::Nu8).unwrap(),
+                authorized,
+            );
+            let converted = authorized.into_effects().unwrap();
+            assert_eq!(converted.txid(), expected_txid);
+            assert_eq!(
+                Transaction::from_effects(converted.into_data(), &())
+                    .unwrap()
+                    .txid(),
+                expected_txid,
+            );
+            let previous_output = TxOut::new(Zatoshis::from_u64(2000).unwrap(), Script::default());
+            let reference = PrecomputedSighashData::new_zip244(
+                with_test_transparent_auth(
+                    full.clone(),
+                    vec![previous_output.value()],
+                    vec![previous_output.script_pubkey().clone()],
+                ),
+                &(),
+            )
+            .unwrap();
+
+            for auth in [
+                bytes.body().as_v7().unwrap().auth_bundles().to_vec(),
+                vec![],
+            ] {
+                let projected_bytes = replace_auth(&bytes, auth);
+                let data = TransactionData::<EffectsOnly>::from_effects_bytes(
+                    projected_bytes,
+                    BranchId::Sprout,
+                )
+                .unwrap();
+                assert_eq!(data.consensus_branch_id(), BranchId::Nu8);
+                let _: Option<&::sapling::Bundle<::sapling::bundle::EffectsOnly, ZatBalance>> =
+                    data.sapling_bundle();
+                let _: Option<&::orchard::Bundle<::orchard::bundle::EffectsOnly, ZatBalance>> =
+                    data.orchard_bundle();
+                let _: Option<
+                    &::transparent::bundle::Bundle<::transparent::bundle::EffectsOnly, Zatoshis>,
+                > = data.transparent_bundle();
+                assert!(data.uninterpreted_auth_bundles().is_empty());
+                assert!(data.uninterpreted_effect_bundles().is_empty());
+                assert_eq!(data.coinbase_bundle(), full.coinbase_bundle());
+                if let Some(bundle) = data.sapling_bundle() {
+                    let effects = bundle;
+                    assert_eq!(
+                        effects.shielded_spends().len(),
+                        full.sapling_bundle().unwrap().shielded_spends().len()
+                    );
+                    for (effect, spend) in effects
+                        .shielded_spends()
+                        .iter()
+                        .zip(full.sapling_bundle().unwrap().shielded_spends())
+                    {
+                        assert_eq!(effect.nullifier(), spend.nullifier());
+                        assert_eq!(effect.cv().to_bytes(), spend.cv().to_bytes());
+                        assert_eq!(effect.rk(), spend.rk());
+                        assert!(effect.anchor().is_none());
+                    }
+                }
+                for (bundle, expected) in [
+                    (data.orchard_bundle(), full.orchard_bundle()),
+                    (data.ironwood_bundle(), full.ironwood_bundle()),
+                ] {
+                    if let Some(bundle) = bundle {
+                        assert!(bundle.anchor().is_none());
+                        let effects = bundle;
+                        assert_eq!(effects.actions().len(), expected.unwrap().actions().len());
+                        for (effect, action) in
+                            effects.actions().iter().zip(expected.unwrap().actions())
+                        {
+                            assert_eq!(effect.nullifier(), action.nullifier());
+                            assert_eq!(effect.cmx(), action.cmx());
+                        }
+                    }
+                }
+                assert_eq!(
+                    to_txid_v7(BranchId::Nu8.into(), &data.txid_digests(&()).unwrap()),
+                    expected_txid
+                );
+                let cached: Transaction<EffectsOnly> =
+                    Transaction::from_effects(data, &()).unwrap();
+                assert_eq!(cached.txid(), expected_txid);
+                assert_eq!(cached.clone(), cached);
+                assert_eq!(
+                    Transaction::from_effects(cached.clone().into_data().clone(), &())
+                        .unwrap()
+                        .txid(),
+                    expected_txid,
+                );
+                let _: &TransactionData<EffectsOnly> = &cached;
+                assert_eq!(cached.consensus_branch_id(), BranchId::Nu8);
+                assert_eq!(cached.coinbase_bundle(), full.coinbase_bundle());
+                let data = cached.into_data();
+                assert!(matches!(
+                    PrecomputedSighashData::new_zip244_with_context(
+                        data,
+                        &(),
+                        &TransparentSigningContext::new(vec![])
+                    ),
+                    Err(Zip244Error::Digest(
+                        V7DigestError::MissingTransparentInputContext {
+                            expected: 1,
+                            amounts: 0,
+                            scripts: 0
+                        }
+                    )),
+                ));
+                let data = TransactionData::<EffectsOnly>::from_effects_bytes(
+                    replace_auth(&bytes, vec![]),
+                    BranchId::Nu8,
+                )
+                .unwrap();
+                let prevout = data.transparent_bundle().unwrap().vin[0].prevout().clone();
+                let signing =
+                    TransparentSigningContext::new(vec![(prevout, previous_output.clone())]);
+                let precomputed = PrecomputedSighashData::new_zip244_with_context(
+                    Transaction::from_effects(data, &()).unwrap().into_data(),
+                    &(),
+                    &signing,
+                )
+                .unwrap();
+                let mut contexts = Vec::new();
+                if sapling {
+                    for index in 0..precomputed
+                        .tx()
+                        .sapling_bundle()
+                        .unwrap()
+                        .shielded_spends()
+                        .len()
+                    {
+                        contexts.push(V7SignatureContext::SaplingSpend { index });
+                    }
+                    contexts.push(V7SignatureContext::SaplingBinding);
+                }
+                if orchard {
+                    for index in 0..precomputed.tx().orchard_bundle().unwrap().actions().len() {
+                        contexts.push(V7SignatureContext::OrchardAction { index });
+                    }
+                    contexts.push(V7SignatureContext::OrchardBinding);
+                }
+                if ironwood {
+                    for index in 0..precomputed.tx().ironwood_bundle().unwrap().actions().len() {
+                        contexts.push(V7SignatureContext::IronwoodAction { index });
+                    }
+                    contexts.push(V7SignatureContext::IronwoodBinding);
+                }
+                contexts.push(V7SignatureContext::Transparent(
+                    TransparentInput::from_parts(
+                        precomputed.tx().transparent_bundle().unwrap(),
+                        SighashType::ALL,
+                        0,
+                        previous_output.script_pubkey(),
+                        previous_output.script_pubkey(),
+                        previous_output.value(),
+                    )
+                    .unwrap(),
+                ));
+                for context in contexts {
+                    let context = SignableInput::V7(context);
+                    assert_eq!(
+                        precomputed.signature_hash(&context).as_ref(),
+                        reference.signature_hash(&context).as_ref()
+                    );
+                }
+            }
+            // Missing shielded auth must still be rejected independently of transparent auth.
+            for bundle_type in [
+                BundleType::SAPLING,
+                BundleType::ORCHARD,
+                BundleType::IRONWOOD,
+            ] {
+                if bytes
+                    .body()
+                    .as_v7()
+                    .unwrap()
+                    .effect_bundle(bundle_type)
+                    .is_some()
+                {
+                    let auth = bytes
+                        .body()
+                        .as_v7()
+                        .unwrap()
+                        .auth_bundles()
+                        .iter()
+                        .filter(|auth| auth.bundle_type() != bundle_type)
+                        .cloned()
+                        .collect();
+                    assert!(
+                        TransactionData::<Authorized>::from_bytes(
+                            replace_auth(&bytes, auth),
+                            BranchId::Nu8
+                        )
+                        .is_err()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn v7_effects_projection_output_only_sapling_and_opaque_auth() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let output_only = test_sapling_output_only_bundle(&mut runner);
+        let mut full = typed_v7_tx(&mut runner, false, false, false, false);
+        full.value_pool_deltas
+            .set_sapling(*output_only.value_balance())
+            .unwrap();
+        full.sapling_bundle = Some(alloc::boxed::Box::new(output_only));
+        let bytes = byte_tx(&full);
+        let data = TransactionData::<EffectsOnly>::from_effects_bytes(
+            replace_auth(&bytes, vec![]),
+            BranchId::Nu8,
+        )
+        .unwrap();
+        let sapling = data.sapling_bundle().unwrap();
+        assert!(sapling.shielded_spends().is_empty());
+        assert!(!sapling.shielded_outputs().is_empty());
+        assert_eq!(
+            to_txid_v7(BranchId::Nu8.into(), &data.txid_digests(&()).unwrap()),
+            bytes.v7_txid(&()).unwrap()
+        );
+
+        for key in [
+            retained_key(),
+            BundleId::new(
+                BundleType::SAPLING,
+                BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+            ),
+        ] {
+            let bytes = retained_bytes(key, true);
+            let data =
+                TransactionData::<EffectsOnly>::from_effects_bytes(bytes.clone(), BranchId::Nu8)
+                    .unwrap();
+            assert!(data.uninterpreted_auth_bundles().is_empty());
+            let effect = &data.uninterpreted_effect_bundles()[&key.bundle_type()];
+            assert_eq!(effect.digest_key(), key);
+            assert_eq!(
+                effect,
+                bytes
+                    .body()
+                    .as_v7()
+                    .unwrap()
+                    .effect_bundle(key.bundle_type())
+                    .unwrap()
+            );
+            assert_eq!(
+                data.txid_digests(&()).unwrap_err(),
+                V7DigestError::MissingEffectsDigest { key }
+            );
+            let mut provider = SuppliedBundleDigests::new();
+            provider.insert_effects(key, test_digest(1)).unwrap();
+            assert_eq!(
+                to_txid_v7(BranchId::Nu8.into(), &data.txid_digests(&provider).unwrap()),
+                bytes.v7_txid(&provider).unwrap()
+            );
+            let previous_output = TxOut::new(Zatoshis::from_u64(2000).unwrap(), Script::default());
+            let prevout = data.transparent_bundle().unwrap().vin[0].prevout().clone();
+            let signing = TransparentSigningContext::new(vec![(prevout, previous_output.clone())]);
+            let projected =
+                PrecomputedSighashData::new_zip244_with_context(data, &provider, &signing).unwrap();
+            let authorized = with_test_transparent_auth(
+                TransactionData::<Authorized>::from_bytes(bytes, BranchId::Nu8).unwrap(),
+                vec![previous_output.value()],
+                vec![previous_output.script_pubkey().clone()],
+            );
+            let reference = PrecomputedSighashData::new_zip244(authorized, &provider).unwrap();
+            let context = SignableInput::V7(V7SignatureContext::Transparent(
+                TransparentInput::from_parts(
+                    projected.tx().transparent_bundle().unwrap(),
+                    SighashType::ALL,
+                    0,
+                    previous_output.script_pubkey(),
+                    previous_output.script_pubkey(),
+                    previous_output.value(),
+                )
+                .unwrap(),
+            ));
+            assert_eq!(
+                projected.signature_hash(&context).as_ref(),
+                reference.signature_hash(&context).as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn authorized_into_effects_retains_opaque_effects_and_cached_identifier() {
+        for key in [
+            retained_key(),
+            BundleId::new(
+                BundleType::SAPLING,
+                BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+            ),
+        ] {
+            let bytes = retained_bytes(key, true);
+            let original =
+                TransactionData::<Authorized>::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+            assert!(!original.uninterpreted_auth_bundles().is_empty());
+            let effects = original.clone().into_effects().unwrap();
+            assert_eq!(
+                effects.uninterpreted_effect_bundles(),
+                original.uninterpreted_effect_bundles()
+            );
+            assert!(effects.uninterpreted_auth_bundles().is_empty());
+            assert_eq!(
+                effects.value_pool_deltas().iter().collect::<Vec<_>>(),
+                original.value_pool_deltas().iter().collect::<Vec<_>>()
+            );
+            let mut provider = SuppliedBundleDigests::new();
+            provider.insert_effects(key, test_digest(1)).unwrap();
+            let expected = bytes.v7_txid(&provider).unwrap();
+            let mut wire = Vec::new();
+            bytes.write(&mut wire).unwrap();
+            let complete =
+                Transaction::read_with_bundle_digests(&wire[..], BranchId::Nu8, &provider).unwrap();
+            let cached = complete.into_effects().unwrap();
+            assert_eq!(cached.txid(), expected);
+            assert!(cached.uninterpreted_auth_bundles().is_empty());
+            assert_eq!(
+                cached.uninterpreted_effect_bundles(),
+                effects.uninterpreted_effect_bundles()
+            );
+            assert!(matches!(
+                Transaction::from_effects(cached.clone().into_data(), &()),
+                Err(crate::transaction::EffectsTransactionError::Digest(
+                    V7DigestError::MissingEffectsDigest { key: missing }
+                )) if missing == key
+            ));
+            assert_eq!(
+                Transaction::from_effects(cached.into_data(), &provider)
+                    .unwrap()
+                    .txid(),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn authorized_into_effects_preserves_shielded_anchors_and_digests() {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        for (version, branch) in [
+            (TxVersion::V5, BranchId::Nu6_3),
+            (TxVersion::V6, BranchId::Nu7),
+        ] {
+            let sapling = test_sapling_bundle(&mut runner);
+            let orchard = test_orchard_bundle(&mut runner);
+            let original = if version == TxVersion::V5 {
+                TransactionData::<Authorized>::from_parts(
+                    version,
+                    branch,
+                    0,
+                    1.into(),
+                    None,
+                    None,
+                    Some(sapling),
+                    Some(orchard),
+                )
+            } else {
+                TransactionData::<Authorized>::from_parts_v6(
+                    branch,
+                    0,
+                    1.into(),
+                    None,
+                    Some(sapling),
+                    Some(orchard),
+                    Some(test_ironwood_bundle(&mut runner)),
+                )
+            };
+            let expected = original.clone().freeze().unwrap().txid();
+            let cached = original.clone().freeze().unwrap().into_effects().unwrap();
+            assert_eq!(cached.txid(), expected);
+            let effects = original.clone().into_effects().unwrap();
+            if version == TxVersion::V5 {
+                assert_eq!(
+                    effects.sapling_bundle().unwrap().shielded_spends()[0]
+                        .anchor()
+                        .as_ref()
+                        .unwrap(),
+                    original.sapling_bundle().unwrap().shielded_spends()[0].anchor(),
+                );
+                assert_eq!(
+                    effects.orchard_bundle().unwrap().anchor().as_ref().unwrap(),
+                    original.orchard_bundle().unwrap().anchor()
+                );
+            } else {
+                assert!(
+                    effects
+                        .sapling_bundle()
+                        .unwrap()
+                        .shielded_spends()
+                        .iter()
+                        .all(|spend| spend.anchor().is_none())
+                );
+                assert!(effects.orchard_bundle().unwrap().anchor().is_none());
+                assert!(effects.ironwood_bundle().unwrap().anchor().is_none());
+            }
+            assert_eq!(
+                crate::transaction::txid::to_txid(
+                    version,
+                    branch,
+                    &effects.txid_digests(&()).unwrap()
+                )
+                .unwrap(),
+                expected
+            );
+            let cached = Transaction::from_effects(effects, &()).unwrap();
+            assert_eq!(cached.txid(), expected);
+            let effects = cached.into_data();
+            let reference = PrecomputedSighashData::new_zip244(
+                with_test_transparent_auth(original, vec![], vec![]),
+                &(),
+            )
+            .unwrap();
+            let effects = PrecomputedSighashData::new_zip244_with_context(
+                effects,
+                &(),
+                &TransparentSigningContext::new(vec![]),
+            )
+            .unwrap();
+            assert_eq!(
+                effects.signature_hash(&SignableInput::Shielded).as_ref(),
+                reference.signature_hash(&SignableInput::Shielded).as_ref()
+            );
+        }
+        let full = typed_v7_tx(&mut runner, true, true, true, false);
+        let effects = full.into_effects().unwrap();
+        assert!(
+            effects
+                .sapling_bundle()
+                .unwrap()
+                .shielded_spends()
+                .iter()
+                .all(|spend| spend.anchor().is_none())
+        );
+        assert!(effects.orchard_bundle().unwrap().anchor().is_none());
+        assert!(effects.ironwood_bundle().unwrap().anchor().is_none());
     }
 
     fn assert_digests_match(typed: &TransactionData<Authorized>, bytes: &TransactionBytes) {

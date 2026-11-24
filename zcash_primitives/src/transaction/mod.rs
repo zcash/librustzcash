@@ -44,6 +44,7 @@ use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
 use {
     blake2b_simd::Hash as Blake2bHash,
     core::convert::TryFrom,
+    core::fmt,
     core::ops::Deref,
     zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis},
 };
@@ -335,9 +336,12 @@ impl TxVersion {
 /// dependents; implementing this trait under a single protocol feature is not
 /// supported.
 pub trait Authorization {
+    /// Transparent protocol authorization.
     type TransparentAuth: transparent::Authorization;
+    /// Native Sapling protocol authorization.
     #[cfg(feature = "sapling")]
     type SaplingAuth: sapling::bundle::Authorization;
+    /// Native Orchard protocol authorization.
     #[cfg(feature = "orchard")]
     type OrchardAuth: orchard::bundle::Authorization;
 }
@@ -352,6 +356,72 @@ impl Authorization for Authorized {
     type SaplingAuth = sapling::bundle::Authorized;
     #[cfg(feature = "orchard")]
     type OrchardAuth = orchard::bundle::Authorized;
+}
+
+/// [`Authorization`] marker for transaction effects without proofs or signatures.
+///
+/// This state is available without `circuits`. Native shielded bundles permit
+/// absent anchors. Projection and PCZT extraction omit authorizing anchors in
+/// version 6 and later; earlier formats retain genuine effecting anchors.
+///
+/// For version 5 or later, transaction identifiers and signature hashes can be
+/// computed with a [`zip248::BundleDigestProvider`]:
+///
+/// ```
+/// use transparent::sighash::TransparentSigningContext;
+/// use zcash_primitives::transaction::{
+///     EffectsOnly, TransactionData, sighash::PrecomputedSighashData,
+/// };
+///
+/// fn digests(tx: TransactionData<EffectsOnly>, context: &TransparentSigningContext<zcash_protocol::value::Zatoshis>) {
+///     let _ = tx.txid_digests(&());
+///     let _ = PrecomputedSighashData::new_zip244_with_context(tx, &(), context);
+/// }
+/// ```
+///
+/// Freezing, complete-transaction writing, and authorizing commitments require
+/// [`Authorized`]:
+///
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, TransactionData};
+/// fn freeze(tx: TransactionData<EffectsOnly>) {
+///     tx.freeze();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, TransactionData};
+/// fn write(tx: TransactionData<EffectsOnly>) {
+///     tx.write(Vec::new());
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use zcash_primitives::transaction::{
+///     EffectsOnly, TransactionData, txid::BlockTxCommitmentDigester,
+/// };
+/// fn auth_commitment(tx: TransactionData<EffectsOnly>) {
+///     tx.digest(BlockTxCommitmentDigester, &());
+/// }
+/// ```
+///
+/// Previous-output signing context is not stored in effects:
+/// ```compile_fail
+/// use transparent::sighash::TransparentAuthorizingContext;
+/// use zcash_primitives::transaction::{EffectsOnly, TransactionData};
+/// fn prevouts(tx: TransactionData<EffectsOnly>) {
+///     tx.transparent_bundle().unwrap().authorization.input_amounts();
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct EffectsOnly;
+
+impl Authorization for EffectsOnly {
+    type TransparentAuth = transparent::EffectsOnly;
+    #[cfg(feature = "sapling")]
+    type SaplingAuth = sapling::bundle::EffectsOnly;
+    #[cfg(feature = "orchard")]
+    type OrchardAuth = orchard::bundle::EffectsOnly;
 }
 
 /// [`Authorization`] marker type for non-coinbase transactions without authorization data.
@@ -386,24 +456,212 @@ impl Authorization for Coinbase {
         orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 }
 
-/// A Zcash transaction.
-#[derive(Debug)]
-pub struct Transaction {
+/// A transaction with a cached identifier and immutable transaction data.
+///
+/// The default state is [`Authorized`]. [`Transaction<EffectsOnly>`] supports
+/// transactions with pruned authorization through [`Transaction::from_effects`].
+/// Equality compares identifiers within the same authorization state.
+///
+/// Complete writing, freezing, and authorizing commitments require authorization:
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// fn write(tx: Transaction<EffectsOnly>) {
+///     tx.write(Vec::new());
+/// }
+/// ```
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// fn freeze(tx: Transaction<EffectsOnly>) {
+///     tx.into_data().freeze();
+/// }
+/// ```
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// fn auth(tx: Transaction<EffectsOnly>) {
+///     tx.auth_commitment(&());
+/// }
+/// ```
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// use zcash_protocol::consensus::BranchId;
+/// let _ = Transaction::<EffectsOnly>::read(&[][..], BranchId::Nu5);
+/// ```
+///
+/// Equality does not compare different authorization states:
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// fn compare(full: Transaction, effects: Transaction<EffectsOnly>) -> bool {
+///     full == effects
+/// }
+/// ```
+///
+/// Cached transaction data cannot be mutated:
+/// ```compile_fail
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction, TransactionData};
+/// fn mutate(tx: &mut Transaction<EffectsOnly>) -> &mut TransactionData<EffectsOnly> {
+///     &mut **tx
+/// }
+/// ```
+///
+/// Effects-only transactions can be cloned without changing their identifier:
+/// ```
+/// use zcash_primitives::transaction::{EffectsOnly, Transaction};
+/// fn clone(tx: Transaction<EffectsOnly>) -> Transaction<EffectsOnly> {
+///     tx.clone()
+/// }
+/// ```
+pub struct Transaction<A: Authorization = Authorized> {
     txid: TxId,
-    data: TransactionData<Authorized>,
+    data: TransactionData<A>,
 }
 
-impl Deref for Transaction {
-    type Target = TransactionData<Authorized>;
+impl<A: Authorization> fmt::Debug for Transaction<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Transaction")
+            .field("txid", &self.txid)
+            .field("data", &self.data)
+            .finish()
+    }
+}
 
-    fn deref(&self) -> &TransactionData<Authorized> {
+impl<A: Authorization> Deref for Transaction<A> {
+    type Target = TransactionData<A>;
+
+    fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
-impl PartialEq for Transaction {
-    fn eq(&self, other: &Transaction) -> bool {
+impl<A: Authorization> PartialEq for Transaction<A> {
+    fn eq(&self, other: &Self) -> bool {
         self.txid == other.txid
+    }
+}
+
+impl<A: Authorization> Transaction<A> {
+    /// Consumes this transaction, returning its data without the cached identifier.
+    pub fn into_data(self) -> TransactionData<A> {
+        self.data
+    }
+
+    /// Returns the transaction identifier.
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+}
+
+/// An error constructing a transaction from effecting data.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum EffectsTransactionError {
+    /// This format's identifier requires authorizing data.
+    UnsupportedVersion(TxVersion),
+    /// The effects cannot be represented by their transaction format.
+    InconsistentData(io::Error),
+    /// An effecting anchor or bundle digest could not be resolved.
+    Digest(V7DigestError),
+}
+
+impl fmt::Display for EffectsTransactionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedVersion(version) => {
+                write!(
+                    f,
+                    "transaction version {version:?} requires authorizing data for its identifier"
+                )
+            }
+            Self::InconsistentData(error) => write!(f, "inconsistent transaction effects: {error}"),
+            Self::Digest(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for EffectsTransactionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnsupportedVersion(_) => None,
+            Self::InconsistentData(error) => Some(error),
+            Self::Digest(error) => Some(error),
+        }
+    }
+}
+
+impl From<V7DigestError> for EffectsTransactionError {
+    fn from(error: V7DigestError) -> Self {
+        Self::Digest(error)
+    }
+}
+
+impl Transaction<EffectsOnly> {
+    /// Computes and caches a version 5, 6, or 7 transaction's identifier from its effects.
+    ///
+    /// Version 7 is available under `zcash_unstable = "nu8"`. Pruned version 7
+    /// bytes can be projected with `TransactionData::from_effects_bytes`.
+    /// Transparent previous outputs and authorizing data are not required.
+    /// The provider is trusted as described by [`BundleDigestProvider`]; pass
+    /// `&()` when no retained effecting bundle needs an external digest.
+    ///
+    /// This checks format consistency, not consensus validity or bundle activation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectsTransactionError::UnsupportedVersion`] before version 5,
+    /// [`EffectsTransactionError::InconsistentData`] for unrepresentable effects,
+    /// or [`EffectsTransactionError::Digest`] for a missing effecting anchor,
+    /// incompatible bundle, or unresolved retained effecting digest. Retained
+    /// effects are only representable in version 7.
+    pub fn from_effects(
+        data: TransactionData<EffectsOnly>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self, EffectsTransactionError> {
+        if matches!(
+            data.version,
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4
+        ) {
+            return Err(EffectsTransactionError::UnsupportedVersion(data.version));
+        }
+        if data
+            .transparent_bundle
+            .as_ref()
+            .is_some_and(|bundle| bundle.vin.is_empty() && bundle.vout.is_empty())
+        {
+            return Err(EffectsTransactionError::InconsistentData(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "empty transparent effecting bundles must be omitted",
+            )));
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        {
+            if data.version != TxVersion::V7 && !data.uninterpreted_effect_bundles.is_empty() {
+                return Err(EffectsTransactionError::InconsistentData(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "retained effects require the version 7 transaction format",
+                )));
+            }
+            if data.version == TxVersion::V7 {
+                #[cfg(feature = "orchard")]
+                if data.v7_bundle_version_mismatch().is_some() {
+                    return Err(V7DigestError::EffectsVersionMismatch.into());
+                }
+                if data.empty_v7_effect_bundle().is_some() {
+                    return Err(EffectsTransactionError::InconsistentData(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "empty version 7 effecting bundles must be omitted",
+                    )));
+                }
+            }
+        }
+        data.validate_effects_version_consistency(data.version)
+            .map_err(EffectsTransactionError::InconsistentData)?;
+        let txid = to_txid(
+            data.version,
+            data.consensus_branch_id,
+            &data.txid_digests(provider)?,
+        )
+        .ok_or(V7DigestError::EffectsVersionMismatch)?;
+        Ok(Self { txid, data })
     }
 }
 
@@ -428,7 +686,6 @@ impl PartialEq for Transaction {
 /// `orchard`. Their positional parameters depend on these features, which
 /// Cargo may also enable through another dependent. Single-protocol features
 /// support inspecting and digesting typed transactions, not these calls.
-#[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
     consensus_branch_id: BranchId,
@@ -440,14 +697,46 @@ pub struct TransactionData<A: Authorization> {
     #[cfg(feature = "sapling")]
     sapling_bundle: Option<Box<sapling::Bundle<A::SaplingAuth, ZatBalance>>>,
     #[cfg(feature = "orchard")]
-    orchard_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
+    orchard_bundle: Option<Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>>,
     #[cfg(feature = "orchard")]
-    ironwood_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
+    ironwood_bundle: Option<Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>>,
     coinbase_bundle: Option<Box<zip248::CoinbaseBundle>>,
     #[cfg(zcash_unstable = "nu8")]
     uninterpreted_effect_bundles: BTreeMap<BundleType, V7EffectBundleBytes>,
     #[cfg(zcash_unstable = "nu8")]
     uninterpreted_auth_bundles: BTreeMap<BundleType, V7AuthBundleBytes>,
+}
+
+impl<A: Authorization> fmt::Debug for TransactionData<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("TransactionData");
+        debug
+            .field("version", &self.version)
+            .field("consensus_branch_id", &self.consensus_branch_id)
+            .field("lock_time", &self.lock_time)
+            .field("expiry_height", &self.expiry_height)
+            .field("value_pool_deltas", &self.value_pool_deltas)
+            .field("transparent_bundle", &self.transparent_bundle)
+            .field("sprout_bundle", &self.sprout_bundle);
+        #[cfg(feature = "sapling")]
+        debug.field("sapling_bundle", &self.sapling_bundle);
+        #[cfg(feature = "orchard")]
+        debug
+            .field("orchard_bundle", &self.orchard_bundle)
+            .field("ironwood_bundle", &self.ironwood_bundle);
+        debug.field("coinbase_bundle", &self.coinbase_bundle);
+        #[cfg(zcash_unstable = "nu8")]
+        debug
+            .field(
+                "uninterpreted_effect_bundles",
+                &self.uninterpreted_effect_bundles,
+            )
+            .field(
+                "uninterpreted_auth_bundles",
+                &self.uninterpreted_auth_bundles,
+            );
+        debug.finish()
+    }
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -475,7 +764,35 @@ impl Clone for TransactionData<Authorized> {
     }
 }
 
-impl Clone for Transaction {
+impl Clone for TransactionData<EffectsOnly> {
+    fn clone(&self) -> Self {
+        TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            value_pool_deltas: self.value_pool_deltas.clone(),
+            transparent_bundle: self.transparent_bundle.clone(),
+            sprout_bundle: self.sprout_bundle.clone(),
+            #[cfg(feature = "sapling")]
+            sapling_bundle: self.sapling_bundle.clone(),
+            #[cfg(feature = "orchard")]
+            orchard_bundle: self.orchard_bundle.clone(),
+            #[cfg(feature = "orchard")]
+            ironwood_bundle: self.ironwood_bundle.clone(),
+            coinbase_bundle: self.coinbase_bundle.clone(),
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles.clone(),
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: self.uninterpreted_auth_bundles.clone(),
+        }
+    }
+}
+
+impl<A: Authorization> Clone for Transaction<A>
+where
+    TransactionData<A>: Clone,
+{
     fn clone(&self) -> Self {
         // SAFETY: We're reconstructing the Transaction from its data.
         // The txid is deterministic from the data, so cloning data and
@@ -1474,11 +1791,11 @@ impl<A: Authorization> TransactionData<A> {
             header_digest,
             digester.digest_transparent(self.version, self.transparent_bundle.as_ref()),
             #[cfg(feature = "sapling")]
-            digester.digest_sapling(version, self.sapling_bundle.as_deref()),
+            digester.digest_sapling(version, self.sapling_bundle.as_deref())?,
             #[cfg(feature = "orchard")]
-            digester.digest_orchard(version, self.orchard_bundle.as_deref()),
+            digester.digest_orchard(version, self.orchard_bundle.as_deref())?,
             #[cfg(feature = "orchard")]
-            digester.digest_ironwood(version, self.ironwood_bundle.as_deref()),
+            digester.digest_ironwood(version, self.ironwood_bundle.as_deref())?,
             #[cfg(zcash_unstable = "nu8")]
             digester.digest_coinbase(version, self.coinbase_bundle.as_deref()),
             #[cfg(zcash_unstable = "nu8")]
@@ -1548,9 +1865,9 @@ impl<A: Authorization> TransactionData<A> {
             sapling::Bundle<B::SaplingAuth, ZatBalance>,
         >,
         #[cfg(feature = "orchard")] mut f_orchard: impl FnMut(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+            Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Option<
-            orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>,
+            orchard::Bundle<B::OrchardAuth, ZatBalance>,
         >,
     ) -> TransactionData<B> {
         let mut data = TransactionData {
@@ -1601,9 +1918,9 @@ impl<A: Authorization> TransactionData<A> {
             E,
         >,
         #[cfg(feature = "orchard")] mut f_orchard: impl FnMut(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+            Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ) -> Result<
-            Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
+            Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>,
             E,
         >,
     ) -> Result<TransactionData<B>, E> {
@@ -1668,6 +1985,10 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
+    /// Maps authorization while preserving anchor representations.
+    ///
+    /// Use [`Self::map_bundles`] to change the anchor representation.
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
@@ -1679,7 +2000,15 @@ impl<A: Authorization> TransactionData<A> {
             A::OrchardAuth,
             B::OrchardAuth,
         >,
-    ) -> TransactionData<B> {
+    ) -> TransactionData<B>
+    where
+        B::SaplingAuth: sapling::bundle::Authorization<
+                Anchor = <A::SaplingAuth as sapling::bundle::Authorization>::Anchor,
+            >,
+        B::OrchardAuth: orchard::bundle::Authorization<
+                Anchor = <A::OrchardAuth as orchard::bundle::Authorization>::Anchor,
+            >,
+    {
         #[cfg(feature = "sapling")]
         let mut map_sapling = |sb: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>| {
             sb.map(|b| {
@@ -1739,7 +2068,191 @@ impl<A: Authorization> TransactionData<A> {
     }
 }
 
+impl TransactionData<EffectsOnly> {
+    /// Projects version 7 wire data into typed transaction effects.
+    ///
+    /// All supplied authorization data is discarded, including anchors and opaque
+    /// entries. Unsupported variants, unknown types, and feature-disabled effects
+    /// retain their exact identifiers and payloads. Keep [`TransactionBytes`] for
+    /// lossless retention. No transaction-local consensus validation is performed.
+    /// Use [`Transaction::from_effects`] to cache the projected transaction's identifier.
+    ///
+    /// The encoded branch ID is used; `consensus_branch_id` is reserved for
+    /// formats that do not encode one. Transparent previous outputs are not in
+    /// the transaction encoding; supply them to
+    /// [`sighash::PrecomputedSighashData::new_zip244_with_context`]
+    /// before computing signature hashes for a transaction with transparent inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a non-v7 encoding, an unknown encoded branch ID,
+    /// amounts outside the typed monetary range, or invalid supported effecting
+    /// fields. Neither anchors, proofs, nor signatures are required or interpreted.
+    #[cfg(zcash_unstable = "nu8")]
+    pub fn from_effects_bytes(
+        bytes: TransactionBytes,
+        _consensus_branch_id: BranchId,
+    ) -> io::Result<Self> {
+        let lock_time = bytes.lock_time();
+        let expiry_height = bytes.expiry_height();
+        let branch_id = bytes.try_consensus_branch_id()?;
+        let TransactionBodyBytes::V7(body) = bytes.into_body() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "effects projection requires version 7",
+            ));
+        };
+        let branch_id = branch_id.expect("version 7 encodes a consensus branch ID");
+        let value_pool_deltas = body.to_value_pool_deltas()?;
+        let mut transparent_bundle = None;
+        let mut coinbase_bundle = None;
+        #[cfg(feature = "sapling")]
+        let mut sapling_bundle = None;
+        #[cfg(feature = "orchard")]
+        let (mut orchard_bundle, mut ironwood_bundle) = (None, None);
+        let mut uninterpreted = BTreeMap::new();
+        for effects in body.into_effect_bundles() {
+            let bundle_type = effects.bundle_type();
+            match effects {
+                V7EffectBundleBytes::Transparent(effects) => {
+                    transparent_bundle = effects.into_effects()?;
+                }
+                V7EffectBundleBytes::Coinbase(effects) => {
+                    coinbase_bundle = Some(effects.to_coinbase_bundle()?);
+                }
+                #[cfg(feature = "sapling")]
+                V7EffectBundleBytes::Sapling(effects) => {
+                    sapling_bundle = Some(sapling_serialization::effects_from_v7_bytes(
+                        &effects,
+                        value_pool_deltas
+                            .sapling_value()
+                            .unwrap_or(ZatBalance::zero()),
+                    )?);
+                }
+                #[cfg(feature = "orchard")]
+                V7EffectBundleBytes::Orchard(effects) => {
+                    orchard_bundle = Some(orchard_serialization::effects_from_v7_bytes(
+                        &effects,
+                        value_pool_deltas
+                            .orchard_value()
+                            .unwrap_or(ZatBalance::zero()),
+                        orchard::bundle::BundleVersion::orchard_v3(),
+                    )?);
+                }
+                #[cfg(feature = "orchard")]
+                V7EffectBundleBytes::Ironwood(effects) => {
+                    ironwood_bundle = Some(orchard_serialization::effects_from_v7_bytes(
+                        &effects,
+                        value_pool_deltas
+                            .ironwood_value()
+                            .unwrap_or(ZatBalance::zero()),
+                        orchard::bundle::BundleVersion::ironwood_v3(),
+                    )?);
+                }
+                effects => {
+                    uninterpreted.insert(bundle_type, effects);
+                }
+            }
+        }
+        Self::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            branch_id,
+            lock_time,
+            expiry_height,
+            value_pool_deltas,
+            transparent_bundle,
+            None,
+            #[cfg(feature = "sapling")]
+            sapling_bundle,
+            #[cfg(feature = "orchard")]
+            orchard_bundle,
+            #[cfg(feature = "orchard")]
+            ironwood_bundle,
+            coinbase_bundle,
+            uninterpreted,
+            BTreeMap::new(),
+        )
+    }
+}
+
 impl TransactionData<Authorized> {
+    /// Discards authorization from a version 5 or later transaction.
+    ///
+    /// Retains all effects, value pool deltas, and uninterpreted effecting entries.
+    /// All proofs, signatures, and uninterpreted authorizing entries are discarded.
+    /// Version 5 effecting anchors are retained; version 6 and later authorizing
+    /// anchors are discarded. No transaction-local consensus validation is performed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectsTransactionError::UnsupportedVersion`] before version 5,
+    /// or [`EffectsTransactionError::InconsistentData`] for bundle types or value
+    /// balances inconsistent with the transaction format.
+    pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, EffectsTransactionError> {
+        if matches!(
+            self.version,
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4
+        ) {
+            return Err(EffectsTransactionError::UnsupportedVersion(self.version));
+        }
+        self.validate_effects_version_consistency(self.version)
+            .map_err(EffectsTransactionError::InconsistentData)?;
+        #[cfg(any(feature = "sapling", feature = "orchard"))]
+        let retain_anchors = self.version == TxVersion::V5;
+
+        Ok(TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            value_pool_deltas: self.value_pool_deltas,
+            transparent_bundle: self.transparent_bundle.map(|bundle| transparent::Bundle {
+                vin: bundle
+                    .vin
+                    .into_iter()
+                    .map(|input| TxIn::from_parts(input.prevout().clone(), (), input.sequence()))
+                    .collect(),
+                vout: bundle.vout,
+                authorization: transparent::EffectsOnly,
+            }),
+            sprout_bundle: None,
+            #[cfg(feature = "sapling")]
+            sapling_bundle: self.sapling_bundle.map(|bundle| {
+                Box::new((*bundle).map_authorization_with_anchor(
+                    (),
+                    |_, anchor| retain_anchors.then_some(anchor),
+                    |_, _| (),
+                    |_, _| (),
+                    |_, _| (),
+                    |_, _| sapling::bundle::EffectsOnly,
+                ))
+            }),
+            #[cfg(feature = "orchard")]
+            orchard_bundle: self.orchard_bundle.map(|bundle| {
+                Box::new((*bundle).map_authorization_with_anchor(
+                    &mut (),
+                    |_, anchor| retain_anchors.then_some(anchor),
+                    |_, _, _| (),
+                    |_, _| orchard::bundle::EffectsOnly,
+                ))
+            }),
+            #[cfg(feature = "orchard")]
+            ironwood_bundle: self.ironwood_bundle.map(|bundle| {
+                Box::new((*bundle).map_authorization_with_anchor(
+                    &mut (),
+                    |_, anchor| retain_anchors.then_some(anchor),
+                    |_, _, _| (),
+                    |_, _| orchard::bundle::EffectsOnly,
+                ))
+            }),
+            coinbase_bundle: self.coinbase_bundle,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: BTreeMap::new(),
+        })
+    }
+
     /// Rejects retained byte entries that typed serialization cannot interpret.
     fn reject_unrecognized_bundles(&self) -> io::Result<()> {
         #[cfg(zcash_unstable = "nu8")]
@@ -1754,6 +2267,30 @@ impl TransactionData<Authorized> {
         Ok(())
     }
 
+    /// Checks format consistency and activation rules for complete serialization.
+    fn validate_version_consistency(&self, body_version: TxVersion) -> io::Result<()> {
+        self.validate_effects_version_consistency(body_version)?;
+        for (&bundle_type, &(_, value)) in self.value_pool_deltas.iter() {
+            if !zip248::bundle_activated(bundle_type) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    alloc::format!(
+                        "value pool delta for bundleType {} (value {}) is not activated by any implemented consensus branch",
+                        bundle_type.to_u64(),
+                        i64::from(value)
+                    ),
+                ));
+            }
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        if body_version == TxVersion::V7 {
+            bytes::validate_v7_branch_id(Some(self.consensus_branch_id.into()))?;
+        }
+        Ok(())
+    }
+}
+
+impl<A: Authorization> TransactionData<A> {
     /// Checks that the version-dependent fields this data carries can be
     /// represented by `body_version`.
     ///
@@ -1773,10 +2310,9 @@ impl TransactionData<Authorized> {
     ///
     /// # Errors
     ///
-    /// Returns [`io::ErrorKind::InvalidInput`] if the data cannot be represented
-    /// by `body_version`, or if it carries a value pool delta for a bundle type
-    /// that no implemented consensus branch activates.
-    fn validate_version_consistency(&self, body_version: TxVersion) -> io::Result<()> {
+    /// Returns [`io::ErrorKind::InvalidInput`] if the effects cannot be
+    /// represented by `body_version`. Does not check activation or authorization.
+    fn validate_effects_version_consistency(&self, body_version: TxVersion) -> io::Result<()> {
         let unsupported_bundle = self.sprout_bundle.is_some() && !body_version.has_sprout();
         #[cfg(feature = "sapling")]
         let unsupported_bundle =
@@ -1792,25 +2328,8 @@ impl TransactionData<Authorized> {
             ));
         }
 
-        // Activation is separate from registration and, unlike the ZIP 233
-        // construction feature, is always known: a delta left over from
-        // parsing must be rejected whatever features are enabled.
-        for (&bundle_type, &(_, value)) in self.value_pool_deltas.iter() {
-            if !zip248::bundle_activated(bundle_type) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    alloc::format!(
-                        "value pool delta for bundleType {} (value {}) is not activated by any implemented consensus branch",
-                        bundle_type.to_u64(),
-                        i64::from(value)
-                    ),
-                ));
-            }
-        }
-
         #[cfg(zcash_unstable = "nu8")]
         if body_version == TxVersion::V7 {
-            bytes::validate_v7_branch_id(Some(self.consensus_branch_id.into()))?;
             if let Some((bundle_type, _, _)) = self.v7_shielded_balance_mismatch() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -1910,7 +2429,9 @@ impl TransactionData<Authorized> {
 
         Ok(())
     }
+}
 
+impl TransactionData<Authorized> {
     /// Builds the version 7 (ZIP 248) body of this transaction.
     ///
     /// ZIP 248 omits an empty effecting bundle, but the typed representation
@@ -2070,6 +2591,21 @@ fn v7_auth_for_conversion<'a>(
 }
 
 impl Transaction {
+    /// Discards authorization while preserving the cached identifier.
+    ///
+    /// Uses [`TransactionData::into_effects`] without recomputing the identifier
+    /// or requesting uninterpreted bundle digests.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors documented by [`TransactionData::into_effects`].
+    pub fn into_effects(self) -> Result<Transaction<EffectsOnly>, EffectsTransactionError> {
+        Ok(Transaction {
+            txid: self.txid,
+            data: self.data.into_effects()?,
+        })
+    }
+
     fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
         match data.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
@@ -2141,14 +2677,6 @@ impl Transaction {
         .expect("is v7 tx");
 
         Ok(Transaction { txid, data })
-    }
-
-    pub fn into_data(self) -> TransactionData<Authorized> {
-        self.data
-    }
-
-    pub fn txid(&self) -> TxId {
-        self.txid
     }
 
     /// Reads a transaction from its wire encoding.
@@ -3085,19 +3613,25 @@ pub trait TransactionDigest<A: Authorization> {
         transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth, Zatoshis>>,
     ) -> Self::TransparentDigest;
 
+    /// Digests a Sapling bundle's effects in `version`.
+    ///
+    /// Returns an error if the bundle storage cannot represent that format's effects.
     #[cfg(feature = "sapling")]
     fn digest_sapling(
         &self,
         version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    ) -> Self::SaplingDigest;
+    ) -> Result<Self::SaplingDigest, V7DigestError>;
 
+    /// Digests an Orchard bundle's effects in `version`.
+    ///
+    /// Returns an error if the bundle storage cannot represent that format's effects.
     #[cfg(feature = "orchard")]
     fn digest_orchard(
         &self,
         version: TxVersion,
         orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::OrchardDigest;
+    ) -> Result<Self::OrchardDigest, V7DigestError>;
 
     /// Computes the digest for the Ironwood bundle.
     ///
@@ -3107,12 +3641,14 @@ pub trait TransactionDigest<A: Authorization> {
     /// `None`, while version 7 omits the entry. Transaction commitment digesters may instead
     /// return an empty authorizing data digest when no Ironwood bundle is present, and may use
     /// a different anchor commitment policy than transaction ID digesters.
+    ///
+    /// Returns an error if the bundle storage cannot represent that format's effects.
     #[cfg(feature = "orchard")]
     fn digest_ironwood(
         &self,
         version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::IronwoodDigest;
+    ) -> Result<Self::IronwoodDigest, V7DigestError>;
 
     /// Computes the digest for a version 7 coinbase bundle.
     ///

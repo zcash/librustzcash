@@ -310,10 +310,22 @@ impl SaplingSpendBytes {
     ///
     /// Validates the value commitment and randomized validating key.
     pub(crate) fn to_spend_v5(&self) -> io::Result<SpendDescriptionV5> {
+        let spend = self.to_effects()?;
         Ok(SpendDescriptionV5::from_parts(
+            spend.cv().clone(),
+            *spend.nullifier(),
+            *spend.rk(),
+        ))
+    }
+
+    pub(crate) fn to_effects(&self) -> io::Result<SpendDescription<sapling::bundle::EffectsOnly>> {
+        Ok(SpendDescription::from_parts(
             read_value_commitment(&self.cv()[..])?,
+            None,
             read_nullifier(&self.nullifier()[..])?,
             read_rk(&self.rk()[..])?,
+            (),
+            (),
         ))
     }
 }
@@ -323,14 +335,48 @@ impl SaplingOutputBytes {
     ///
     /// Validates the value commitment and note commitment.
     pub(crate) fn to_output_v5(&self) -> io::Result<OutputDescriptionV5> {
+        let output = self.to_effects()?;
         Ok(OutputDescriptionV5::from_parts(
+            output.cv().clone(),
+            *output.cmu(),
+            output.ephemeral_key().clone(),
+            *output.enc_ciphertext(),
+            *output.out_ciphertext(),
+        ))
+    }
+
+    pub(crate) fn to_effects(&self) -> io::Result<OutputDescription<()>> {
+        Ok(OutputDescription::from_parts(
             read_value_commitment(&self.cv()[..])?,
             read_cmu(&self.cmu()[..])?,
             EphemeralKeyBytes(*self.ephemeral_key()),
             *self.enc_ciphertext(),
             *self.out_ciphertext(),
+            (),
         ))
     }
+}
+
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) fn effects_from_v7_bytes(
+    bytes: &crate::transaction::bytes::V7SaplingBundleBytes,
+    value_balance: ZatBalance,
+) -> io::Result<sapling::Bundle<sapling::bundle::EffectsOnly, ZatBalance>> {
+    sapling::Bundle::from_parts(
+        bytes
+            .spends()
+            .iter()
+            .map(|spend| spend.to_effects())
+            .collect::<io::Result<_>>()?,
+        bytes
+            .outputs()
+            .iter()
+            .map(|output| output.to_effects())
+            .collect::<io::Result<_>>()?,
+        value_balance,
+        sapling::bundle::EffectsOnly,
+    )
+    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty Sapling effects"))
 }
 
 impl SaplingSpendV4Bytes {

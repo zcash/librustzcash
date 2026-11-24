@@ -601,6 +601,33 @@ pub struct TransparentEffectsBytes {
 
 #[cfg(zcash_unstable = "nu8")]
 impl TransparentEffectsBytes {
+    /// Interprets effects without authorization data or previous-output context.
+    ///
+    /// Returns an error for an empty bundle or an output outside the monetary range.
+    pub(crate) fn into_effects(
+        self,
+    ) -> io::Result<Option<Bundle<::transparent::bundle::EffectsOnly, Zatoshis>>> {
+        if self.inputs.is_empty() && self.outputs.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "empty transparent effects",
+            ));
+        }
+        Ok(Some(Bundle {
+            vin: self
+                .inputs
+                .into_iter()
+                .map(|input| TxIn::from_parts(OutPoint::from(input.prevout), (), input.sequence))
+                .collect(),
+            vout: self
+                .outputs
+                .into_iter()
+                .map(TxOut::try_from)
+                .collect::<io::Result<_>>()?,
+            authorization: ::transparent::bundle::EffectsOnly,
+        }))
+    }
+
     /// Constructs effecting data from its wire fields.
     ///
     /// Empty data cannot be serialized or included in a v7 transaction body.

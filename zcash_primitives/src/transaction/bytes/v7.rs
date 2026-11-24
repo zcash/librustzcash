@@ -507,6 +507,11 @@ impl V7TransactionBodyBytes {
         &self.effect_bundles
     }
 
+    /// Moves the effecting entries out, discarding the remaining maps.
+    pub(crate) fn into_effect_bundles(self) -> Vec<V7EffectBundleBytes> {
+        self.effect_bundles
+    }
+
     /// Returns the authorizing-data entries in canonical order.
     pub fn auth_bundles(&self) -> &[V7AuthBundleBytes] {
         &self.auth_bundles

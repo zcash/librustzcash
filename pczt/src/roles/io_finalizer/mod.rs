@@ -63,9 +63,18 @@ impl IoFinalizer {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
             },
-            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
-            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
-            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
+            |s| {
+                crate::extract_sapling_effects(s, anchor_requirement)
+                    .map_err(ExtractError::SaplingExtract)
+            },
+            |o| {
+                crate::extract_orchard_effects(o, anchor_requirement)
+                    .map_err(ExtractError::OrchardExtract)
+            },
+            |i| {
+                crate::extract_orchard_effects(i, anchor_requirement)
+                    .map_err(ExtractError::IronwoodExtract)
+            },
         )?;
 
         // After shielded IO finalization, the transaction effects cannot be modified
@@ -75,7 +84,7 @@ impl IoFinalizer {
                 | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
                 | FLAG_SHIELDED_MODIFIABLE);
         }
-        let sighash_data = precompute_sighash_data(&global, tx_data)?;
+        let sighash_data = precompute_sighash_data(&global, tx_data, &transparent)?;
         let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
 
         // The Sapling bundle is always finalized: unlike the Orchard-protocol

@@ -1,8 +1,5 @@
 use blake2b_simd::Hash as Blake2bHash;
 
-use ::transparent::sighash::TransparentAuthorizingContext;
-use zcash_protocol::value::Zatoshis;
-
 use crate::transaction::{
     Authorization, TransactionData, Zip244Digests,
     sighash::SignableInput,
@@ -13,7 +10,7 @@ use crate::transaction::{
 /// Implements the version 6 transaction signature hash, using the `txid_parts` and
 /// transparent `inputs_digests` of `tx`.
 pub(crate) fn v6_signature_hash<
-    TA: TransparentAuthorizingContext<Zatoshis>,
+    TA: ::transparent::bundle::Authorization,
     A: Authorization<TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,

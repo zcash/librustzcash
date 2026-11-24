@@ -4,37 +4,18 @@ use alloc::vec::Vec;
 use core::fmt::{self, Debug};
 use zcash_script::{script, solver};
 
-use crate::{
-    address::{Script, TransparentAddress},
-    sighash::TransparentAuthorizingContext,
-};
+use crate::address::{Script, TransparentAddress};
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
 }
 
-/// Marker type for a bundle that contains no authorizing data, and the necessary input
-/// information for creating sighashes.
-#[derive(Debug)]
-pub struct EffectsOnly<V> {
-    pub(crate) inputs: Vec<TxOut<V>>,
-}
+/// Marker type for a bundle without authorizing data.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectsOnly;
 
-impl<V: Debug> Authorization for EffectsOnly<V> {
+impl Authorization for EffectsOnly {
     type ScriptSig = ();
-}
-
-impl<V: Copy + Debug> TransparentAuthorizingContext<V> for EffectsOnly<V> {
-    fn input_amounts(&self) -> Vec<V> {
-        self.inputs.iter().map(|input| input.value()).collect()
-    }
-
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
-        self.inputs
-            .iter()
-            .map(|input| input.script_pubkey().clone())
-            .collect()
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
