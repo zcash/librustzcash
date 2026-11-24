@@ -1536,8 +1536,8 @@ proptest! {
             transparent_bundle,
             sprout_bundle,
             sapling_bundle,
+            orchard_bundle,
             // TODO: Account for the remaining bundles.
-            orchard_bundle: _,
             ironwood_bundle: _,
         } = data;
 
@@ -1561,6 +1561,7 @@ proptest! {
         }
 
         expected += boxed_bytes(sapling_bundle.as_deref());
+        expected += boxed_bytes(orchard_bundle.as_deref());
 
         prop_assert_eq!(transaction.dynamic_usage(), expected);
         prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
