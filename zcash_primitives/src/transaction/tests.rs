@@ -1610,3 +1610,37 @@ proptest! {
         prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    /// Increasing vector capacities adds exactly the newly reserved bytes.
+    #[test]
+    fn dynamic_usage_counts_spare_capacity(
+        transaction in arb_tx(BranchId::Overwinter),
+        count in 1_usize..8,
+        input_slots in 0_usize..16,
+        output_slots in 0_usize..16,
+        joinsplit_slots in 1_usize..8,
+    ) {
+        let mut transaction = with_joinsplits(transaction, count);
+        let mut expected = transaction.dynamic_usage();
+
+        if let Some(bundle) = transaction.data.transparent_bundle.as_mut() {
+            expected += reserve_slots(&mut bundle.vin, input_slots);
+            expected += reserve_slots(&mut bundle.vout, output_slots);
+        }
+
+        let sprout = transaction.data.sprout_bundle.as_mut().unwrap();
+        expected += reserve_slots(&mut sprout.joinsplits, joinsplit_slots);
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
+
+        /// Request slots beyond current capacity and count the actual allocation growth.
+        fn reserve_slots<T>(items: &mut Vec<T>, slots: usize) -> usize {
+            let before = items.capacity();
+            items.reserve(before - items.len() + slots);
+            (items.capacity() - before) * size_of::<T>()
+        }
+    }
+}
