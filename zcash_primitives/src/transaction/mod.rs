@@ -348,13 +348,21 @@ impl Transaction {
 #[cfg(feature = "std")]
 impl memuse::DynamicUsage for Transaction {
     fn dynamic_usage(&self) -> usize {
-        self.unshielded_dynamic_usage()
+        self.unshielded_dynamic_usage() + self.sapling_bundle.dynamic_usage()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        let usage = self.unshielded_dynamic_usage();
+        let mut lower_bound = self.unshielded_dynamic_usage();
+        let mut upper_bound = Some(lower_bound);
 
-        (usage, Some(usage))
+        for (bundle_lower, bundle_upper) in [self.sapling_bundle.dynamic_usage_bounds()] {
+            lower_bound += bundle_lower;
+            upper_bound = upper_bound
+                .zip(bundle_upper)
+                .map(|(total, additional)| total + additional);
+        }
+
+        (lower_bound, upper_bound)
     }
 }
 
