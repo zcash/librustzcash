@@ -1,3 +1,5 @@
+#[cfg(all(test, feature = "std"))]
+use memuse::DynamicUsage;
 use proptest::prelude::*;
 
 #[cfg(test)]
@@ -1506,5 +1508,51 @@ fn zip_0233() {
             v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts, None).as_ref(),
             tv.sighash_shielded
         );
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(16))]
+
+    /// The heap usage is the sum of the allocations owned by the generated transaction.
+    #[test]
+    fn dynamic_usage_counts_transaction_storage(
+        transaction in zcash_protocol::consensus::testing::arb_branch_id().prop_flat_map(arb_tx),
+    ) {
+        let Transaction { txid: _, data } = &transaction;
+        let TransactionData {
+            // Fields without dynamic allocations
+            version: _,
+            consensus_branch_id: _,
+            lock_time: _,
+            expiry_height: _,
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
+            zip233_amount: _,
+            // Fields with dynamic allocations
+            transparent_bundle,
+            // TODO: Account for the remaining bundles.
+            sprout_bundle: _,
+            sapling_bundle: _,
+            orchard_bundle: _,
+            ironwood_bundle: _,
+        } = data;
+
+        let mut expected = 0;
+
+        if let Some(bundle) = transparent_bundle {
+            expected += bundle.vin.capacity() * size_of::<TxIn<transparent::Authorized>>();
+            for input in &bundle.vin {
+                expected += input.script_sig().0.0.capacity();
+            }
+
+            expected += bundle.vout.capacity() * size_of::<transparent::TxOut<Zatoshis>>();
+            for output in &bundle.vout {
+                expected += output.script_pubkey().0.0.capacity();
+            }
+        }
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
     }
 }
