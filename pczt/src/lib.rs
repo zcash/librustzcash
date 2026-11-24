@@ -813,6 +813,25 @@ fn validate_v7_signature_counts(counts: [(PoolType, usize); 4]) -> Result<(), Ex
     Ok(())
 }
 
+/// Returns whether `tx_version` signs a distinct digest per shielded Spend, action and
+/// binding signature.
+#[cfg(any(
+    feature = "io-finalizer",
+    feature = "signer",
+    feature = "spend-finalizer"
+))]
+pub(crate) fn is_v7_version(tx_version: u32) -> bool {
+    #[cfg(zcash_unstable = "nu8")]
+    {
+        tx_version == zcash_protocol::constants::V7_TX_VERSION
+    }
+    #[cfg(not(zcash_unstable = "nu8"))]
+    {
+        let _ = tx_version;
+        false
+    }
+}
+
 /// Computes the digests that the signature hashes of `tx_data` commit to.
 ///
 /// `global` must be the global data of the PCZT that `tx_data` was extracted from.

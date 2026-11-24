@@ -3430,6 +3430,7 @@ version = "0.10.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
+ "corez",
  "document-features",
  "ff 0.14.0",
  "getset",

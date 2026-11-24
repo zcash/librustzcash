@@ -356,6 +356,7 @@ These are `cfg` flags (not Cargo feature flags) that enable unstable or
 in-development functionality:
 
 - `zcash_unstable="nutachyon"`
+- `zcash_unstable="nu8"`
 
 ## Code Style
 
@@ -686,6 +687,9 @@ either path can read a skill's `SKILL.md` directly.
 
 - `cargo test --workspace` across 6 feature-flag configurations
 - `cargo clippy --all-features --all-targets -- -D warnings`
+- Direct `--lib` feature-boundary checks for `zcash_primitives`, `pczt`, and the
+  `zcash` facade's default API, independently of workspace feature unification
+  (`feature-boundaries` job)
 - `cargo fmt --all -- --check`
 - Intra-doc link validation (nightly)
 - Protobuf generated code consistency

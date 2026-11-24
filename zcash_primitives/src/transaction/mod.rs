@@ -3,8 +3,9 @@
 //! The byte layer ([`bytes`]) is always available and does not require the
 //! Sapling or Orchard protocol crates. The typed transaction types expose each
 //! shielded protocol independently under its corresponding feature. The builder
-//! requires `circuits`; full ZIP 248 validation requires both protocols.
-#[cfg(feature = "circuits")]
+//! requires both protocols; only proof creation requires `circuits`. Full ZIP
+//! 248 validation requires both protocols.
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 pub mod builder;
 pub mod bytes;
 pub mod coinbase;

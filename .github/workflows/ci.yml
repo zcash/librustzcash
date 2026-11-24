@@ -484,10 +484,10 @@ jobs:
         run: cargo add --no-default-features --path ../crates/zcash_keys
       - name: Add pczt as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/pczt
+        run: cargo add --no-default-features --features signer,io-finalizer --path ../crates/pczt
       - name: Add zcash_primitives as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --no-default-features --path ../crates/zcash_primitives
+        run: cargo add --no-default-features --features sapling,orchard --path ../crates/zcash_primitives
       - name: Add zcash_pool_migration as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_pool_migration
@@ -526,6 +526,19 @@ jobs:
                 --features "$feature"
             done
           done
+      - name: Test zcash_primitives protocol subsets
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            for features in '' sapling orchard; do
+              RUSTFLAGS="$cfg" cargo test \
+                -p zcash_primitives \
+                --lib \
+                --no-default-features \
+                --features "$features" \
+                transaction::bytes::tests::
+            done
+          done
       - name: Check standalone pczt roles
         shell: bash
         run: |
@@ -537,6 +550,67 @@ jobs:
                 --no-default-features \
                 --features "$feature"
             done
+          done
+      - name: Test PCZT activation agreement
+        shell: bash
+        run: |
+          for cfg in '--cfg zcash_unstable="nu8"' '--cfg zcash_unstable="nu8" --cfg zcash_unstable="nutachyon"'; do
+            RUSTFLAGS="$cfg" cargo test -p pczt --lib --no-default-features \
+              --features zcp-builder \
+              roles::creator::tests::v7_activation_agrees_with_transaction_version
+          done
+      # Resolve the proof-free builder API from outside the workspace so that
+      # dev-dependencies cannot restore it by enabling `circuits`.
+      - name: Check proof-free PCZT construction from a downstream crate
+        shell: bash
+        env:
+          CRATES: ${{ github.workspace }}
+          FIXTURE: ${{ runner.temp }}/proof-free-builder-fixture
+        run: |
+          cargo init --lib "$FIXTURE"
+          cp "$CRATES/rust-toolchain.toml" "$FIXTURE/"
+          cp "$CRATES/Cargo.lock" "$FIXTURE/"
+          {
+            echo '[patch.crates-io]'
+            sed -n '/^\[patch.crates-io\]/,$p' "$CRATES/Cargo.toml" | tail -n +2
+          } >> "$FIXTURE/Cargo.toml"
+          cd "$FIXTURE"
+          cargo add --path "$CRATES/zcash_primitives" --no-default-features --features sapling,orchard
+          cargo add --path "$CRATES/components/zcash_protocol" --no-default-features
+          cargo add rand_core@0.10 --no-default-features
+          cat > src/lib.rs <<'RS'
+          //! Requires PCZT construction without proof creation.
+
+          use rand_core::{CryptoRng, Rng};
+          use zcash_primitives::transaction::{
+              builder::{BuildConfig, Builder, BundlePadding},
+              fees::zip317,
+          };
+          use zcash_protocol::consensus::{BlockHeight, MainNetwork};
+
+          /// Resolves the builder and its proof-free PCZT construction method.
+          pub fn probe_builder(rng: impl Rng + CryptoRng) {
+              let builder = Builder::new(
+                  MainNetwork,
+                  BlockHeight::from_u32(1),
+                  BuildConfig::Standard {
+                      sapling_anchor: None,
+                      orchard_anchor: None,
+                      ironwood_anchor: None,
+                      orchard_padding: BundlePadding::DEFAULT,
+                      ironwood_padding: BundlePadding::DEFAULT,
+                  },
+              );
+              let _ = builder.build_for_pczt(rng, &zip317::FeeRule::standard());
+          }
+          RS
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            if RUSTFLAGS="$cfg" cargo tree -e features -i zcash_primitives \
+              | grep -q 'zcash_primitives feature "circuits"'; then
+              echo "The proof-free builder fixture activates circuits"
+              exit 1
+            fi
+            RUSTFLAGS="$cfg" cargo check --lib
           done
       # Non-role PCZT handling must not pull in `zcash_primitives` and its
       # transparent dependency, under any cfg.
@@ -556,10 +630,76 @@ jobs:
               fi
             done
           done
+      - name: Check proof-free zcash facade features
+        shell: bash
+        run: |
+          for features in sapling orchard sapling,orchard; do
+            cargo check -p zcash --lib --no-default-features --features "$features"
+          done
       - name: Build with both unstable cfgs
         run: >
           RUSTFLAGS='--cfg zcash_unstable="nu8" --cfg zcash_unstable="nutachyon"'
           cargo check -p zcash_primitives -p pczt -p zcash --lib --all-features
+      # A synthetic downstream crate keeps workspace dev-dependencies from
+      # restoring APIs that the facade's defaults no longer enable.
+      - name: Check the zcash facade's default API from a downstream crate
+        shell: bash
+        env:
+          CRATES: ${{ github.workspace }}
+          FIXTURE: ${{ runner.temp }}/facade-fixture
+        run: |
+          cargo init --lib "$FIXTURE"
+          cp "$CRATES/rust-toolchain.toml" "$FIXTURE/"
+          cp "$CRATES/Cargo.lock" "$FIXTURE/"
+          {
+            echo '[patch.crates-io]'
+            sed -n '/^\[patch.crates-io\]/,$p' "$CRATES/Cargo.toml" | tail -n +2
+          } >> "$FIXTURE/Cargo.toml"
+          cd "$FIXTURE"
+          cargo add --path "$CRATES/zcash"
+          cargo add --path "$CRATES/components/zcash_protocol" --no-default-features
+          cat > src/lib.rs <<'RS'
+          //! Requires the API that the `zcash` facade enables by default.
+
+          use zcash::primitives::{
+              block::Block,
+              transaction::{
+                  TxVersion,
+                  builder::{BuildConfig, Builder, BundlePadding},
+                  components::{orchard, sapling},
+                  fees::zip317,
+              },
+          };
+          use zcash_protocol::consensus::{BlockHeight, BranchId, MainNetwork};
+
+          /// Resolves the block module and its typed reader.
+          pub fn probe_block() {
+              let _ = Block::read(&[][..], &MainNetwork);
+          }
+
+          /// Resolves the builder and the typed Sapling module.
+          pub fn probe_builder() {
+              let mut builder = Builder::new(
+                  MainNetwork,
+                  BlockHeight::from_u32(1),
+                  BuildConfig::Standard {
+                      sapling_anchor: None,
+                      orchard_anchor: None,
+                      ironwood_anchor: None,
+                      orchard_padding: BundlePadding::DEFAULT,
+                      ironwood_padding: BundlePadding::DEFAULT,
+                  },
+              );
+              let _ = builder.propose_version::<zip317::FeeRule>(TxVersion::V6);
+              let _ = sapling::zip212_enforcement(&MainNetwork, BlockHeight::from_u32(1));
+          }
+
+          /// Resolves the typed Orchard module and its bundle reader.
+          pub fn probe_orchard() {
+              let _ = orchard::read_v5_bundle(&[][..], BranchId::Nu5);
+          }
+          RS
+          cargo build
 
   bitrot:
     name: Bitrot check

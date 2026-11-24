@@ -6,13 +6,16 @@
 use rand_core::{CryptoRng, Rng};
 use zcash_primitives::transaction::sighash::SignableInput;
 
+#[cfg(zcash_unstable = "nu8")]
+use zcash_primitives::transaction::sighash::V7SignatureContext;
+
 use crate::{
     ExtractError, ParsedPczt, Pczt,
     common::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    precompute_sighash_data, sighash,
+    is_v7_version, precompute_sighash_data, sighash,
 };
 
 pub struct IoFinalizer {
@@ -85,30 +88,82 @@ impl IoFinalizer {
                 | FLAG_SHIELDED_MODIFIABLE);
         }
         let sighash_data = precompute_sighash_data(&global, tx_data, &transparent)?;
-        let shielded_sighash = sighash(&sighash_data, &SignableInput::Shielded);
+        let is_v7 = is_v7_version(global.tx_version);
+        let shielded_sighash = (!is_v7).then(|| sighash(&sighash_data, &SignableInput::Shielded));
 
         // The Sapling bundle is always finalized: unlike the Orchard-protocol
         // Transaction Extractor, the Sapling one requires `bsk` to be set even when
         // the bundle is empty.
-        sapling
-            .bundle
-            .finalize_io(shielded_sighash, &mut rng)
-            .map_err(Error::SaplingFinalize)?;
+        if is_v7 {
+            #[cfg(zcash_unstable = "nu8")]
+            {
+                // Every Spend has its own index, so the bundle needs one digest per Spend.
+                // An empty bundle finalizes from an empty vector.
+                let spend_sighashes = (0..sapling.bundle.spends().len())
+                    .map(|index| {
+                        sighash(
+                            &sighash_data,
+                            &SignableInput::V7(V7SignatureContext::SaplingSpend { index }),
+                        )
+                    })
+                    .collect::<alloc::vec::Vec<_>>();
+                sapling
+                    .bundle
+                    .finalize_io_with_sighashes(&spend_sighashes, &mut rng)
+                    .map_err(Error::SaplingFinalize)?;
+            }
+        } else {
+            sapling
+                .bundle
+                .finalize_io(
+                    shielded_sighash.expect("pre-v7 signs a shared shielded digest"),
+                    &mut rng,
+                )
+                .map_err(Error::SaplingFinalize)?;
+        }
+
+        macro_rules! finalize_orchard_pool {
+            ($bundle:expr, $action:ident, $finalize:ident) => {{
+                let bundle = &mut $bundle;
+                if is_v7 {
+                    #[cfg(zcash_unstable = "nu8")]
+                    {
+                        // Every action has its own index, so the bundle needs one digest
+                        // per action.
+                        let action_sighashes = (0..bundle.bundle.actions().len())
+                            .map(|index| {
+                                sighash(
+                                    &sighash_data,
+                                    &SignableInput::V7(V7SignatureContext::$action { index }),
+                                )
+                            })
+                            .collect::<alloc::vec::Vec<_>>();
+                        bundle
+                            .bundle
+                            .finalize_io_with_sighashes(&action_sighashes, &mut rng)
+                            .map_err(Error::$finalize)?;
+                    }
+                } else {
+                    bundle
+                        .bundle
+                        .finalize_io(
+                            shielded_sighash.expect("pre-v7 signs a shared shielded digest"),
+                            &mut rng,
+                        )
+                        .map_err(Error::$finalize)?;
+                }
+            }};
+        }
+
         // An empty Orchard-protocol bundle carries no value commitment information
         // and contributes nothing to the transaction; leave its `bsk` unset so that
         // it stays in its canonical empty form (and so remains omissible by, or
         // representable in, the serialization formats).
         if has_orchard_actions {
-            orchard
-                .bundle
-                .finalize_io(shielded_sighash, &mut rng)
-                .map_err(Error::OrchardFinalize)?;
+            finalize_orchard_pool!(orchard, OrchardAction, OrchardFinalize);
         }
         if has_ironwood_actions {
-            ironwood
-                .bundle
-                .finalize_io(shielded_sighash, &mut rng)
-                .map_err(Error::IronwoodFinalize)?;
+            finalize_orchard_pool!(ironwood, IronwoodAction, IronwoodFinalize);
         }
 
         Ok(Pczt {

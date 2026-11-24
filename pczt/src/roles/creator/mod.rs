@@ -558,6 +558,34 @@ mod tests {
         ));
     }
 
+    #[cfg(all(zcash_unstable = "nu8", feature = "zcp-builder"))]
+    #[test]
+    fn v7_activation_agrees_with_transaction_version() {
+        for branch in [
+            BranchId::Sprout,
+            BranchId::Overwinter,
+            BranchId::Sapling,
+            BranchId::Blossom,
+            BranchId::Heartwood,
+            BranchId::Canopy,
+            BranchId::Nu5,
+            BranchId::Nu6,
+            BranchId::Nu6_1,
+            BranchId::Nu6_2,
+            BranchId::Nu6_3,
+            BranchId::Nu7,
+            BranchId::Nu8,
+            #[cfg(zcash_unstable = "nutachyon")]
+            BranchId::NuTachyon,
+        ] {
+            assert_eq!(
+                super::v7_activated(branch),
+                zcash_primitives::transaction::TxVersion::V7.valid_in_branch(branch),
+                "{branch:?}",
+            );
+        }
+    }
+
     #[test]
     fn optional_anchors_are_supported_for_empty_bundles() {
         let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, None, Some([0; 32]))

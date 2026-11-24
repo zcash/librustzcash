@@ -8943,7 +8943,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     // anchors are retained, while Orchard effecting fields are compacted using
     // the v2 PCZT encoding. Passing the proof-bearing authoritative copy also
     // exercises redaction of data that the external Signer does not need.
-    let original_sighash = Signer::new(pczt_proven.clone()).unwrap().shielded_sighash();
+    let original_sighash = Signer::new(pczt_proven.clone())
+        .unwrap()
+        .shielded_sighash()
+        .unwrap();
     let original_len = pczt_proven.clone().serialize().unwrap().len();
     let signer_view = redact_pczt_for_signer(&pczt_proven, SignerView::Compact);
     assert_eq!(
@@ -8973,7 +8976,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     assert!(signer_view_bytes.len() < original_len);
     let signer_view = pczt::Pczt::parse(&signer_view_bytes).unwrap();
     assert_eq!(
-        Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
+        Signer::new(signer_view.clone())
+            .unwrap()
+            .shielded_sighash()
+            .unwrap(),
         original_sighash,
     );
 
@@ -8983,7 +8989,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     // remains representable in the v1 PCZT encoding.
     let full_view = redact_pczt_for_signer(&pczt_proven, SignerView::Full);
     assert_eq!(
-        Signer::new(full_view.clone()).unwrap().shielded_sighash(),
+        Signer::new(full_view.clone())
+            .unwrap()
+            .shielded_sighash()
+            .unwrap(),
         original_sighash,
     );
     assert_eq!(full_view.orchard().anchor(), pczt_proven.orchard().anchor());
@@ -10403,7 +10412,10 @@ where
         (orchard, ironwood)
     }
 
-    let original_sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let original_sighash = Signer::new(pczt.clone())
+        .unwrap()
+        .shielded_sighash()
+        .unwrap();
     let original_spend_states = spend_states(pczt.clone());
 
     // Every action in both bundles is either already signed (a pre-signed protocol padding
@@ -10513,7 +10525,10 @@ where
     // the same transaction effects and, unlike the compact view, retains v6 anchors.
     let full_view = redact_pczt_for_signer(&pczt, SignerView::Full);
     assert_eq!(
-        Signer::new(full_view.clone()).unwrap().shielded_sighash(),
+        Signer::new(full_view.clone())
+            .unwrap()
+            .shielded_sighash()
+            .unwrap(),
         original_sighash,
     );
     assert!(full_view.ironwood().actions().iter().all(|action| {
@@ -10601,7 +10616,8 @@ where
         assert_eq!(
             Signer::new((*compact_view).clone())
                 .unwrap()
-                .shielded_sighash(),
+                .shielded_sighash()
+                .unwrap(),
             original_sighash,
         );
     }
