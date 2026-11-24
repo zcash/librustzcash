@@ -343,19 +343,28 @@ impl Transaction {
                     .sum::<usize>()
         })
     }
+
+    /// Heap storage in the Sprout bundle and its JoinSplit vector.
+    fn sprout_dynamic_usage(&self) -> usize {
+        self.sprout_bundle.as_ref().map_or(0, |bundle| {
+            // JoinSplit descriptions store both proof variants and ciphertexts inline.
+            size_of::<sprout::Bundle>() + bundle.joinsplits.capacity() * size_of::<JsDescription>()
+        })
+    }
 }
 
 #[cfg(feature = "std")]
 impl memuse::DynamicUsage for Transaction {
     fn dynamic_usage(&self) -> usize {
         self.unshielded_dynamic_usage()
+            + self.sprout_dynamic_usage()
             + self.sapling_bundle.dynamic_usage()
             + self.orchard_bundle.dynamic_usage()
             + self.ironwood_bundle.dynamic_usage()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        let mut lower_bound = self.unshielded_dynamic_usage();
+        let mut lower_bound = self.unshielded_dynamic_usage() + self.sprout_dynamic_usage();
         let mut upper_bound = Some(lower_bound);
 
         for (bundle_lower, bundle_upper) in [
