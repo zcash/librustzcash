@@ -6,6 +6,7 @@
 
 use core::{cmp::Ordering, fmt};
 
+use corez::io;
 use rand_core::{CryptoRng, Rng};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
@@ -138,6 +139,8 @@ pub enum Error<FE> {
     ChangeRequired(ZatBalance),
     /// An error occurred in computing the fees for a transaction.
     Fee(FeeError<FE>),
+    /// The transaction could not be serialized.
+    Transaction(io::Error),
     /// An overflow or underflow occurred when computing value balances
     Balance(BalanceError),
     /// An error occurred in constructing the transparent parts of a transaction.
@@ -216,6 +219,7 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             ),
             Error::Balance(e) => write!(f, "Invalid amount {e:?}"),
             Error::Fee(e) => write!(f, "An error occurred in fee calculation: {e}"),
+            Error::Transaction(err) => write!(f, "Could not serialize transaction: {err}"),
             Error::TransparentBuild(err) => err.fmt(f),
             Error::NullDataTooLong { actual, limit } => write!(
                 f,
@@ -1566,6 +1570,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
     /// generated during the build process.
     ///
     /// V7 rejects expiry heights above 499,999,999 before proving or signing.
+    /// Returns [`Error::Transaction`] if serialization fails, including when a V7
+    /// bundle payload exceeds the maximum block size.
     ///
     /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
     /// [Orchard metadata]: ::orchard::builder::BundleMetadata
@@ -2030,10 +2036,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         )
         .expect("builder constructs only recognized bundles with empty unrecognized maps");
 
-        // The unwrap() here is safe because the txid hashing
-        // of freeze() should be infalliable.
+        // V7 freezing also validates the serialized bundle payload sizes.
         Ok(BuildResult {
-            transaction: authorized_tx.freeze().unwrap(),
+            transaction: authorized_tx.freeze().map_err(Error::Transaction)?,
             sapling_meta,
             orchard_meta,
             ironwood_meta,
@@ -2413,6 +2418,18 @@ mod tests {
     use {
         crate::transaction::sighash::{PrecomputedSighashData, SignableInput, V7SignatureContext},
         alloc::{collections::BTreeSet, vec::Vec},
+    };
+
+    #[cfg(all(
+        feature = "circuits",
+        feature = "transparent-inputs",
+        feature = "non-standard-fees",
+        zcash_unstable = "nu8"
+    ))]
+    use {
+        crate::transaction::fees::{fixed, zip317::P2PKH_STANDARD_OUTPUT_SIZE},
+        sapling::prover::mock::{MockOutputProver, MockSpendProver},
+        zcash_protocol::constants::MAX_BLOCK_BYTES,
     };
 
     #[cfg(any(feature = "circuits", feature = "non-standard-fees"))]
@@ -3373,6 +3390,54 @@ mod tests {
         assert_matches!(
             fixture(invalid).build_for_pczt(UnwrapErr(SysRng), &fee_rule),
             Err(Error::InvalidExpiryHeight { expiry_height }) if expiry_height == invalid
+        );
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "circuits",
+        feature = "transparent-inputs",
+        feature = "non-standard-fees",
+        zcash_unstable = "nu8"
+    ))]
+    fn v7_builder_rejects_oversized_payload() {
+        /// Enough outputs to exceed the payload limit even without counts or inputs.
+        const OUTPUT_COUNT: usize = MAX_BLOCK_BYTES / P2PKH_STANDARD_OUTPUT_SIZE + 1;
+        let mut keys = TransparentSigningSet::new();
+        let pubkey = keys
+            .add_key(secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap());
+        let recipient = TransparentAddress::from_pubkey(&pubkey);
+        let params = nu8_test_network();
+        let height = params.activation_height(NetworkUpgrade::Nu8).unwrap();
+        let mut builder = Builder::new(params, height, standard_build_config());
+        builder
+            .propose_version::<Infallible>(TxVersion::V7)
+            .unwrap();
+        builder
+            .add_transparent_p2pkh_input(
+                pubkey,
+                OutPoint::fake(),
+                TxOut::new(MINIMUM_FEE, recipient.script().into()),
+            )
+            .unwrap();
+        for _ in 0..OUTPUT_COUNT {
+            builder
+                .add_transparent_output(&recipient, Zatoshis::ZERO)
+                .unwrap();
+        }
+
+        let result = builder.build(
+            &keys,
+            &[],
+            &[],
+            UnwrapErr(SysRng),
+            &MockSpendProver,
+            &MockOutputProver,
+            &fixed::FeeRule::non_standard(MINIMUM_FEE),
+        );
+        assert_matches!(
+            result,
+            Err(Error::Transaction(error)) if error.kind() == corez::io::ErrorKind::InvalidInput
         );
     }
 
