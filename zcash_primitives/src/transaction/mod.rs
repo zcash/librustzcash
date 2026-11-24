@@ -324,15 +324,37 @@ pub struct Transaction {
     data: TransactionData<Authorized>,
 }
 
-/// Placeholder accounting until transaction bundle storage is counted.
+#[cfg(feature = "std")]
+impl Transaction {
+    /// Heap storage in the transparent bundle, including spare vector capacity.
+    fn unshielded_dynamic_usage(&self) -> usize {
+        self.transparent_bundle.as_ref().map_or(0, |bundle| {
+            bundle.vin.capacity() * size_of::<transparent::TxIn<transparent::Authorized>>()
+                + bundle.vout.capacity() * size_of::<transparent::TxOut<Zatoshis>>()
+                + bundle
+                    .vin
+                    .iter()
+                    .map(|input| input.script_sig().0.0.capacity())
+                    .sum::<usize>()
+                + bundle
+                    .vout
+                    .iter()
+                    .map(|output| output.script_pubkey().0.0.capacity())
+                    .sum::<usize>()
+        })
+    }
+}
+
 #[cfg(feature = "std")]
 impl memuse::DynamicUsage for Transaction {
     fn dynamic_usage(&self) -> usize {
-        0
+        self.unshielded_dynamic_usage()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        (0, None)
+        let usage = self.unshielded_dynamic_usage();
+
+        (usage, Some(usage))
     }
 }
 
