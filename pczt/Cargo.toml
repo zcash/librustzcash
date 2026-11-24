@@ -92,7 +92,7 @@ orchard = [
     "dep:pasta_curves",
     "orchard/zeroize",
     "dep:zcash_note_encryption",
-    "zcash_primitives/orchard",
+    "zcash_primitives?/orchard",
 ]
 
 ## Enables functionality that requires Sapling protocol types.
@@ -104,7 +104,7 @@ sapling = [
     "dep:sapling",
     "dep:zcash_note_encryption",
     "sapling/zeroize",
-    "zcash_primitives/sapling",
+    "zcash_primitives?/sapling",
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.

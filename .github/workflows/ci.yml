@@ -55,10 +55,10 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NuTachyon"]'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NuTachyon", "NU8"]'
               || (
                 github.event_name == 'pull_request'
-                && '["all-features"]'
+                && '["all-features", "NU8"]'
                 || '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features"]'
               )
             )
@@ -73,12 +73,16 @@ jobs:
         ${{
           matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
       RUSTDOCFLAGS: >-
         ${{
           matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
 
@@ -92,7 +96,7 @@ jobs:
           transparent-pool: ${{ matrix.state == 'transparent' }}
           orchard-pool: ${{ matrix.state == 'Orchard' }}
           all-pools: ${{ matrix.state == 'all-pools' }}
-          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
+          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
           extra-features: >-
             ${{
               matrix.state == 'transparent-inputs-only'
@@ -107,7 +111,7 @@ jobs:
         with:
           shared-key: msrv
           # Unstable cfg states have distinct RUSTFLAGS-derived cache keys.
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
       - name: Run tests
         shell: bash
         env:
@@ -195,7 +199,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-features", "NuTachyon"]'
+              && '["all-features", "NuTachyon", "NU8"]'
               || '["all-features"]'
             )
           }}
@@ -209,18 +213,24 @@ jobs:
         exclude:
           - target: macOS
             state: NuTachyon
+          - target: macOS
+            state: NU8
 
     env:
       RUSTFLAGS: >-
         ${{
           matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
       RUSTDOCFLAGS: >-
         ${{
           matrix.state == 'NuTachyon'
           && '--cfg zcash_unstable="nutachyon"'
+          || matrix.state == 'NU8'
+          && '--cfg zcash_unstable="nu8"'
           || ''
         }}
 
@@ -235,7 +245,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NuTachyon' || matrix.state == 'NU8' }}
       - name: Run tests
         shell: bash
         env:
@@ -264,7 +274,7 @@ jobs:
           ${{
             fromJSON(
               github.event_name == 'schedule'
-              && '["all-pools", "NuTachyon"]'
+              && '["all-pools", "NuTachyon", "NU8"]'
               || '["all-pools"]'
             )
           }}
@@ -275,6 +285,9 @@ jobs:
 
           - state: NuTachyon
             rustflags: '--cfg zcash_unstable="nutachyon"'
+
+          - state: NU8
+            rustflags: '--cfg zcash_unstable="nu8"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -489,6 +502,64 @@ jobs:
       - name: Build for target
         working-directory: ./ci-build
         run: cargo build --verbose --target ${{ matrix.target }}
+
+  feature-boundaries:
+    name: Feature boundaries
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Direct `--lib` checks, without workspace dev-dependency feature
+      # unification, of each feature whose availability the crate's API depends
+      # on. The NU8 variants cover the same set again.
+      - name: Check zcash_primitives feature boundaries
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            RUSTFLAGS="$cfg" cargo check -p zcash_primitives --lib --no-default-features
+            for feature in sapling orchard sapling,orchard transparent-inputs; do
+              RUSTFLAGS="$cfg" cargo check \
+                -p zcash_primitives \
+                --lib \
+                --no-default-features \
+                --features "$feature"
+            done
+          done
+      - name: Check standalone pczt roles
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            for feature in orchard sapling spend-finalizer zcp-builder signer io-finalizer tx-extractor; do
+              RUSTFLAGS="$cfg" cargo check \
+                -p pczt \
+                --lib \
+                --no-default-features \
+                --features "$feature"
+            done
+          done
+      # Non-role PCZT handling must not pull in `zcash_primitives` and its
+      # transparent dependency, under any cfg.
+      - name: Check standalone pczt protocol features stay lightweight
+        shell: bash
+        run: |
+          for cfg in '' '--cfg zcash_unstable="nu8"'; do
+            for feature in orchard sapling; do
+              if RUSTFLAGS="$cfg" cargo tree \
+                -p pczt \
+                --no-default-features \
+                --features "$feature" \
+                -e normal \
+                | grep -q zcash_primitives; then
+                echo "pczt --features $feature activates zcash_primitives"
+                exit 1
+              fi
+            done
+          done
+      - name: Build with both unstable cfgs
+        run: >
+          RUSTFLAGS='--cfg zcash_unstable="nu8" --cfg zcash_unstable="nutachyon"'
+          cargo check -p zcash_primitives -p pczt -p zcash --lib --all-features
 
   bitrot:
     name: Bitrot check
@@ -806,6 +877,7 @@ jobs:
       - build-latest
       - build-nodefault
       - build-nostd
+      - feature-boundaries
       - bitrot
       - changelogs
       - clippy

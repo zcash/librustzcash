@@ -51,7 +51,11 @@ use {
 #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
 use alloc::string::String;
 #[cfg(zcash_unstable = "nu8")]
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use self::bytes::V4SaplingBundleBytes;
 #[cfg(zcash_unstable = "nu8")]
@@ -73,7 +77,7 @@ use self::{
     components::sprout,
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
     util::sha256d::{HashReader, HashWriter},
-    zip248::{BundleType, BundleVariant},
+    zip248::{BundleDigestProvider, BundleType, BundleVariant, V7DigestError},
 };
 
 #[cfg(all(feature = "circuits", feature = "sapling", feature = "orchard"))]
@@ -410,9 +414,9 @@ impl PartialEq for Transaction {
 /// - Per-protocol bundle fields: transparent, Sprout (pre-v5), Sapling,
 ///   Orchard, Ironwood, and the v7 coinbase bundle.
 ///
-/// Fully typed conversion requires every effecting and authorizing payload to
-/// be one this implementation interprets; an opaque payload prevents it. Value
-/// pool delta entries carry no payload, so entries for unknown bundle types or
+/// Uninterpreted effecting and authorizing payloads are retained in separate byte
+/// maps for inspection and digesting, but prevent typed serialization and freezing.
+/// Value pool delta entries carry no payload, so entries for unknown bundle types or
 /// variants remain in [`zip248::ValuePoolDeltas`] when their amounts are within
 /// the typed monetary range. Use the byte layer ([`TransactionBytes`]) to parse
 /// and re-serialize a transaction carrying opaque payloads.
@@ -440,6 +444,10 @@ pub struct TransactionData<A: Authorization> {
     #[cfg(feature = "orchard")]
     ironwood_bundle: Option<Box<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>>,
     coinbase_bundle: Option<Box<zip248::CoinbaseBundle>>,
+    #[cfg(zcash_unstable = "nu8")]
+    uninterpreted_effect_bundles: BTreeMap<BundleType, V7EffectBundleBytes>,
+    #[cfg(zcash_unstable = "nu8")]
+    uninterpreted_auth_bundles: BTreeMap<BundleType, V7AuthBundleBytes>,
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -459,6 +467,10 @@ impl Clone for TransactionData<Authorized> {
             #[cfg(feature = "orchard")]
             ironwood_bundle: self.ironwood_bundle.clone(),
             coinbase_bundle: self.coinbase_bundle.clone(),
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles.clone(),
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: self.uninterpreted_auth_bundles.clone(),
         }
     }
 }
@@ -699,7 +711,12 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             None,
             None,
+            #[cfg(zcash_unstable = "nu8")]
+            BTreeMap::new(),
+            #[cfg(zcash_unstable = "nu8")]
+            BTreeMap::new(),
         )
+        .expect("derived default-variant deltas and empty retained maps are consistent")
     }
 
     /// Constructs a V6 [`TransactionData`] from its constituent parts,
@@ -1014,7 +1031,12 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             ironwood_bundle,
             None,
+            #[cfg(zcash_unstable = "nu8")]
+            BTreeMap::new(),
+            #[cfg(zcash_unstable = "nu8")]
+            BTreeMap::new(),
         )
+        .expect("derived default-variant deltas and empty retained maps are consistent")
     }
 
     /// Constructs a `TransactionData` from per-protocol bundles and an
@@ -1027,6 +1049,15 @@ impl<A: Authorization> TransactionData<A> {
     /// pool's delta, the fee, or a coinbase bundle's contribution. The
     /// [`Self::from_parts`] and [`Self::from_parts_v6`] constructors derive the
     /// shielded deltas from the bundles' value balances.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if retained entries have mismatched map keys, conflicting
+    /// variants, duplicate a typed bundle slot, or contain inconsistent effecting
+    /// and authorizing fields. Non-v7 transactions cannot contain retained entries.
+    /// Each retained authorizing entry must have matching retained effects, except
+    /// coinbase authorizing data may accompany a typed coinbase bundle.
+    /// Typed bundles require default-variant value pool deltas.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_with_value_pool_deltas(
         version: TxVersion,
@@ -1046,8 +1077,109 @@ impl<A: Authorization> TransactionData<A> {
             orchard::Bundle<A::OrchardAuth, ZatBalance>,
         >,
         coinbase_bundle: Option<zip248::CoinbaseBundle>,
-    ) -> Self {
-        TransactionData {
+        #[cfg(zcash_unstable = "nu8")] uninterpreted_effect_bundles: BTreeMap<
+            BundleType,
+            V7EffectBundleBytes,
+        >,
+        #[cfg(zcash_unstable = "nu8")] uninterpreted_auth_bundles: BTreeMap<
+            BundleType,
+            V7AuthBundleBytes,
+        >,
+    ) -> io::Result<Self> {
+        let typed_slots = [
+            (BundleType::TRANSPARENT, transparent_bundle.is_some()),
+            (BundleType::COINBASE, coinbase_bundle.is_some()),
+            #[cfg(feature = "sapling")]
+            (BundleType::SAPLING, sapling_bundle.is_some()),
+            #[cfg(feature = "orchard")]
+            (BundleType::ORCHARD, orchard_bundle.is_some()),
+            #[cfg(feature = "orchard")]
+            (BundleType::IRONWOOD, ironwood_bundle.is_some()),
+        ];
+        for &(slot, present) in &typed_slots {
+            if present
+                && value_pool_deltas
+                    .bundle_variant(slot)
+                    .is_some_and(|variant| variant != BundleVariant::DEFAULT)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "typed bundle conflicts with a non-default value pool delta variant",
+                ));
+            }
+        }
+        #[cfg(zcash_unstable = "nu8")]
+        {
+            if version != TxVersion::V7
+                && (!uninterpreted_effect_bundles.is_empty()
+                    || !uninterpreted_auth_bundles.is_empty())
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "retained bundles require transaction version 7",
+                ));
+            }
+            if let Some(key) = v7_retained_bundle_collision(
+                &typed_slots,
+                &uninterpreted_effect_bundles,
+                &uninterpreted_auth_bundles,
+            ) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    alloc::format!("{}", V7DigestError::DuplicateBundleType { key }),
+                ));
+            }
+            for (bundle_type, key) in uninterpreted_effect_bundles
+                .iter()
+                .map(|(bundle_type, entry)| (bundle_type, entry.digest_key()))
+                .chain(
+                    uninterpreted_auth_bundles
+                        .iter()
+                        .map(|(bundle_type, entry)| (bundle_type, entry.digest_key())),
+                )
+            {
+                if *bundle_type != key.bundle_type() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "retained bundle map key differs from its entry's bundle type",
+                    ));
+                }
+                let variants = [
+                    value_pool_deltas.bundle_variant(*bundle_type),
+                    uninterpreted_effect_bundles
+                        .get(bundle_type)
+                        .map(|b| b.bundle_variant()),
+                    uninterpreted_auth_bundles
+                        .get(bundle_type)
+                        .map(|b| b.bundle_variant()),
+                    typed_slots
+                        .iter()
+                        .any(|&(slot, present)| slot == *bundle_type && present)
+                        .then_some(BundleVariant::DEFAULT),
+                ];
+                if variants
+                    .into_iter()
+                    .flatten()
+                    .any(|v| v != key.bundle_variant())
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "bundle type has conflicting variants",
+                    ));
+                }
+            }
+            for (bundle_type, auth) in &uninterpreted_auth_bundles {
+                if let Some(effect) = uninterpreted_effect_bundles.get(bundle_type) {
+                    auth.validate_for_effect(effect)?;
+                } else if *bundle_type != BundleType::COINBASE || coinbase_bundle.is_none() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "retained authorizing entry has no corresponding effecting entry",
+                    ));
+                }
+            }
+        }
+        Ok(TransactionData {
             version,
             consensus_branch_id,
             lock_time,
@@ -1062,7 +1194,11 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             ironwood_bundle: ironwood_bundle.map(Box::new),
             coinbase_bundle: coinbase_bundle.map(Box::new),
-        }
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles,
+        })
     }
 
     /// Returns the transaction version.
@@ -1083,12 +1219,19 @@ impl<A: Authorization> TransactionData<A> {
         self.expiry_height
     }
 
+    /// Returns the interpreted transparent bundle.
+    ///
+    /// `None` means no interpreted bundle is available; a v7 transaction may still
+    /// contain an uninterpreted entry of this type.
     pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth, Zatoshis>> {
         self.transparent_bundle.as_ref()
     }
 
-    /// Returns the coinbase bundle, if any. A v7 transaction is a coinbase
-    /// transaction if and only if it has one.
+    /// Returns the interpreted coinbase bundle.
+    ///
+    /// `None` means no interpreted bundle is available; a v7 transaction may still
+    /// contain an uninterpreted entry of this type. Use [`coinbase::is_coinbase`]
+    /// to classify coinbase transactions independently of the variant.
     /// [ZIP 248 §Coinbase Bundle](https://zips.z.cash/zip-0248#coinbase-bundle)
     pub fn coinbase_bundle(&self) -> Option<&zip248::CoinbaseBundle> {
         self.coinbase_bundle.as_deref()
@@ -1098,17 +1241,28 @@ impl<A: Authorization> TransactionData<A> {
         self.sprout_bundle.as_deref()
     }
 
+    /// Returns the interpreted Sapling bundle.
+    ///
+    /// `None` means no interpreted bundle is available; a v7 transaction may still
+    /// contain an uninterpreted entry of this type.
     #[cfg(feature = "sapling")]
     pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
         self.sapling_bundle.as_deref()
     }
 
+    /// Returns the interpreted Orchard bundle.
+    ///
+    /// `None` means no interpreted bundle is available; a v7 transaction may still
+    /// contain an uninterpreted entry of this type.
     #[cfg(feature = "orchard")]
     pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.orchard_bundle.as_deref()
     }
 
-    /// Returns the Ironwood bundle, if any.
+    /// Returns the interpreted Ironwood bundle.
+    ///
+    /// `None` means no interpreted bundle is available; a v7 transaction may still
+    /// contain an uninterpreted entry of this type.
     ///
     /// The Ironwood bundle acts on the *Ironwood pool* using the Orchard
     /// protocol, so it has the same type as the Orchard bundle.
@@ -1121,6 +1275,26 @@ impl<A: Authorization> TransactionData<A> {
     /// Returns the ZIP 248 value pool deltas.
     pub fn value_pool_deltas(&self) -> &zip248::ValuePoolDeltas {
         &self.value_pool_deltas
+    }
+
+    /// Returns effecting entries not interpreted by this build.
+    ///
+    /// These include unknown bundle types, unsupported variants of known types, and
+    /// protocol bundles whose typed support is disabled. Entries retain their exact
+    /// type and variant identifiers.
+    #[cfg(zcash_unstable = "nu8")]
+    pub fn uninterpreted_effect_bundles(&self) -> &BTreeMap<BundleType, V7EffectBundleBytes> {
+        &self.uninterpreted_effect_bundles
+    }
+
+    /// Returns authorizing entries not interpreted by this build.
+    ///
+    /// These include unknown bundle types, unsupported variants of known types, and
+    /// protocol bundles whose typed support is disabled. Entries retain their exact
+    /// type and variant identifiers.
+    #[cfg(zcash_unstable = "nu8")]
+    pub fn uninterpreted_auth_bundles(&self) -> &BTreeMap<BundleType, V7AuthBundleBytes> {
+        &self.uninterpreted_auth_bundles
     }
 
     /// Removes and returns the Sapling bundle, if present.
@@ -1260,7 +1434,34 @@ impl<A: Authorization> TransactionData<A> {
     /// V6 and later transactions include the Ironwood bundle digest as a separate
     /// Orchard-shaped digest with Ironwood personalization. Earlier transaction
     /// versions do not include Ironwood in their digest.
-    pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
+    ///
+    /// Returns an error if a retained bundle needs a digest not supplied by
+    /// `provider`, or if retained entries duplicate typed bundle slots.
+    /// Pre-v7 transactions do not consult `provider`.
+    pub fn digest<D: TransactionDigest<A>>(
+        &self,
+        digester: D,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<D::Digest, V7DigestError> {
+        #[cfg(not(zcash_unstable = "nu8"))]
+        let _ = provider;
+        #[cfg(zcash_unstable = "nu8")]
+        if let Some(key) = v7_retained_bundle_collision(
+            &[
+                (BundleType::TRANSPARENT, self.transparent_bundle.is_some()),
+                (BundleType::COINBASE, self.coinbase_bundle.is_some()),
+                #[cfg(feature = "sapling")]
+                (BundleType::SAPLING, self.sapling_bundle.is_some()),
+                #[cfg(feature = "orchard")]
+                (BundleType::ORCHARD, self.orchard_bundle.is_some()),
+                #[cfg(feature = "orchard")]
+                (BundleType::IRONWOOD, self.ironwood_bundle.is_some()),
+            ],
+            &self.uninterpreted_effect_bundles,
+            &self.uninterpreted_auth_bundles,
+        ) {
+            return Err(V7DigestError::DuplicateBundleType { key });
+        }
         let version = self.version;
         let header_digest = digester.digest_header(
             version,
@@ -1269,7 +1470,7 @@ impl<A: Authorization> TransactionData<A> {
             self.expiry_height,
         );
 
-        digester.combine(
+        Ok(digester.combine(
             header_digest,
             digester.digest_transparent(self.version, self.transparent_bundle.as_ref()),
             #[cfg(feature = "sapling")]
@@ -1282,7 +1483,11 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_coinbase(version, self.coinbase_bundle.as_deref()),
             #[cfg(zcash_unstable = "nu8")]
             digester.digest_value_pool_deltas(version, &self.value_pool_deltas),
-        )
+            #[cfg(zcash_unstable = "nu8")]
+            digester.digest_unrecognized_effects(&self.uninterpreted_effect_bundles, provider)?,
+            #[cfg(zcash_unstable = "nu8")]
+            digester.digest_unrecognized_auth(&self.uninterpreted_auth_bundles, provider)?,
+        ))
     }
 
     /// Computes this transaction's txid digest tree under the rules of its
@@ -1296,8 +1501,14 @@ impl<A: Authorization> TransactionData<A> {
     /// [ZIP 229]: https://zips.z.cash/zip-0229
     /// [ZIP 244]: https://zips.z.cash/zip-0244
     /// [ZIP 248]: https://zips.z.cash/zip-0248
-    pub fn txid_digests(&self) -> Zip244Digests<blake2b_simd::Hash> {
-        self.digest(txid::TxIdDigester)
+    ///
+    /// Returns an error if a retained effecting bundle needs a digest not
+    /// supplied by `provider`, or if retained entries duplicate typed bundle slots.
+    pub fn txid_digests(
+        &self,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Zip244Digests<blake2b_simd::Hash>, V7DigestError> {
+        self.digest(txid::TxIdDigester, provider)
     }
 
     /// Changes the consensus branch ID stored in this transaction for pre-v5 transactions.
@@ -1357,6 +1568,10 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             ironwood_bundle: f_orchard(self.ironwood_bundle.map(|b| *b)).map(Box::new),
             coinbase_bundle: self.coinbase_bundle,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: self.uninterpreted_auth_bundles,
         };
         data.refresh_legacy_shielded_deltas();
         data
@@ -1407,6 +1622,10 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             ironwood_bundle: f_orchard(self.ironwood_bundle.map(|b| *b))?.map(Box::new),
             coinbase_bundle: self.coinbase_bundle,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: self.uninterpreted_auth_bundles,
         };
         data.refresh_legacy_shielded_deltas();
         Ok(data)
@@ -1503,6 +1722,10 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "orchard")]
             ironwood_bundle: map_orchard(self.ironwood_bundle.map(|bundle| *bundle)),
             coinbase_bundle: self.coinbase_bundle,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_effect_bundles: self.uninterpreted_effect_bundles,
+            #[cfg(zcash_unstable = "nu8")]
+            uninterpreted_auth_bundles: self.uninterpreted_auth_bundles,
         }
     }
 }
@@ -1517,6 +1740,20 @@ impl<A: Authorization> TransactionData<A> {
 }
 
 impl TransactionData<Authorized> {
+    /// Rejects retained byte entries that typed serialization cannot interpret.
+    fn reject_unrecognized_bundles(&self) -> io::Result<()> {
+        #[cfg(zcash_unstable = "nu8")]
+        if !self.uninterpreted_effect_bundles.is_empty()
+            || !self.uninterpreted_auth_bundles.is_empty()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "retained bundles cannot be frozen or serialized as typed transactions",
+            ));
+        }
+        Ok(())
+    }
+
     /// Checks that the version-dependent fields this data carries can be
     /// represented by `body_version`.
     ///
@@ -1687,6 +1924,7 @@ impl TransactionData<Authorized> {
     /// rejects.
     #[cfg(zcash_unstable = "nu8")]
     fn v7_body(&self) -> io::Result<V7TransactionBodyBytes> {
+        self.reject_unrecognized_bundles()?;
         #[cfg(feature = "orchard")]
         if let Some(bundle_type) = self.v7_bundle_version_mismatch() {
             return Err(io::Error::new(
@@ -1758,7 +1996,9 @@ impl TransactionData<Authorized> {
     /// present shielded bundle's balance must equal its map entry (absent means
     /// zero), the consensus branch ID must be nonzero, and empty effecting
     /// bundles must be omitted.
+    /// Retained effecting or authorizing byte entries are rejected.
     pub fn freeze(self) -> io::Result<Transaction> {
+        self.reject_unrecognized_bundles()?;
         self.validate_version_consistency(self.version)?;
 
         // A v7 body has additional structural invariants, such as one variant
@@ -1780,6 +2020,29 @@ fn disabled_protocol(protocol: &str) -> io::Error {
         io::ErrorKind::InvalidData,
         alloc::format!("{protocol} support is disabled; use TransactionBytes"),
     )
+}
+
+/// Finds retained entries that collide with occupied typed bundle slots.
+#[cfg(zcash_unstable = "nu8")]
+fn v7_retained_bundle_collision(
+    typed_slots: &[(BundleType, bool)],
+    effects: &BTreeMap<BundleType, V7EffectBundleBytes>,
+    auth: &BTreeMap<BundleType, V7AuthBundleBytes>,
+) -> Option<zip248::BundleId> {
+    for &(bundle_type, present) in typed_slots {
+        if present {
+            if let Some(bundle) = effects.get(&bundle_type) {
+                return Some(bundle.digest_key());
+            }
+            if let Some(bundle) = auth.get(&bundle_type)
+                && !(bundle_type == BundleType::COINBASE
+                    && bundle.bundle_variant() == BundleVariant::DEFAULT)
+            {
+                return Some(bundle.digest_key());
+            }
+        }
+    }
+    None
 }
 
 /// Borrows an effecting entry or removes it from an owned conversion source.
@@ -1814,7 +2077,7 @@ impl Transaction {
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
             // v7 is the ZIP 248 extensible format, not v6's flat layout.
             #[cfg(zcash_unstable = "nu8")]
-            TxVersion::V7 => Ok(Self::from_data_v7(data)),
+            TxVersion::V7 => Self::from_data_v7(data, &()),
         }
     }
 
@@ -1835,7 +2098,9 @@ impl Transaction {
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
-            &data.digest(TxIdDigester),
+            &data
+                .digest(TxIdDigester, &())
+                .expect("v5 has no retained bundles"),
         )
         .expect("is v5 tx");
 
@@ -1848,7 +2113,9 @@ impl Transaction {
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
-            &data.digest(TxIdDigester),
+            &data
+                .digest(TxIdDigester, &())
+                .expect("v6 has no retained bundles"),
         )
         .expect("is v6 tx");
 
@@ -1856,17 +2123,24 @@ impl Transaction {
     }
 
     #[cfg(zcash_unstable = "nu8")]
-    fn from_data_v7(data: TransactionData<Authorized>) -> Self {
+    fn from_data_v7(
+        data: TransactionData<Authorized>,
+        provider: &impl BundleDigestProvider,
+    ) -> io::Result<Self> {
         assert_eq!(data.version, TxVersion::V7);
+        data.validate_version_consistency(TxVersion::V7)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
-            &data.digest(TxIdDigester),
+            &data.digest(TxIdDigester, provider).map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, alloc::format!("{error}"))
+            })?,
         )
         .expect("is v7 tx");
 
-        Transaction { txid, data }
+        Ok(Transaction { txid, data })
     }
 
     pub fn into_data(self) -> TransactionData<Authorized> {
@@ -1879,21 +2153,32 @@ impl Transaction {
 
     /// Reads a transaction from its wire encoding.
     ///
-    /// This is the fully-typed compatibility path. It parses the wire bytes
-    /// with [`TransactionBytes::read`], interprets each known bundle, and
-    /// computes the transaction identifier. It does **not** perform the
-    /// transaction-local consensus checks; use `Transaction::read_and_validate_v7`
-    /// for a version 7 transaction that must be validated.
+    /// Interprets supported bundles and computes the transaction identifier without
+    /// transaction-local consensus validation.
     ///
-    /// For version 7, returns an error if the transaction contains an opaque
-    /// effecting or authorizing payload whose bundle type or variant this
-    /// implementation does not interpret. Value-pool-only entries for unknown
-    /// identifiers are retained in the typed map when their amounts are within
-    /// the monetary range, except for bundle types not activated by any
-    /// implemented branch. Use [`TransactionBytes::read`] and supply the bundle
-    /// digests to compute the identifier of a transaction carrying opaque
-    /// payloads.
+    /// Returns an error if parsing, typed conversion, or version consistency checks fail, or
+    /// if a retained effecting bundle needs an externally supplied digest.
     pub fn read<R: Read>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self> {
+        Self::read_with_bundle_digests(reader, consensus_branch_id, &())
+    }
+
+    /// Reads a transaction, resolving retained bundle digests with `provider`.
+    ///
+    /// The provider is trusted as described by [`BundleDigestProvider`]. This
+    /// does not perform transaction-local consensus validation. Retained bundles
+    /// prevent typed serialization but remain available for inspection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing, typed conversion, or version consistency checks fail, or
+    /// if a required effecting digest is unavailable.
+    pub fn read_with_bundle_digests<R: Read>(
+        reader: R,
+        consensus_branch_id: BranchId,
+        provider: &impl BundleDigestProvider,
+    ) -> io::Result<Self> {
+        #[cfg(not(zcash_unstable = "nu8"))]
+        let _ = provider;
         let mut reader = HashReader::new(reader);
         let version = TxVersion::read(&mut reader)?;
         let (bytes, legacy_hash) = match version {
@@ -1906,7 +2191,16 @@ impl Transaction {
                 [0; 32],
             ),
         };
-        Self::from_bytes(bytes, consensus_branch_id, legacy_hash)
+        let data = TransactionData::from_bytes(bytes, consensus_branch_id)?;
+        match version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Ok(Transaction {
+                txid: TxId::from_bytes(legacy_hash),
+                data,
+            }),
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => Self::from_data_v7(data, provider),
+            _ => Self::from_data(data),
+        }
     }
 
     /// Reads and fully validates a version 7 transaction from its wire
@@ -1933,16 +2227,38 @@ impl Transaction {
         bytes.validate_v7()
     }
 
-    /// Interprets a byte-layer transaction as a fully-typed transaction.
-    ///
-    /// `legacy_hash` is the double-SHA256 of the wire bytes, used as the
-    /// transaction identifier for versions 1 through 4. It is ignored for
-    /// later versions, whose identifiers are computed from their digests.
-    fn from_bytes(
-        bytes: TransactionBytes,
+    /// Interprets an already-validated version 7 body and computes its identifier.
+    #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+    fn from_v7_body_ref(
+        body: &V7TransactionBodyBytes,
         consensus_branch_id: BranchId,
-        legacy_hash: [u8; 32],
+        lock_time: u32,
+        expiry_height: BlockHeight,
     ) -> io::Result<Self> {
+        Self::from_data_v7(
+            TransactionData::from_v7_body(
+                Cow::Borrowed(body),
+                consensus_branch_id,
+                lock_time,
+                expiry_height,
+            )?,
+            &(),
+        )
+    }
+}
+
+impl TransactionData<Authorized> {
+    /// Interprets byte-layer data without computing an identifier or freezing it.
+    ///
+    /// Unsupported v7 payloads, including feature-disabled protocol entries,
+    /// are retained as bytes. No transaction-local consensus validation is performed.
+    /// The supplied branch ID is used only for pre-v5 transactions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unrecognized encoded branch ID, values outside
+    /// the typed monetary range, or malformed supported bundle payloads.
+    pub fn from_bytes(bytes: TransactionBytes, consensus_branch_id: BranchId) -> io::Result<Self> {
         let version = bytes.version();
         let lock_time = bytes.lock_time();
         let expiry_height = bytes.expiry_height();
@@ -1971,21 +2287,18 @@ impl Transaction {
                     }
                 }
 
-                Ok(Transaction {
-                    txid: TxId::from_bytes(legacy_hash),
-                    data: TransactionData::from_parts(
-                        version,
-                        consensus_branch_id,
-                        lock_time,
-                        expiry_height,
-                        transparent_bundle,
-                        sprout_bundle,
-                        #[cfg(feature = "sapling")]
-                        sapling_bundle,
-                        #[cfg(feature = "orchard")]
-                        None,
-                    ),
-                })
+                Ok(Self::from_parts(
+                    version,
+                    consensus_branch_id,
+                    lock_time,
+                    expiry_height,
+                    transparent_bundle,
+                    sprout_bundle,
+                    #[cfg(feature = "sapling")]
+                    sapling_bundle,
+                    #[cfg(feature = "orchard")]
+                    None,
+                ))
             }
             TransactionBodyBytes::V5(body) => {
                 let consensus_branch_id = wire_branch_id.expect("v5 encodes a consensus branch ID");
@@ -2014,7 +2327,7 @@ impl Transaction {
                     return Err(disabled_protocol("Orchard"));
                 }
 
-                let data = TransactionData::from_parts(
+                Ok(Self::from_parts(
                     version,
                     consensus_branch_id,
                     lock_time,
@@ -2025,8 +2338,7 @@ impl Transaction {
                     sapling_bundle,
                     #[cfg(feature = "orchard")]
                     orchard_bundle,
-                );
-                Ok(Self::from_data_v5(data))
+                ))
             }
             TransactionBodyBytes::V6(body) => {
                 let consensus_branch_id = wire_branch_id.expect("v6 encodes a consensus branch ID");
@@ -2064,7 +2376,7 @@ impl Transaction {
                     return Err(disabled_protocol("Orchard or Ironwood"));
                 }
 
-                let data = TransactionData::from_parts_v6(
+                Ok(Self::from_parts_v6(
                     consensus_branch_id,
                     lock_time,
                     expiry_height,
@@ -2075,8 +2387,7 @@ impl Transaction {
                     orchard_bundle,
                     #[cfg(feature = "orchard")]
                     ironwood_bundle,
-                );
-                Ok(Self::from_data_v6(data))
+                ))
             }
             #[cfg(zcash_unstable = "nu8")]
             TransactionBodyBytes::V7(body) => {
@@ -2091,28 +2402,6 @@ impl Transaction {
         }
     }
 
-    /// Interprets a version 7 body as a fully-typed transaction.
-    ///
-    /// Every effecting and authorizing bundle must be one this implementation
-    /// interprets, and none may carry data the typed representation cannot
-    /// hold. Callers that accept such bundles must reject them first. Value
-    /// pool delta entries are interpreted separately and may retain unknown
-    /// identifiers when their amounts are within the typed monetary range.
-    #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
-    fn from_v7_body_ref(
-        body: &V7TransactionBodyBytes,
-        consensus_branch_id: BranchId,
-        lock_time: u32,
-        expiry_height: BlockHeight,
-    ) -> io::Result<Self> {
-        Self::from_v7_body(
-            Cow::Borrowed(body),
-            consensus_branch_id,
-            lock_time,
-            expiry_height,
-        )
-    }
-
     /// Interprets a v7 body, moving owned scripts and proof buffers into typed bundles.
     #[cfg(zcash_unstable = "nu8")]
     fn from_v7_body(
@@ -2121,64 +2410,79 @@ impl Transaction {
         lock_time: u32,
         expiry_height: BlockHeight,
     ) -> io::Result<Self> {
-        let opaque_key = body
-            .opaque_effect_bundles()
-            .map(|bundle| bundle.id())
-            .chain(body.opaque_auth_bundles().map(|bundle| bundle.id()))
-            .next();
-        if let Some(key) = opaque_key {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                alloc::format!(
-                    "v7 transaction contains an opaque effecting or authorizing payload \
-                     (bundleType {}, bundleVariant {}); \
-                     parse it with TransactionBytes and supply its digests",
-                    key.bundle_type().to_u64(),
-                    key.bundle_variant().to_u64(),
-                ),
-            ));
-        }
-        #[cfg(not(feature = "sapling"))]
-        if body.sapling().is_some() || body.sapling_auth().is_some() {
-            return Err(disabled_protocol("Sapling"));
-        }
-        #[cfg(not(feature = "orchard"))]
-        if body.orchard().is_some()
-            || body.orchard_auth().is_some()
-            || body.ironwood().is_some()
-            || body.ironwood_auth().is_some()
-        {
-            return Err(disabled_protocol("Orchard or Ironwood"));
+        let retained_types: BTreeSet<_> = body
+            .effect_bundles()
+            .iter()
+            .filter(|bundle| match bundle {
+                V7EffectBundleBytes::Opaque(_) => true,
+                V7EffectBundleBytes::Sapling(_) => !cfg!(feature = "sapling"),
+                V7EffectBundleBytes::Orchard(_) | V7EffectBundleBytes::Ironwood(_) => {
+                    !cfg!(feature = "orchard")
+                }
+                _ => false,
+            })
+            .map(V7EffectBundleBytes::bundle_type)
+            .chain(
+                body.auth_bundles()
+                    .iter()
+                    .filter(|bundle| match bundle {
+                        V7AuthBundleBytes::Opaque(_) => true,
+                        V7AuthBundleBytes::Sapling(_) => !cfg!(feature = "sapling"),
+                        V7AuthBundleBytes::Orchard(_) | V7AuthBundleBytes::Ironwood(_) => {
+                            !cfg!(feature = "orchard")
+                        }
+                        _ => false,
+                    })
+                    .map(V7AuthBundleBytes::bundle_type),
+            )
+            .collect();
+        let mut uninterpreted_effect_bundles = BTreeMap::new();
+        let mut uninterpreted_auth_bundles = BTreeMap::new();
+        for bundle_type in retained_types {
+            // Coinbase has no typed authorizing slot, so its effecting bundle
+            // remains interpretable even when it carries opaque authorizing data.
+            if !(bundle_type == BundleType::COINBASE && body.coinbase().is_some())
+                && let Some(bundle) = v7_effect_for_conversion(&mut body, bundle_type)
+            {
+                uninterpreted_effect_bundles.insert(bundle_type, bundle.into_owned());
+            }
+            if let Some(bundle) = v7_auth_for_conversion(&mut body, bundle_type) {
+                uninterpreted_auth_bundles.insert(bundle_type, bundle.into_owned());
+            }
         }
         let value_pool_deltas = body.to_value_pool_deltas()?;
-        let transparent_bundle = v7_effect_for_conversion(&mut body, BundleType::TRANSPARENT)
-            .map(|effects| {
-                let effects = match effects {
-                    Cow::Borrowed(V7EffectBundleBytes::Transparent(effects)) => effects.clone(),
-                    Cow::Owned(V7EffectBundleBytes::Transparent(effects)) => effects,
-                    _ => unreachable!("opaque effects were rejected"),
-                };
-                let auth =
-                    v7_auth_for_conversion(&mut body, BundleType::TRANSPARENT).map(
-                        |auth| match auth {
-                            Cow::Borrowed(V7AuthBundleBytes::Transparent(auth)) => auth.clone(),
-                            Cow::Owned(V7AuthBundleBytes::Transparent(auth)) => auth,
-                            _ => unreachable!("opaque authorizing data was rejected"),
-                        },
-                    );
-                TransparentBundleBytes::from_parts(effects, auth)?.into_authorized()
-            })
-            .transpose()?
-            .flatten();
+        let transparent_bundle = (!uninterpreted_effect_bundles
+            .contains_key(&BundleType::TRANSPARENT))
+        .then(|| v7_effect_for_conversion(&mut body, BundleType::TRANSPARENT))
+        .flatten()
+        .map(|effects| {
+            let effects = match effects {
+                Cow::Borrowed(V7EffectBundleBytes::Transparent(effects)) => effects.clone(),
+                Cow::Owned(V7EffectBundleBytes::Transparent(effects)) => effects,
+                _ => unreachable!("only interpreted transparent effects are converted"),
+            };
+            let auth =
+                v7_auth_for_conversion(&mut body, BundleType::TRANSPARENT).map(|auth| match auth {
+                    Cow::Borrowed(V7AuthBundleBytes::Transparent(auth)) => auth.clone(),
+                    Cow::Owned(V7AuthBundleBytes::Transparent(auth)) => auth,
+                    _ => unreachable!("only interpreted transparent authorizing data is converted"),
+                });
+            TransparentBundleBytes::from_parts(effects, auth)?.into_authorized()
+        })
+        .transpose()?
+        .flatten();
         let coinbase_bundle = body
             .coinbase()
+            .filter(|_| !uninterpreted_effect_bundles.contains_key(&BundleType::COINBASE))
             .map(CoinbaseBundleBytes::to_coinbase_bundle)
             .transpose()?;
         #[cfg(feature = "sapling")]
-        let sapling_bundle = v7_effect_for_conversion(&mut body, BundleType::SAPLING)
+        let sapling_bundle = (!uninterpreted_effect_bundles.contains_key(&BundleType::SAPLING))
+            .then(|| v7_effect_for_conversion(&mut body, BundleType::SAPLING))
+            .flatten()
             .map(|effects| {
                 let V7EffectBundleBytes::Sapling(effects) = effects.as_ref() else {
-                    unreachable!("opaque effects were rejected");
+                    unreachable!("only interpreted Sapling effects are converted");
                 };
                 let auth =
                     v7_auth_for_conversion(&mut body, BundleType::SAPLING).ok_or_else(|| {
@@ -2188,7 +2492,7 @@ impl Transaction {
                         )
                     })?;
                 let V7AuthBundleBytes::Sapling(auth) = auth.as_ref() else {
-                    unreachable!("opaque authorizing data was rejected");
+                    unreachable!("only interpreted Sapling authorizing data is converted");
                 };
                 auth.to_authorized(
                     effects,
@@ -2199,10 +2503,12 @@ impl Transaction {
             })
             .transpose()?;
         #[cfg(feature = "orchard")]
-        let orchard_bundle = v7_effect_for_conversion(&mut body, BundleType::ORCHARD)
+        let orchard_bundle = (!uninterpreted_effect_bundles.contains_key(&BundleType::ORCHARD))
+            .then(|| v7_effect_for_conversion(&mut body, BundleType::ORCHARD))
+            .flatten()
             .map(|effects| {
                 let V7EffectBundleBytes::Orchard(effects) = effects.as_ref() else {
-                    unreachable!("opaque effects were rejected");
+                    unreachable!("only interpreted Orchard effects are converted");
                 };
                 let auth =
                     v7_auth_for_conversion(&mut body, BundleType::ORCHARD).ok_or_else(|| {
@@ -2225,15 +2531,17 @@ impl Transaction {
                     Cow::Owned(V7AuthBundleBytes::Orchard(auth)) => {
                         auth.into_authorized(effects, value_balance, version)
                     }
-                    _ => unreachable!("opaque authorizing data was rejected"),
+                    _ => unreachable!("only interpreted Orchard authorizing data is converted"),
                 }
             })
             .transpose()?;
         #[cfg(feature = "orchard")]
-        let ironwood_bundle = v7_effect_for_conversion(&mut body, BundleType::IRONWOOD)
+        let ironwood_bundle = (!uninterpreted_effect_bundles.contains_key(&BundleType::IRONWOOD))
+            .then(|| v7_effect_for_conversion(&mut body, BundleType::IRONWOOD))
+            .flatten()
             .map(|effects| {
                 let V7EffectBundleBytes::Ironwood(effects) = effects.as_ref() else {
-                    unreachable!("opaque effects were rejected");
+                    unreachable!("only interpreted Ironwood effects are converted");
                 };
                 let auth =
                     v7_auth_for_conversion(&mut body, BundleType::IRONWOOD).ok_or_else(|| {
@@ -2256,12 +2564,12 @@ impl Transaction {
                     Cow::Owned(V7AuthBundleBytes::Ironwood(auth)) => {
                         auth.into_authorized(effects, value_balance, version)
                     }
-                    _ => unreachable!("opaque authorizing data was rejected"),
+                    _ => unreachable!("only interpreted Ironwood authorizing data is converted"),
                 }
             })
             .transpose()?;
 
-        let data = TransactionData::from_parts_with_value_pool_deltas(
+        Self::from_parts_with_value_pool_deltas(
             TxVersion::V7,
             consensus_branch_id,
             lock_time,
@@ -2276,17 +2584,19 @@ impl Transaction {
             #[cfg(feature = "orchard")]
             ironwood_bundle,
             coinbase_bundle,
-        );
-        data.validate_version_consistency(TxVersion::V7)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        Ok(Self::from_data_v7(data))
+            uninterpreted_effect_bundles,
+            uninterpreted_auth_bundles,
+        )
     }
+}
 
+impl Transaction {
     /// Converts this authorized transaction to its canonical wire representation.
     ///
     /// `body_version` selects the format of the body independently of the
     /// version header, as required by the version-specific `write_v*` methods.
     fn to_bytes(&self, body_version: TxVersion) -> io::Result<TransactionBytes> {
+        self.reject_unrecognized_bundles()?;
         self.validate_version_consistency(body_version)?;
         let transparent = || {
             self.transparent_bundle.as_ref().map_or_else(
@@ -2463,6 +2773,7 @@ impl Transaction {
     }
 
     pub fn write_v5<W: Write>(&self, writer: W) -> io::Result<()> {
+        self.reject_unrecognized_bundles()?;
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2473,6 +2784,7 @@ impl Transaction {
     }
 
     pub fn write_v6<W: Write>(&self, writer: W) -> io::Result<()> {
+        self.reject_unrecognized_bundles()?;
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2598,9 +2910,15 @@ impl Transaction {
     /// [ZIP 229]: https://zips.z.cash/zip-0229
     /// [ZIP 244]: https://zips.z.cash/zip-0244
     /// [ZIP 248]: https://zips.z.cash/zip-0248
+    ///
+    /// Returns an error if a retained authorizing bundle needs a digest not
+    /// supplied by `provider`, or if retained entries duplicate typed bundle slots.
     // TODO: should this be moved to `from_data` and stored?
-    pub fn auth_commitment(&self) -> Blake2bHash {
-        self.data.digest(BlockTxCommitmentDigester)
+    pub fn auth_commitment(
+        &self,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Blake2bHash, V7DigestError> {
+        self.data.digest(BlockTxCommitmentDigester, provider)
     }
 }
 
@@ -2742,6 +3060,12 @@ pub trait TransactionDigest<A: Authorization> {
     /// The digest type produced for a version 7 value pool delta map.
     #[cfg(zcash_unstable = "nu8")]
     type ValuePoolDeltasDigest;
+    /// The digest type produced for retained effecting entries.
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedEffectDigest;
+    /// The digest type produced for retained authorizing entries.
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedAuthDigest;
 
     type Digest;
 
@@ -2814,6 +3138,26 @@ pub trait TransactionDigest<A: Authorization> {
         value_pool_deltas: &zip248::ValuePoolDeltas,
     ) -> Self::ValuePoolDeltasDigest;
 
+    /// Digests retained effecting entries relevant to this strategy.
+    ///
+    /// Returns an error if a required digest is unavailable from `provider`.
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_effects(
+        &self,
+        bundles: &BTreeMap<BundleType, V7EffectBundleBytes>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedEffectDigest, V7DigestError>;
+
+    /// Digests retained authorizing entries relevant to this strategy.
+    ///
+    /// Returns an error if a required digest is unavailable from `provider`.
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_auth(
+        &self,
+        bundles: &BTreeMap<BundleType, V7AuthBundleBytes>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedAuthDigest, V7DigestError>;
+
     #[allow(clippy::too_many_arguments)]
     fn combine(
         &self,
@@ -2824,6 +3168,8 @@ pub trait TransactionDigest<A: Authorization> {
         #[cfg(feature = "orchard")] ironwood_digest: Self::IronwoodDigest,
         #[cfg(zcash_unstable = "nu8")] coinbase_digest: Self::CoinbaseDigest,
         #[cfg(zcash_unstable = "nu8")] value_pool_deltas_digest: Self::ValuePoolDeltasDigest,
+        #[cfg(zcash_unstable = "nu8")] unrecognized_effect_digest: Self::UnrecognizedEffectDigest,
+        #[cfg(zcash_unstable = "nu8")] unrecognized_auth_digest: Self::UnrecognizedAuthDigest,
     ) -> Self::Digest;
 }
 
@@ -3026,6 +3372,8 @@ impl std::error::Error for V7ValidationError {}
 pub enum V7ConsensusError {
     /// The transaction is not a version 7 transaction.
     NotV7,
+    /// Retained bundles cannot be checked by this implementation.
+    UnsupportedBundles,
     /// The transaction's consensus branch ID does not activate version 7.
     NotActivated {
         /// The branch ID encoded in the transaction.
@@ -3059,6 +3407,13 @@ pub enum V7ConsensusError {
     InvalidExpiryHeight {
         /// The encoded expiry height.
         expiry_height: u32,
+    },
+    /// The coinbase expiry height differs from its encoded block height.
+    CoinbaseExpiryHeightMismatch {
+        /// The transaction header's expiry height.
+        expiry_height: BlockHeight,
+        /// The coinbase bundle's block height.
+        block_height: BlockHeight,
     },
     /// A value pool delta entry names a bundle type that is not registered for
     /// version 7.
@@ -3148,6 +3503,9 @@ impl core::fmt::Display for V7ConsensusError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             V7ConsensusError::NotV7 => f.write_str("transaction is not a version 7 transaction"),
+            V7ConsensusError::UnsupportedBundles => {
+                f.write_str("transaction contains bundles this implementation cannot validate")
+            }
             V7ConsensusError::NotActivated { branch_id } => {
                 write!(f, "version 7 is not activated under {branch_id:?}")
             }
@@ -3178,6 +3536,13 @@ impl core::fmt::Display for V7ConsensusError {
             V7ConsensusError::InvalidExpiryHeight { expiry_height } => write!(
                 f,
                 "nExpiryHeight {expiry_height} is outside the ZIP 248 range"
+            ),
+            V7ConsensusError::CoinbaseExpiryHeightMismatch {
+                expiry_height,
+                block_height,
+            } => write!(
+                f,
+                "coinbase expiry height {expiry_height} differs from block height {block_height}"
             ),
             V7ConsensusError::UnregisteredBundleType { bundle_type } => write!(
                 f,
@@ -3279,9 +3644,15 @@ impl<A: Authorization> TransactionData<A> {
     /// with an absent entry interpreted as zero. Orchard and Ironwood slots require
     /// `orchard_v3` and `ironwood_v3` bundles, respectively. Block- and UTXO-context checks
     /// remain the consumer's responsibility; see [`TransactionBytes::validate_v7`].
+    /// Retained bundles return [`V7ConsensusError::UnsupportedBundles`].
     pub fn check_v7_consensus_rules(&self) -> Result<(), V7ConsensusError> {
         if self.version != TxVersion::V7 {
             return Err(V7ConsensusError::NotV7);
+        }
+        if !self.uninterpreted_effect_bundles.is_empty()
+            || !self.uninterpreted_auth_bundles.is_empty()
+        {
+            return Err(V7ConsensusError::UnsupportedBundles);
         }
         if !TxVersion::V7.valid_in_branch(self.consensus_branch_id) {
             return Err(V7ConsensusError::NotActivated {
@@ -3312,11 +3683,18 @@ impl<A: Authorization> TransactionData<A> {
 
         let coinbase_bundle = self.coinbase_bundle.as_deref();
         let is_coinbase = coinbase_bundle.is_some();
+        if let Some(coinbase) = coinbase_bundle
+            && self.expiry_height != coinbase.block_height()
+        {
+            return Err(V7ConsensusError::CoinbaseExpiryHeightMismatch {
+                expiry_height: self.expiry_height,
+                block_height: coinbase.block_height(),
+            });
+        }
 
         // [ZIP 248 §Bundle availability]: every value pool delta entry must
-        // name a registered bundle type and variant. The byte validator also
-        // checks the effect and auth maps, which a typed transaction cannot
-        // represent for unregistered types.
+        // name a registered bundle type and variant. Retained effecting and
+        // authorizing entries are rejected before these checks.
         for (&bundle_type, (bundle_variant, _)) in self.value_pool_deltas.iter() {
             if !bundle_type.is_known() {
                 return Err(V7ConsensusError::UnregisteredBundleType {

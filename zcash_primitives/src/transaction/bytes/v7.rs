@@ -369,6 +369,14 @@ pub enum V7AuthBundleBytes {
 }
 
 impl V7AuthBundleBytes {
+    /// Checks that authorizing fields correspond to the effecting entry.
+    pub(in crate::transaction) fn validate_for_effect(
+        &self,
+        effect: &V7EffectBundleBytes,
+    ) -> io::Result<()> {
+        validate_auth_correspondence(effect, self)
+    }
+
     /// Returns the exact raw digest key of this entry.
     pub fn digest_key(&self) -> BundleId {
         match self {

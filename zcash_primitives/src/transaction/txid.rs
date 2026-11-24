@@ -27,14 +27,18 @@ use super::{Authorization, Authorized, TransactionDigest};
 use super::{TransparentDigests, TxId, TxVersion, Zip244Digests};
 
 #[cfg(zcash_unstable = "nu8")]
-use super::zip248::{BundleId, BundleType, BundleVariant};
-#[cfg(zcash_unstable = "nu8")]
-use super::{
-    bytes::transparent::TransparentEffectsBytes,
-    bytes::{
-        CoinbaseBundleBytes, OrchardActionBytes, TransparentAuthBytes, V7OrchardAuthBytes,
-        V7OrchardBundleBytes, V7SaplingAuthBytes, V7SaplingBundleBytes, ValuePoolDeltaBytes,
+use {
+    super::{
+        bytes::transparent::TransparentEffectsBytes,
+        bytes::{
+            CoinbaseBundleBytes, OrchardActionBytes, TransparentAuthBytes, V7AuthBundleBytes,
+            V7EffectBundleBytes, V7OrchardAuthBytes, V7OrchardBundleBytes, V7SaplingAuthBytes,
+            V7SaplingBundleBytes, ValuePoolDeltaBytes,
+        },
+        zip248::{BundleDigestProvider, BundleId, BundleType, BundleVariant, V7DigestError},
     },
+    alloc::{collections::BTreeMap, vec::Vec},
+    zcash_encoding::CompactSize,
 };
 
 /// TxId tree root personalization
@@ -909,8 +913,6 @@ fn hash_v7_tagged_bundle_digests<'a, I>(personalization: &[u8; 16], entries: I) 
 where
     I: IntoIterator<Item = ((u64, u64), &'a Blake2bHash)>,
 {
-    use zcash_encoding::CompactSize;
-
     let mut h = hasher(personalization);
     for ((bt, bv), digest) in entries {
         // Each tagged entry: bundleType || bundleVariant || 32-byte digest.
@@ -1213,6 +1215,10 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type CoinbaseDigest = Option<Blake2bHash>;
     #[cfg(zcash_unstable = "nu8")]
     type ValuePoolDeltasDigest = Option<Blake2bHash>;
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedEffectDigest = Vec<(BundleId, Blake2bHash)>;
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedAuthDigest = ();
 
     type Digest = Zip244Digests<Blake2bHash>;
 
@@ -1305,6 +1311,28 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         (version == TxVersion::V7).then(|| hash_v7_value_pool_deltas(value_pool_deltas))
     }
 
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_effects(
+        &self,
+        bundles: &BTreeMap<BundleType, V7EffectBundleBytes>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedEffectDigest, V7DigestError> {
+        let mut digests = Vec::with_capacity(bundles.len());
+        for bundle in bundles.values() {
+            digests.push((bundle.digest_key(), bundle.effects_digest(provider)?));
+        }
+        Ok(digests)
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_auth(
+        &self,
+        _bundles: &BTreeMap<BundleType, V7AuthBundleBytes>,
+        _provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedAuthDigest, V7DigestError> {
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn combine(
         &self,
@@ -1315,6 +1343,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         #[cfg(feature = "orchard")] ironwood_digest: Self::IronwoodDigest,
         #[cfg(zcash_unstable = "nu8")] coinbase_digest: Self::CoinbaseDigest,
         #[cfg(zcash_unstable = "nu8")] value_pool_deltas_digest: Self::ValuePoolDeltasDigest,
+        #[cfg(zcash_unstable = "nu8")] unrecognized_effect_digest: Self::UnrecognizedEffectDigest,
+        #[cfg(zcash_unstable = "nu8")] _unrecognized_auth_digest: Self::UnrecognizedAuthDigest,
     ) -> Self::Digest {
         Zip244Digests {
             header_digest,
@@ -1335,10 +1365,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             coinbase_digest,
             #[cfg(zcash_unstable = "nu8")]
             value_pool_deltas_digest,
-            // The typed path has no opaque bundles; the byte layer supplies
-            // their digests itself.
             #[cfg(zcash_unstable = "nu8")]
-            unknown_effect_digests: alloc::vec::Vec::new(),
+            unknown_effect_digests: unrecognized_effect_digest,
         }
     }
 }
@@ -1550,14 +1578,12 @@ fn to_hash_v7(
 }
 
 /// Builds `((bundleType, bundleVariant), &Blake2bHash)` entries for a v7
-/// per-bundle digest, merging the known bundle digests
-/// with unknown-bundle digests in strictly increasing `(bundleType,
-/// bundleVariant)` order.
+/// per-bundle digest, merging typed bundle digests with retained byte-layer
+/// bundle digests in strictly increasing `(bundleType, bundleVariant)` order.
 ///
-/// Known bundle digests (transparent, coinbase, Sapling, Orchard, Ironwood)
-/// and opaque-bundle digests are merged and sorted by their raw
-/// `(bundleType, bundleVariant)` key, so the digest is deterministic
-/// regardless of the order bundles were deserialized.
+/// Retained entries include opaque bundles and known bundles whose protocol
+/// feature is disabled. Each bundle must occur in exactly one typed slot or
+/// retained entry.
 ///
 /// Absent bundles (e.g. a transaction with no transparent component) are
 /// simply omitted -- they do not contribute a zero-digest entry.
@@ -1568,9 +1594,9 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
     sapling_digest: Option<&'a Blake2bHash>,
     orchard_digest: Option<&'a Blake2bHash>,
     ironwood_digest: Option<&'a Blake2bHash>,
-    unknown: &'a [(BundleId, Blake2bHash)],
-) -> alloc::vec::Vec<((u64, u64), &'a Blake2bHash)> {
-    let mut entries: alloc::vec::Vec<((u64, u64), &'a Blake2bHash)> = alloc::vec::Vec::new();
+    retained: &'a [(BundleId, Blake2bHash)],
+) -> Vec<((u64, u64), &'a Blake2bHash)> {
+    let mut entries = Vec::new();
     // Known bundles, pushed in the natural order of their wire keys.
     if let Some(d) = transparent_digest {
         entries.push((
@@ -1602,11 +1628,8 @@ pub(crate) fn v7_bundle_digest_entries<'a>(
             d,
         ));
     }
-    // Unknown bundles: these were round-tripped from the wire and may include
-    // bundle types introduced by future network upgrades that this code does
-    // not yet understand. They participate in the digest identically to known
-    // bundles so that the txid is stable across software versions.
-    for (key, digest) in unknown {
+    // Retained entries carry their exact wire key, including non-default variants.
+    for (key, digest) in retained {
         entries.push((key.wire_key(), digest));
     }
     // Sort to guarantee the strictly-increasing order required by ZIP 248.
@@ -1748,6 +1771,10 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type CoinbaseDigest = ();
     #[cfg(zcash_unstable = "nu8")]
     type ValuePoolDeltasDigest = ();
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedEffectDigest = ();
+    #[cfg(zcash_unstable = "nu8")]
+    type UnrecognizedAuthDigest = Vec<(BundleId, Blake2bHash)>;
 
     fn digest_header(
         &self,
@@ -1873,6 +1900,28 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     ) -> Self::ValuePoolDeltasDigest {
     }
 
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_effects(
+        &self,
+        _bundles: &BTreeMap<BundleType, V7EffectBundleBytes>,
+        _provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedEffectDigest, V7DigestError> {
+        Ok(())
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    fn digest_unrecognized_auth(
+        &self,
+        bundles: &BTreeMap<BundleType, V7AuthBundleBytes>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self::UnrecognizedAuthDigest, V7DigestError> {
+        let mut digests = Vec::with_capacity(bundles.len());
+        for bundle in bundles.values() {
+            digests.push((bundle.digest_key(), bundle.auth_digest(provider)?));
+        }
+        Ok(digests)
+    }
+
     #[cfg(not(zcash_unstable = "nu8"))]
     #[allow(clippy::too_many_arguments)]
     fn combine(
@@ -1929,6 +1978,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         #[cfg(feature = "orchard")] ironwood_digest: Self::IronwoodDigest,
         #[cfg(zcash_unstable = "nu8")] _coinbase_digest: Self::CoinbaseDigest,
         #[cfg(zcash_unstable = "nu8")] _value_pool_deltas_digest: Self::ValuePoolDeltasDigest,
+        #[cfg(zcash_unstable = "nu8")] _unrecognized_effect_digest: Self::UnrecognizedEffectDigest,
+        #[cfg(zcash_unstable = "nu8")] unrecognized_auth_digest: Self::UnrecognizedAuthDigest,
     ) -> Self::Digest {
         let (txversion, consensus_branch_id) = tx_context;
 
@@ -1956,7 +2007,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
                 sapling_v7.as_ref(),
                 orchard_v7.as_ref(),
                 ironwood_v7.as_ref(),
-                &[],
+                &unrecognized_auth_digest,
             ));
 
             let mut personal = [0; 16];
@@ -2059,6 +2110,10 @@ mod digest_path_tests {
         BlockTxCommitmentDigester, hash_transparent_txid_data, hash_v7_transparent_auth,
         hash_v7_transparent_effects_bytes, transparent_digests_bytes, transparent_witness_digest,
     };
+    #[cfg(not(feature = "orchard"))]
+    use crate::transaction::bytes::{
+        OrchardActionBytes, OrchardSignatureBytes, V7OrchardAuthBytes, V7OrchardBundleBytes,
+    };
     use crate::transaction::{
         Authorized, TransactionDigest, TxVersion,
         bytes::{
@@ -2067,6 +2122,20 @@ mod digest_path_tests {
             V7EffectBundleBytes, V7TransactionBodyBytes,
         },
         zip248::SuppliedBundleDigests,
+    };
+
+    #[cfg(not(feature = "sapling"))]
+    use crate::transaction::{
+        bytes::{
+            SaplingSignatureBytes, SaplingSpendBytes, V7SaplingAuthBytes, V7SaplingBundleBytes,
+        },
+        components::GROTH_PROOF_SIZE,
+    };
+    #[cfg(any(not(feature = "sapling"), not(feature = "orchard")))]
+    use {
+        super::TxIdDigester,
+        crate::transaction::bytes::{SighashInfoBytes, V7AuthBundleBytes},
+        alloc::collections::BTreeMap,
     };
 
     #[cfg(all(feature = "sapling", feature = "orchard"))]
@@ -2148,6 +2217,133 @@ mod digest_path_tests {
             bytes.v7_txid(&provider).unwrap(),
             super::to_txid_v7(BranchId::Nu8.into(), &digests),
         );
+    }
+
+    #[cfg(any(not(feature = "sapling"), not(feature = "orchard")))]
+    fn assert_retained_known_bundle_digests(body: V7TransactionBodyBytes) {
+        let effects: BTreeMap<_, _> = body
+            .effect_bundles()
+            .iter()
+            .map(|bundle| (bundle.bundle_type(), bundle.clone()))
+            .collect();
+        let auth: BTreeMap<_, _> = body
+            .auth_bundles()
+            .iter()
+            .map(|bundle| (bundle.bundle_type(), bundle.clone()))
+            .collect();
+        let effect_digests =
+            <TxIdDigester as TransactionDigest<Authorized>>::digest_unrecognized_effects(
+                &TxIdDigester,
+                &effects,
+                &(),
+            )
+            .unwrap();
+        let auth_digests = BlockTxCommitmentDigester
+            .digest_unrecognized_auth(&auth, &())
+            .unwrap();
+        assert_eq!(effect_digests.len(), effects.len());
+        assert_eq!(auth_digests.len(), auth.len());
+        for (bundle, (key, digest)) in effects.values().zip(&effect_digests) {
+            assert_eq!(*key, bundle.digest_key());
+            assert_eq!(*digest, bundle.effects_digest(&()).unwrap());
+        }
+        for (bundle, (key, digest)) in auth.values().zip(&auth_digests) {
+            assert_eq!(*key, bundle.digest_key());
+            assert_eq!(*digest, bundle.auth_digest(&()).unwrap());
+        }
+
+        let effect_entries =
+            super::v7_bundle_digest_entries(None, None, None, None, None, &effect_digests);
+        let auth_entries =
+            super::v7_bundle_digest_entries(None, None, None, None, None, &auth_digests);
+        assert_eq!(
+            super::hash_v7_effects_bundles(effect_entries.clone()),
+            body.effects_bundles_digest(&()).unwrap(),
+        );
+        assert_eq!(
+            super::hash_v7_auth_bundles(auth_entries),
+            body.auth_bundles_digest(&()).unwrap(),
+        );
+
+        let transparent = hash_transparent_txid_data(None);
+        let merged = super::v7_bundle_digest_entries(
+            Some(&transparent),
+            None,
+            None,
+            None,
+            None,
+            &effect_digests,
+        );
+        assert_eq!(merged.len(), effect_digests.len() + 1);
+        assert_eq!(&merged[1..], effect_entries.as_slice());
+        assert_eq!(
+            merged[0],
+            (
+                super::BundleId::new(
+                    super::BundleType::TRANSPARENT,
+                    super::BundleVariant::DEFAULT,
+                )
+                .wire_key(),
+                &transparent,
+            ),
+        );
+    }
+
+    #[cfg(not(feature = "sapling"))]
+    #[test]
+    fn retained_sapling_bytes_digest_without_sapling_feature() {
+        let effects = V7SaplingBundleBytes::from_parts(
+            vec![SaplingSpendBytes::from_parts([0; 32], [0; 32], [0; 32])],
+            Vec::new(),
+        );
+        let signature = SaplingSignatureBytes::from_parts(SighashInfoBytes::v0(), [0; 64]);
+        let auth = V7SaplingAuthBytes::from_parts(
+            Some([0; 32]),
+            vec![[0; GROTH_PROOF_SIZE]],
+            vec![signature.clone()],
+            Vec::new(),
+            Some(signature),
+        );
+        let body = V7TransactionBodyBytes::from_parts(
+            Vec::new(),
+            vec![V7EffectBundleBytes::Sapling(effects)],
+            vec![V7AuthBundleBytes::Sapling(auth)],
+        )
+        .unwrap();
+        assert_retained_known_bundle_digests(body);
+    }
+
+    #[cfg(not(feature = "orchard"))]
+    #[test]
+    fn retained_orchard_and_ironwood_bytes_digest_without_orchard_feature() {
+        /// ZIP 248 proof length for an Orchard-protocol bundle with one action.
+        const PROOF_LEN: usize = 4992;
+        let effects = V7OrchardBundleBytes::from_parts(
+            vec![OrchardActionBytes::from_parts(
+                [0; 32], [0; 32], [0; 32], [0; 32], [0; 32], [0; 580], [0; 80],
+            )],
+            0,
+        );
+        let signature = OrchardSignatureBytes::from_parts(SighashInfoBytes::v0(), [0; 64]);
+        let auth = V7OrchardAuthBytes::from_parts(
+            Some([0; 32]),
+            vec![0; PROOF_LEN],
+            vec![signature.clone()],
+            Some(signature),
+        );
+        let body = V7TransactionBodyBytes::from_parts(
+            Vec::new(),
+            vec![
+                V7EffectBundleBytes::Orchard(effects.clone()),
+                V7EffectBundleBytes::Ironwood(effects),
+            ],
+            vec![
+                V7AuthBundleBytes::Orchard(auth.clone()),
+                V7AuthBundleBytes::Ironwood(auth),
+            ],
+        )
+        .unwrap();
+        assert_retained_known_bundle_digests(body);
     }
 
     #[cfg(any(feature = "sapling", feature = "orchard"))]

@@ -100,7 +100,8 @@ impl<'a> TransactionExtractor<'a> {
         )?;
 
         // The commitment being signed is shared across all shielded inputs.
-        let sighash_data = PrecomputedSighashData::new(tx_data);
+        let sighash_data =
+            PrecomputedSighashData::new(tx_data, &()).map_err(crate::ExtractError::Digest)?;
         let shielded_sighash = sighash_data.signature_hash(&SignableInput::Shielded);
         let tx_data = sighash_data.into_tx();
 

@@ -44,7 +44,9 @@ use zcash_protocol::value::{ZatBalance, Zatoshis};
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
-    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
+    zcash_primitives::transaction::{
+        Authorization, TransactionData, TxVersion, zip248::V7DigestError,
+    },
     zcash_protocol::{
         consensus::{BranchId, OrchardProtocolRevision},
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
@@ -53,7 +55,7 @@ use {
 };
 
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput};
+use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput, Zip244Error};
 
 pub mod roles;
 
@@ -758,9 +760,12 @@ pub(crate) fn precompute_sighash_data(
     global: &Global,
     tx_data: TransactionData<EffectsOnly>,
 ) -> Result<PrecomputedSighashData<EffectsOnly>, ExtractError> {
-    PrecomputedSighashData::new_zip244(tx_data).map_err(|_| ExtractError::UnsupportedTxVersion {
-        version: global.tx_version,
-        version_group_id: global.version_group_id,
+    PrecomputedSighashData::new_zip244(tx_data, &()).map_err(|error| match error {
+        Zip244Error::Digest(error) => ExtractError::Digest(error),
+        _ => ExtractError::UnsupportedTxVersion {
+            version: global.tx_version,
+            version_group_id: global.version_group_id,
+        },
     })
 }
 
@@ -778,6 +783,8 @@ pub(crate) fn sighash(
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ExtractError {
+    /// A transaction bundle digest could not be resolved.
+    Digest(V7DigestError),
     /// The PCZT's transparent inputs have incompatible lock time requirements.
     IncompatibleLockTimes,
     /// The value that the PCZT's transparent inputs and outputs move through the
@@ -817,6 +824,9 @@ pub enum ExtractError {
 impl core::fmt::Display for ExtractError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            ExtractError::Digest(error) => {
+                write!(f, "could not compute transaction digests: {error}")
+            }
             ExtractError::IncompatibleLockTimes => {
                 write!(f, "the transparent inputs have incompatible lock times")
             }
@@ -925,7 +935,7 @@ mod extraction_tests {
             .unwrap();
         let data = pczt.into_effects().unwrap();
         assert_eq!(data.version(), TxVersion::V6);
-        let digests = data.digest(TxIdDigester);
+        let digests = data.digest(TxIdDigester, &()).unwrap();
         let expected = hex::decode(EXPECTED_DIGEST).unwrap();
         assert_eq!(
             to_txid(data.version(), data.consensus_branch_id(), &digests)
@@ -935,7 +945,7 @@ mod extraction_tests {
             expected
         );
         assert_eq!(
-            PrecomputedSighashData::new_zip244(data)
+            PrecomputedSighashData::new_zip244(data, &())
                 .unwrap()
                 .signature_hash(&SignableInput::Shielded)
                 .as_ref()

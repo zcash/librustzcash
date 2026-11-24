@@ -40,7 +40,8 @@ impl TransactionBytes {
     ///   Sapling, Orchard, or Ironwood effecting bundle;
     /// - coinbase spend restrictions, the Orchard `enableCrossAddress`
     ///   restriction, fee delta signs, the coinbase value pool delta relation,
-    ///   value conservation, and the input- and output-side conditions.
+    ///   equality of coinbase expiry and encoded block heights, value conservation,
+    ///   and the input- and output-side conditions.
     ///
     /// Every known bundle is converted to its typed representation, so the
     /// bundle's domain and canonical field checks (curve points, proof
@@ -52,7 +53,7 @@ impl TransactionBytes {
     /// context is still required to verify that `feeDelta` equals the actual
     /// aggregate fees, so that the derived ZIP 235 NSM contribution and miner
     /// fees are correct for the block. This method also leaves coinbase placement
-    /// and the coinbase bundle's `blockHeight`, `blockSubsidy`, and `lockboxValue`
+    /// and the coinbase's expiry height and `blockHeight`, `blockSubsidy`, and `lockboxValue`
     /// matching the block and issuance schedule to the caller.
     ///
     /// The caller must check the transparent bundle's value pool delta against
@@ -243,9 +244,8 @@ fn check_required_effects(body: &V7TransactionBodyBytes) -> Result<(), V7Validat
 
 /// Checks that every effecting bundle that requires authorizing data has it.
 ///
-/// Presence alone decides for the shielded bundles: an empty Sapling, Orchard or
-/// Ironwood effecting bundle still has an authorizing entry (its payload may be
-/// empty), and its absence is distinguishable from a present-but-empty one.
+/// Every Sapling, Orchard, or Ironwood effecting entry requires a matching
+/// authorizing entry. Empty shielded effecting entries are rejected by the byte layer.
 fn check_required_auth(body: &V7TransactionBodyBytes) -> Result<(), V7ValidationError> {
     if let Some(transparent) = body.transparent() {
         let tx_in_count = transparent.inputs().len();

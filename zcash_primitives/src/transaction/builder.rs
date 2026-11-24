@@ -1775,12 +1775,18 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_bundle,
             ironwood_bundle,
             None,
-        );
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+        )
+        .expect("builder constructs only recognized bundles with empty unrecognized maps");
 
         //
         // Signatures -- everything but the signatures must already have been added.
         //
-        let sighash_data = PrecomputedSighashData::new(unauthed_tx);
+        let sighash_data = PrecomputedSighashData::new(unauthed_tx, &())
+            .expect("builder constructs only recognized bundles");
 
         let transparent_bundle = sighash_data
             .tx()
@@ -1888,7 +1894,12 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_bundle,
             ironwood_bundle,
             None,
-        );
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+        )
+        .expect("builder constructs only recognized bundles with empty unrecognized maps");
 
         // The unwrap() here is safe because the txid hashing
         // of freeze() should be infalliable.

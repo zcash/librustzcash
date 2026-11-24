@@ -2,9 +2,8 @@
 //!
 //! Typed transactions hold each protocol bundle in its own field; there is no
 //! all-typed bundle map. An effecting or authorizing payload whose bundle type
-//! or variant this implementation does not interpret has no typed
-//! representation and prevents fully typed conversion; the byte layer retains
-//! it. Value pool delta entries carry no payload, so they remain representable
+//! or variant this implementation does not interpret is retained in a separate
+//! byte map. Value pool delta entries carry no payload, so they remain representable
 //! in [`ValuePoolDeltas`] under their open identifiers, subject only to the
 //! typed monetary range.
 
@@ -209,19 +208,29 @@ impl BundleId {
 /// have an effecting digest without authorizing data, and a caller may know one
 /// digest without the other. The provider is consulted only for bundles whose
 /// payload the byte layer cannot digest itself.
+/// The unit value `()` supplies no digests.
 ///
 /// The provider is trusted. The byte layer cannot verify a digest for a bundle
 /// it does not interpret, so a transaction identifier computed from supplied
 /// digests is only as trustworthy as the source that supplied them. A caller
 /// that accepts such a transaction must obtain the digests from a source it
 /// trusts, or verify the bundle independently.
-#[cfg(zcash_unstable = "nu8")]
 pub trait BundleDigestProvider {
     /// Returns the canonical effecting-data digest for `key`, if supplied.
     fn effects_digest(&self, key: BundleId) -> Option<blake2b_simd::Hash>;
 
     /// Returns the canonical authorizing-data digest for `key`, if supplied.
     fn auth_digest(&self, key: BundleId) -> Option<blake2b_simd::Hash>;
+}
+
+impl BundleDigestProvider for () {
+    fn effects_digest(&self, _key: BundleId) -> Option<blake2b_simd::Hash> {
+        None
+    }
+
+    fn auth_digest(&self, _key: BundleId) -> Option<blake2b_simd::Hash> {
+        None
+    }
 }
 
 /// A [`BundleDigestProvider`] backed by explicit per-key digests.
@@ -232,14 +241,12 @@ pub trait BundleDigestProvider {
 /// [`Self::validate_for`] to reject such keys.
 ///
 /// The supplied digests are trusted: see [`BundleDigestProvider`].
-#[cfg(zcash_unstable = "nu8")]
 #[derive(Clone, Debug, Default)]
 pub struct SuppliedBundleDigests {
     effects: BTreeMap<BundleId, blake2b_simd::Hash>,
     auth: BTreeMap<BundleId, blake2b_simd::Hash>,
 }
 
-#[cfg(zcash_unstable = "nu8")]
 impl SuppliedBundleDigests {
     /// Constructs an empty set of supplied digests.
     pub fn new() -> Self {
@@ -339,7 +346,6 @@ impl SuppliedBundleDigests {
     }
 }
 
-#[cfg(zcash_unstable = "nu8")]
 impl BundleDigestProvider for SuppliedBundleDigests {
     fn effects_digest(&self, key: BundleId) -> Option<blake2b_simd::Hash> {
         self.effects.get(&key).cloned()
@@ -351,12 +357,16 @@ impl BundleDigestProvider for SuppliedBundleDigests {
 }
 
 /// An error resolving the per-bundle digests of a version 7 transaction.
-#[cfg(zcash_unstable = "nu8")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum V7DigestError {
     /// The transaction is not a version 7 transaction.
     NotV7,
+    /// A retained entry duplicates a typed bundle slot.
+    DuplicateBundleType {
+        /// The retained entry that conflicts with the typed bundle.
+        key: BundleId,
+    },
     /// No effecting-data digest was supplied for an unsupported bundle.
     MissingEffectsDigest {
         /// The bundle whose digest is missing.
@@ -402,11 +412,16 @@ pub enum V7DigestError {
     },
 }
 
-#[cfg(zcash_unstable = "nu8")]
 impl fmt::Display for V7DigestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotV7 => f.write_str("transaction is not a version 7 transaction"),
+            Self::DuplicateBundleType { key } => write!(
+                f,
+                "retained bundle ({}, {}) duplicates a typed bundle slot",
+                key.bundle_type().to_u64(),
+                key.bundle_variant().to_u64()
+            ),
             Self::MissingEffectsDigest { key } => write!(
                 f,
                 "no effecting-data digest supplied for bundle ({}, {})",
@@ -459,7 +474,7 @@ impl fmt::Display for V7DigestError {
     }
 }
 
-#[cfg(all(feature = "std", zcash_unstable = "nu8"))]
+#[cfg(feature = "std")]
 impl std::error::Error for V7DigestError {}
 
 // CoinbaseBundle

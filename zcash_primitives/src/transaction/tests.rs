@@ -64,7 +64,7 @@ fn nu7_v6_encoding_and_digests_are_feature_independent() {
         None,
         None,
     );
-    let digests = data.digest(TxIdDigester);
+    let digests = data.digest(TxIdDigester, &()).unwrap();
     assert_eq!(
         digests.header_digest.as_bytes(),
         hex::decode(HEADER_DIGEST).unwrap()
@@ -280,8 +280,24 @@ fn transaction_size_excludes_absent_shielded_bundles() {
     /// bundles are boxed, so an absent bundle costs one pointer; storing any of them
     /// inline would exceed this bound.
     const MAX_TRANSACTION_SIZE: usize = 168;
+    #[cfg(zcash_unstable = "nu8")]
+    let max_transaction_size = MAX_TRANSACTION_SIZE
+        + core::mem::size_of::<
+            alloc::collections::BTreeMap<
+                crate::transaction::zip248::BundleType,
+                crate::transaction::bytes::V7EffectBundleBytes,
+            >,
+        >()
+        + core::mem::size_of::<
+            alloc::collections::BTreeMap<
+                crate::transaction::zip248::BundleType,
+                crate::transaction::bytes::V7AuthBundleBytes,
+            >,
+        >();
+    #[cfg(not(zcash_unstable = "nu8"))]
+    let max_transaction_size = MAX_TRANSACTION_SIZE;
 
-    assert!(core::mem::size_of::<Transaction>() <= MAX_TRANSACTION_SIZE);
+    assert!(core::mem::size_of::<Transaction>() <= max_transaction_size);
 }
 
 #[test]
@@ -347,7 +363,7 @@ fn v7_empty_transaction_matches_zip248_digests() {
         "600c2dd76c15b3683691259781ce79a3757cc7f95714cfbccdb49f69ddf15958",
     );
     assert_eq!(
-        hex::encode(tx.auth_commitment().as_bytes()),
+        hex::encode(tx.auth_commitment(&()).unwrap().as_bytes()),
         "d3a128d379cd32a6ec49acb8e5da337ed38e80c068fa0e33e4baf2786867241a",
     );
 }
@@ -378,7 +394,10 @@ fn v7_fee_delta_matches_zip248_digests() {
         None,
         None,
         None,
+        Default::default(),
+        Default::default(),
     )
+    .unwrap()
     .freeze()
     .unwrap();
 
@@ -438,7 +457,10 @@ fn v7_data_with_deltas(
         #[cfg(feature = "orchard")]
         ironwood_bundle,
         None,
+        Default::default(),
+        Default::default(),
     )
+    .unwrap()
 }
 
 /// A value pool delta map holding one entry for `bundle_type` plus an equally
@@ -459,12 +481,11 @@ fn balanced_vp(
     vp
 }
 
-/// A typed bundle at the default variant paired with a non-default variant
-/// delta for its bundle type cannot be written as v7, so `freeze` must reject it
-/// rather than compute an identifier for an unserializable transaction.
+/// A typed bundle uses the default variant, including when no retained maps
+/// are supplied.
 #[test]
 #[cfg(all(zcash_unstable = "nu8", feature = "sapling"))]
-fn v7_freeze_rejects_nondefault_value_pool_delta_variant() {
+fn retained_v7_constructor_rejects_nondefault_value_pool_delta_for_typed_slot() {
     use crate::transaction::zip248::{BundleType, BundleVariant, ValuePoolDeltas};
 
     let mut runner = proptest::test_runner::TestRunner::default();
@@ -481,9 +502,22 @@ fn v7_freeze_rejects_nondefault_value_pool_delta_variant() {
     )
     .unwrap();
 
-    let error = v7_data_with_deltas(vp, None, Some(bundle), None, None)
-        .freeze()
-        .unwrap_err();
+    let error = TransactionData::<Authorized>::from_parts_with_value_pool_deltas(
+        TxVersion::V7,
+        BranchId::Nu8,
+        0,
+        100u32.into(),
+        vp,
+        None,
+        None,
+        Some(bundle),
+        None,
+        None,
+        None,
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap_err();
     assert_eq!(error.kind(), corez::io::ErrorKind::InvalidInput);
 }
 
@@ -645,7 +679,7 @@ fn v5_auth_commitment_in_nu6_3_does_not_include_ironwood_digest() {
     .freeze()
     .unwrap();
 
-    assert_eq!(tx.auth_commitment(), expected.finalize());
+    assert_eq!(tx.auth_commitment(&()).unwrap(), expected.finalize());
 }
 
 #[test]
@@ -669,7 +703,7 @@ fn v6_empty_auth_commitment_uses_v6_shielded_personalizations() {
             .freeze()
             .unwrap();
 
-    assert_eq!(tx.auth_commitment(), expected.finalize());
+    assert_eq!(tx.auth_commitment(&()).unwrap(), expected.finalize());
 }
 
 #[test]
@@ -680,7 +714,7 @@ fn v6_empty_orchard_txid_uses_v6_orchard_personalization() {
 
     let tx_data =
         TransactionData::from_parts_v6(BranchId::Nu6_3, 0, 0u32.into(), None, None, None, None);
-    let txid_parts = tx_data.digest(TxIdDigester);
+    let txid_parts = tx_data.digest(TxIdDigester, &()).unwrap();
     let tx = tx_data.freeze().unwrap();
 
     assert!(txid_parts.orchard_digest.is_none());
@@ -1294,13 +1328,13 @@ fn v6_tx_data_with_ironwood_bundle(
 
 #[cfg(test)]
 fn v5_shielded_sighash(tx_data: &TransactionData<TestUnauthorized>) -> Blake2bHash {
-    let txid_parts = tx_data.digest(TxIdDigester);
+    let txid_parts = tx_data.digest(TxIdDigester, &()).unwrap();
     v5_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts, None)
 }
 
 #[cfg(test)]
 fn v6_shielded_sighash(tx_data: &TransactionData<TestUnauthorized>) -> Blake2bHash {
-    let txid_parts = tx_data.digest(TxIdDigester);
+    let txid_parts = tx_data.digest(TxIdDigester, &()).unwrap();
     v6_signature_hash(tx_data, &SignableInput::Shielded, &txid_parts, None)
 }
 
@@ -1322,7 +1356,10 @@ fn v6_orchard_anchor_changes_auth_commitment_not_txid_or_sighash() {
         v6_shielded_sighash(&tx_data_a),
         v6_shielded_sighash(&tx_data_b)
     );
-    assert_ne!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_ne!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[test]
@@ -1343,7 +1380,10 @@ fn v6_ironwood_anchor_changes_auth_commitment_not_txid_or_sighash() {
         v6_shielded_sighash(&tx_data_a),
         v6_shielded_sighash(&tx_data_b)
     );
-    assert_ne!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_ne!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[test]
@@ -1363,7 +1403,10 @@ fn v5_orchard_anchor_still_changes_txid_and_sighash() {
         v5_shielded_sighash(&tx_data_a),
         v5_shielded_sighash(&tx_data_b)
     );
-    assert_eq!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_eq!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[test]
@@ -1384,7 +1427,10 @@ fn v6_sapling_anchor_changes_auth_commitment_not_txid_or_sighash() {
         v6_shielded_sighash(&tx_data_a),
         v6_shielded_sighash(&tx_data_b)
     );
-    assert_ne!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_ne!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[test]
@@ -1404,7 +1450,10 @@ fn v5_sapling_anchor_still_changes_txid_and_sighash() {
         v5_shielded_sighash(&tx_data_a),
         v5_shielded_sighash(&tx_data_b)
     );
-    assert_eq!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_eq!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[test]
@@ -1558,7 +1607,10 @@ fn v6_orchard_non_anchor_bundle_data_still_changes_txid_and_sighash() {
         v6_shielded_sighash(&tx_data_a),
         v6_shielded_sighash(&tx_data_b)
     );
-    assert_ne!(tx_a.auth_commitment(), tx_b.auth_commitment());
+    assert_ne!(
+        tx_a.auth_commitment(&()).unwrap(),
+        tx_b.auth_commitment(&()).unwrap()
+    );
 }
 
 #[cfg(test)]
@@ -1609,7 +1661,10 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     });
     if sapling_anchors_agree {
         prop_assert_eq!(tx.txid(), txo.txid());
-        let (auth, auth_o) = (tx.auth_commitment(), txo.auth_commitment());
+        let (auth, auth_o) = (
+            tx.auth_commitment(&()).unwrap(),
+            txo.auth_commitment(&()).unwrap(),
+        );
         prop_assert_eq!(auth.as_bytes(), auth_o.as_bytes());
     }
     Ok(())
@@ -1738,8 +1793,11 @@ fn zip_0143() {
             tv.sighash
         );
 
-        let precomputed =
-            PrecomputedSighashData::new(with_test_transparent_auth(tx.into_data(), vec![], vec![]));
+        let precomputed = PrecomputedSighashData::new(
+            with_test_transparent_auth(tx.into_data(), vec![], vec![]),
+            &(),
+        )
+        .unwrap();
         assert_eq!(
             precomputed.signature_hash(&signable_input).as_ref(),
             &tv.sighash
@@ -1771,8 +1829,11 @@ fn zip_0243() {
             tv.sighash
         );
 
-        let precomputed =
-            PrecomputedSighashData::new(with_test_transparent_auth(tx.into_data(), vec![], vec![]));
+        let precomputed = PrecomputedSighashData::new(
+            with_test_transparent_auth(tx.into_data(), vec![], vec![]),
+            &(),
+        )
+        .unwrap();
         assert_eq!(
             precomputed.signature_hash(&signable_input).as_ref(),
             &tv.sighash
@@ -1870,7 +1931,7 @@ fn zip_0244() {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
-        assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
+        assert_eq!(tx.auth_commitment(&()).unwrap().as_ref(), &tv.auth_digest);
 
         let txdata = tx.deref();
 
@@ -1929,12 +1990,12 @@ fn zip_0244() {
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
         );
-        (tdata, txdata.digest(TxIdDigester))
+        (tdata, txdata.digest(TxIdDigester, &()).unwrap())
     }
 
     for tv in self::data::zip_0244::make_test_vectors() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
-        let precomputed = PrecomputedSighashData::new(txdata);
+        let precomputed = PrecomputedSighashData::new(txdata, &()).unwrap();
         let txdata = precomputed.tx();
 
         // Computes the signature hash both from the precomputed digests and with the input
@@ -2014,7 +2075,7 @@ fn zip_0244() {
 
         // Computing the signature hashes of every input under every hash type reads the
         // input amounts and `scriptPubKey`s only once.
-        let precomputed = PrecomputedSighashData::new(to_test_txdata(&tv).0);
+        let precomputed = PrecomputedSighashData::new(to_test_txdata(&tv).0, &()).unwrap();
         if let Some(bundle) = precomputed
             .tx()
             .transparent_bundle()
@@ -2077,7 +2138,10 @@ fn zip_0233() {
             None,
             None,
             None,
+            Default::default(),
+            Default::default(),
         )
+        .unwrap()
     };
 
     // A nonzero ZIP 233 amount is not supported by any implemented format.
@@ -2124,10 +2188,13 @@ fn v7_txid_digester_builds_the_complete_tree() {
         None,
         None,
         None,
-    );
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
 
-    let conventional = tx.digest(TxIdDigester);
-    let own = tx.txid_digests();
+    let conventional = tx.digest(TxIdDigester, &()).unwrap();
+    let own = tx.txid_digests(&()).unwrap();
     assert_eq!(conventional.header_digest, own.header_digest);
     assert!(conventional.transparent_digests.is_none());
     assert!(conventional.coinbase_digest.is_none());
@@ -2207,8 +2274,8 @@ mod zip248_tests {
 
     /// Verifies that a v7 transaction with an unknown bundle type can be
     /// parsed and re-serialized at the byte layer (ZIP 248 forward
-    /// compatibility), and that the typed compatibility path rejects it rather
-    /// than inventing a digest.
+    /// compatibility). Typed inspection retains its payloads without inventing
+    /// a digest.
     #[test]
     fn unknown_bundle_roundtrip() {
         use super::super::{
@@ -2257,9 +2324,23 @@ mod zip248_tests {
         tx2.write(&mut buf2).unwrap();
         assert_eq!(buf, buf2);
 
-        // The typed compatibility path cannot represent the opaque effecting or
-        // authorizing payloads, so it rejects the transaction instead of
-        // inventing a digest.
+        let inspected =
+            crate::transaction::TransactionData::from_bytes(tx2, BranchId::Nu8).unwrap();
+        assert_eq!(
+            inspected.uninterpreted_effect_bundles()[&id.bundle_type()]
+                .as_opaque()
+                .unwrap()
+                .payload(),
+            &[0xDE, 0xAD, 0xBE, 0xEF],
+        );
+        assert_eq!(
+            inspected.uninterpreted_auth_bundles()[&id.bundle_type()]
+                .as_opaque()
+                .unwrap()
+                .payload(),
+            &[0xCA, 0xFE],
+        );
+        // Computing an identifier still requires an effecting digest.
         assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
     }
 
@@ -2331,7 +2412,10 @@ mod zip248_tests {
                 None,
                 None,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         /// A transparent bundle with one input and one output, satisfying both
@@ -2399,7 +2483,10 @@ mod zip248_tests {
                 None,
                 None,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         /// Builds a typed v7 transaction with a transparent bundle and an
@@ -2429,7 +2516,10 @@ mod zip248_tests {
                 None,
                 Some(ironwood),
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         /// Builds a coinbase bundle paying out `subsidy` zatoshis with
@@ -2462,7 +2552,10 @@ mod zip248_tests {
                 None,
                 None,
                 Some(coinbase),
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         /// Records a fee bundle value. [`zip248::ValuePoolDeltas::set_fee`]
@@ -2562,7 +2655,10 @@ mod zip248_tests {
                 None,
                 None,
                 Some(coinbase_bundle(100, 20)),
-            );
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(tx.check_v7_consensus_rules(), Ok(()));
 
             assert_eq!(
@@ -2808,7 +2904,10 @@ mod zip248_tests {
                 None,
                 None,
                 None,
-            );
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(
                 tx.check_v7_consensus_rules(),
                 Err(V7ConsensusError::SproutBundlePresent)
@@ -2917,13 +3016,14 @@ mod zip248_tests {
 
         /// The effecting data of a coinbase bundle at height 100 that issues
         /// nothing: `blockHeight || blockSubsidy || lockboxValue ||
-        /// coinbaseDataLen`.
+        /// coinbaseDataLen || minerSignalsCount`.
         fn coinbase_effects() -> Vec<u8> {
             let mut buf = Vec::new();
             buf.extend_from_slice(&100u32.to_le_bytes());
             buf.extend_from_slice(&0u64.to_le_bytes());
             buf.extend_from_slice(&0u64.to_le_bytes());
-            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap(); // coinbaseDataLen
+            CompactSize::write(&mut buf, 0).unwrap(); // minerSignalsCount
             buf
         }
 
@@ -3047,8 +3147,7 @@ mod zip248_tests {
         /// A bundleType this implementation knows may carry a bundleVariant it
         /// does not. Reinterpreting it as the default variant would change the
         /// bytes it re-serializes to, so the byte layer preserves it opaquely.
-        /// The typed compatibility path cannot resolve its digest, so it
-        /// rejects the transaction.
+        /// Typed inspection retains it without resolving its digest.
         #[test]
         fn preserves_unknown_variant_of_known_bundle_type() {
             use crate::transaction::bytes::{TransactionBytes, V7EffectBundleBytes};
@@ -3069,6 +3168,11 @@ mod zip248_tests {
             tx.write(&mut reserialized).unwrap();
             assert_eq!(reserialized, buf);
 
+            let inspected =
+                crate::transaction::TransactionData::from_bytes(tx, BranchId::Nu8).unwrap();
+            let retained = &inspected.uninterpreted_effect_bundles()[&zip248::BundleType::SAPLING];
+            assert_eq!(retained.bundle_variant(), unknown_variant);
+            assert_eq!(retained.as_opaque().unwrap().payload(), &opaque);
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
@@ -3076,11 +3180,11 @@ mod zip248_tests {
         fn rejects_out_of_order_vp_deltas() {
             let mut buf = v7_header(BranchId::Nu8);
             // 2 VP delta entries: Orchard (3) then Sapling (2) — wrong order.
-            CompactSize::write(&mut *buf, 2).unwrap();
+            CompactSize::write(&mut buf, 2).unwrap();
             write_vp_entry(&mut buf, 3, 0, 100_000); // Orchard first (wrong)
             write_vp_entry(&mut buf, 2, 0, -100_000); // Sapling second
-            CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
-            CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
+            CompactSize::write(&mut buf, 0).unwrap(); // nEffectBundles
+            CompactSize::write(&mut buf, 0).unwrap(); // nAuthBundles
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
@@ -3088,45 +3192,57 @@ mod zip248_tests {
         #[test]
         fn rejects_duplicate_vp_deltas() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 2).unwrap();
+            CompactSize::write(&mut buf, 2).unwrap();
             write_vp_entry(&mut buf, 2, 0, 50_000);
             write_vp_entry(&mut buf, 2, 0, 50_000);
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
 
         #[test]
-        fn rejects_coinbase_in_auth_bundles() {
+        fn retains_coinbase_in_auth_bundles() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
+            CompactSize::write(&mut buf, 0).unwrap(); // no VP deltas
             // A coinbase effect bundle, and an auth bundle for it: the
             // registry marks the coinbase mAuthBundles column as prohibited.
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_framing(&mut buf, 1, 0, &coinbase_effects());
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_framing(&mut buf, 1, 0, &[0xAA]);
 
-            assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
+            let tx = Transaction::read(&buf[..], BranchId::Nu8).unwrap();
+            assert!(tx.uninterpreted_effect_bundles().is_empty());
+            assert_eq!(
+                tx.uninterpreted_auth_bundles()[&zip248::BundleType::COINBASE]
+                    .as_opaque()
+                    .unwrap()
+                    .payload(),
+                &[0xAA],
+            );
+            assert_eq!(
+                tx.check_v7_consensus_rules(),
+                Err(super::super::super::V7ConsensusError::UnsupportedBundles),
+            );
         }
 
         #[test]
         fn rejects_oversized_coinbase_data() {
             let mut effects = coinbase_effects();
-            // Replace the empty `coinbaseData` with one byte over the limit.
-            // Dropping the trailing signal count keeps the truncation pointed
-            // at the length prefix rather than the count.
+            // Replace the empty data length and signal count with oversized
+            // coinbase data followed by an empty signal list.
+            effects.pop();
             effects.pop();
             CompactSize::write(&mut effects, zip248::MAX_COINBASE_DATA_LEN + 1).unwrap();
             effects.extend_from_slice(&[0u8; zip248::MAX_COINBASE_DATA_LEN + 1]);
             CompactSize::write(&mut effects, 0).unwrap();
 
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_framing(&mut buf, 1, 0, &effects);
-            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
@@ -3134,10 +3250,10 @@ mod zip248_tests {
         #[test]
         fn rejects_zero_vp_delta_value() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 0);
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
@@ -3145,11 +3261,11 @@ mod zip248_tests {
         #[test]
         fn rejects_fee_in_effect_bundles() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             // bundleType 5 is the fee bundle, which is value-only.
             write_framing(&mut buf, 5, 0, &[0xAA]);
-            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
@@ -3157,12 +3273,12 @@ mod zip248_tests {
         #[test]
         fn rejects_mismatched_variant_across_maps() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_vp_entry(&mut buf, 2, 0, 100_000);
             // Effect bundle says bundleType 2 variant 1 — mismatch.
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_framing(&mut buf, 2, 1, &[]);
-            CompactSize::write(&mut *buf, 0).unwrap(); // no auth
+            CompactSize::write(&mut buf, 0).unwrap(); // no auth
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
@@ -3170,9 +3286,9 @@ mod zip248_tests {
         #[test]
         fn rejects_auth_without_effect() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 0).unwrap();
-            CompactSize::write(&mut *buf, 1).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 0).unwrap();
+            CompactSize::write(&mut buf, 1).unwrap();
             write_framing(&mut buf, 2, 0, &[0xBB]);
 
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
@@ -3191,12 +3307,12 @@ mod zip248_tests {
         #[test]
         fn rejects_out_of_order_effect_bundles() {
             let mut buf = v7_header(BranchId::Nu8);
-            CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
+            CompactSize::write(&mut buf, 0).unwrap(); // no VP deltas
             // Effect bundles: Orchard (3) before Transparent (0) — wrong order.
-            CompactSize::write(&mut *buf, 2).unwrap();
+            CompactSize::write(&mut buf, 2).unwrap();
             write_framing(&mut buf, 3, 0, &[0xAA]);
             write_framing(&mut buf, 0, 0, &[0xBB]);
-            CompactSize::write(&mut *buf, 0).unwrap(); // no auth
+            CompactSize::write(&mut buf, 0).unwrap(); // no auth
             assert!(Transaction::read(&buf[..], BranchId::Nu8).is_err());
         }
     }
@@ -3263,7 +3379,7 @@ mod zip248_tests {
                 TxVersion::V7,
                 BranchId::Nu8,
                 0,
-                BlockHeight::from_u32(1_500_100),
+                coinbase.block_height(),
                 vp,
                 Some(transparent),
                 None,
@@ -3271,7 +3387,10 @@ mod zip248_tests {
                 None,
                 None,
                 Some(coinbase.clone()),
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
             .freeze()
             .expect("v7 transaction data can be frozen");
 
@@ -3336,7 +3455,10 @@ mod zip248_tests {
                         orchard,
                         ironwood,
                         None,
+                        Default::default(),
+                        Default::default(),
                     )
+                    .unwrap()
                     .freeze()
                     .expect("v7 transaction data can be frozen")
                 };
@@ -3347,12 +3469,12 @@ mod zip248_tests {
                 prop_assert!(parsed.ironwood_bundle().is_some());
                 prop_assert!(parsed.orchard_bundle().is_none());
                 let (parsed_auth, ironwood_auth) =
-                    (parsed.auth_commitment(), as_ironwood.auth_commitment());
+                    (parsed.auth_commitment(&()).unwrap(), as_ironwood.auth_commitment(&()).unwrap());
                 prop_assert_eq!(parsed_auth.as_bytes(), ironwood_auth.as_bytes());
 
                 let as_orchard = build(false);
                 prop_assert_ne!(as_ironwood.txid(), as_orchard.txid());
-                let orchard_auth = as_orchard.auth_commitment();
+                let orchard_auth = as_orchard.auth_commitment(&()).unwrap();
                 prop_assert_ne!(ironwood_auth.as_bytes(), orchard_auth.as_bytes());
             }
         }
@@ -3399,15 +3521,15 @@ mod zip248_tests {
         }
     }
 
-    // -- Sighash version info error tests --------------------------------------
+    // -- Sighash variant info error tests --------------------------------------
 
     mod sighash_info {
         use super::super::super::zip248;
 
         #[test]
-        fn rejects_wrong_sighash_version() {
-            // sighashInfo with version byte 0x01 instead of 0x00.
-            let data: &[u8] = &[0x01, 0x01]; // compactSize(1), version=1
+        fn rejects_wrong_sighash_variant() {
+            // sighashInfo with variant byte 0x01 instead of 0x00.
+            let data: &[u8] = &[0x01, 0x01]; // compactSize(1), variant=1
             let mut cursor = data;
             let result = zip248::consume_v7_sighash_v0_info(&mut cursor, "test");
             assert!(result.is_err());
@@ -3427,9 +3549,10 @@ mod zip248_tests {
 
     mod v7_validation {
         use super::super::super::{
-            Transaction, TransactionBytes, TxVersion, V7BundleMap, V7ConsensusError,
-            V7ValidationError,
+            Authorized, Transaction, TransactionBytes, TransactionData, TxVersion, V7BundleMap,
+            V7ConsensusError, V7ValidationError,
             bytes::{TransactionBodyBytes, V5TransactionBodyBytes},
+            coinbase::is_coinbase,
             zip248,
         };
         use super::write_framing;
@@ -3513,9 +3636,9 @@ mod zip248_tests {
             buf
         }
 
-        fn transparent_auth(sighash_version: u8) -> Vec<u8> {
+        fn transparent_auth(sighash_variant: u8) -> Vec<u8> {
             let mut buf = Vec::new();
-            buf.extend_from_slice(&[0x01, sighash_version]);
+            buf.extend_from_slice(&[0x01, sighash_variant]);
             CompactSize::write(&mut buf, 0).unwrap();
             buf
         }
@@ -3592,6 +3715,91 @@ mod zip248_tests {
                     Script::default(),
                 )],
                 authorization: Authorized,
+            }
+        }
+
+        #[test]
+        fn expiry_height_bound_is_checked_by_both_validators() {
+            let raw = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[(0, 0, transparent_input_effects(true))],
+                &[(0, 0, transparent_auth(0))],
+            );
+            let original = TransactionBytes::read(raw.as_slice()).unwrap();
+            for expiry_height in [zip248::MAX_EXPIRY_HEIGHT, zip248::MAX_EXPIRY_HEIGHT + 1] {
+                let bytes = TransactionBytes::from_parts(
+                    TxVersion::V7,
+                    Some(BranchId::Nu8.into()),
+                    0,
+                    expiry_height.into(),
+                    original.body().clone(),
+                )
+                .unwrap();
+                let typed = TransactionData::<Authorized>::from_bytes(bytes.clone(), BranchId::Nu8)
+                    .unwrap();
+                if expiry_height == zip248::MAX_EXPIRY_HEIGHT {
+                    bytes.validate_v7().unwrap();
+                    typed.check_v7_consensus_rules().unwrap();
+                } else {
+                    assert!(matches!(
+                        bytes.validate_v7(),
+                        Err(V7ValidationError::InvalidExpiryHeight { expiry_height: actual })
+                            if actual == expiry_height
+                    ));
+                    assert_eq!(
+                        typed.check_v7_consensus_rules(),
+                        Err(V7ConsensusError::InvalidExpiryHeight { expiry_height })
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn coinbase_expiry_must_match_its_encoded_block_height() {
+            let raw = wire_tx(
+                BranchId::Nu8,
+                &[],
+                &[
+                    (0, 0, transparent_outputs_only_effects()),
+                    (1, 0, coinbase_effects(0, 0)),
+                ],
+                &[],
+            );
+            let original = TransactionBytes::read(raw.as_slice()).unwrap();
+            original.validate_v7().unwrap();
+            for expiry_height in [0u32, 99, 101] {
+                let bytes = TransactionBytes::from_parts(
+                    TxVersion::V7,
+                    Some(BranchId::Nu8.into()),
+                    0,
+                    expiry_height.into(),
+                    original.body().clone(),
+                )
+                .unwrap();
+                let typed = TransactionData::<Authorized>::from_bytes(bytes.clone(), BranchId::Nu8)
+                    .unwrap();
+                let expected = V7ConsensusError::CoinbaseExpiryHeightMismatch {
+                    expiry_height: expiry_height.into(),
+                    block_height: 100u32.into(),
+                };
+                assert_eq!(typed.check_v7_consensus_rules(), Err(expected.clone()));
+                assert!(matches!(
+                    bytes.validate_v7(),
+                    Err(V7ValidationError::Consensus(actual)) if actual == expected
+                ));
+            }
+        }
+
+        #[test]
+        fn opaque_coinbase_variants_are_classified_by_bundle_type() {
+            for bundle_type in [1u64, 42] {
+                let raw = wire_tx(BranchId::Nu8, &[], &[(bundle_type, 7, vec![0xaa])], &[]);
+                let bytes = TransactionBytes::read(raw.as_slice()).unwrap();
+                assert!(bytes.validate_v7().is_err());
+                let data = TransactionData::<Authorized>::from_bytes(bytes, BranchId::Nu8).unwrap();
+                assert!(data.coinbase_bundle().is_none());
+                assert_eq!(is_coinbase(&data), bundle_type == 1);
             }
         }
 
@@ -4079,7 +4287,10 @@ mod zip248_tests {
                     #[cfg(feature = "orchard")]
                     None,
                     None,
-                );
+                    Default::default(),
+                    Default::default(),
+                )
+                .unwrap();
                 assert_eq!(
                     data.check_v7_consensus_rules(),
                     Err(V7ConsensusError::BundleNotActivated { bundle_type: 6 }),
@@ -4116,7 +4327,7 @@ mod zip248_tests {
         }
 
         #[test]
-        fn unsupported_sighash_version_is_rejected() {
+        fn unsupported_sighash_variant_is_rejected() {
             let bytes = wire_tx(
                 BranchId::Nu8,
                 &[],
@@ -4277,7 +4488,10 @@ mod zip248_tests {
                     None,
                     None,
                     None,
+                    Default::default(),
+                    Default::default(),
                 )
+                .unwrap()
                 .freeze()
                 .unwrap();
 
@@ -4306,7 +4520,10 @@ mod zip248_tests {
                     Some(bundle),
                     None,
                     None,
+                    Default::default(),
+                    Default::default(),
                 )
+                .unwrap()
                 .freeze()
                 .unwrap();
 
@@ -4340,7 +4557,10 @@ mod zip248_tests {
                     None,
                     Some(bundle),
                     None,
+                    Default::default(),
+                    Default::default(),
                 )
+                .unwrap()
                 .freeze()
                 .unwrap();
 
@@ -4380,7 +4600,10 @@ mod zip248_tests {
                         )),
                         None,
                         None,
+                        Default::default(),
+                        Default::default(),
                     )
+                    .unwrap()
                     .freeze()
                     .unwrap()
                 };
@@ -4457,7 +4680,10 @@ mod zip248_tests {
                     Some(bundle),
                     Some(ironwood),
                     None,
+                    Default::default(),
+                    Default::default(),
                 )
+                .unwrap()
                 .freeze()
                 .unwrap();
 
@@ -4492,7 +4718,10 @@ mod zip248_tests {
                 #[cfg(feature = "orchard")]
                 None,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         #[cfg(feature = "orchard")]
@@ -4521,7 +4750,10 @@ mod zip248_tests {
                 orchard,
                 ironwood,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         }
 
         /// The input- and output-side conditions are satisfied by each shielded
@@ -4670,7 +4902,10 @@ mod zip248_tests {
                     #[cfg(feature = "orchard")]
                     None,
                     None,
-                );
+                    Default::default(),
+                    Default::default(),
+                )
+                .unwrap();
                 assert_eq!(
                     tx.check_v7_consensus_rules(),
                     Err(V7ConsensusError::MissingEffectBundle { bundle_type }),
@@ -4687,6 +4922,7 @@ mod zip248_tests {
 /// byte layer does not interpret.
 #[cfg(all(test, zcash_unstable = "nu8"))]
 mod v7_byte_digests {
+    use alloc::collections::BTreeMap;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -4702,15 +4938,19 @@ mod v7_byte_digests {
         test_orchard_bundle, test_sapling_bundle, test_sapling_output_only_bundle,
     };
     use crate::transaction::{
+        V7ConsensusError,
         bytes::{
             BundleType, BundleVariant, OpaqueAuthBundleBytes, OpaqueEffectBundleBytes,
             OrchardSignatureBytes, SaplingSignatureBytes, SighashInfoBytes, TransactionBodyBytes,
             TransactionBytes, V7AuthBundleBytes, V7EffectBundleBytes, V7OrchardAuthBytes,
             V7OrchardBundleBytes, V7SaplingAuthBytes, V7TransactionBodyBytes, ValuePoolDeltaBytes,
         },
-        txid::TxIdDigester,
+        sighash::{PrecomputedSighashData, Zip244Error},
+        txid::{BlockTxCommitmentDigester, TxIdDigester},
         zip248::{self, BundleId, SuppliedBundleDigests, V7DigestError},
     };
+
+    type TransactionWriter = fn(&Transaction, &mut Vec<u8>) -> corez::io::Result<()>;
 
     fn transparent_bundle() -> ::transparent::bundle::Bundle<
         ::transparent::bundle::Authorized,
@@ -4800,7 +5040,10 @@ mod v7_byte_digests {
             orchard,
             ironwood,
             coinbase,
+            Default::default(),
+            Default::default(),
         )
+        .unwrap()
     }
 
     fn byte_tx(tx: &TransactionData<Authorized>) -> TransactionBytes {
@@ -4812,7 +5055,7 @@ mod v7_byte_digests {
 
     fn assert_digests_match(typed: &TransactionData<Authorized>, bytes: &TransactionBytes) {
         let empty = SuppliedBundleDigests::new();
-        let typed_digests = typed.digest(TxIdDigester);
+        let typed_digests = typed.digest(TxIdDigester, &()).unwrap();
         let byte_digests = bytes.v7_txid_digests(&empty).unwrap();
 
         assert_eq!(byte_digests.header_digest, typed_digests.header_digest);
@@ -4845,7 +5088,7 @@ mod v7_byte_digests {
         assert_eq!(bytes.v7_txid(&empty).unwrap(), typed_tx.txid());
         assert_eq!(
             bytes.v7_auth_commitment(&empty).unwrap(),
-            typed_tx.auth_commitment()
+            typed_tx.auth_commitment(&()).unwrap()
         );
     }
 
@@ -5033,7 +5276,10 @@ mod v7_byte_digests {
             bytes.expiry_height(),
         )
         .unwrap();
-        let owned = Transaction::from_bytes(bytes, BranchId::Nu8, [0; 32]).unwrap();
+        let owned = TransactionData::from_bytes(bytes, BranchId::Nu8)
+            .unwrap()
+            .freeze()
+            .unwrap();
         assert_eq!(
             owned
                 .orchard_bundle()
@@ -5060,7 +5306,10 @@ mod v7_byte_digests {
         let mut borrowed_bytes = Vec::new();
         borrowed.write(&mut borrowed_bytes).unwrap();
         assert_eq!(owned_bytes, borrowed_bytes);
-        assert_eq!(owned.auth_commitment(), borrowed.auth_commitment());
+        assert_eq!(
+            owned.auth_commitment(&()).unwrap(),
+            borrowed.auth_commitment(&()).unwrap()
+        );
     }
 
     #[test]
@@ -5139,12 +5388,15 @@ mod v7_byte_digests {
             Some(orchard),
             None,
             None,
-        );
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
 
-        let digests = typed.digest(BlockTxCommitmentDigester);
+        let digests = typed.digest(BlockTxCommitmentDigester, &()).unwrap();
 
         let tx = typed.clone().freeze().unwrap();
-        assert_eq!(tx.auth_commitment(), digests);
+        assert_eq!(tx.auth_commitment(&()).unwrap(), digests);
 
         let bytes = byte_tx(&typed);
         assert_eq!(
@@ -5199,7 +5451,10 @@ mod v7_byte_digests {
             Some(orchard),
             Some(ironwood),
             None,
-        );
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         let bytes = byte_tx(&typed);
         assert!(bytes.validate_v7().is_ok());
 
@@ -5454,7 +5709,10 @@ mod v7_byte_digests {
             None,
             None,
             None,
-        );
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         let bytes = byte_tx(&typed);
         let body = bytes.body().as_v7().unwrap();
         let sapling = body.sapling().unwrap();
@@ -5604,7 +5862,10 @@ mod v7_byte_digests {
             None,
             None,
             None,
-        );
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         let bytes = byte_tx(&typed);
         assert_digests_match(&typed, &bytes);
     }
@@ -5737,7 +5998,10 @@ mod v7_byte_digests {
                 Some(orchard.clone()),
                 None,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         };
 
         let tx_a = build(sapling.clone());
@@ -5782,7 +6046,10 @@ mod v7_byte_digests {
                 Some(orchard),
                 None,
                 None,
+                Default::default(),
+                Default::default(),
             )
+            .unwrap()
         };
 
         let tx_a = build(orchard.clone());
@@ -5830,6 +6097,473 @@ mod v7_byte_digests {
             .hash_length(32)
             .personal(b"test_unknown_efx")
             .hash(&[byte])
+    }
+
+    /// A type not assigned by the bundle registry.
+    const RETAINED_UNKNOWN_TYPE: u64 = 99;
+    /// A variant not assigned to any supported bundle type.
+    const RETAINED_UNKNOWN_VARIANT: u64 = 7;
+
+    fn retained_key() -> BundleId {
+        BundleId::new(
+            BundleType::from_u64(RETAINED_UNKNOWN_TYPE),
+            BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+        )
+    }
+
+    fn retained_bytes(key: BundleId, with_auth: bool) -> TransactionBytes {
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let known = byte_tx(&typed_v7_tx(&mut runner, false, false, false, false));
+        let body = known.body().as_v7().unwrap();
+        let mut effects = body.effect_bundles().to_vec();
+        effects.push(V7EffectBundleBytes::Opaque(
+            OpaqueEffectBundleBytes::from_parts(key, vec![0xDE, 0xAD, 0x00, 0xFF]).unwrap(),
+        ));
+        let mut auth = body.auth_bundles().to_vec();
+        if with_auth {
+            auth.push(V7AuthBundleBytes::Opaque(
+                OpaqueAuthBundleBytes::from_parts(key, vec![0xCA, 0xFE, 0x00]).unwrap(),
+            ));
+        }
+        TransactionBytes::from_parts(
+            known.version(),
+            known.raw_consensus_branch_id(),
+            known.lock_time(),
+            known.expiry_height(),
+            TransactionBodyBytes::V7(
+                V7TransactionBodyBytes::from_parts(
+                    body.value_pool_deltas().to_vec(),
+                    effects,
+                    auth,
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap()
+    }
+
+    fn retained_constructor(
+        vp: zip248::ValuePoolDeltas,
+        effects: BTreeMap<BundleType, V7EffectBundleBytes>,
+        auth: BTreeMap<BundleType, V7AuthBundleBytes>,
+        transparent: Option<
+            ::transparent::bundle::Bundle<::transparent::bundle::Authorized, Zatoshis>,
+        >,
+    ) -> corez::io::Result<TransactionData<Authorized>> {
+        TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from_u32(100),
+            vp,
+            transparent,
+            None,
+            None,
+            None,
+            None,
+            None,
+            effects,
+            auth,
+        )
+    }
+
+    #[test]
+    fn retained_v7_mixed_bundles_preserve_exact_keys_and_bytes() {
+        for key in [
+            retained_key(),
+            BundleId::new(
+                BundleType::SAPLING,
+                BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+            ),
+        ] {
+            let bytes = retained_bytes(key, true);
+            let data = TransactionData::from_bytes(bytes.clone(), BranchId::Sprout).unwrap();
+            assert_eq!(data.consensus_branch_id(), BranchId::Nu8);
+            assert!(data.transparent_bundle().is_some());
+            assert!(data.sapling_bundle().is_none());
+            assert_eq!(data.uninterpreted_effect_bundles().len(), 1);
+            assert_eq!(data.uninterpreted_auth_bundles().len(), 1);
+            let effect = &data.uninterpreted_effect_bundles()[&key.bundle_type()];
+            let auth = &data.uninterpreted_auth_bundles()[&key.bundle_type()];
+            assert_eq!(effect.digest_key(), key);
+            assert_eq!(auth.digest_key(), key);
+            assert_eq!(
+                effect.as_opaque().unwrap().payload(),
+                &[0xDE, 0xAD, 0x00, 0xFF]
+            );
+            assert_eq!(auth.as_opaque().unwrap().payload(), &[0xCA, 0xFE, 0x00]);
+            assert_eq!(
+                effect,
+                bytes
+                    .body()
+                    .as_v7()
+                    .unwrap()
+                    .effect_bundle(key.bundle_type())
+                    .unwrap(),
+            );
+            assert_eq!(
+                auth,
+                bytes
+                    .body()
+                    .as_v7()
+                    .unwrap()
+                    .auth_bundle(key.bundle_type())
+                    .unwrap(),
+            );
+            let mut encoded = Vec::new();
+            bytes.write(&mut encoded).unwrap();
+            let reparsed = TransactionBytes::read(&encoded[..]).unwrap();
+            assert_eq!(reparsed, bytes);
+            let mut reencoded = Vec::new();
+            reparsed.write(&mut reencoded).unwrap();
+            assert_eq!(encoded, reencoded);
+        }
+    }
+
+    #[test]
+    fn retained_v7_clone_and_all_mappings_preserve_both_maps() {
+        let data = TransactionData::from_bytes(retained_bytes(retained_key(), true), BranchId::Nu8)
+            .unwrap();
+        let mapped = data.clone().map_bundles::<Authorized>(|b| b, |b| b, |b| b);
+        let tried = data
+            .clone()
+            .try_map_bundles::<Authorized, core::convert::Infallible>(Ok, Ok, Ok)
+            .unwrap();
+        let authorized = data.clone().map_authorization::<Authorized>((), (), ());
+        for preserved in [data.clone(), mapped, tried, authorized] {
+            assert_eq!(
+                preserved.uninterpreted_effect_bundles(),
+                data.uninterpreted_effect_bundles()
+            );
+            assert_eq!(
+                preserved.uninterpreted_auth_bundles(),
+                data.uninterpreted_auth_bundles()
+            );
+            assert_eq!(preserved.transparent_bundle(), data.transparent_bundle());
+            assert_eq!(
+                preserved.value_pool_deltas().iter().collect::<Vec<_>>(),
+                data.value_pool_deltas().iter().collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    #[test]
+    fn retained_v7_mapping_collision_is_rejected_before_digest_resolution() {
+        let key = BundleId::new(
+            BundleType::TRANSPARENT,
+            BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+        );
+        let bytes = unknown_body(V7EffectBundleBytes::Opaque(
+            OpaqueEffectBundleBytes::from_parts(key, vec![0xDE, 0xAD]).unwrap(),
+        ));
+        let data = TransactionData::from_bytes(bytes, BranchId::Nu8).unwrap();
+        assert!(data.transparent_bundle().is_none());
+        let mapped =
+            data.clone()
+                .map_bundles::<Authorized>(|_| Some(transparent_bundle()), |b| b, |b| b);
+        let tried = data
+            .clone()
+            .try_map_bundles::<Authorized, core::convert::Infallible>(
+                |_| Ok(Some(transparent_bundle())),
+                Ok,
+                Ok,
+            )
+            .unwrap();
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(1)).unwrap();
+        for colliding in [mapped, tried] {
+            assert!(colliding.transparent_bundle().is_some());
+            assert_eq!(
+                colliding.uninterpreted_effect_bundles(),
+                data.uninterpreted_effect_bundles(),
+            );
+            assert_eq!(
+                colliding.uninterpreted_auth_bundles(),
+                data.uninterpreted_auth_bundles(),
+            );
+            for provider in [&SuppliedBundleDigests::new(), &supplied] {
+                assert_eq!(
+                    colliding.txid_digests(provider).unwrap_err(),
+                    V7DigestError::DuplicateBundleType { key },
+                );
+            }
+            let signable = super::with_test_transparent_auth(
+                colliding,
+                vec![Zatoshis::const_from_u64(1000)],
+                vec![::transparent::address::Script::default()],
+            );
+            assert_eq!(
+                PrecomputedSighashData::new(signable, &supplied)
+                    .err()
+                    .unwrap(),
+                V7DigestError::DuplicateBundleType { key },
+            );
+        }
+    }
+
+    #[test]
+    fn retained_v7_digest_errors_name_exact_keys_and_resolve_independently() {
+        let key = retained_key();
+        let bytes = retained_bytes(key, true);
+        let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+        assert_eq!(
+            data.txid_digests(&()).unwrap_err(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+        assert_eq!(
+            data.digest(TxIdDigester, &()).unwrap_err(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+        assert_eq!(
+            data.digest(BlockTxCommitmentDigester, &()).unwrap_err(),
+            V7DigestError::MissingAuthDigest { key },
+        );
+        let mut wrong = SuppliedBundleDigests::new();
+        let wrong_key = BundleId::new(key.bundle_type(), BundleVariant::DEFAULT);
+        wrong.insert_effects(wrong_key, test_digest(1)).unwrap();
+        wrong.insert_auth(wrong_key, test_digest(2)).unwrap();
+        assert_eq!(
+            data.txid_digests(&wrong).unwrap_err(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+        assert_eq!(
+            data.digest(BlockTxCommitmentDigester, &wrong).unwrap_err(),
+            V7DigestError::MissingAuthDigest { key },
+        );
+        let mut effects = SuppliedBundleDigests::new();
+        effects.insert_effects(key, test_digest(1)).unwrap();
+        assert!(data.txid_digests(&effects).is_ok());
+        assert_eq!(
+            data.digest(BlockTxCommitmentDigester, &effects)
+                .unwrap_err(),
+            V7DigestError::MissingAuthDigest { key },
+        );
+        let mut auth = SuppliedBundleDigests::new();
+        auth.insert_auth(key, test_digest(2)).unwrap();
+        assert!(data.digest(BlockTxCommitmentDigester, &auth).is_ok());
+        assert_eq!(
+            data.txid_digests(&auth).unwrap_err(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+        let mut encoded = Vec::new();
+        bytes.write(&mut encoded).unwrap();
+        assert!(Transaction::read(&encoded[..], BranchId::Nu8).is_err());
+        let tx =
+            Transaction::read_with_bundle_digests(&encoded[..], BranchId::Nu8, &effects).unwrap();
+        assert_eq!(tx.txid(), bytes.v7_txid(&effects).unwrap());
+        assert_eq!(
+            tx.auth_commitment(&()).unwrap_err(),
+            V7DigestError::MissingAuthDigest { key },
+        );
+        assert_eq!(
+            tx.auth_commitment(&auth).unwrap(),
+            bytes.v7_auth_commitment(&auth).unwrap(),
+        );
+    }
+
+    #[test]
+    fn retained_v7_provider_digests_match_byte_layer_and_do_not_cross_commit() {
+        let key = retained_key();
+        let bytes = retained_bytes(key, true);
+        let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(1)).unwrap();
+        supplied.insert_auth(key, test_digest(2)).unwrap();
+        let digests = data.txid_digests(&supplied).unwrap();
+        let byte_digests = bytes.v7_txid_digests(&supplied).unwrap();
+        assert_eq!(digests.header_digest, byte_digests.header_digest);
+        assert_eq!(
+            digests.value_pool_deltas_digest,
+            byte_digests.value_pool_deltas_digest
+        );
+        assert_eq!(digests.unknown_effect_digests, vec![(key, test_digest(1))]);
+        assert_eq!(
+            digests.unknown_effect_digests,
+            byte_digests.unknown_effect_digests
+        );
+        let txid =
+            crate::transaction::txid::to_txid(TxVersion::V7, BranchId::Nu8, &digests).unwrap();
+        let auth = data.digest(BlockTxCommitmentDigester, &supplied).unwrap();
+        assert_eq!(txid, bytes.v7_txid(&supplied).unwrap());
+        assert_eq!(auth, bytes.v7_auth_commitment(&supplied).unwrap());
+        for (effects, authorizing) in [(1, 3), (3, 2)] {
+            let mut changed = SuppliedBundleDigests::new();
+            changed.insert_effects(key, test_digest(effects)).unwrap();
+            changed.insert_auth(key, test_digest(authorizing)).unwrap();
+            let changed_digests = data.txid_digests(&changed).unwrap();
+            let changed_txid =
+                crate::transaction::txid::to_txid(TxVersion::V7, BranchId::Nu8, &changed_digests)
+                    .unwrap();
+            assert_eq!(txid == changed_txid, effects == 1);
+            assert_eq!(
+                auth == data.digest(BlockTxCommitmentDigester, &changed).unwrap(),
+                authorizing == 2,
+            );
+        }
+    }
+
+    #[test]
+    fn retained_v7_sighash_precomputation_requires_only_effects() {
+        let key = retained_key();
+        let data = || {
+            super::with_test_transparent_auth(
+                TransactionData::from_bytes(retained_bytes(key, true), BranchId::Nu8).unwrap(),
+                vec![Zatoshis::const_from_u64(1000)],
+                vec![::transparent::address::Script::default()],
+            )
+        };
+        assert_eq!(
+            PrecomputedSighashData::new(data(), &()).err().unwrap(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+        assert!(matches!(
+            PrecomputedSighashData::new_zip244(data(), &()),
+            Err(Zip244Error::Digest(V7DigestError::MissingEffectsDigest { key: missing }))
+                if missing == key
+        ));
+        let mut supplied = SuppliedBundleDigests::new();
+        supplied.insert_effects(key, test_digest(1)).unwrap();
+        let normal = PrecomputedSighashData::new(data(), &supplied).unwrap();
+        let zip244 = PrecomputedSighashData::new_zip244(data(), &supplied).unwrap();
+        assert_eq!(
+            normal.tx().uninterpreted_auth_bundles(),
+            zip244.tx().uninterpreted_auth_bundles(),
+        );
+    }
+
+    #[test]
+    fn retained_v7_effect_only_needs_no_authorizing_digest() {
+        let key = retained_key();
+        let bytes = retained_bytes(key, false);
+        let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+        assert_eq!(data.uninterpreted_effect_bundles().len(), 1);
+        assert!(data.uninterpreted_auth_bundles().is_empty());
+        assert_eq!(
+            data.digest(BlockTxCommitmentDigester, &()).unwrap(),
+            bytes.v7_auth_commitment(&()).unwrap(),
+        );
+        assert_eq!(
+            data.txid_digests(&()).unwrap_err(),
+            V7DigestError::MissingEffectsDigest { key },
+        );
+    }
+
+    #[test]
+    fn retained_v7_constructor_rejects_mismatched_keys_variants_and_typed_collision() {
+        let key = retained_key();
+        let bytes = retained_bytes(key, true);
+        let body = bytes.body().as_v7().unwrap();
+        let effect = body.effect_bundle(key.bundle_type()).unwrap().clone();
+        let auth = body.auth_bundle(key.bundle_type()).unwrap().clone();
+        let empty = zip248::ValuePoolDeltas::empty;
+        let wrong_type = BundleType::from_u64(RETAINED_UNKNOWN_TYPE + 1);
+        for (effects, auth) in [
+            (
+                BTreeMap::from([(wrong_type, effect.clone())]),
+                BTreeMap::new(),
+            ),
+            (
+                BTreeMap::new(),
+                BTreeMap::from([(wrong_type, auth.clone())]),
+            ),
+        ] {
+            assert!(retained_constructor(empty(), effects, auth, None).is_err());
+        }
+        let different_variant = V7AuthBundleBytes::Opaque(
+            OpaqueAuthBundleBytes::from_parts(
+                BundleId::new(key.bundle_type(), BundleVariant::DEFAULT),
+                vec![0xAA],
+            )
+            .unwrap(),
+        );
+        assert!(
+            retained_constructor(
+                empty(),
+                BTreeMap::from([(key.bundle_type(), effect.clone())]),
+                BTreeMap::from([(key.bundle_type(), different_variant)]),
+                None,
+            )
+            .is_err()
+        );
+        let mut conflicting_delta = empty();
+        conflicting_delta
+            .insert(
+                key.bundle_type(),
+                BundleVariant::DEFAULT,
+                ZatBalance::from_i64(1).unwrap(),
+            )
+            .unwrap();
+        assert!(
+            retained_constructor(
+                conflicting_delta,
+                BTreeMap::from([(key.bundle_type(), effect)]),
+                BTreeMap::from([(key.bundle_type(), auth)]),
+                None,
+            )
+            .is_err()
+        );
+        let colliding = BundleId::new(
+            BundleType::TRANSPARENT,
+            BundleVariant::from_u64(RETAINED_UNKNOWN_VARIANT),
+        );
+        let effect = V7EffectBundleBytes::Opaque(
+            OpaqueEffectBundleBytes::from_parts(colliding, vec![0xAA]).unwrap(),
+        );
+        let auth = V7AuthBundleBytes::Opaque(
+            OpaqueAuthBundleBytes::from_parts(colliding, vec![0xBB]).unwrap(),
+        );
+        for (effects, auth) in [
+            (
+                BTreeMap::from([(BundleType::TRANSPARENT, effect)]),
+                BTreeMap::new(),
+            ),
+            (
+                BTreeMap::new(),
+                BTreeMap::from([(BundleType::TRANSPARENT, auth)]),
+            ),
+        ] {
+            assert!(
+                retained_constructor(empty(), effects, auth, Some(transparent_bundle())).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn retained_v7_freeze_writers_and_consensus_reject_retained_entries() {
+        let key = retained_key();
+        for with_auth in [false, true] {
+            let bytes = retained_bytes(key, with_auth);
+            let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+            assert_eq!(
+                data.clone().freeze().unwrap_err().kind(),
+                corez::io::ErrorKind::InvalidInput
+            );
+            assert_eq!(
+                data.check_v7_consensus_rules(),
+                Err(V7ConsensusError::UnsupportedBundles)
+            );
+            let mut provider = SuppliedBundleDigests::new();
+            provider.insert_effects(key, test_digest(1)).unwrap();
+            let mut encoded = Vec::new();
+            bytes.write(&mut encoded).unwrap();
+            let tx = Transaction::read_with_bundle_digests(&encoded[..], BranchId::Nu8, &provider)
+                .unwrap();
+            let writers: [TransactionWriter; 5] = [
+                |tx, output| tx.write(output),
+                |tx, output| tx.write_v4(output),
+                |tx, output| tx.write_v5(output),
+                |tx, output| tx.write_v6(output),
+                |tx, output| tx.write_v7(output),
+            ];
+            for write in writers {
+                let mut output = Vec::new();
+                assert_eq!(
+                    write(&tx, &mut output).unwrap_err().kind(),
+                    corez::io::ErrorKind::InvalidInput
+                );
+                assert!(output.is_empty());
+            }
+        }
     }
 
     #[test]
@@ -6121,7 +6855,12 @@ mod version_consistency {
             orchard,
             ironwood,
             coinbase,
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
         )
+        .unwrap()
     }
 
     fn fee_only() -> zip248::ValuePoolDeltas {
@@ -6478,7 +7217,10 @@ mod v7_bundle_versions {
                 orchard,
                 ironwood,
                 None,
-            ),
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
         }
     }
 

@@ -23,13 +23,15 @@
 use core::fmt;
 
 use pczt::Pczt;
-use zcash_primitives::transaction::txid::to_txid;
+use zcash_primitives::transaction::{txid::to_txid, zip248::V7DigestError};
 use zcash_protocol::TxId;
 
 /// A stored PCZT whose transaction id cannot be derived.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxIdError {
+    /// A transaction bundle digest could not be resolved.
+    Digest(V7DigestError),
     /// The bytes do not parse as a PCZT.
     Parse,
     /// The PCZT parses, but its effects cannot be assembled into transaction data — a bundle is
@@ -40,6 +42,9 @@ pub enum TxIdError {
 impl fmt::Display for TxIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            TxIdError::Digest(error) => {
+                write!(f, "could not compute transaction digests: {error}")
+            }
             TxIdError::Parse => f.write_str("the stored bytes do not parse as a PCZT"),
             TxIdError::Effects => {
                 f.write_str("the PCZT's effects do not assemble into transaction data")
@@ -62,7 +67,7 @@ pub fn pczt_txid(pczt: &Pczt) -> Result<TxId, TxIdError> {
         .clone()
         .into_effects()
         .map_err(|_| TxIdError::Effects)?;
-    let digests = tx_data.txid_digests();
+    let digests = tx_data.txid_digests(&()).map_err(TxIdError::Digest)?;
     Ok(
         to_txid(tx_data.version(), tx_data.consensus_branch_id(), &digests)
             .expect("version compatibility checked by Pczt::into_effects"),

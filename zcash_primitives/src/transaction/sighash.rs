@@ -9,6 +9,7 @@ use super::{
     sighash_v5::{TransparentInputsDigests, v5_signature_hash},
     sighash_v6::v6_signature_hash,
     txid::TxIdDigester,
+    zip248::{BundleDigestProvider, V7DigestError},
 };
 #[cfg(feature = "sapling")]
 use ::sapling::bundle::GrothProofBytes;
@@ -65,14 +66,19 @@ where
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 {
     /// Computes the digests for `tx`.
-    pub fn new(tx: TransactionData<A>) -> Self {
+    ///
+    /// Returns an error if `provider` cannot resolve an unrecognized bundle's digest.
+    pub fn new(
+        tx: TransactionData<A>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self, V7DigestError> {
         let tx_digests = match tx.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 TxDigests::Zip143(zip143_digests(&tx))
             }
-            _ => TxDigests::Zip244(tx.digest(TxIdDigester)),
+            _ => TxDigests::Zip244(tx.digest(TxIdDigester, provider)?),
         };
-        Self::from_tx_digests(tx, tx_digests)
+        Ok(Self::from_tx_digests(tx, tx_digests))
     }
 }
 
@@ -83,14 +89,19 @@ where
     A: Authorization<TransparentAuth = TA>,
 {
     /// Computes the digests for `tx` without Sapling domain types.
-    pub fn new(tx: TransactionData<A>) -> Self {
+    ///
+    /// Returns an error if `provider` cannot resolve an unrecognized bundle's digest.
+    pub fn new(
+        tx: TransactionData<A>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self, V7DigestError> {
         let tx_digests = match tx.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 TxDigests::Zip143(zip143_digests(&tx))
             }
-            _ => TxDigests::Zip244(tx.digest(TxIdDigester)),
+            _ => TxDigests::Zip244(tx.digest(TxIdDigester, provider)?),
         };
-        Self::from_tx_digests(tx, tx_digests)
+        Ok(Self::from_tx_digests(tx, tx_digests))
     }
 }
 
@@ -106,17 +117,24 @@ where
     /// not commit to them.
     ///
     /// Returns [`Zip244Error::NotZip244`] if `tx` is of version 4 or earlier.
+    /// Returns [`Zip244Error::Digest`] if a bundle digest cannot be resolved.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244
     /// [ZIP 229]: https://zips.z.cash/zip-0229#transactionidentifiersauthdigestsandsignaturedigests
     /// [ZIP 248]: https://zips.z.cash/zip-0248
-    pub fn new_zip244(tx: TransactionData<A>) -> Result<Self, Zip244Error<A>> {
+    pub fn new_zip244(
+        tx: TransactionData<A>,
+        provider: &impl BundleDigestProvider,
+    ) -> Result<Self, Zip244Error<A>> {
         match tx.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 Err(Zip244Error::NotZip244(Box::new(tx)))
             }
             _ => {
-                let tx_digests = TxDigests::Zip244(tx.digest(TxIdDigester));
+                let tx_digests = TxDigests::Zip244(
+                    tx.digest(TxIdDigester, provider)
+                        .map_err(Zip244Error::Digest)?,
+                );
                 Ok(Self::from_tx_digests(tx, tx_digests))
             }
         }
@@ -186,6 +204,8 @@ where
 /// An error returned by [`PrecomputedSighashData::new_zip244`].
 #[non_exhaustive]
 pub enum Zip244Error<A: Authorization> {
+    /// A bundle digest could not be resolved.
+    Digest(V7DigestError),
     /// The transaction is of version 4 or earlier, so its signature hashes are not
     /// [ZIP 244] or [ZIP 229] signature hashes. This holds the transaction, unchanged.
     ///
@@ -197,6 +217,7 @@ pub enum Zip244Error<A: Authorization> {
 impl<A: Authorization> fmt::Debug for Zip244Error<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Zip244Error::Digest(error) => f.debug_tuple("Digest").field(error).finish(),
             Zip244Error::NotZip244(tx) => f
                 .debug_struct("NotZip244")
                 .field("version", &tx.version)
@@ -208,6 +229,9 @@ impl<A: Authorization> fmt::Debug for Zip244Error<A> {
 impl<A: Authorization> fmt::Display for Zip244Error<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Zip244Error::Digest(error) => {
+                write!(f, "could not compute transaction digests: {error}")
+            }
             Zip244Error::NotZip244(tx) => write!(
                 f,
                 "transaction version {:?} does not use ZIP 244 or ZIP 229 signature hashes",

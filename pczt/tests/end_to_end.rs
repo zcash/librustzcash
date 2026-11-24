@@ -240,7 +240,7 @@ fn transparent_to_orchard() {
 
     // Grab the transaction's effects here, as it's easier.
     let tx_effects =
-        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap()).unwrap();
+        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap(), &()).unwrap();
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt)
@@ -421,7 +421,7 @@ fn transparent_p2sh_multisig_to_orchard() {
 
     // Grab the transaction's effects here, as it's easier.
     let tx_effects =
-        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap()).unwrap();
+        PrecomputedSighashData::new_zip244(pczt.clone().into_effects().unwrap(), &()).unwrap();
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt)
@@ -1673,7 +1673,7 @@ fn assert_shielded_sighash_is_txid(pczt: Pczt) {
     let txid = to_txid(
         effects.version(),
         effects.consensus_branch_id(),
-        &effects.txid_digests(),
+        &effects.txid_digests(&()).unwrap(),
     )
     .expect("a PCZT's effects are a v5 or later transaction");
     assert_eq!(&sighash, txid.as_ref());

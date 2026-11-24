@@ -576,9 +576,15 @@ fn typed_read_rejects_disabled_orchard_bundle() {
 
 #[cfg(zcash_unstable = "nu8")]
 mod v7 {
+    use alloc::collections::BTreeMap;
+
     use proptest::prelude::*;
 
     use super::*;
+    use crate::transaction::{
+        Authorized, Transaction, TransactionData,
+        zip248::{SuppliedBundleDigests, V7DigestError},
+    };
 
     fn v7_transparent() -> TransparentBundleBytes {
         let effects = TransparentEffectsBytes::from_parts(
@@ -1070,6 +1076,212 @@ mod v7 {
             )
             .unwrap(),
         )
+    }
+
+    fn retained_constructor(
+        effects: BTreeMap<BundleType, V7EffectBundleBytes>,
+        auth: BTreeMap<BundleType, V7AuthBundleBytes>,
+        coinbase: Option<zip248::CoinbaseBundle>,
+    ) -> io::Result<TransactionData<Authorized>> {
+        TransactionData::from_parts_with_value_pool_deltas(
+            TxVersion::V7,
+            BranchId::Nu8,
+            0,
+            BlockHeight::from(100u32),
+            zip248::ValuePoolDeltas::empty(),
+            None,
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            #[cfg(feature = "orchard")]
+            None,
+            coinbase,
+            effects,
+            auth,
+        )
+    }
+
+    #[test]
+    fn retained_v7_auth_only_coinbase_preserves_typed_effect() {
+        let coinbase = v7_coinbase();
+        let auth = opaque_auth(BundleType::COINBASE, vec![0x00, 0xAA, 0xFF]);
+        let bytes = v7_tx(v7_body_with_auth(
+            vec![],
+            vec![V7EffectBundleBytes::Coinbase(coinbase.clone())],
+            vec![auth.clone()],
+        ));
+        let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+        assert_eq!(
+            data.coinbase_bundle(),
+            Some(&coinbase.to_coinbase_bundle().unwrap())
+        );
+        assert!(data.uninterpreted_effect_bundles().is_empty());
+        assert_eq!(
+            data.uninterpreted_auth_bundles(),
+            &BTreeMap::from([(BundleType::COINBASE, auth.clone())]),
+        );
+        assert_eq!(
+            data.clone().freeze().unwrap_err().kind(),
+            io::ErrorKind::InvalidInput,
+        );
+        let mut wire = Vec::new();
+        bytes.write(&mut wire).unwrap();
+        let parsed = Transaction::read(&wire[..], BranchId::Nu8).unwrap();
+        assert_eq!(parsed.txid(), bytes.v7_txid(&()).unwrap());
+        let key = auth.digest_key();
+        assert_eq!(
+            parsed.auth_commitment(&()),
+            Err(V7DigestError::MissingAuthDigest { key }),
+        );
+        let mut provider = SuppliedBundleDigests::new();
+        provider
+            .insert_auth(
+                key,
+                blake2b_simd::Params::new().hash_length(32).hash(&[0xAA]),
+            )
+            .unwrap();
+        assert_eq!(
+            parsed.auth_commitment(&provider).unwrap(),
+            bytes.v7_auth_commitment(&provider).unwrap(),
+        );
+        let mut output = Vec::new();
+        assert!(parsed.write(&mut output).is_err());
+        assert!(output.is_empty());
+        assert_eq!(TransactionBytes::read(&wire[..]).unwrap(), bytes);
+        #[cfg(all(feature = "sapling", feature = "orchard"))]
+        assert_eq!(
+            data.check_v7_consensus_rules(),
+            Err(crate::transaction::V7ConsensusError::UnsupportedBundles),
+        );
+    }
+
+    #[test]
+    fn retained_v7_constructor_accepts_typed_coinbase_with_retained_auth() {
+        let coinbase = v7_coinbase().to_coinbase_bundle().unwrap();
+        let auth = opaque_auth(BundleType::COINBASE, vec![0xAA]);
+        let data = retained_constructor(
+            BTreeMap::new(),
+            BTreeMap::from([(BundleType::COINBASE, auth.clone())]),
+            Some(coinbase.clone()),
+        )
+        .unwrap();
+        assert_eq!(data.coinbase_bundle(), Some(&coinbase));
+        assert!(data.uninterpreted_effect_bundles().is_empty());
+        assert_eq!(
+            data.uninterpreted_auth_bundles(),
+            &BTreeMap::from([(BundleType::COINBASE, auth)]),
+        );
+    }
+
+    #[test]
+    fn retained_v7_constructor_rejects_auth_without_any_matching_effect() {
+        for bundle_type in [BundleType::COINBASE, BundleType::from_u64(99)] {
+            let auth = opaque_auth(bundle_type, vec![0xAA]);
+            assert_eq!(
+                retained_constructor(BTreeMap::new(), BTreeMap::from([(bundle_type, auth)]), None,)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+            );
+        }
+    }
+
+    #[test]
+    fn retained_v7_constructor_rejects_recognized_effect_with_opaque_auth() {
+        let (effects, _) = split_transparent(v7_transparent());
+        assert_eq!(
+            retained_constructor(
+                BTreeMap::from([(BundleType::TRANSPARENT, effects)]),
+                BTreeMap::from([(
+                    BundleType::TRANSPARENT,
+                    opaque_auth(BundleType::TRANSPARENT, vec![0xAA]),
+                )]),
+                None,
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidInput,
+        );
+    }
+
+    #[test]
+    fn retained_v7_constructor_rejects_recognized_pair_count_mismatch() {
+        let (effects, _) = split_transparent(v7_transparent());
+        let auth = V7AuthBundleBytes::Transparent(TransparentAuthBytes::from_parts(vec![]));
+        assert_eq!(
+            retained_constructor(
+                BTreeMap::from([(BundleType::TRANSPARENT, effects)]),
+                BTreeMap::from([(BundleType::TRANSPARENT, auth)]),
+                None,
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidInput,
+        );
+    }
+
+    #[test]
+    fn retained_v7_supported_payload_domain_errors_are_not_retained() {
+        let bytes = v7_tx(v7_body(
+            vec![],
+            vec![V7EffectBundleBytes::Transparent(
+                TransparentEffectsBytes::from_parts(vec![], vec![output(-1, &[0x51])]),
+            )],
+        ));
+        assert_eq!(
+            TransactionData::from_bytes(bytes, BranchId::Nu8)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData,
+        );
+    }
+
+    #[cfg(any(not(feature = "sapling"), not(feature = "orchard")))]
+    #[test]
+    fn retained_v7_disabled_protocol_entries_preserve_exact_bytes() {
+        let fixtures = [
+            #[cfg(not(feature = "sapling"))]
+            (
+                V7EffectBundleBytes::Sapling(v7_sapling()),
+                V7AuthBundleBytes::Sapling(v7_sapling_auth()),
+            ),
+            #[cfg(not(feature = "orchard"))]
+            (
+                V7EffectBundleBytes::Orchard(v7_orchard()),
+                V7AuthBundleBytes::Orchard(v7_orchard_auth()),
+            ),
+            #[cfg(not(feature = "orchard"))]
+            (
+                V7EffectBundleBytes::Ironwood(v7_orchard()),
+                V7AuthBundleBytes::Ironwood(v7_orchard_auth()),
+            ),
+        ];
+        for (effect, auth) in fixtures {
+            let bundle_type = effect.bundle_type();
+            let bytes = v7_tx(v7_body_with_auth(
+                vec![],
+                vec![effect.clone()],
+                vec![auth.clone()],
+            ));
+            let data = TransactionData::from_bytes(bytes.clone(), BranchId::Nu8).unwrap();
+            assert_eq!(
+                data.uninterpreted_effect_bundles(),
+                &BTreeMap::from([(bundle_type, effect)]),
+            );
+            assert_eq!(
+                data.uninterpreted_auth_bundles(),
+                &BTreeMap::from([(bundle_type, auth)]),
+            );
+            assert_eq!(
+                data.freeze().unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+            );
+            let mut wire = Vec::new();
+            bytes.write(&mut wire).unwrap();
+            assert_eq!(TransactionBytes::read(&wire[..]).unwrap(), bytes);
+        }
     }
 
     #[test]

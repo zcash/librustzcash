@@ -210,7 +210,7 @@ pub fn coinbase_input(
 /// Returns `true` if `tx` is a coinbase transaction.
 ///
 /// A version 7 transaction is a coinbase transaction if and only if it has a
-/// coinbase bundle, which replaces the identified input below. An earlier
+/// coinbase-type effecting entry, including an uninterpreted variant. An earlier
 /// transaction is a coinbase transaction if it has a transparent bundle with
 /// exactly one input, and that input's `prevout` is [`OutPoint::NULL`]. The
 /// consensus rules place further requirements on the shielded parts of a
@@ -218,7 +218,12 @@ pub fn coinbase_input(
 pub fn is_coinbase<A: Authorization>(tx: &TransactionData<A>) -> bool {
     match tx.version() {
         #[cfg(zcash_unstable = "nu8")]
-        TxVersion::V7 => tx.coinbase_bundle().is_some(),
+        TxVersion::V7 => {
+            tx.coinbase_bundle().is_some()
+                || tx
+                    .uninterpreted_effect_bundles()
+                    .contains_key(&super::zip248::BundleType::COINBASE)
+        }
         _ => tx
             .transparent_bundle()
             .is_some_and(transparent_bundle_is_coinbase),
@@ -489,7 +494,12 @@ mod tests {
             #[cfg(feature = "orchard")]
             None,
             coinbase_bundle,
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
+            #[cfg(zcash_unstable = "nu8")]
+            Default::default(),
         )
+        .unwrap()
     }
 
     /// A v7 transaction is a coinbase transaction exactly when it has a coinbase

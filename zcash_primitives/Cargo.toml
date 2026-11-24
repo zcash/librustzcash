@@ -175,6 +175,11 @@ harness = false
 # Needs `sapling::prover::mock`, which sapling gates behind its `circuit` feature.
 required-features = ["circuits"]
 
+[[bench]]
+name = "transaction_codec"
+harness = false
+required-features = ["sapling", "orchard", "test-dependencies"]
+
 [badges]
 maintenance = { status = "actively-developed" }
 
