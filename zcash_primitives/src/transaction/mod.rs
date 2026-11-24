@@ -351,6 +351,7 @@ impl memuse::DynamicUsage for Transaction {
         self.unshielded_dynamic_usage()
             + self.sapling_bundle.dynamic_usage()
             + self.orchard_bundle.dynamic_usage()
+            + self.ironwood_bundle.dynamic_usage()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
@@ -360,6 +361,7 @@ impl memuse::DynamicUsage for Transaction {
         for (bundle_lower, bundle_upper) in [
             self.sapling_bundle.dynamic_usage_bounds(),
             self.orchard_bundle.dynamic_usage_bounds(),
+            self.ironwood_bundle.dynamic_usage_bounds(),
         ] {
             lower_bound += bundle_lower;
             upper_bound = upper_bound
