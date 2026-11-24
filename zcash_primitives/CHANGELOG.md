@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- With the `std` feature, `transaction::Transaction` implements
+  `memuse::DynamicUsage` to report its retained heap storage.
+
 ## [0.31.1] - 2026-11-12
 
 ### Fixed
