@@ -9,34 +9,35 @@ use super::{
 };
 
 #[cfg(feature = "local-consensus")]
-use super::{
-    PowTargetSpacingChange, pow_target_spacing_with, spacing_changes_are_in_activation_order,
-    target_time_between_with,
+use {
+    super::{
+        PowTargetSpacingChange, pow_target_spacing_with, spacing_changes_are_in_activation_order,
+        target_time_between_with,
+    },
+    crate::local_consensus::LocalNetwork,
+    alloc::vec::Vec,
 };
+
+/// A local network that takes the given activation steps, leaving out each step whose height is
+/// `None`. The heights must be in activation order, as [`in_activation_order`] checks.
+#[cfg(feature = "local-consensus")]
+fn network_taking_steps(steps: &[(NetworkUpgrade, Option<BlockHeight>)]) -> LocalNetwork {
+    let steps: Vec<_> = steps
+        .iter()
+        .filter_map(|(upgrade, height)| Some(*upgrade).zip(*height))
+        .collect();
+    LocalNetwork::new(&steps).expect("the heights are in activation order")
+}
 
 /// A local network on which every upgrade through Blossom activates at `blossom`, and every later
 /// upgrade through NU7 activates at `nu7`. The heights must be in activation order, as
 /// [`in_activation_order`] checks.
 #[cfg(feature = "local-consensus")]
-fn spacing_test_network(
-    blossom: Option<BlockHeight>,
-    nu7: Option<BlockHeight>,
-) -> crate::local_consensus::LocalNetwork {
-    crate::local_consensus::LocalNetwork {
-        overwinter: blossom,
-        sapling: blossom,
-        blossom,
-        heartwood: nu7,
-        canopy: nu7,
-        nu5: nu7,
-        nu6: nu7,
-        nu6_1: nu7,
-        nu6_2: nu7,
-        nu6_3: nu7,
-        nu7,
-        #[cfg(zcash_unstable = "nutachyon")]
-        nu_tachyon: None,
-    }
+fn spacing_test_network(blossom: Option<BlockHeight>, nu7: Option<BlockHeight>) -> LocalNetwork {
+    network_taking_steps(&[
+        (NetworkUpgrade::Blossom, blossom),
+        (NetworkUpgrade::Nu7, nu7),
+    ])
 }
 
 /// Returns whether `activations`, the activation heights of successive network upgrades, are in
@@ -312,17 +313,11 @@ fn a_further_spacing_change_extends_the_per_height_spacing() {
                 .into_iter()
                 .filter(|third| in_activation_order(&[blossom, second, *third]))
             {
-                // Every upgrade after Blossom through `SECOND_UPGRADE` activates at `second`.
-                let network = crate::local_consensus::LocalNetwork {
-                    heartwood: second,
-                    canopy: second,
-                    nu5: second,
-                    nu6: second,
-                    nu6_1: second,
-                    nu6_2: second,
-                    nu6_3: second,
-                    ..spacing_test_network(blossom, third)
-                };
+                let network = network_taking_steps(&[
+                    (NetworkUpgrade::Blossom, blossom),
+                    (SECOND_UPGRADE, second),
+                    (NetworkUpgrade::Nu7, third),
+                ]);
                 let specified_spacing = |height: BlockHeight| {
                     let active = |upgrade| network.is_nu_active(upgrade, height);
                     if !active(NetworkUpgrade::Blossom) {

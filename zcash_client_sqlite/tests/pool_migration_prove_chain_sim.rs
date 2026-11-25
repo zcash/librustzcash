@@ -58,7 +58,7 @@ use zcash_keys::keys::UnifiedSpendingKey;
 
 use zcash_primitives::block::BlockHash;
 use zcash_primitives::transaction::Transaction;
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade};
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
@@ -97,13 +97,9 @@ const SHARD_COMPLETION_BLOCKS: usize = 5;
 /// A network with every upgrade through NU6.3 active at [`ACTIVATION`].
 fn nu63_network() -> LocalNetwork {
     let h = BlockHeight::from_u32(ACTIVATION);
-    LocalNetwork {
-        nu6: Some(h),
-        nu6_1: Some(h),
-        nu6_2: Some(h),
-        nu6_3: Some(h),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    }
+    TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, h)
+        .expect("the activation heights are in activation order")
 }
 
 /// The store the [`WalletMigration`] adapter is handed for PLANNING and COMMITTING, holding one

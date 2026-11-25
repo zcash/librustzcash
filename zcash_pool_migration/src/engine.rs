@@ -4596,7 +4596,7 @@ pub(crate) mod tests {
     use proptest::proptest;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
-    use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
+    use zcash_protocol::{consensus::NetworkUpgrade, local_consensus::LocalNetwork, value::COIN};
 
     /// Every `MigrationStatus` variant's wire name is pinned to its literal string, and
     /// `TryFrom<&str>` recovers the variant from the name `AsRef<str>` produces for it. Pinning the
@@ -4929,21 +4929,19 @@ pub(crate) mod tests {
     /// A local network with NU6.3 active at a low height, matching the build test network, so the
     /// canonical fees and activation checks compute in planning tests.
     pub(crate) fn test_net() -> LocalNetwork {
-        LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(2)),
-            blossom: Some(BlockHeight::from_u32(3)),
-            heartwood: Some(BlockHeight::from_u32(4)),
-            canopy: Some(BlockHeight::from_u32(5)),
-            nu5: Some(BlockHeight::from_u32(6)),
-            nu6: Some(BlockHeight::from_u32(7)),
-            nu6_1: Some(BlockHeight::from_u32(8)),
-            nu6_2: Some(BlockHeight::from_u32(9)),
-            nu6_3: Some(BlockHeight::from_u32(10)),
-            nu7: None,
-            #[cfg(zcash_unstable = "nutachyon")]
-            nu_tachyon: None,
-        }
+        LocalNetwork::new(&[
+            (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+            (NetworkUpgrade::Sapling, BlockHeight::from_u32(2)),
+            (NetworkUpgrade::Blossom, BlockHeight::from_u32(3)),
+            (NetworkUpgrade::Heartwood, BlockHeight::from_u32(4)),
+            (NetworkUpgrade::Canopy, BlockHeight::from_u32(5)),
+            (NetworkUpgrade::Nu5, BlockHeight::from_u32(6)),
+            (NetworkUpgrade::Nu6, BlockHeight::from_u32(7)),
+            (NetworkUpgrade::Nu6_1, BlockHeight::from_u32(8)),
+            (NetworkUpgrade::Nu6_2, BlockHeight::from_u32(9)),
+            (NetworkUpgrade::Nu6_3, BlockHeight::from_u32(10)),
+        ])
+        .expect("the activation heights are in activation order")
     }
 
     /// A minimal in-memory backend: a fixed set of note values and a chain tip.

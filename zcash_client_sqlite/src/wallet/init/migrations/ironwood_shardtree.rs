@@ -257,7 +257,10 @@ mod tests {
     use rusqlite::Connection;
     use schemerz_rusqlite::RusqliteMigration;
     use zcash_client_backend::data_api::scanning::ScanPriority;
-    use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork};
+    use zcash_protocol::{
+        consensus::{BlockHeight, NetworkUpgrade},
+        local_consensus::LocalNetwork,
+    };
 
     use crate::wallet::init::migrations::tests::test_migrate;
     use crate::wallet::scanning::priority_code;
@@ -309,21 +312,11 @@ mod tests {
 
         let tx = conn.transaction().unwrap();
         super::Migration {
-            params: LocalNetwork {
-                overwinter: Some(BlockHeight::from_u32(1)),
-                sapling: Some(activation),
-                blossom: Some(activation),
-                heartwood: Some(activation),
-                canopy: Some(activation),
-                nu5: Some(activation),
-                nu6: None,
-                nu6_1: None,
-                nu6_2: None,
-                nu6_3: Some(activation),
-                nu7: None,
-                #[cfg(zcash_unstable = "nutachyon")]
-                nu_tachyon: None,
-            },
+            params: LocalNetwork::new(&[
+                (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+                (NetworkUpgrade::Nu6_3, activation),
+            ])
+            .expect("the activation heights are in activation order"),
         }
         .up(&tx)
         .unwrap();

@@ -1846,6 +1846,7 @@ mod tests {
     /// the target spacing after Blossom.
     #[cfg(feature = "local-consensus")]
     mod local_network_spacing {
+        use alloc::vec::Vec;
         use core::{num::NonZeroU32, time::Duration};
 
         use proptest::prelude::*;
@@ -1918,23 +1919,15 @@ mod tests {
         /// `second`. The heights must be in activation order: each that is `Some` follows one
         /// that is `Some` and no greater.
         fn network(blossom: Option<u32>, first: Option<u32>, second: Option<u32>) -> LocalNetwork {
-            let blossom = blossom.map(BlockHeight::from_u32);
-            let first = first.map(BlockHeight::from_u32);
-            LocalNetwork {
-                overwinter: blossom,
-                sapling: blossom,
-                blossom,
-                heartwood: first,
-                canopy: first,
-                nu5: first,
-                nu6: first,
-                nu6_1: first,
-                nu6_2: first,
-                nu6_3: first,
-                nu7: second.map(BlockHeight::from_u32),
-                #[cfg(zcash_unstable = "nutachyon")]
-                nu_tachyon: None,
-            }
+            let steps: Vec<_> = [
+                (NetworkUpgrade::Blossom, blossom),
+                (FIRST_UPGRADE, first),
+                (SECOND_UPGRADE, second),
+            ]
+            .into_iter()
+            .filter_map(|(upgrade, height)| Some(upgrade).zip(height.map(BlockHeight::from_u32)))
+            .collect();
+            LocalNetwork::new(&steps).expect("the heights are in activation order")
         }
 
         /// The spacing under [`CHANGES`] of a chain on which the first change takes effect at

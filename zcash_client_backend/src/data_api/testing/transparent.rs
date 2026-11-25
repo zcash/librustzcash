@@ -26,7 +26,7 @@ use zcash_primitives::{
     },
 };
 use zcash_protocol::{
-    consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
+    consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     value::Zatoshis,
 };
@@ -45,7 +45,6 @@ use {
     secp256k1::SecretKey,
     secrecy::Secret,
     std::collections::HashMap,
-    zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     zcash_script::{descriptor::sh, pattern::check_multisig, script},
 };
 
@@ -268,18 +267,16 @@ where
     const NU7_ACTIVATION_OFFSET: u32 = 10;
 
     let sapling_activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
-        .sapling
+        .activation_height(NetworkUpgrade::Sapling)
         .expect("the default test network activates Sapling");
     let nu7_activation = sapling_activation + NU7_ACTIVATION_OFFSET;
     let mut st = TestBuilder::new()
-        .with_network(LocalNetwork {
-            nu6: Some(sapling_activation),
-            nu6_1: Some(sapling_activation),
-            nu6_2: Some(sapling_activation),
-            nu6_3: Some(sapling_activation),
-            nu7: Some(nu7_activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        })
+        .with_network(
+            TestBuilder::<(), ()>::DEFAULT_NETWORK
+                .activating_through(NetworkUpgrade::Nu6_3, sapling_activation)
+                .and_then(|network| network.activating_through(NetworkUpgrade::Nu7, nu7_activation))
+                .expect("the activation heights are in activation order"),
+        )
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();

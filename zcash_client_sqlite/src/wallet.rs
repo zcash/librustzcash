@@ -6812,16 +6812,12 @@ mod tests {
 
         // A network on which every upgrade through NU7 activates at Sapling activation.
         let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
-            .sapling
+            .activation_height(NetworkUpgrade::Sapling)
             .expect("the default test network activates Sapling");
-        let network = LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            nu7: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .and_then(|network| network.activating_through(NetworkUpgrade::Nu7, activation))
+            .expect("the activation heights are in activation order");
         let mut st = TestBuilder::new()
             .with_network(network)
             .with_data_store_factory(TestDbFactory::default())

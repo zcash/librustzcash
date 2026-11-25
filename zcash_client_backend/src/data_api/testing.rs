@@ -1879,20 +1879,13 @@ impl TestBuilder<(), ()> {
     ///
     /// This is a fake network where Sapling through NU5 activate at the same height. We
     /// pick height 100,000 to be large enough to handle any hard-coded test offsets.
-    pub const DEFAULT_NETWORK: LocalNetwork = LocalNetwork {
-        overwinter: Some(BlockHeight::from_u32(1)),
-        sapling: Some(BlockHeight::from_u32(100_000)),
-        blossom: Some(BlockHeight::from_u32(100_000)),
-        heartwood: Some(BlockHeight::from_u32(100_000)),
-        canopy: Some(BlockHeight::from_u32(100_000)),
-        nu5: Some(BlockHeight::from_u32(100_000)),
-        nu6: None,
-        nu6_1: None,
-        nu6_2: None,
-        nu6_3: None,
-        nu7: None,
-        #[cfg(zcash_unstable = "nutachyon")]
-        nu_tachyon: None,
+    pub const DEFAULT_NETWORK: LocalNetwork = match LocalNetwork::new(&[
+        (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+        (NetworkUpgrade::Nu5, BlockHeight::from_u32(100_000)),
+    ]) {
+        Ok(network) => network,
+        // Evaluated at compile time, so this cannot be reached at run time.
+        Err(_) => panic!("the default network's upgrades activate in order"),
     };
 
     /// Constructs a new test environment builder.

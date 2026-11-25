@@ -2090,40 +2090,37 @@ mod tests {
 
     #[cfg(feature = "circuits")]
     fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-        zcash_protocol::local_consensus::LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(2)),
-            blossom: Some(BlockHeight::from_u32(3)),
-            heartwood: Some(BlockHeight::from_u32(4)),
-            canopy: Some(BlockHeight::from_u32(5)),
-            nu5: Some(BlockHeight::from_u32(6)),
-            nu6: Some(BlockHeight::from_u32(7)),
-            nu6_1: Some(BlockHeight::from_u32(8)),
-            nu6_2: Some(BlockHeight::from_u32(9)),
-            nu6_3: Some(BlockHeight::from_u32(10)),
-            nu7: None,
-            #[cfg(zcash_unstable = "nutachyon")]
-            nu_tachyon: None,
-        }
+        zcash_protocol::local_consensus::LocalNetwork::new(&[
+            (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+            (NetworkUpgrade::Sapling, BlockHeight::from_u32(2)),
+            (NetworkUpgrade::Blossom, BlockHeight::from_u32(3)),
+            (NetworkUpgrade::Heartwood, BlockHeight::from_u32(4)),
+            (NetworkUpgrade::Canopy, BlockHeight::from_u32(5)),
+            (NetworkUpgrade::Nu5, BlockHeight::from_u32(6)),
+            (NetworkUpgrade::Nu6, BlockHeight::from_u32(7)),
+            (NetworkUpgrade::Nu6_1, BlockHeight::from_u32(8)),
+            (NetworkUpgrade::Nu6_2, BlockHeight::from_u32(9)),
+            (NetworkUpgrade::Nu6_3, BlockHeight::from_u32(10)),
+        ])
+        .expect("the activation heights are in activation order")
     }
 
     #[cfg(feature = "circuits")]
     fn nu7_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-        zcash_protocol::local_consensus::LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(2)),
-            blossom: Some(BlockHeight::from_u32(3)),
-            heartwood: Some(BlockHeight::from_u32(4)),
-            canopy: Some(BlockHeight::from_u32(5)),
-            nu5: Some(BlockHeight::from_u32(6)),
-            nu6: Some(BlockHeight::from_u32(7)),
-            nu6_1: Some(BlockHeight::from_u32(8)),
-            nu6_2: Some(BlockHeight::from_u32(9)),
-            nu6_3: Some(BlockHeight::from_u32(10)),
-            nu7: Some(BlockHeight::from_u32(11)),
-            #[cfg(zcash_unstable = "nutachyon")]
-            nu_tachyon: None,
-        }
+        zcash_protocol::local_consensus::LocalNetwork::new(&[
+            (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+            (NetworkUpgrade::Sapling, BlockHeight::from_u32(2)),
+            (NetworkUpgrade::Blossom, BlockHeight::from_u32(3)),
+            (NetworkUpgrade::Heartwood, BlockHeight::from_u32(4)),
+            (NetworkUpgrade::Canopy, BlockHeight::from_u32(5)),
+            (NetworkUpgrade::Nu5, BlockHeight::from_u32(6)),
+            (NetworkUpgrade::Nu6, BlockHeight::from_u32(7)),
+            (NetworkUpgrade::Nu6_1, BlockHeight::from_u32(8)),
+            (NetworkUpgrade::Nu6_2, BlockHeight::from_u32(9)),
+            (NetworkUpgrade::Nu6_3, BlockHeight::from_u32(10)),
+            (NetworkUpgrade::Nu7, BlockHeight::from_u32(11)),
+        ])
+        .expect("the activation heights are in activation order")
     }
 
     #[cfg(feature = "circuits")]
