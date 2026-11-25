@@ -48,6 +48,8 @@ use zcash_primitives::transaction::fees::{
     transparent::{InputSize, InputView, p2sh_input_serialized_len},
     zip317,
 };
+#[cfg(not(feature = "spend-index"))]
+use zcash_protocol::consensus::{BranchId, default_tx_expiry_delta};
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
@@ -59,11 +61,6 @@ use zip32::Scope;
 use {
     bip32::{PublicKey, PublicKeyBytes},
     zcash_script::script::Code,
-};
-#[cfg(not(feature = "spend-index"))]
-use {
-    zcash_primitives::transaction::builder::default_tx_expiry_delta,
-    zcash_protocol::consensus::BranchId,
 };
 
 use super::{

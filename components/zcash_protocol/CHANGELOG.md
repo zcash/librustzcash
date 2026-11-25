@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::{default_tx_expiry_delta,
+  OVERWINTER_DEFAULT_TX_EXPIRY_DELTA, BLOSSOM_DEFAULT_TX_EXPIRY_DELTA,
+  NU7_DEFAULT_TX_EXPIRY_DELTA}`
+
 ### Changed
 - `zcash_protocol::TxId::from_hex` now returns
   `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
