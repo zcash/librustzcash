@@ -459,12 +459,23 @@ impl NetworkConstants for NetworkType {
 }
 
 /// Zcash consensus parameters.
+///
+/// # Activation order
+///
+/// Network upgrades activate in the order of [`UPGRADES_IN_ORDER`]. An implementation MUST
+/// respect that order: if a network upgrade has an activation height, then every earlier
+/// upgrade has an activation height that is no greater. Two upgrades may share an activation
+/// height. Every function that takes consensus parameters assumes this order, and its result is
+/// unspecified for an implementation that violates it.
 pub trait Parameters: Clone {
     /// Returns the type of network configured by this set of consensus parameters.
     fn network_type(&self) -> NetworkType;
 
     /// Returns the activation height for a particular network upgrade,
     /// if an activation height has been set.
+    ///
+    /// The heights returned for the network upgrades MUST respect the
+    /// [activation order](Parameters#activation-order).
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight>;
 
     /// Determines whether the specified network upgrade is active as of the
@@ -733,6 +744,9 @@ impl NetworkUpgrade {
 }
 
 /// The network upgrades on the Zcash chain, in order of activation.
+///
+/// Every network activates its upgrades in this order, as the
+/// [activation order](Parameters#activation-order) of [`Parameters`] requires.
 pub const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Overwinter,
     NetworkUpgrade::Sapling,
@@ -785,8 +799,7 @@ pub const POST_NU7_POW_TARGET_SPACING: Duration = Duration::from_secs(25);
 ///
 /// This is [`PRE_BLOSSOM_POW_TARGET_SPACING`] if Blossom is not active at `height`,
 /// [`POST_BLOSSOM_POW_TARGET_SPACING`] if Blossom is active and NU7 is not, and
-/// [`POST_NU7_POW_TARGET_SPACING`] if both are active. A network on which NU7 is active and
-/// Blossom is not therefore has the pre-Blossom spacing.
+/// [`POST_NU7_POW_TARGET_SPACING`] if NU7 is active.
 ///
 /// [ZIP 208]: https://zips.z.cash/zip-0208
 /// [ZIP 218]: https://zips.z.cash/zip-0218

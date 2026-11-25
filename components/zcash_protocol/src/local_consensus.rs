@@ -2,9 +2,13 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 
 /// a `LocalNetwork` setup should define the activation heights
 /// of network upgrades. `None` is considered as "not activated"
-/// These heights are not validated. Callers shall initialized
+/// These heights are not validated. Callers shall initialize
 /// them according to the settings used on the Full Nodes they
-/// are connecting to.
+/// are connecting to, and MUST set them in the
+/// [activation order](Parameters#activation-order) that
+/// [`Parameters`] requires: a network upgrade may have an
+/// activation height only if every earlier upgrade has one that
+/// is no greater.
 ///
 /// Example:
 ///     Regtest Zcashd using the following `zcash.conf`

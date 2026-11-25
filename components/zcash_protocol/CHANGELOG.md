@@ -13,6 +13,12 @@ workspace.
 ### Changed
 - `zcash_protocol::TxId::from_hex` now returns
   `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
+- `zcash_protocol::consensus::Parameters` now documents the requirement that
+  network upgrades activate in the order of
+  `zcash_protocol::consensus::UPGRADES_IN_ORDER`. The results of functions
+  that take consensus parameters are unspecified for an implementation that
+  violates it, including a `zcash_protocol::local_consensus::LocalNetwork`
+  whose activation heights are out of order.
 
 ## [0.11.0] - 2026-10-21
 

@@ -8,27 +8,41 @@ use super::{
     Parameters, TEST_NETWORK, pow_target_spacing, target_time_between,
 };
 
-/// A local network on which only Blossom and NU7 can activate, at the given heights.
+/// A local network on which every upgrade through Blossom activates at `blossom`, and every later
+/// upgrade through NU7 activates at `nu7`. The heights must be in activation order, as
+/// [`in_activation_order`] checks.
 #[cfg(feature = "local-consensus")]
 fn spacing_test_network(
     blossom: Option<BlockHeight>,
     nu7: Option<BlockHeight>,
 ) -> crate::local_consensus::LocalNetwork {
     crate::local_consensus::LocalNetwork {
-        overwinter: None,
-        sapling: None,
+        overwinter: blossom,
+        sapling: blossom,
         blossom,
-        heartwood: None,
-        canopy: None,
-        nu5: None,
-        nu6: None,
-        nu6_1: None,
-        nu6_2: None,
-        nu6_3: None,
+        heartwood: nu7,
+        canopy: nu7,
+        nu5: nu7,
+        nu6: nu7,
+        nu6_1: nu7,
+        nu6_2: nu7,
+        nu6_3: nu7,
         nu7,
         #[cfg(zcash_unstable = "nutachyon")]
         nu_tachyon: None,
     }
+}
+
+/// Returns whether `activations`, the activation heights of successive network upgrades, are in
+/// activation order: each upgrade that activates follows an upgrade that activates at a height
+/// no greater.
+#[cfg(feature = "local-consensus")]
+fn in_activation_order(activations: &[Option<BlockHeight>]) -> bool {
+    activations.windows(2).all(|pair| match (pair[0], pair[1]) {
+        (_, None) => true,
+        (Some(earlier), Some(later)) => earlier <= later,
+        (None, Some(_)) => false,
+    })
 }
 
 #[test]
@@ -198,12 +212,10 @@ fn network_without_nu7_keeps_the_post_blossom_spacing() {
 
 #[test]
 #[cfg(feature = "local-consensus")]
-fn nu7_without_blossom_keeps_the_pre_blossom_spacing() {
-    /// NU7 activates at the first block after genesis, as on a typical regtest network.
-    const NU7_ACTIVATION: BlockHeight = BlockHeight(1);
-    let network = spacing_test_network(None, Some(NU7_ACTIVATION));
+fn network_without_blossom_keeps_the_pre_blossom_spacing() {
+    let network = spacing_test_network(None, None);
 
-    for height in [BlockHeight(0), NU7_ACTIVATION, BlockHeight(u32::MAX)] {
+    for height in [BlockHeight(0), BlockHeight(1), BlockHeight(u32::MAX)] {
         assert_eq!(
             pow_target_spacing(&network, height),
             PRE_BLOSSOM_POW_TARGET_SPACING
@@ -218,8 +230,8 @@ fn nu7_without_blossom_keeps_the_pre_blossom_spacing() {
 #[test]
 #[cfg(feature = "local-consensus")]
 fn target_time_between_matches_the_sum_of_per_block_spacings() {
-    /// Candidate activation heights for Blossom and NU7. Pairing every candidate with every
-    /// other covers each upgrade never activating, and NU7 activating before, with, and after
+    /// Candidate activation heights for Blossom and NU7. The pairs of candidates that are in
+    /// activation order cover each upgrade never activating, and NU7 activating with and after
     /// Blossom.
     const ACTIVATIONS: [Option<BlockHeight>; 3] =
         [None, Some(BlockHeight(3)), Some(BlockHeight(6))];
@@ -228,7 +240,10 @@ fn target_time_between_matches_the_sum_of_per_block_spacings() {
     const HEIGHT_LIMIT: u32 = 10;
 
     for blossom in ACTIVATIONS {
-        for nu7 in ACTIVATIONS {
+        for nu7 in ACTIVATIONS
+            .into_iter()
+            .filter(|nu7| in_activation_order(&[blossom, *nu7]))
+        {
             let network = spacing_test_network(blossom, nu7);
             for from in (0..HEIGHT_LIMIT).map(BlockHeight) {
                 for to in (0..HEIGHT_LIMIT).map(BlockHeight) {
