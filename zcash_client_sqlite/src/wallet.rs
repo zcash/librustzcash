@@ -6473,7 +6473,10 @@ mod tests {
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::{
         block::BlockHash,
-        transaction::builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+        transaction::{
+            TransactionData, TxVersion,
+            builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+        },
     };
     use zcash_protocol::{
         TxId,
@@ -6511,10 +6514,7 @@ mod tests {
         },
         shardtree::error::ShardTreeError,
         zcash_client_backend::data_api::WalletCommitmentTrees,
-        zcash_primitives::transaction::{
-            TransactionData, TxVersion,
-            components::orchard::testing::arb_ironwood_bundle_for_version,
-        },
+        zcash_primitives::transaction::components::orchard::testing::arb_ironwood_bundle_for_version,
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
