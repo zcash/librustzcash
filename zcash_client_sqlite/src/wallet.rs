@@ -1367,7 +1367,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
     };
 
     let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-    upsert_address(
+    upsert_address_and_reconcile(
         conn,
         params,
         account.internal_id(),
@@ -1375,6 +1375,8 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         &addr,
         Some(chain_tip_height),
         true,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
     )?;
 
     Ok(Some((addr, diversifier_index)))
@@ -1792,6 +1794,53 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
         |row| row.get(0).map(AddressRef),
     )
     .map_err(SqliteClientError::from)
+}
+
+/// Records an external address and reconciles a newly added transparent receiver against stored
+/// observations.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn upsert_address_and_reconcile<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    account_id: AccountRef,
+    diversifier_index: DiversifierIndex,
+    address: &UnifiedAddress,
+    exposed_at_height: Option<BlockHeight>,
+    force_update_address: bool,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+) -> Result<AddressRef, SqliteClientError> {
+    #[cfg(feature = "transparent-inputs")]
+    let new_receiver = match address.transparent() {
+        Some(receiver) => {
+            let encoded = receiver.encode(params);
+            find_account_by_exact_address(conn, &encoded, Some(&encoded))?
+                .is_none()
+                .then_some(receiver)
+        }
+        None => None,
+    };
+
+    let address_ref = upsert_address(
+        conn,
+        params,
+        account_id,
+        diversifier_index,
+        address,
+        exposed_at_height,
+        force_update_address,
+    )?;
+
+    #[cfg(feature = "transparent-inputs")]
+    if let Some(receiver) = new_receiver {
+        transparent::reconcile_and_extend_gaps(
+            conn,
+            params,
+            gap_limits,
+            transparent::observations::ReconcileScope::Addresses(std::slice::from_ref(receiver)),
+        )?;
+    }
+
+    Ok(address_ref)
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -3948,6 +3997,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             tx_ref,
                             Some(sent_tx.target_height().into()),
                             None,
+                            #[cfg(feature = "transparent-inputs")]
+                            gap_limits,
                         )?;
                     }
                     #[cfg(feature = "orchard")]
@@ -3970,6 +4021,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             tx_ref,
                             Some(sent_tx.target_height().into()),
                             None,
+                            #[cfg(feature = "transparent-inputs")]
+                            gap_limits,
                         )?;
                     }
                 }

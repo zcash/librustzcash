@@ -685,7 +685,7 @@ pub(crate) mod tests {
             Account as _, AccountBirthday, AccountPurpose, SentTransaction, WalletWrite,
             chain::ChainState,
             scanning::{ScanPriority, ScanRange},
-            testing::{TestBuilder, TestState},
+            testing::{AddressType, TestBuilder, TestState},
             wallet::TargetHeight,
         },
         wallet::{
@@ -715,7 +715,7 @@ pub(crate) mod tests {
         value::{MAX_MONEY, Zatoshis},
     };
     use zcash_script::script;
-    use zip32::AccountId;
+    use zip32::{AccountId, DiversifierIndex};
 
     use super::{Involvement, ReconcileScope, backfill_observations, put_observations};
     use crate::{
@@ -1215,6 +1215,179 @@ pub(crate) mod tests {
         let mut expected_requests = vec![funding0.hash().to_vec(), funding1.hash().to_vec()];
         expected_requests.sort();
         assert_eq!(enhancement_queue(conn), expected_requests);
+    }
+
+    fn check_address_discovery(
+        network: LocalNetwork,
+        discover: impl FnOnce(
+            &mut TestState<BlockCache, TestDb, LocalNetwork>,
+            &UnifiedFullViewingKey,
+            DiversifierIndex,
+        ),
+    ) {
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let ufvk = st
+            .test_account()
+            .unwrap()
+            .usk()
+            .to_unified_full_viewing_key();
+        let (ua, index) = ufvk
+            .find_address(
+                DiversifierIndex::from(100u32),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap();
+        let late = *ua.transparent().unwrap();
+        let known = external_address(&ufvk, 0);
+        let payment = spending_tx_paying(
+            OutPoint::new([0x91; 32], 0),
+            &[(known, 60_000), (late, 40_000)],
+        );
+        let (height, _) = st.generate_next_block_from_tx(1, &payment);
+        st.scan_cached_blocks(height, 1);
+        zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+            &network,
+            st.wallet_mut(),
+            &payment,
+            Some(height),
+        )
+        .unwrap();
+
+        assert_eq!(
+            received_outputs(st.wallet().conn()),
+            vec![(known.encode(&network), 60_000, false)],
+        );
+        assert!(
+            all_observed_addresses(st.wallet().conn())
+                .contains(&(Involvement::Output.encode(), late.encode(&network))),
+        );
+        assert!(
+            st.wallet()
+                .conn()
+                .query_row(
+                    "SELECT raw IS NOT NULL FROM transactions WHERE txid = :txid",
+                    named_params! { ":txid": payment.txid().as_ref() },
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap(),
+        );
+
+        discover(&mut st, &ufvk, index);
+
+        let mut expected = vec![
+            (known.encode(&network), 60_000, false),
+            (late.encode(&network), 40_000, false),
+        ];
+        expected.sort();
+        assert_eq!(received_outputs(st.wallet().conn()), expected);
+        assert_eq!(spend_search_queue(st.wallet().conn()).len(), 2);
+    }
+
+    #[test]
+    fn explicit_address_generation_recognizes_stored_involvement() {
+        check_address_discovery(TestBuilder::<(), ()>::DEFAULT_NETWORK, |st, _, index| {
+            let account = st.test_account().unwrap().id();
+            for _ in 0..2 {
+                st.wallet_mut()
+                    .get_address_for_index(account, index, UnifiedAddressRequest::AllAvailableKeys)
+                    .unwrap()
+                    .unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn explicit_address_reconciliation_rolls_back_on_error() {
+        check_address_discovery(TestBuilder::<(), ()>::DEFAULT_NETWORK, |st, _, index| {
+            let account = st.test_account().unwrap().id();
+            let outputs_before = received_outputs(st.wallet().conn());
+            let searches_before = spend_search_queue(st.wallet().conn());
+            let requests_before = enhancement_queue(st.wallet().conn());
+            let result = st
+                .wallet_mut()
+                .db_mut()
+                .transactionally::<_, (), SqliteClientError>(|wdb| {
+                    wdb.get_address_for_index(
+                        account,
+                        index,
+                        UnifiedAddressRequest::AllAvailableKeys,
+                    )?;
+                    assert_eq!(received_outputs(wdb.conn.0).len(), 2);
+                    Err(SqliteClientError::ChainHeightUnknown)
+                });
+            assert_matches!(result, Err(SqliteClientError::ChainHeightUnknown));
+            assert_eq!(received_outputs(st.wallet().conn()), outputs_before);
+            assert_eq!(spend_search_queue(st.wallet().conn()), searches_before);
+            assert_eq!(enhancement_queue(st.wallet().conn()), requests_before);
+            let stored: u32 = st
+                .wallet()
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM addresses WHERE transparent_child_index = :index",
+                    named_params! { ":index": u32::try_from(index).unwrap() },
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, 0);
+
+            st.wallet_mut()
+                .get_address_for_index(account, index, UnifiedAddressRequest::AllAvailableKeys)
+                .unwrap()
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn sapling_address_discovery_recognizes_stored_involvement() {
+        check_address_discovery(TestBuilder::<(), ()>::DEFAULT_NETWORK, |st, ufvk, index| {
+            let (height, _, _) = st.generate_next_block(
+                ufvk.sapling().unwrap(),
+                AddressType::DiversifiedExternal(index),
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(height, 1);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_address_discovery_recognizes_stored_involvement() {
+        check_address_discovery(TestBuilder::<(), ()>::DEFAULT_NETWORK, |st, ufvk, index| {
+            let (height, _, _) = st.generate_next_block(
+                ufvk.orchard().unwrap(),
+                AddressType::DiversifiedExternal(index),
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(height, 1);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_address_discovery_recognizes_stored_involvement() {
+        let activation = Some(BlockHeight::from(100_000));
+        let network = LocalNetwork {
+            nu6: activation,
+            nu6_1: activation,
+            nu6_2: activation,
+            nu6_3: activation,
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+        check_address_discovery(network, |st, ufvk, index| {
+            let (height, _, _) = st.generate_next_block(
+                &zcash_client_backend::data_api::testing::IronwoodFvk(
+                    ufvk.orchard().unwrap().clone(),
+                ),
+                AddressType::DiversifiedExternal(index),
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(height, 1);
+        });
     }
 
     /// Advancing the gap limit recognizes stored involvement with each address the advance

@@ -103,7 +103,6 @@ use wallet::{
     commitment_tree::{self, put_shard_roots},
     common::{TableConstants, unspent_notes_meta},
     scanning::replace_queue_entries,
-    upsert_address,
 };
 
 #[cfg(feature = "orchard")]
@@ -2460,7 +2459,7 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
             match account.uivk().address(diversifier_index, request) {
                 Ok(address) => {
                     let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
-                    upsert_address(
+                    wallet::upsert_address_and_reconcile(
                         self.conn.borrow(),
                         &self.params,
                         account.internal_id(),
@@ -2468,6 +2467,8 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
                         &address,
                         Some(chain_tip_height.unwrap_or(account.birthday())),
                         true,
+                        #[cfg(feature = "transparent-inputs")]
+                        &self.gap_limits,
                     )?;
 
                     Ok(Some(address))
@@ -3111,6 +3112,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
                 tx_ref,
                 target_or_mined_height,
                 spent_in,
+                #[cfg(feature = "transparent-inputs")]
+                &self.gap_limits,
             )
         };
 
@@ -3157,6 +3160,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
                 tx_ref,
                 target_or_mined_height,
                 spent_in,
+                #[cfg(feature = "transparent-inputs")]
+                &self.gap_limits,
             )
         };
 
@@ -3185,6 +3190,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
                 tx_ref,
                 target_or_mined_height,
                 spent_in,
+                #[cfg(feature = "transparent-inputs")]
+                &self.gap_limits,
             )
         };
 

@@ -977,11 +977,10 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
 /// Checks the involvement index against the wallet's address book over the given scope, and
 /// extends each account's transparent address gap if that check found an address used.
 ///
-/// This is the entry point for the paths that add addresses outside the gap machinery — account
-/// creation, standalone receiver import, and the index's own backfill — for which no window of
-/// derived addresses drives the walk. [`generate_gap_addresses`] reconciles the windows it
-/// derives itself, and reaches a fixpoint, so extending every account's gap here is enough to
-/// let a discovery cascade as far as it should.
+/// This is the entry point for account creation, standalone receiver import, explicit address
+/// generation, shielded address discovery, and the index's backfill. [`generate_gap_addresses`]
+/// reconciles the windows it derives itself and reaches a fixpoint, so extending every account's
+/// gap here lets a discovery cascade as far as it should.
 pub(crate) fn reconcile_and_extend_gaps<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,

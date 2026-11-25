@@ -26,8 +26,12 @@ use zip32::Scope;
 use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
 
 use super::{
-    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
+    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr,
+    upsert_address_and_reconcile,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::GapLimits;
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
@@ -326,6 +330,7 @@ pub(crate) fn ensure_address<
     params: &P,
     output: &T,
     exposure_height: Option<BlockHeight>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Option<AddressRef>, SqliteClientError> {
     if output.recipient_key_scope() != Some(Scope::Internal) {
         let account = get_account(conn, params, output.account_id())?
@@ -345,7 +350,7 @@ pub(crate) fn ensure_address<
             .uivk()
             .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
 
-        upsert_address(
+        upsert_address_and_reconcile(
             conn,
             params,
             account.internal_id(),
@@ -353,6 +358,8 @@ pub(crate) fn ensure_address<
             &ua,
             exposure_height,
             false,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
         )
         .map(Some)
     } else {
@@ -377,9 +384,17 @@ pub(crate) fn put_received_note<
     tx_ref: TxRef,
     target_or_mined_height: Option<BlockHeight>,
     spent_in: Option<TxRef>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<AccountRef, SqliteClientError> {
     let account_id = get_account_ref(conn, output.account_id())?;
-    let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
+    let address_id = ensure_address(
+        conn,
+        params,
+        output,
+        target_or_mined_height,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+    )?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes (
             transaction_id, output_index, account_id, address_id,
