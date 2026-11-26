@@ -1254,7 +1254,12 @@ pub fn transparent_dust_threshold_follows_marginal_fee_at_target_height<DSF>(
             );
             let address_balance = st
                 .wallet()
-                .get_transparent_balances(account.id(), target_height, policy)
+                .get_transparent_balances(
+                    account.id(),
+                    target_height,
+                    policy,
+                    &st.full_spend_authority(),
+                )
                 .unwrap()
                 .get(taddr)
                 .cloned()
@@ -1275,6 +1280,7 @@ pub fn transparent_dust_threshold_follows_marginal_fee_at_target_height<DSF>(
                         policy,
                         CoinbaseFilter::AllTransparentOutputs,
                         LockFilter::Policy(&LockedInputPolicy::Exclude),
+                        &st.full_spend_authority(),
                     )
                     .unwrap()
                     .into_iter()
@@ -1294,6 +1300,7 @@ pub fn transparent_dust_threshold_follows_marginal_fee_at_target_height<DSF>(
                         usize::MAX,
                         &StandardFeeRule::Zip317,
                         LockFilter::Policy(&LockedInputPolicy::Exclude),
+                        &st.full_spend_authority(),
                     )
                     .unwrap()
                     .into_iter()

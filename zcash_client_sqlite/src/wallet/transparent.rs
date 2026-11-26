@@ -4983,19 +4983,20 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn transparent_dust_is_independent_of_spend_authority() {
-        let marginal_fee = u64::from(zip317::MARGINAL_FEE);
-        let dust = marginal_fee - 1;
-        for values in [
-            &[dust][..],
-            &[marginal_fee][..],
-            &[dust, marginal_fee, marginal_fee * 2][..],
-        ] {
+        for case in 0..3 {
             let mut st = TestBuilder::new()
                 .with_data_store_factory(TestDbFactory::default())
                 .with_account_from_sapling_activation(BlockHash([0; 32]))
                 .build();
             let account = st.test_account().unwrap().id();
             let height = st.test_account().unwrap().birthday().height() + 1000;
+            let marginal_fee = u64::from(zip317::marginal_fee(st.network(), height + 1));
+            let dust = marginal_fee - 1;
+            let values = match case {
+                0 => vec![dust],
+                1 => vec![marginal_fee],
+                _ => vec![dust, marginal_fee, marginal_fee * 2],
+            };
             st.wallet_mut().update_chain_tip(height).unwrap();
             let pubkeys = [2, 3].map(|byte| {
                 SecretKey::from_secret_bytes([byte; 32])
@@ -5008,7 +5009,7 @@ mod tests {
                     .import_standalone_transparent_pubkey(account, pubkey, SpendingKeyCustody::Held)
                     .unwrap();
                 let address = TransparentAddress::from_pubkey(&pubkey);
-                for value in values {
+                for value in &values {
                     txid_byte += 1;
                     let utxo = WalletTransparentOutput::from_parts(
                         OutPoint::new([txid_byte; 32], 0),
@@ -5027,7 +5028,7 @@ mod tests {
 
             let economic_per_key = values
                 .iter()
-                .filter(|value| **value > u64::from(zip317::MARGINAL_FEE))
+                .filter(|value| **value > marginal_fee)
                 .sum::<u64>();
             let uneconomic_per_key = values.iter().sum::<u64>() - economic_per_key;
             let key_count = u64::try_from(pubkeys.len()).unwrap();
