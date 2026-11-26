@@ -26,21 +26,6 @@ memuse::impl_no_dynamic_usage!(BlockHeight);
 /// The height of the genesis block on a network.
 pub const H0: BlockHeight = BlockHeight(0);
 
-/// The target time between blocks, in seconds (the post-Blossom target spacing).
-#[deprecated(
-    since = "0.11.0",
-    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
-)]
-pub const SECONDS_PER_BLOCK: u32 = 75;
-
-/// The approximate number of blocks produced per hour at [`SECONDS_PER_BLOCK`].
-#[deprecated(
-    since = "0.11.0",
-    note = "The spacing depends on the height; use `pow_target_spacing` or `target_time_between`."
-)]
-#[allow(deprecated)]
-pub const BLOCKS_PER_HOUR: u32 = 3600 / SECONDS_PER_BLOCK;
-
 /// The factor by which NU7 divides the target block spacing, from 75 seconds to 25 seconds
 /// ([ZIP 218]'s `NU7PoWTargetSpacingRatio`).
 ///
@@ -236,224 +221,16 @@ pub trait NetworkConstants: private::Sealed + Clone {
     ///
     /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     fn coin_type(&self) -> u32;
-
-    /// Returns the human-readable prefix for Bech32-encoded Sapling extended spending keys
-    /// for the network to which this NetworkConstants value applies.
-    ///
-    /// Defined in [ZIP 32].
-    ///
-    /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_keys::constants::hrp_sapling_extended_spending_key` instead."
-    )]
-    fn hrp_sapling_extended_spending_key(&self) -> &'static str;
-
-    /// Returns the human-readable prefix for Bech32-encoded Sapling extended full
-    /// viewing keys for the network to which this NetworkConstants value applies.
-    ///
-    /// Defined in [ZIP 32].
-    ///
-    /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_keys::constants::hrp_sapling_extended_full_viewing_key` instead."
-    )]
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str;
-
-    /// Returns the Bech32-encoded human-readable prefix for Sapling payment addresses
-    /// for the network to which this NetworkConstants value applies.
-    ///
-    /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
-    ///
-    /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::hrp_sapling_payment_address` instead."
-    )]
-    fn hrp_sapling_payment_address(&self) -> &'static str;
-
-    /// Returns the human-readable prefix for Base58Check-encoded Sprout
-    /// payment addresses for the network to which this NetworkConstants value
-    /// applies.
-    ///
-    /// Defined in the [Zcash Protocol Specification section 5.6.3][sproutpaymentaddrencoding].
-    ///
-    /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::b58_sprout_address_prefix` instead."
-    )]
-    fn b58_sprout_address_prefix(&self) -> [u8; 2];
-
-    /// Returns the human-readable prefix for Base58Check-encoded transparent
-    /// pay-to-public-key-hash payment addresses for the network to which this NetworkConstants value
-    /// applies.
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::b58_pubkey_address_prefix` instead."
-    )]
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2];
-
-    /// Returns the human-readable prefix for Base58Check-encoded transparent secret key for the
-    /// network to which this NetworkConstants value applies.
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_keys::constants::b58_secret_key_prefix` instead."
-    )]
-    fn b58_secret_key_prefix(&self) -> [u8; 1];
-
-    /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
-    /// payment addresses for the network to which this NetworkConstants value applies.
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::b58_script_address_prefix` instead."
-    )]
-    fn b58_script_address_prefix(&self) -> [u8; 2];
-
-    /// Returns the Bech32-encoded human-readable prefix for TEX addresses, for the
-    /// network to which this `NetworkConstants` value applies.
-    ///
-    /// Defined in [ZIP 320].
-    ///
-    /// [ZIP 320]: https://zips.z.cash/zip-0320
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::hrp_tex_address` instead."
-    )]
-    fn hrp_tex_address(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded mainnet Unified Address.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::hrp_unified_address` instead."
-    )]
-    fn hrp_unified_address(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded mainnet Unified FVK.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::hrp_unified_fvk` instead."
-    )]
-    fn hrp_unified_fvk(&self) -> &'static str;
-
-    /// The HRP for a Bech32m-encoded mainnet Unified IVK.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
-    #[deprecated(
-        since = "0.11.0",
-        note = "Use `zcash_address::constants::hrp_unified_ivk` instead."
-    )]
-    fn hrp_unified_ivk(&self) -> &'static str;
 }
 
 impl private::Sealed for NetworkType {}
 
-#[allow(deprecated)]
 impl NetworkConstants for NetworkType {
     fn coin_type(&self) -> u32 {
         match self {
             NetworkType::Main => mainnet::COIN_TYPE,
             NetworkType::Test => testnet::COIN_TYPE,
             NetworkType::Regtest => regtest::COIN_TYPE,
-        }
-    }
-
-    fn hrp_sapling_extended_spending_key(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
-            NetworkType::Test => testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
-            NetworkType::Regtest => regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
-        }
-    }
-
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-            NetworkType::Test => testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-            NetworkType::Regtest => regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-        }
-    }
-
-    fn hrp_sapling_payment_address(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-            NetworkType::Test => testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-            NetworkType::Regtest => regtest::HRP_SAPLING_PAYMENT_ADDRESS,
-        }
-    }
-
-    fn b58_sprout_address_prefix(&self) -> [u8; 2] {
-        match self {
-            NetworkType::Main => mainnet::B58_SPROUT_ADDRESS_PREFIX,
-            NetworkType::Test => testnet::B58_SPROUT_ADDRESS_PREFIX,
-            NetworkType::Regtest => regtest::B58_SPROUT_ADDRESS_PREFIX,
-        }
-    }
-
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        match self {
-            NetworkType::Main => mainnet::B58_PUBKEY_ADDRESS_PREFIX,
-            NetworkType::Test => testnet::B58_PUBKEY_ADDRESS_PREFIX,
-            NetworkType::Regtest => regtest::B58_PUBKEY_ADDRESS_PREFIX,
-        }
-    }
-
-    fn b58_secret_key_prefix(&self) -> [u8; 1] {
-        match self {
-            NetworkType::Main => mainnet::B58_SECRET_KEY_PREFIX,
-            NetworkType::Test => testnet::B58_SECRET_KEY_PREFIX,
-            NetworkType::Regtest => regtest::B58_SECRET_KEY_PREFIX,
-        }
-    }
-
-    fn b58_script_address_prefix(&self) -> [u8; 2] {
-        match self {
-            NetworkType::Main => mainnet::B58_SCRIPT_ADDRESS_PREFIX,
-            NetworkType::Test => testnet::B58_SCRIPT_ADDRESS_PREFIX,
-            NetworkType::Regtest => regtest::B58_SCRIPT_ADDRESS_PREFIX,
-        }
-    }
-
-    fn hrp_tex_address(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_TEX_ADDRESS,
-            NetworkType::Test => testnet::HRP_TEX_ADDRESS,
-            NetworkType::Regtest => regtest::HRP_TEX_ADDRESS,
-        }
-    }
-
-    fn hrp_unified_address(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS,
-            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS,
-        }
-    }
-
-    fn hrp_unified_fvk(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_FVK,
-            NetworkType::Test => testnet::HRP_UNIFIED_FVK,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK,
-        }
-    }
-
-    fn hrp_unified_ivk(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_IVK,
-            NetworkType::Test => testnet::HRP_UNIFIED_IVK,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
         }
     }
 }
@@ -497,54 +274,9 @@ impl<P: Parameters> Parameters for &P {
 
 impl<P: Parameters> private::Sealed for P {}
 
-#[allow(deprecated)]
 impl<P: Parameters> NetworkConstants for P {
     fn coin_type(&self) -> u32 {
         self.network_type().coin_type()
-    }
-
-    fn hrp_sapling_extended_spending_key(&self) -> &'static str {
-        self.network_type().hrp_sapling_extended_spending_key()
-    }
-
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str {
-        self.network_type().hrp_sapling_extended_full_viewing_key()
-    }
-
-    fn hrp_sapling_payment_address(&self) -> &'static str {
-        self.network_type().hrp_sapling_payment_address()
-    }
-
-    fn b58_sprout_address_prefix(&self) -> [u8; 2] {
-        self.network_type().b58_sprout_address_prefix()
-    }
-
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        self.network_type().b58_pubkey_address_prefix()
-    }
-
-    fn b58_secret_key_prefix(&self) -> [u8; 1] {
-        self.network_type().b58_secret_key_prefix()
-    }
-
-    fn b58_script_address_prefix(&self) -> [u8; 2] {
-        self.network_type().b58_script_address_prefix()
-    }
-
-    fn hrp_tex_address(&self) -> &'static str {
-        self.network_type().hrp_tex_address()
-    }
-
-    fn hrp_unified_address(&self) -> &'static str {
-        self.network_type().hrp_unified_address()
-    }
-
-    fn hrp_unified_fvk(&self) -> &'static str {
-        self.network_type().hrp_unified_fvk()
-    }
-
-    fn hrp_unified_ivk(&self) -> &'static str {
-        self.network_type().hrp_unified_ivk()
     }
 }
 

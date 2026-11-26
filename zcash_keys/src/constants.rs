@@ -110,31 +110,3 @@ pub const fn b58_secret_key_prefix(net: NetworkType) -> [u8; 1] {
         NetworkType::Regtest => regtest::B58_SECRET_KEY_PREFIX,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use zcash_protocol::consensus::{NetworkConstants, NetworkType};
-
-    const NETWORKS: [NetworkType; 3] = [NetworkType::Main, NetworkType::Test, NetworkType::Regtest];
-
-    /// The `zcash_protocol` copies of these prefixes must not drift from the definitions
-    /// here while both exist.
-    #[test]
-    #[allow(deprecated)]
-    fn zcash_protocol_copies_match() {
-        for net in NETWORKS {
-            assert_eq!(
-                super::hrp_sapling_extended_spending_key(net),
-                net.hrp_sapling_extended_spending_key()
-            );
-            assert_eq!(
-                super::hrp_sapling_extended_full_viewing_key(net),
-                net.hrp_sapling_extended_full_viewing_key()
-            );
-            assert_eq!(
-                super::b58_secret_key_prefix(net),
-                net.b58_secret_key_prefix()
-            );
-        }
-    }
-}
