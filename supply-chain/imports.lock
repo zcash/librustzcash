@@ -1,6 +1,10 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_transparent]]
+version = "0.12.0"
+audited_as = "0.11.1"
+
 [[publisher.addchain]]
 version = "0.3.0"
 when = "2026-02-26"
