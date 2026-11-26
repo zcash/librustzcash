@@ -2707,6 +2707,19 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
     {
         let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        // Bring the gap window up to date before reserving from it. Gap maintenance otherwise
+        // runs only when an output or spend involving this key scope is recorded, so a window
+        // left unfilled (as by releases whose gap maintenance did not iterate to a fixpoint)
+        // would refuse reservations until the next such transaction.
+        wallet::transparent::generate_gap_addresses(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account_id,
+            TransparentKeyScope::EPHEMERAL,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
+        )?;
         let reserved = wallet::transparent::reserve_next_n_addresses(
             self.conn.0,
             &self.params,
@@ -2727,6 +2740,19 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
     {
         let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        // Bring the gap window up to date before reserving from it. Gap maintenance otherwise
+        // runs only when an output or spend involving this key scope is recorded, so a window
+        // left unfilled (as by releases whose gap maintenance did not iterate to a fixpoint)
+        // would refuse reservations until the next such transaction.
+        wallet::transparent::generate_gap_addresses(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
+        )?;
         let reserved = wallet::transparent::reserve_next_n_addresses(
             self.conn.0,
             &self.params,
