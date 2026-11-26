@@ -1932,6 +1932,8 @@ mod tests {
                 nu6_2: first,
                 nu6_3: first,
                 nu7: second.map(BlockHeight::from_u32),
+                #[cfg(zcash_unstable = "nu8")]
+                nu8: None,
                 #[cfg(zcash_unstable = "nutachyon")]
                 nu_tachyon: None,
             }

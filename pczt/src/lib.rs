@@ -33,21 +33,32 @@ use zcash_protocol::PoolType;
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 #[cfg(all(
     any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
-    zcash_unstable = "nutachyon"
+    zcash_unstable = "nu8"
 ))]
 use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+use zcash_protocol::value::{ZatBalance, Zatoshis};
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
-    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
+    zcash_primitives::transaction::{
+        Authorization, TransactionData, TxVersion, zip248::V7DigestError,
+    },
     zcash_protocol::{
         consensus::{BranchId, OrchardProtocolRevision},
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
+        value::BalanceError,
     },
 };
 
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput};
+use zcash_primitives::transaction::sighash::{PrecomputedSighashData, SignableInput, Zip244Error};
+
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+pub use zcash_primitives::transaction::EffectsOnly;
 
 pub mod roles;
 
@@ -150,7 +161,7 @@ pub mod v1 {
             // The v1 encoding cannot represent V6 or V7 transactions.
             if match pczt.global.tx_version {
                 zcash_protocol::constants::V6_TX_VERSION => true,
-                #[cfg(zcash_unstable = "nutachyon")]
+                #[cfg(zcash_unstable = "nu8")]
                 zcash_protocol::constants::V7_TX_VERSION => true,
                 _ => false,
             } {
@@ -478,7 +489,7 @@ impl Pczt {
         // v1 encoding, avoiding the speculative clone below.
         let requires_v2 = match self.global.tx_version {
             zcash_protocol::constants::V6_TX_VERSION => true,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             zcash_protocol::constants::V7_TX_VERSION => true,
             _ => false,
         };
@@ -564,7 +575,7 @@ impl Pczt {
         let version = match (global.tx_version, global.version_group_id) {
             (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
             (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             (V7_TX_VERSION, V7_VERSION_GROUP_ID) => Ok(TxVersion::V7),
             (version, version_group_id) => Err(ExtractError::UnsupportedTxVersion {
                 version,
@@ -586,14 +597,31 @@ impl Pczt {
                     return Err(ExtractError::UnsupportedConsensusBranchId.into());
                 }
             }
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             TxVersion::V7 => {
-                if orchard_protocol_revision < OrchardProtocolRevision::V3 {
+                if !version.valid_in_branch(consensus_branch_id) {
                     return Err(ExtractError::UnsupportedConsensusBranchId.into());
                 }
+                if global.expiry_height > common::MAX_V7_EXPIRY_HEIGHT {
+                    return Err(ExtractError::InvalidExpiryHeight.into());
+                }
+                validate_v7_signature_counts([
+                    (PoolType::TRANSPARENT, transparent.inputs.len()),
+                    (PoolType::SAPLING, sapling.spends.len()),
+                    (PoolType::ORCHARD, orchard.actions.len()),
+                    (PoolType::IRONWOOD, ironwood.actions.len()),
+                ])?;
             }
         }
 
+        // The parsed bundle does not expose its input values, so take the
+        // transparent pool's delta from the PCZT's own bundle first.
+        #[cfg(zcash_unstable = "nu8")]
+        let transparent_delta = if matches!(version, TxVersion::V7) {
+            transparent_value_balance(&transparent)?
+        } else {
+            ZatBalance::zero()
+        };
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
@@ -630,16 +658,22 @@ impl Pczt {
                 orchard_bundle,
                 ironwood_bundle,
             ),
-            #[cfg(zcash_unstable = "nutachyon")]
-            TxVersion::V7 => TransactionData::from_parts_v7(
+            // ZIP 248 requires the value pool deltas to sum to zero. The
+            // transparent pool's delta is only knowable here, from the input
+            // values the PCZT records; an authorized transparent bundle does
+            // not carry them.
+            #[cfg(zcash_unstable = "nu8")]
+            TxVersion::V7 => TransactionData::from_parts_v7_balanced(
                 consensus_branch_id,
                 lock_time,
                 global.expiry_height.into(),
+                transparent_delta,
                 transparent_bundle,
                 sapling_bundle,
                 orchard_bundle,
                 ironwood_bundle,
-            ),
+            )
+            .map_err(ExtractError::TransparentValueBalance)?,
             _ => TransactionData::from_parts(
                 version,
                 consensus_branch_id,
@@ -663,6 +697,16 @@ impl Pczt {
     }
 
     /// Gets the effects of this transaction.
+    ///
+    /// V5 shielded effects retain genuine effecting anchors. V6 and V7 anchors
+    /// are absent. Previous outputs must be supplied separately for signing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExtractError`] for malformed bundles or an unsupported version/branch
+    /// combination. V7 additionally requires an expiry height at most 499,999,999 and
+    /// at most 65,536 transparent inputs, Sapling Spends, or actions in each Orchard
+    /// protocol pool.
     #[cfg(any(feature = "io-finalizer", feature = "signer"))]
     pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, ExtractError> {
         let anchor_requirement =
@@ -674,11 +718,36 @@ impl Pczt {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
             },
-            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
-            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
-            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
+            |s| {
+                extract_sapling_effects(s, anchor_requirement).map_err(ExtractError::SaplingExtract)
+            },
+            |o| {
+                extract_orchard_effects(o, anchor_requirement).map_err(ExtractError::OrchardExtract)
+            },
+            |i| {
+                extract_orchard_effects(i, anchor_requirement)
+                    .map_err(ExtractError::IronwoodExtract)
+            },
         )
         .map(|parsed| parsed.tx_data)
+    }
+
+    /// Returns the genuine transparent previous outputs in input order.
+    ///
+    /// Returns [`ExtractError::TransparentParse`] if the transparent bundle
+    /// cannot be parsed into the protocol types.
+    #[cfg(any(feature = "io-finalizer", feature = "signer"))]
+    pub fn transparent_signing_context(
+        &self,
+    ) -> Result<
+        ::transparent::sighash::TransparentSigningContext<zcash_protocol::value::Zatoshis>,
+        ExtractError,
+    > {
+        self.transparent
+            .clone()
+            .into_parsed()
+            .map(|bundle| bundle.signing_context())
+            .map_err(ExtractError::TransparentParse)
     }
 }
 
@@ -697,14 +766,70 @@ pub(crate) struct ParsedPczt<A: Authorization> {
     pub(crate) tx_data: TransactionData<A>,
 }
 
-#[cfg(any(feature = "io-finalizer", feature = "signer"))]
-pub struct EffectsOnly;
+/// The net value the PCZT's transparent inputs and outputs move through the
+/// transparent pool, as a ZIP 248 value pool delta.
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+fn transparent_value_balance(
+    bundle: &crate::transparent::Bundle,
+) -> Result<ZatBalance, ExtractError> {
+    fn total(mut values: impl Iterator<Item = u64>) -> Result<ZatBalance, ExtractError> {
+        // `Iterator::try_reduce` is still unstable, so fold explicitly.
+        values.try_fold(ZatBalance::zero(), |acc, value| {
+            let value = Zatoshis::from_u64(value)
+                .map_err(ExtractError::TransparentValueBalance)
+                .map(ZatBalance::from)?;
+            (acc + value).ok_or(ExtractError::TransparentValueBalance(
+                BalanceError::Overflow,
+            ))
+        })
+    }
+    let inputs = total(bundle.inputs().iter().map(|input| input.value))?;
+    let outputs = total(bundle.outputs().iter().map(|output| output.value))?;
+    (inputs - outputs).ok_or(ExtractError::TransparentValueBalance(
+        BalanceError::Underflow,
+    ))
+}
 
-#[cfg(any(feature = "io-finalizer", feature = "signer"))]
-impl Authorization for EffectsOnly {
-    type TransparentAuth = ::transparent::bundle::EffectsOnly<zcash_protocol::value::Zatoshis>;
-    type SaplingAuth = ::sapling::bundle::EffectsOnly;
-    type OrchardAuth = ::orchard::bundle::EffectsOnly;
+/// A ZIP 248 variant 0 signature index is a `u16`, including index 65,535.
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+const MAX_V7_SIGNATURE_COUNT: usize = u16::MAX as usize + 1;
+
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    zcash_unstable = "nu8"
+))]
+fn validate_v7_signature_counts(counts: [(PoolType, usize); 4]) -> Result<(), ExtractError> {
+    for (pool, count) in counts {
+        if count > MAX_V7_SIGNATURE_COUNT {
+            return Err(ExtractError::TooManySignatureIndices { pool, count });
+        }
+    }
+    Ok(())
+}
+
+/// Returns whether `tx_version` signs a distinct digest per shielded Spend, action and
+/// binding signature.
+#[cfg(any(
+    feature = "io-finalizer",
+    feature = "signer",
+    feature = "spend-finalizer"
+))]
+pub(crate) fn is_v7_version(tx_version: u32) -> bool {
+    #[cfg(zcash_unstable = "nu8")]
+    {
+        tx_version == zcash_protocol::constants::V7_TX_VERSION
+    }
+    #[cfg(not(zcash_unstable = "nu8"))]
+    {
+        let _ = tx_version;
+        false
+    }
 }
 
 /// Computes the digests that the signature hashes of `tx_data` commit to.
@@ -714,10 +839,69 @@ impl Authorization for EffectsOnly {
 pub(crate) fn precompute_sighash_data(
     global: &Global,
     tx_data: TransactionData<EffectsOnly>,
+    transparent: &::transparent::pczt::Bundle<zcash_protocol::value::Zatoshis>,
 ) -> Result<PrecomputedSighashData<EffectsOnly>, ExtractError> {
-    PrecomputedSighashData::new_zip244(tx_data).map_err(|_| ExtractError::UnsupportedTxVersion {
-        version: global.tx_version,
-        version_group_id: global.version_group_id,
+    PrecomputedSighashData::new_zip244_with_context(tx_data, &(), &transparent.signing_context())
+        .map_err(|error| match error {
+            Zip244Error::Digest(error) => ExtractError::Digest(error),
+            _ => ExtractError::UnsupportedTxVersion {
+                version: global.tx_version,
+                version_group_id: global.version_group_id,
+            },
+        })
+}
+
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+pub(crate) fn extract_sapling_effects(
+    bundle: &::sapling::pczt::Bundle,
+    requirement: common::AnchorRequirement,
+) -> Result<
+    Option<::sapling::Bundle<::sapling::bundle::EffectsOnly, zcash_protocol::value::ZatBalance>>,
+    ::sapling::pczt::TxExtractorError,
+> {
+    bundle.extract_effects().map(|bundle| {
+        bundle.map(|bundle| {
+            bundle.map_authorization_with_anchor(
+                (),
+                |_, anchor| {
+                    if matches!(requirement, common::AnchorRequirement::Required) {
+                        anchor
+                    } else {
+                        None
+                    }
+                },
+                |_, proof| proof,
+                |_, proof| proof,
+                |_, sig| sig,
+                |_, auth| auth,
+            )
+        })
+    })
+}
+
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+pub(crate) fn extract_orchard_effects(
+    bundle: &::orchard::pczt::Bundle,
+    requirement: common::AnchorRequirement,
+) -> Result<
+    Option<::orchard::Bundle<::orchard::bundle::EffectsOnly, zcash_protocol::value::ZatBalance>>,
+    ::orchard::pczt::TxExtractorError,
+> {
+    bundle.extract_effects().map(|bundle| {
+        bundle.map(|bundle| {
+            bundle.map_authorization_with_anchor(
+                &mut (),
+                |_, anchor| {
+                    if matches!(requirement, common::AnchorRequirement::Required) {
+                        anchor
+                    } else {
+                        None
+                    }
+                },
+                |_, _, sig| sig,
+                |_, auth| auth,
+            )
+        })
     })
 }
 
@@ -735,8 +919,19 @@ pub(crate) fn sighash(
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ExtractError {
+    /// A transaction bundle digest could not be resolved.
+    Digest(V7DigestError),
+    /// The v7 expiry height exceeds the maximum permitted by ZIP 248.
+    #[cfg(zcash_unstable = "nu8")]
+    InvalidExpiryHeight,
+    /// A v7 per-signature sequence has more entries than its `u16` indices can address.
+    #[cfg(zcash_unstable = "nu8")]
+    TooManySignatureIndices { pool: PoolType, count: usize },
     /// The PCZT's transparent inputs have incompatible lock time requirements.
     IncompatibleLockTimes,
+    /// The value that the PCZT's transparent inputs and outputs move through the
+    /// transparent pool is not representable.
+    TransparentValueBalance(BalanceError),
     /// An error occurred extracting the Ironwood protocol bundle from the Ironwood PCZT bundle.
     IronwoodExtract(::orchard::pczt::TxExtractorError),
     /// The PCZT carries Ironwood bundle data, but its transaction version does not
@@ -760,8 +955,7 @@ pub enum ExtractError {
     /// The consensus branch ID requested by the PCZT does not correspond to a
     /// known network upgrade.
     UnknownConsensusBranchId,
-    /// The network upgrade for the PCZT's consensus branch ID predates the v5
-    /// transaction format, so no transaction can be extracted from it.
+    /// The PCZT's consensus branch ID does not support its transaction version.
     UnsupportedConsensusBranchId,
     /// The PCZT specifies an unsupported transaction version.
     UnsupportedTxVersion { version: u32, version_group_id: u32 },
@@ -771,8 +965,23 @@ pub enum ExtractError {
 impl core::fmt::Display for ExtractError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            ExtractError::Digest(error) => {
+                write!(f, "could not compute transaction digests: {error}")
+            }
+            #[cfg(zcash_unstable = "nu8")]
+            ExtractError::InvalidExpiryHeight => write!(f, "v7 expiry height exceeds 499,999,999"),
+            #[cfg(zcash_unstable = "nu8")]
+            ExtractError::TooManySignatureIndices { pool, count } => {
+                write!(
+                    f,
+                    "{pool} has {count} entries, exceeding the v7 signature index range"
+                )
+            }
             ExtractError::IncompatibleLockTimes => {
                 write!(f, "the transparent inputs have incompatible lock times")
+            }
+            ExtractError::TransparentValueBalance(e) => {
+                write!(f, "the transparent value balance is not representable: {e}")
             }
             ExtractError::IronwoodExtract(e) => {
                 write!(f, "could not extract the Ironwood bundle: {e}")
@@ -802,7 +1011,7 @@ impl core::fmt::Display for ExtractError {
             ExtractError::UnknownConsensusBranchId => write!(f, "unknown consensus branch ID"),
             ExtractError::UnsupportedConsensusBranchId => write!(
                 f,
-                "the consensus branch ID predates the v5 transaction format"
+                "the consensus branch ID does not support the transaction version"
             ),
             ExtractError::UnsupportedTxVersion {
                 version,
@@ -853,7 +1062,7 @@ impl core::error::Error for ParseError {}
 #[cfg(all(test, any(feature = "io-finalizer", feature = "signer")))]
 mod extraction_tests {
     use zcash_primitives::transaction::{
-        TxVersion,
+        EffectsOnly, TransactionData, TxVersion,
         sighash::{PrecomputedSighashData, SignableInput},
         txid::{TxIdDigester, to_txid},
     };
@@ -874,9 +1083,10 @@ mod extraction_tests {
             .unwrap()
             .build()
             .unwrap();
-        let data = pczt.into_effects().unwrap();
+        let data: TransactionData<EffectsOnly> = pczt.into_effects().unwrap();
+        let _: &TransactionData<crate::EffectsOnly> = &data;
         assert_eq!(data.version(), TxVersion::V6);
-        let digests = data.digest(TxIdDigester);
+        let digests = data.digest(TxIdDigester, &()).unwrap();
         let expected = hex::decode(EXPECTED_DIGEST).unwrap();
         assert_eq!(
             to_txid(data.version(), data.consensus_branch_id(), &digests)
@@ -886,11 +1096,15 @@ mod extraction_tests {
             expected
         );
         assert_eq!(
-            PrecomputedSighashData::new_zip244(data)
-                .unwrap()
-                .signature_hash(&SignableInput::Shielded)
-                .as_ref()
-                .as_slice(),
+            PrecomputedSighashData::new_zip244_with_context(
+                data,
+                &(),
+                &::transparent::sighash::TransparentSigningContext::new(alloc::vec![])
+            )
+            .unwrap()
+            .signature_hash(&SignableInput::Shielded)
+            .as_ref()
+            .as_slice(),
             expected
         );
     }
@@ -934,10 +1148,10 @@ mod extraction_tests {
     }
 
     #[test]
-    #[cfg(zcash_unstable = "nutachyon")]
-    fn nu_tachyon_pczt_extracts_as_v7() {
-        let pczt = Creator::new(
-            BranchId::NuTachyon.into(),
+    #[cfg(zcash_unstable = "nu8")]
+    fn nu8_pczt_extracts_as_v7() {
+        let pczt = Creator::new_v7(
+            BranchId::Nu8.into(),
             10_000_000,
             133,
             Some([0; 32]),
@@ -947,9 +1161,324 @@ mod extraction_tests {
         .build()
         .unwrap();
 
-        let tx_data = pczt.into_effects().unwrap();
+        let tx_data: TransactionData<EffectsOnly> = pczt.into_effects().unwrap();
         assert_eq!(tx_data.version(), TxVersion::V7);
-        assert_eq!(tx_data.consensus_branch_id(), BranchId::NuTachyon);
+        assert_eq!(tx_data.consensus_branch_id(), BranchId::Nu8);
+    }
+
+    #[cfg(zcash_unstable = "nu8")]
+    mod v7 {
+        use alloc::collections::BTreeMap;
+
+        use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+        use zcash_primitives::transaction::{TxVersion, zip248::BundleType};
+        use zcash_protocol::{
+            PoolType,
+            consensus::{BlockHeight, BranchId},
+            value::{BalanceError, MAX_MONEY, ZatBalance, Zatoshis},
+        };
+
+        use crate::{
+            ExtractError, MAX_V7_SIGNATURE_COUNT, Pczt,
+            common::MAX_V7_EXPIRY_HEIGHT,
+            roles::creator::{Creator, Error as CreatorError},
+            transparent::{Input, Output},
+            validate_v7_signature_counts,
+        };
+
+        /// A non-expiring transaction with no keys or addresses.
+        const EXPIRY_DISABLED: u32 = 0;
+        /// Mainnet's registered coin type.
+        const COIN_TYPE: u32 = 133;
+        /// A deterministic seed; rejection happens before randomness is consumed.
+        const RNG_SEED: [u8; 32] = [0; 32];
+
+        fn empty() -> Pczt {
+            Creator::new_v7(BranchId::Nu8.into(), EXPIRY_DISABLED, COIN_TYPE, None, None)
+                .unwrap()
+                .build()
+                .unwrap()
+        }
+
+        fn input(value: Zatoshis) -> Input {
+            Input {
+                prevout_txid: [0; 32],
+                prevout_index: 0,
+                sequence: None,
+                required_time_lock_time: None,
+                required_height_lock_time: None,
+                script_sig: None,
+                value: value.into_u64(),
+                script_pubkey: vec![],
+                redeem_script: None,
+                partial_signatures: BTreeMap::new(),
+                sighash_type: ::transparent::sighash::SighashType::ALL.encode(),
+                bip32_derivation: BTreeMap::new(),
+                ripemd160_preimages: BTreeMap::new(),
+                sha256_preimages: BTreeMap::new(),
+                hash160_preimages: BTreeMap::new(),
+                hash256_preimages: BTreeMap::new(),
+                proprietary: BTreeMap::new(),
+            }
+        }
+
+        fn output(value: Zatoshis) -> Output {
+            Output {
+                value: value.into_u64(),
+                script_pubkey: vec![],
+                redeem_script: None,
+                bip32_derivation: BTreeMap::new(),
+                user_address: None,
+                proprietary: BTreeMap::new(),
+            }
+        }
+
+        #[test]
+        fn v7_import_rejects_inactive_branches_in_every_role() {
+            for branch in [BranchId::Nu6_3, BranchId::Nu7] {
+                let mut pczt = empty();
+                pczt.global.consensus_branch_id = branch.into();
+                let imported = Pczt::parse(&pczt.serialize().unwrap()).unwrap();
+                assert!(matches!(
+                    imported.clone().into_effects(),
+                    Err(ExtractError::UnsupportedConsensusBranchId)
+                ));
+                #[cfg(feature = "signer")]
+                assert!(matches!(
+                    crate::roles::signer::Signer::new(imported.clone()),
+                    Err(crate::roles::signer::Error::Extract(
+                        ExtractError::UnsupportedConsensusBranchId
+                    ))
+                ));
+                #[cfg(feature = "tx-extractor")]
+                assert!(matches!(
+                    crate::roles::tx_extractor::TransactionExtractor::new(imported)
+                        .extract(ChaCha20Rng::from_seed(RNG_SEED)),
+                    Err(crate::roles::tx_extractor::Error::Extract(
+                        ExtractError::UnsupportedConsensusBranchId
+                    ))
+                ));
+            }
+        }
+
+        #[test]
+        fn v7_expiry_height_is_checked_at_creation_and_import() {
+            for expiry in [EXPIRY_DISABLED, MAX_V7_EXPIRY_HEIGHT] {
+                let pczt = Creator::new_v7(BranchId::Nu8.into(), expiry, COIN_TYPE, None, None)
+                    .unwrap()
+                    .build()
+                    .unwrap();
+                assert_eq!(
+                    pczt.into_effects().unwrap().expiry_height(),
+                    BlockHeight::from_u32(expiry)
+                );
+            }
+            let invalid = MAX_V7_EXPIRY_HEIGHT + 1;
+            assert!(matches!(
+                Creator::new_v7(BranchId::Nu8.into(), invalid, COIN_TYPE, None, None),
+                Err(CreatorError::InvalidExpiryHeight)
+            ));
+            let mut pczt = empty();
+            pczt.global.expiry_height = invalid;
+            let imported = Pczt::parse(&pczt.serialize().unwrap()).unwrap();
+            assert!(matches!(
+                imported.clone().into_effects(),
+                Err(ExtractError::InvalidExpiryHeight)
+            ));
+            #[cfg(feature = "signer")]
+            assert!(matches!(
+                crate::roles::signer::Signer::new(imported.clone()),
+                Err(crate::roles::signer::Error::Extract(
+                    ExtractError::InvalidExpiryHeight
+                ))
+            ));
+            #[cfg(feature = "tx-extractor")]
+            assert!(matches!(
+                crate::roles::tx_extractor::TransactionExtractor::new(imported)
+                    .extract(ChaCha20Rng::from_seed(RNG_SEED)),
+                Err(crate::roles::tx_extractor::Error::Extract(
+                    ExtractError::InvalidExpiryHeight
+                ))
+            ));
+        }
+
+        #[test]
+        fn v7_signature_count_boundary_covers_every_pool() {
+            let pools = [
+                PoolType::TRANSPARENT,
+                PoolType::SAPLING,
+                PoolType::ORCHARD,
+                PoolType::IRONWOOD,
+            ];
+            // Check lengths directly: no elliptic-curve operations or large fixtures.
+            let boundary = pools.map(|pool| (pool, MAX_V7_SIGNATURE_COUNT));
+            validate_v7_signature_counts(boundary).unwrap();
+            for index in 0..pools.len() {
+                let mut counts = boundary;
+                counts[index].1 += 1;
+                assert!(matches!(
+                    validate_v7_signature_counts(counts),
+                    Err(ExtractError::TooManySignatureIndices { pool, count })
+                        if pool == pools[index] && count == MAX_V7_SIGNATURE_COUNT + 1
+                ));
+            }
+        }
+
+        #[test]
+        fn v7_oversized_import_fails_before_parsing_or_sighashing() {
+            let mut pczt = empty();
+            let mut malformed = input(Zatoshis::ZERO);
+            // Bundle parsing would reject this; the count check must run first.
+            malformed.sighash_type = u8::MAX;
+            pczt.transparent
+                .inputs
+                .resize(MAX_V7_SIGNATURE_COUNT + 1, malformed);
+            assert!(matches!(
+                pczt.clone().into_effects(),
+                Err(ExtractError::TooManySignatureIndices {
+                    pool: PoolType::TRANSPARENT,
+                    ..
+                })
+            ));
+            #[cfg(feature = "signer")]
+            assert!(matches!(
+                crate::roles::signer::Signer::new(pczt.clone()),
+                Err(crate::roles::signer::Error::Extract(
+                    ExtractError::TooManySignatureIndices { .. }
+                ))
+            ));
+            #[cfg(feature = "tx-extractor")]
+            assert!(matches!(
+                crate::roles::tx_extractor::TransactionExtractor::new(pczt)
+                    .extract(ChaCha20Rng::from_seed(RNG_SEED)),
+                Err(crate::roles::tx_extractor::Error::Extract(
+                    ExtractError::TooManySignatureIndices { .. }
+                ))
+            ));
+        }
+
+        #[test]
+        fn v7_oversized_shielded_sequences_fail_before_curve_decoding() {
+            let count = MAX_V7_SIGNATURE_COUNT + 1;
+            let malformed_spend = crate::sapling::Spend {
+                cv: [0; 32],
+                nullifier: [0; 32],
+                rk: [0; 32],
+                zkproof: None,
+                spend_auth_sig: None,
+                recipient: None,
+                value: None,
+                rcm: None,
+                rseed: None,
+                rcv: None,
+                proof_generation_key: None,
+                witness: None,
+                alpha: None,
+                zip32_derivation: None,
+                dummy_ask: None,
+                proprietary: BTreeMap::new(),
+            };
+            let mut pczt = empty();
+            pczt.sapling.spends.resize(count, malformed_spend);
+            assert!(matches!(
+                pczt.into_effects(),
+                Err(ExtractError::TooManySignatureIndices {
+                    pool: PoolType::SAPLING,
+                    ..
+                })
+            ));
+            for pool in [PoolType::ORCHARD, PoolType::IRONWOOD] {
+                let mut pczt = empty();
+                let bundle = if pool == PoolType::ORCHARD {
+                    &mut pczt.orchard
+                } else {
+                    &mut pczt.ironwood
+                };
+                let mut malformed_action = crate::orchard::testing::dummy_action();
+                malformed_action.spend.rk = [0; 32];
+                bundle.actions.resize(count, malformed_action);
+                assert!(matches!(
+                    pczt.into_effects(),
+                    Err(ExtractError::TooManySignatureIndices { pool: actual, .. })
+                        if actual == pool
+                ));
+            }
+        }
+
+        #[test]
+        fn v7_transparent_deltas_have_the_input_minus_output_sign() {
+            /// Independent small input and output amounts, in zatoshis.
+            const SMALL: Zatoshis = Zatoshis::const_from_u64(3);
+            const LARGE: Zatoshis = Zatoshis::const_from_u64(7);
+            for (inputs, outputs, expected) in [
+                (vec![LARGE], vec![SMALL], 4),
+                (vec![SMALL], vec![LARGE], -4),
+                (vec![], vec![LARGE], -7),
+            ] {
+                let mut pczt = empty();
+                pczt.transparent.inputs = inputs.into_iter().map(input).collect();
+                pczt.transparent.outputs = outputs.into_iter().map(output).collect();
+                // A negative transparent delta is funded by a shielded spend.
+                // Effects extraction does not require a proof of that spend.
+                let shielded_credit = if expected < 0 {
+                    pczt.orchard
+                        .actions
+                        .push(crate::orchard::testing::dummy_action());
+                    pczt.orchard.anchor = Some([0; 32]);
+                    pczt.orchard.value_sum = (LARGE.into_u64(), false);
+                    i64::from(ZatBalance::from(LARGE))
+                } else {
+                    0
+                };
+                let effects = pczt.into_effects().unwrap();
+                assert_eq!(
+                    effects
+                        .value_pool_deltas()
+                        .zec_value(BundleType::TRANSPARENT),
+                    Some(ZatBalance::from_i64(expected).unwrap())
+                );
+                assert_eq!(
+                    effects
+                        .value_pool_deltas()
+                        .zec_value(BundleType::FEE)
+                        .unwrap_or(ZatBalance::zero()),
+                    ZatBalance::from_i64(-(expected + shielded_credit)).unwrap()
+                );
+                assert_eq!(
+                    effects
+                        .value_pool_deltas()
+                        .iter()
+                        .map(|(_, (_, value))| i64::from(*value))
+                        .sum::<i64>(),
+                    0
+                );
+            }
+        }
+
+        #[test]
+        fn transparent_delta_overflow_is_v7_only() {
+            let mut pczt = empty();
+            pczt.transparent.inputs = vec![input(Zatoshis::const_from_u64(MAX_MONEY)); 2];
+            assert!(matches!(
+                pczt.clone().into_effects(),
+                Err(ExtractError::TransparentValueBalance(
+                    BalanceError::Overflow
+                ))
+            ));
+            // These intermediate v5/v6 effects need not have a valid aggregate balance.
+            // NU8 must not add a v7-only delta requirement to their extraction.
+            for version in [TxVersion::V5, TxVersion::V6] {
+                let mut legacy = pczt.clone();
+                legacy.global.tx_version = match version {
+                    TxVersion::V5 => zcash_protocol::constants::V5_TX_VERSION,
+                    TxVersion::V6 => zcash_protocol::constants::V6_TX_VERSION,
+                    _ => unreachable!(),
+                };
+                legacy.global.version_group_id = version.version_group_id();
+                legacy.global.consensus_branch_id = BranchId::Nu7.into();
+                assert_eq!(legacy.into_effects().unwrap().version(), version);
+            }
+        }
     }
 }
 

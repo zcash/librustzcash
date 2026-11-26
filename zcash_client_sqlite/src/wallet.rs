@@ -126,7 +126,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::{HashSer, read_commitment_tree},
-    transaction::{Transaction, TransactionData, coinbase::is_coinbase, fees::zip317},
+    transaction::{Transaction, TransactionData, TxVersion, coinbase::is_coinbase, fees::zip317},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool, TxId,
@@ -3273,39 +3273,30 @@ fn parse_tx<P: consensus::Parameters>(
             .map(|t| (height, t))
             .map_err(SqliteClientError::from)
     } else {
-        let tx_data = Transaction::read(tx_bytes, BranchId::Sprout)
-            .map_err(SqliteClientError::from)?
-            .into_data();
+        let tx = Transaction::read(tx_bytes, BranchId::Sprout).map_err(SqliteClientError::from)?;
 
-        let expiry_height = tx_data.expiry_height();
+        let expiry_height = tx.expiry_height();
         if expiry_height > BlockHeight::from(0) {
-            #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
-            let tx_data = TransactionData::from_parts(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            );
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            let tx_data = TransactionData::from_parts_with_zip233(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.zip233_amount(),
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            );
-            tx_data
-                .freeze()
-                .map(|t| (expiry_height, t))
-                .map_err(SqliteClientError::from)
+            match tx.version() {
+                TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                    let data = tx.into_data();
+                    TransactionData::from_parts(
+                        data.version(),
+                        BranchId::for_height(params, expiry_height),
+                        data.lock_time(),
+                        expiry_height,
+                        data.transparent_bundle().cloned(),
+                        data.sprout_bundle().cloned(),
+                        data.sapling_bundle().cloned(),
+                        data.orchard_bundle().cloned(),
+                    )
+                    .freeze()
+                    .map(|t| (expiry_height, t))
+                    .map_err(SqliteClientError::from)
+                }
+                // V5 and later encode their branch ID and already cache their txid.
+                _ => Ok((expiry_height, tx)),
+            }
         } else if let Some(fallback_height) = fallback_height {
             // Unmined with no expiry, so no epoch is recorded for it. The branch ID
             // does not affect parsing (absent from the pre-v5 serialized form; v5
@@ -6482,7 +6473,10 @@ mod tests {
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::{
         block::BlockHash,
-        transaction::builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+        transaction::{
+            TransactionData, TxVersion,
+            builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+        },
     };
     use zcash_protocol::{
         TxId,
@@ -6512,8 +6506,15 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        ::orchard::tree::MerkleHashOrchard, incrementalmerkletree::Hashable as _,
-        shardtree::error::ShardTreeError, zcash_client_backend::data_api::WalletCommitmentTrees,
+        ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::Hashable as _,
+        proptest::{
+            strategy::{Strategy, ValueTree},
+            test_runner::TestRunner,
+        },
+        shardtree::error::ShardTreeError,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_primitives::transaction::components::orchard::testing::arb_ironwood_bundle_for_version,
     };
 
     fn connection_with_checkpoint_tables() -> Connection {
@@ -7075,6 +7076,90 @@ mod tests {
             parse_tx(&MAIN_NETWORK, &raw, None, Some(BlockHeight::from(0)), None),
             Err(SqliteClientError::CorruptedData(_))
         ));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn parse_tx_uncached_expiry_preserves_v6_ironwood() {
+        let expiry_height = MAIN_NETWORK
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .expect("NU6.3 has an activation height");
+        let mut runner = TestRunner::deterministic();
+        let ironwood = arb_ironwood_bundle_for_version(TxVersion::V6)
+            .prop_filter("an Ironwood bundle is required", Option::is_some)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        let original = TransactionData::from_parts_v6(
+            BranchId::Nu6_3,
+            0,
+            expiry_height,
+            None,
+            None,
+            None,
+            ironwood,
+        )
+        .freeze()
+        .unwrap();
+        let mut raw = vec![];
+        original.write(&mut raw).unwrap();
+
+        for cached_expiry in [None, Some(BlockHeight::from(0))] {
+            let (height, parsed) =
+                parse_tx(&MAIN_NETWORK, &raw, None, cached_expiry, None).unwrap();
+            assert_eq!(height, expiry_height);
+            assert_eq!(parsed.txid(), original.txid());
+            assert!(parsed.ironwood_bundle().is_some());
+            assert_eq!(
+                parsed.ironwood_bundle().unwrap().value_balance(),
+                original.ironwood_bundle().unwrap().value_balance(),
+            );
+            let mut rewritten = vec![];
+            parsed.write(&mut rewritten).unwrap();
+            assert_eq!(rewritten, raw);
+        }
+    }
+
+    #[test]
+    fn parse_tx_uncached_expiry_preserves_encoded_branch_and_txid() {
+        let expiry_height = MAIN_NETWORK
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .unwrap();
+        let versions = [TxVersion::V5, TxVersion::V6].into_iter();
+        #[cfg(zcash_unstable = "nu8")]
+        let versions = versions.chain(core::iter::once(TxVersion::V7));
+        for version in versions {
+            let branch = match version {
+                #[cfg(zcash_unstable = "nu8")]
+                TxVersion::V7 => BranchId::Nu8,
+                _ => BranchId::Nu7,
+            };
+            assert_ne!(branch, BranchId::for_height(&MAIN_NETWORK, expiry_height));
+            let original = TransactionData::from_parts(
+                version,
+                branch,
+                0,
+                expiry_height,
+                None,
+                None,
+                None,
+                None,
+            )
+            .freeze()
+            .unwrap();
+            let mut raw = vec![];
+            original.write(&mut raw).unwrap();
+            for cached_expiry in [None, Some(BlockHeight::from(0)), Some(expiry_height)] {
+                let (height, parsed) =
+                    parse_tx(&MAIN_NETWORK, &raw, None, cached_expiry, None).unwrap();
+                assert_eq!(height, expiry_height);
+                assert_eq!(parsed.consensus_branch_id(), branch);
+                assert_eq!(parsed.txid(), original.txid());
+                let mut rewritten = vec![];
+                parsed.write(&mut rewritten).unwrap();
+                assert_eq!(rewritten, raw);
+            }
+        }
     }
 
     /// A stored unmined transaction with a zero expiry height (e.g. a coinbase

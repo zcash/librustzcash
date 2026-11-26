@@ -51,7 +51,7 @@ blake2b_simd = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
-pczt = { workspace = true, features = ["orchard", "tx-extractor"] }
+pczt = { workspace = true, features = ["orchard", "spend-finalizer", "tx-extractor"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 shardtree.workspace = true
@@ -66,6 +66,7 @@ zcash_client_backend = { workspace = true, features = ["test-dependencies"] }
 # The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
 # against regtest params with the relevant network upgrades (including NU6.3) active.
 zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
+zcash_primitives = { workspace = true, features = ["transparent-inputs", "non-standard-fees"] }
 
 # Shared, test-only in-memory backends (`MockBackend`, `CommitMock`) and witness
 # helpers the engine tests use. The dev-dependency cycle back onto this crate is fine: dev-deps do

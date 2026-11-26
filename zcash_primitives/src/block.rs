@@ -9,20 +9,24 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::fmt;
 use core::ops::Deref;
-use corez::io::{self, ErrorKind, Read, Write};
-use transparent::bundle::OutPoint;
-use zcash_script::{Opcode, opcode::PossiblyBad};
+use corez::io::{self, Read, Write};
 
 use memuse::DynamicUsage;
-use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
 
-use zcash_encoding::{Array, CompactSize, ReverseHex, ReverseHexError, Vector};
-use zcash_protocol::consensus::{self, BlockHeight};
+use zcash_encoding::{ReverseHex, ReverseHexError, Vector};
 
-use crate::{
-    encoding::{ReadBytesExt, WriteBytesExt},
-    transaction::{Transaction, TxVersion, coinbase::is_coinbase},
+use crate::encoding::{ReadBytesExt, WriteBytesExt};
+
+#[cfg(all(feature = "sapling", feature = "orchard"))]
+use {
+    crate::transaction::{Transaction, TxVersion, coinbase::is_coinbase},
+    corez::io::ErrorKind,
+    nonempty::NonEmpty,
+    transparent::bundle::OutPoint,
+    zcash_encoding::{Array, CompactSize},
+    zcash_protocol::consensus::{self, BlockHeight},
+    zcash_script::{Opcode, opcode::PossiblyBad},
 };
 
 pub use equihash;
@@ -185,6 +189,7 @@ impl BlockHeader {
 }
 
 /// A Zcash block.
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 #[derive(Debug)]
 pub struct Block {
     header: BlockHeader,
@@ -192,6 +197,7 @@ pub struct Block {
     claimed_height: BlockHeight,
 }
 
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 impl Block {
     /// Parses a block from bytes.
     ///
@@ -212,49 +218,60 @@ impl Block {
         // Parse with an arbitrary consensus branch ID initially; we will fix it later.
         let coinbase = Transaction::read(&mut reader, consensus::BranchId::Sprout)?;
 
-        // Extract the claimed block height from the coinbase transaction.
-        let claimed_height = {
-            let coinbase_transparent = coinbase
-                .transparent_bundle()
-                .filter(|_| is_coinbase(&coinbase))
-                .ok_or_else(|| {
-                    corez::io::Error::new(ErrorKind::Other, "first tx of block is not coinbase")
+        // Verify some simple structural consensus rules on the coinbase transaction.
+        if coinbase.sprout_bundle().is_some() {
+            return Err(corez::io::Error::new(
+                ErrorKind::Other,
+                "coinbase tx has sprout data",
+            ));
+        }
+
+        // Extract the claimed block height from the coinbase transaction. A v7
+        // coinbase carries it in its coinbase bundle; earlier versions carry it
+        // in the scriptSig of an otherwise unspendable input, so a v7 coinbase
+        // need not have a transparent bundle at all.
+        let claimed_height = match coinbase.coinbase_bundle() {
+            Some(coinbase_bundle) => coinbase_bundle.block_height(),
+            None => {
+                let coinbase_transparent = coinbase
+                    .transparent_bundle()
+                    .filter(|_| is_coinbase(&coinbase))
+                    .ok_or_else(|| {
+                        corez::io::Error::new(ErrorKind::Other, "first tx of block is not coinbase")
+                    })?;
+
+                let coinbase_txin = coinbase_transparent.vin.first().ok_or_else(|| {
+                    corez::io::Error::new(
+                        ErrorKind::Other,
+                        "coinbase tx has no transparent input to carry its height",
+                    )
                 })?;
 
-            // Verify some simple structural consensus rules on the coinbase transaction.
-            if coinbase.sprout_bundle().is_some() {
-                return Err(corez::io::Error::new(
-                    ErrorKind::Other,
-                    "coinbase tx has sprout data",
-                ));
-            }
-
-            let coinbase_txin = coinbase_transparent.vin.first().expect("checked above");
-
-            match coinbase_txin.script_sig().0.parse().next() {
-                Some(Ok(PossiblyBad::Good(Opcode::PushValue(height)))) => height
-                    .to_num()
-                    .map_err(|_| {
-                        corez::io::Error::new(
-                            ErrorKind::Other,
-                            "coinbase input specifies an invalid block height",
-                        )
-                    })
-                    .and_then(|h| {
-                        BlockHeight::try_from(h).map_err(|_| {
+                match coinbase_txin.script_sig().0.parse().next() {
+                    Some(Ok(PossiblyBad::Good(Opcode::PushValue(height)))) => height
+                        .to_num()
+                        .map_err(|_| {
                             corez::io::Error::new(
                                 ErrorKind::Other,
                                 "coinbase input specifies an invalid block height",
                             )
                         })
-                    }),
-                // TODO: Permit missing height in genesis blocks by matching their block
-                // hash against the provided params.
-                _ => Err(corez::io::Error::new(
-                    ErrorKind::Other,
-                    "coinbase scriptSig missing height",
-                )),
-            }?
+                        .and_then(|h| {
+                            BlockHeight::try_from(h).map_err(|_| {
+                                corez::io::Error::new(
+                                    ErrorKind::Other,
+                                    "coinbase input specifies an invalid block height",
+                                )
+                            })
+                        }),
+                    // TODO: Permit missing height in genesis blocks by matching their block
+                    // hash against the provided params.
+                    _ => Err(corez::io::Error::new(
+                        ErrorKind::Other,
+                        "coinbase scriptSig missing height",
+                    )),
+                }?
+            }
         };
 
         // Fix the coinbase tx's consensus branch ID if necessary.
@@ -282,9 +299,33 @@ impl Block {
             Transaction::read(r, consensus_branch_id)
         })?;
 
-        // Verify some simple structural consensus rules on the non-coinbase transactions.
+        // A v7 coinbase is identified by its coinbase bundle, not its inputs.
+        #[cfg(zcash_unstable = "nu8")]
+        if non_coinbase.iter().any(|tx| {
+            tx.version() == TxVersion::V7 && crate::transaction::coinbase::is_coinbase(tx)
+        }) {
+            return Err(corez::io::Error::new(
+                ErrorKind::Other,
+                "non-first tx of block has coinbase bundle",
+            ));
+        }
+
+        // Preserve the pre-v7 structural check for null transparent inputs.
+        // In v7, a null outpoint no longer identifies a coinbase transaction;
+        // it remains unspendable and must be rejected by input/UTXO validation.
         if non_coinbase
             .iter()
+            .filter(|tx| {
+                #[cfg(zcash_unstable = "nu8")]
+                {
+                    tx.version() != TxVersion::V7
+                }
+                #[cfg(not(zcash_unstable = "nu8"))]
+                {
+                    let _ = tx;
+                    true
+                }
+            })
             .flat_map(|tx| tx.transparent_bundle())
             .flat_map(|b| &b.vin)
             .any(|txin| txin.prevout() == &OutPoint::NULL)
@@ -351,9 +392,10 @@ impl Block {
     /// Returns the claimed height of this block.
     ///
     /// This is a "claimed height" for two reasons:
-    /// - It is the value recorded in the `scriptSig` of the coinbase transaction's null
-    ///   transparent input, and thus can only be trusted if the block has been fully
-    ///   validated in the context of a chain.
+    /// - It is the value recorded in the coinbase transaction, either in its
+    ///   coinbase bundle (v7) or in the `scriptSig` of its null transparent
+    ///   input (earlier versions), and thus can only be trusted if the block has
+    ///   been fully validated in the context of a chain.
     /// - Blocks not in the main chain **do not have heights** (because heights are by
     ///   definition measured with respect to the longest chain). This value can only be
     ///   used as a "height" if the block is verified to be currently in the main chain.
@@ -380,9 +422,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use proptest::prelude::*;
-    use zcash_protocol::consensus::MAIN_NETWORK;
 
-    use super::{Block, BlockHash, BlockHeader, testing::arb_block_hash};
+    use super::{BlockHash, BlockHeader, testing::arb_block_hash};
+
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    use {super::Block, zcash_protocol::consensus::MAIN_NETWORK};
 
     const BLOCK_MAINNET_415000: [u8; 1640] = [
         0x04, 0x00, 0x00, 0x00, 0x52, 0x74, 0xb4, 0x3b, 0x9e, 0x4a, 0xd8, 0xf4, 0x3e, 0x93, 0xf7,
@@ -512,6 +556,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
     fn block_read_write() {
         let block = Block::read(&BLOCK_MAINNET_415000[..], &MAIN_NETWORK).unwrap();
         assert_eq!(
@@ -549,6 +594,287 @@ mod tests {
         #[test]
         fn block_hash_from_hex_inverts_display(hash in arb_block_hash()) {
             prop_assert_eq!(BlockHash::from_hex(&hash.to_string()), Ok(hash));
+        }
+    }
+
+    #[cfg(all(feature = "sapling", feature = "orchard", zcash_unstable = "nu8"))]
+    mod nu8 {
+        use alloc::vec::Vec;
+
+        use ::transparent::{
+            address::Script,
+            bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
+        };
+        use zcash_encoding::CompactSize;
+        use zcash_protocol::{
+            consensus::{BlockHeight, BranchId},
+            local_consensus::LocalNetwork,
+            value::{ZatBalance, Zatoshis},
+        };
+
+        use super::super::{Block, BlockHash, BlockHeaderData};
+        use crate::transaction::{
+            Authorized, Transaction, TransactionData, TxVersion,
+            coinbase::coinbase_input,
+            zip248::{self, ValuePoolDeltas},
+        };
+
+        /// A height in the test network's NU8 epoch.
+        const TEST_HEIGHT: BlockHeight = BlockHeight::from_u32(500_000);
+        /// The transparent output value used by the test transactions.
+        const TEST_OUTPUT_VALUE: Zatoshis = Zatoshis::const_from_u64(1_000);
+
+        /// A regtest network with NU8 active from height 1.
+        fn nu8_test_network() -> LocalNetwork {
+            let height = || Some(1u32.into());
+            LocalNetwork {
+                overwinter: height(),
+                sapling: height(),
+                blossom: height(),
+                heartwood: height(),
+                canopy: height(),
+                nu5: height(),
+                nu6: height(),
+                nu6_1: height(),
+                nu6_2: height(),
+                nu6_3: height(),
+                nu7: height(),
+                nu8: height(),
+                #[cfg(zcash_unstable = "nutachyon")]
+                nu_tachyon: height(),
+            }
+        }
+
+        fn block_bytes(txs: &[Transaction]) -> Vec<u8> {
+            let header = BlockHeaderData {
+                version: 4,
+                prev_block: BlockHash([0; 32]),
+                merkle_root: [0; 32],
+                final_sapling_root: [0; 32],
+                time: 0,
+                bits: 0,
+                nonce: [0; 32],
+                solution: vec![],
+            }
+            .freeze()
+            .unwrap();
+
+            let mut buf = Vec::new();
+            header.write(&mut buf).unwrap();
+            CompactSize::write(&mut buf, txs.len()).unwrap();
+            for tx in txs {
+                tx.write(&mut buf).unwrap();
+            }
+            buf
+        }
+
+        /// A v7 coinbase transaction with transparent outputs, no transparent inputs, and
+        /// balanced value pool deltas.
+        fn v7_coinbase(height: BlockHeight) -> Transaction {
+            let coinbase = zip248::CoinbaseBundle::from_parts(
+                height,
+                TEST_OUTPUT_VALUE,
+                Zatoshis::ZERO,
+                vec![],
+                vec![],
+                None,
+            )
+            .unwrap();
+
+            let mut vp = ValuePoolDeltas::empty();
+            vp.set_coinbase(coinbase.value_pool_delta(Zatoshis::ZERO))
+                .unwrap();
+            vp.set_transparent(-ZatBalance::from(TEST_OUTPUT_VALUE))
+                .unwrap();
+
+            TransactionData::<Authorized>::from_parts_with_value_pool_deltas(
+                TxVersion::V7,
+                BranchId::Nu8,
+                0,
+                height,
+                vp,
+                Some(transparent_outputs_only()),
+                None,
+                #[cfg(feature = "sapling")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+                Some(coinbase),
+                #[cfg(zcash_unstable = "nu8")]
+                Default::default(),
+                #[cfg(zcash_unstable = "nu8")]
+                Default::default(),
+            )
+            .unwrap()
+            .freeze()
+            .unwrap()
+        }
+
+        fn transparent_outputs_only() -> Bundle<TransparentAuthorized, Zatoshis> {
+            Bundle {
+                vin: vec![],
+                vout: vec![TxOut::new(TEST_OUTPUT_VALUE, Script::default())],
+                authorization: TransparentAuthorized,
+            }
+        }
+
+        fn transparent_transaction(
+            version: TxVersion,
+            vin: Vec<TxIn<TransparentAuthorized>>,
+        ) -> Transaction {
+            TransactionData::<Authorized>::from_parts(
+                version,
+                BranchId::Nu8,
+                0,
+                TEST_HEIGHT,
+                Some(Bundle {
+                    vin,
+                    ..transparent_outputs_only()
+                }),
+                None,
+                #[cfg(feature = "sapling")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+            )
+            .freeze()
+            .unwrap()
+        }
+
+        fn spending_input(prevout: OutPoint) -> TxIn<TransparentAuthorized> {
+            TxIn::from_parts(prevout, Script::default(), u32::MAX)
+        }
+
+        fn legacy_coinbase() -> Transaction {
+            let input = coinbase_input(TEST_HEIGHT, None).unwrap();
+            transparent_transaction(
+                TxVersion::V5,
+                vec![TxIn::from_parts(
+                    input.prevout().clone(),
+                    input.script_sig().into(),
+                    input.sequence(),
+                )],
+            )
+        }
+
+        /// A v7 coinbase carries its height in the coinbase bundle and has no transparent
+        /// inputs, so the block parser must not read its height from a `scriptSig`.
+        #[test]
+        fn v7_coinbase_without_transparent_inputs_round_trips() {
+            let height = TEST_HEIGHT;
+            let bytes = block_bytes(&[v7_coinbase(height)]);
+
+            let block = Block::read(&bytes[..], &nu8_test_network()).unwrap();
+            assert_eq!(block.claimed_height(), height);
+            assert!(block.vtx().first().coinbase_bundle().is_some());
+
+            let mut reencoded = Vec::new();
+            block.write(&mut reencoded).unwrap();
+            assert_eq!(reencoded, bytes);
+        }
+
+        /// The first transaction of a block must be a coinbase transaction, which for v7
+        /// means it must have a coinbase bundle.
+        #[test]
+        fn v7_non_coinbase_first_transaction_is_rejected() {
+            let tx = TransactionData::<Authorized>::from_parts_v7(
+                BranchId::Nu8,
+                0,
+                TEST_HEIGHT,
+                Some(transparent_outputs_only()),
+                #[cfg(feature = "sapling")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+                #[cfg(feature = "orchard")]
+                None,
+            )
+            .freeze()
+            .unwrap();
+            let bytes = block_bytes(&[tx]);
+
+            let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+            assert!(alloc::format!("{error}").contains("not coinbase"));
+        }
+
+        #[test]
+        fn later_v7_coinbase_is_rejected() {
+            for first in [v7_coinbase(TEST_HEIGHT), legacy_coinbase()] {
+                let bytes = block_bytes(&[first, v7_coinbase(TEST_HEIGHT)]);
+                let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+                assert!(
+                    alloc::format!("{error}").contains("non-first tx of block has coinbase bundle")
+                );
+            }
+        }
+
+        #[test]
+        fn later_legacy_null_input_is_rejected() {
+            // Reject both a legacy coinbase and a non-coinbase with a null input
+            // alongside an ordinary input.
+            for later in [
+                legacy_coinbase(),
+                transparent_transaction(
+                    TxVersion::V5,
+                    vec![
+                        spending_input(OutPoint::fake()),
+                        spending_input(OutPoint::NULL),
+                    ],
+                ),
+            ] {
+                let bytes = block_bytes(&[v7_coinbase(TEST_HEIGHT), later]);
+                let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+                assert!(
+                    alloc::format!("{error}")
+                        .contains("non-coinbase tx has null transparent input")
+                );
+            }
+        }
+
+        #[test]
+        fn mixed_block_round_trips() {
+            for first in [v7_coinbase(TEST_HEIGHT), legacy_coinbase()] {
+                let bytes = block_bytes(&[
+                    first,
+                    transparent_transaction(TxVersion::V5, vec![spending_input(OutPoint::fake())]),
+                    transparent_transaction(TxVersion::V7, vec![spending_input(OutPoint::fake())]),
+                ]);
+                let block = Block::read(&bytes[..], &nu8_test_network()).unwrap();
+                assert_eq!(block.claimed_height(), TEST_HEIGHT);
+                assert_eq!(block.vtx().len(), 3);
+                let mut reencoded = Vec::new();
+                block.write(&mut reencoded).unwrap();
+                assert_eq!(reencoded, bytes);
+            }
+        }
+
+        #[test]
+        fn non_coinbase_first_transaction_is_rejected() {
+            for version in [TxVersion::V5, TxVersion::V7] {
+                let bytes = block_bytes(&[transparent_transaction(
+                    version,
+                    vec![spending_input(OutPoint::fake())],
+                )]);
+                let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+                assert!(alloc::format!("{error}").contains("first tx of block is not coinbase"));
+            }
+
+            // A null outpoint does not identify a v7 transaction as a coinbase.
+            let bytes = block_bytes(&[transparent_transaction(
+                TxVersion::V7,
+                vec![spending_input(OutPoint::NULL)],
+            )]);
+            let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+            assert!(alloc::format!("{error}").contains("first tx of block is not coinbase"));
+        }
+
+        #[test]
+        fn empty_block_is_rejected() {
+            let bytes = block_bytes(&[]);
+            let error = Block::read(&bytes[..], &nu8_test_network()).unwrap_err();
+            assert!(alloc::format!("{error}").contains("block has no coinbase tx"));
         }
     }
 }

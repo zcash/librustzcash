@@ -4,7 +4,7 @@ use getset::Getters;
 
 use crate::{
     address::Script,
-    bundle::{Authorization, Bundle},
+    bundle::{Authorization, Bundle, OutPoint, TxOut},
 };
 
 pub const SIGHASH_ALL: u8 = 0x01;
@@ -122,7 +122,11 @@ impl SighashPolicy {
 
 /// Additional context that is needed to compute signature hashes
 /// for transactions that include transparent inputs or outputs.
-pub trait TransparentAuthorizingContext<V>: Authorization {
+pub trait TransparentAuthorizingContext<V> {
+    /// Previous output identifiers, when available, in input order.
+    fn input_outpoints(&self) -> Option<Vec<OutPoint>> {
+        None
+    }
     /// Returns the list of all transparent input amounts, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
@@ -133,6 +137,42 @@ pub trait TransparentAuthorizingContext<V>: Authorization {
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
     fn input_scriptpubkeys(&self) -> Vec<Script>;
+}
+
+/// Genuine previous outputs used for signing, separate from transaction effects.
+#[derive(Clone, Debug)]
+pub struct TransparentSigningContext<V> {
+    inputs: Vec<(OutPoint, TxOut<V>)>,
+}
+
+impl<V> TransparentSigningContext<V> {
+    /// Supplies previous outputs and their identifiers in transaction input order.
+    pub fn new(inputs: Vec<(OutPoint, TxOut<V>)>) -> Self {
+        Self { inputs }
+    }
+}
+
+impl<V: Copy> TransparentAuthorizingContext<V> for TransparentSigningContext<V> {
+    fn input_outpoints(&self) -> Option<Vec<OutPoint>> {
+        Some(
+            self.inputs
+                .iter()
+                .map(|(outpoint, _)| outpoint.clone())
+                .collect(),
+        )
+    }
+    fn input_amounts(&self) -> Vec<V> {
+        self.inputs
+            .iter()
+            .map(|(_, output)| output.value())
+            .collect()
+    }
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.inputs
+            .iter()
+            .map(|(_, output)| output.script_pubkey().clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,21 +233,50 @@ impl<'a, V> SignableInput<'a, V> {
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidInputIndex, SighashPolicy, SighashType, SignableInput};
+    use super::{
+        InvalidInputIndex, SighashPolicy, SighashType, SignableInput,
+        TransparentAuthorizingContext, TransparentSigningContext,
+    };
     use crate::{
         address::Script,
-        bundle::{Bundle, EffectsOnly, OutPoint, TxIn},
+        bundle::{Bundle, EffectsOnly, OutPoint, TxIn, TxOut},
     };
 
     /// The value of the input in the test below. The test does not depend on it.
     const INPUT_VALUE: u64 = 0;
 
     #[test]
+    fn signing_context_preserves_previous_output_order() {
+        let outpoints = vec![OutPoint::new([1; 32], 0), OutPoint::new([2; 32], 1)];
+        let values = vec![1u64, 2];
+        let scripts = vec![
+            Script::default(),
+            Script(zcash_script::script::Code(vec![0x51])),
+        ];
+        let inputs = outpoints
+            .iter()
+            .zip(&values)
+            .zip(&scripts)
+            .map(|((outpoint, value), script)| {
+                (outpoint.clone(), TxOut::new(*value, script.clone()))
+            })
+            .collect();
+        let context = TransparentSigningContext::new(inputs);
+        assert_eq!(context.input_outpoints(), Some(outpoints));
+        assert_eq!(context.input_amounts(), values);
+        assert_eq!(context.input_scriptpubkeys(), scripts);
+        let absent = TransparentSigningContext::<u64>::new(vec![]);
+        assert_eq!(absent.input_outpoints(), Some(vec![]));
+        assert!(absent.input_amounts().is_empty());
+        assert!(absent.input_scriptpubkeys().is_empty());
+    }
+
+    #[test]
     fn signable_input_rejects_out_of_range_index() {
-        let bundle: Bundle<EffectsOnly<u64>, u64> = Bundle {
+        let bundle: Bundle<EffectsOnly, u64> = Bundle {
             vin: vec![TxIn::from_parts(OutPoint::fake(), (), u32::MAX)],
             vout: vec![],
-            authorization: EffectsOnly { inputs: vec![] },
+            authorization: EffectsOnly,
         };
         let script = Script::default();
 

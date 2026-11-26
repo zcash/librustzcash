@@ -15,6 +15,10 @@ pub(crate) const FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
 pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 
+/// ZIP 248 expiry heights are below the timestamp interpretation threshold.
+#[cfg(zcash_unstable = "nu8")]
+pub(crate) const MAX_V7_EXPIRY_HEIGHT: u32 = 499_999_999;
+
 /// A placeholder anchor used internally when parsing a shielded bundle for an
 /// operation that does not read the anchor's value. Zero is always a valid anchor
 /// encoding for the Sapling, Orchard, and Ironwood note commitment trees.
@@ -72,7 +76,7 @@ impl AnchorRequirement {
     pub(crate) fn for_pre_authorization(tx_version: u32) -> Self {
         match tx_version {
             zcash_protocol::constants::V6_TX_VERSION => AnchorRequirement::NotRequired,
-            #[cfg(zcash_unstable = "nutachyon")]
+            #[cfg(zcash_unstable = "nu8")]
             zcash_protocol::constants::V7_TX_VERSION => AnchorRequirement::NotRequired,
             _ => AnchorRequirement::Required,
         }

@@ -10,23 +10,6 @@ workspace.
 
 ## [Unreleased]
 
-### Added
-- `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
-
-### Changed
-- `zcash_protocol::TxId::from_hex` now returns
-  `Result<TxId, zcash_encoding::ReverseHexError>` instead of `Option<TxId>`.
-- `zcash_protocol::consensus::Parameters` now documents the requirement that
-  network upgrades activate in the order of
-  `zcash_protocol::consensus::UPGRADES_IN_ORDER`. The results of functions
-  that take consensus parameters are unspecified for an implementation that
-  violates it, including a `zcash_protocol::local_consensus::LocalNetwork`
-  whose activation heights are out of order.
-
-### Deprecated
-- `zcash_protocol::zip318::BlockSpacing::nu7_activation`. Use
-  `Parameters::activation_height(NetworkUpgrade::Nu7)` instead.
-
 ## [0.11.0] - 2026-10-21
 
 This release sets the NU7 mainnet activation height to 3543405.

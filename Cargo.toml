@@ -70,10 +70,10 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.9"
 jubjub = "0.11"
 redjubjub = { version = "0.9", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.9", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.9", default-features = false, git = "https://github.com/zcash/sapling-crypto", rev = "c870a25ab3323d4c113105f48be959dd7d142995" }
 
 # - Orchard
-orchard = { version = "0.16", default-features = false }
+orchard = { version = "0.16", default-features = false, git = "https://github.com/zcash/orchard", rev = "413c112358751f77439410d5ecd69d665d48e777" }
 pasta_curves = "0.6"
 
 # - Transparent
@@ -229,6 +229,6 @@ debug = true
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(tokio_unstable)',
-  'cfg(zcash_unstable, values("nutachyon", "zip233"))',
+  'cfg(zcash_unstable, values("nu8", "nutachyon", "zip233"))',
   'cfg(live_network_tests)',
 ] }
