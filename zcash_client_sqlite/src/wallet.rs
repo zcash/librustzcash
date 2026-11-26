@@ -1006,7 +1006,12 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
     let inserted = import_standalone_transparent_pubkey_inner(
-        conn, params, account_uuid, account_id, pubkey, custody,
+        conn,
+        params,
+        account_uuid,
+        account_id,
+        pubkey,
+        custody,
     )?;
     reconcile_imported_receivers(
         conn,

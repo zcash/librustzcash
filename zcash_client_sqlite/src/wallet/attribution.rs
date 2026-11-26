@@ -515,7 +515,7 @@ pub(crate) mod tests {
     use rand::{rand_core::UnwrapErr, rngs::SysRng};
     use rusqlite::named_params;
     use zcash_client_backend::data_api::{
-        Account as _, AccountPurpose, TargetValue, WalletCommitmentTrees, WalletWrite,
+        Account as _, TargetValue, WalletCommitmentTrees, WalletWrite,
         testing::{AddressType, TestBuilder, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
@@ -751,13 +751,7 @@ pub(crate) mod tests {
             .clone();
         let guest = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id();
 

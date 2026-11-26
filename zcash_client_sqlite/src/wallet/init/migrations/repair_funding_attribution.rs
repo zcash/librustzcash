@@ -89,7 +89,7 @@ mod tests {
         schemerz_rusqlite::RusqliteMigration as _,
         transparent::address::TransparentAddress,
         zcash_client_backend::data_api::{
-            Account as _, AccountPurpose, WalletWrite,
+            Account as _, WalletWrite,
             testing::{TestBuilder, TestState},
         },
         zcash_primitives::block::BlockHash,
@@ -134,7 +134,7 @@ mod tests {
                 "guest",
                 &guest_ufvk,
                 &birthday,
-                AccountPurpose::ViewOnly,
+                None,
                 None,
             )
             .unwrap()
@@ -231,7 +231,7 @@ mod tests {
                 "guest",
                 &guest_ufvk,
                 &birthday,
-                AccountPurpose::ViewOnly,
+                None,
                 None,
             )
             .unwrap()
