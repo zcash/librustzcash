@@ -390,3 +390,72 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod param_bounds_tests {
+    use super::is_valid_solution;
+    use crate::params::Params;
+
+    /// Parameter sets for which `Params::new` used to succeed but
+    /// `is_valid_solution` panicked, each via a different mode:
+    /// - `(144, 3)`: index bit width `n / (k + 1) + 1 = 37` exceeds the `u32`
+    ///   accumulator of `indices_from_minimal`.
+    /// - `(2048, 3)`: index bit width 513, same mode.
+    /// - `(744, 23)`: index bit width 32 exceeds `expand_array`'s
+    ///   `7 + bit_len <= 32` accumulator bound.
+    /// - `(528, 21)`: `n > 512` makes `indices_per_hash_output` zero, and the
+    ///   tree validator divides by it.
+    /// - `(56, 7)`, `(48, 7)`, `(24, 3)`, `(80, 15)`: the collision bit width
+    ///   `n / (k + 1)` is below the 8 bits that `expand_array`'s byte-wise
+    ///   expansion of the leaf hashes requires.
+    #[test]
+    fn panicking_params_are_rejected() {
+        let input = [0u8; 108];
+        let nonce = [0u8; 32];
+        for (n, k, soln_len) in [
+            (144, 3, 37),
+            (2048, 3, 513),
+            (744, 23, 33_554_432),
+            (528, 21, 6_553_600),
+            (56, 7, 128),
+            (48, 7, 112),
+            (24, 3, 7),
+            (80, 15, 24_576),
+        ] {
+            assert!(
+                Params::new(n, k).is_none(),
+                "({n}, {k}) must be rejected by Params::new"
+            );
+            // The public API returns an error instead of panicking even when
+            // handed a solution of the matching length.
+            assert!(
+                is_valid_solution(n, k, &input, &nonce, &vec![0u8; soln_len]).is_err(),
+                "({n}, {k}) must be an error, not a panic"
+            );
+        }
+    }
+
+    /// Parameter sets used by Zcash and other Equihash chains remain
+    /// supported, including the widest index bit width (25) that
+    /// `minimal`'s u32 accumulator permits.
+    #[test]
+    fn supported_params_are_still_accepted() {
+        // (64, 7) has the narrowest collision bit width (n / (k + 1) = 8)
+        // that the leaf expansion accepts; it exercises the lower boundary of
+        // the check.
+        for (n, k) in [
+            (200, 9),
+            (144, 5),
+            (96, 5),
+            (96, 3),
+            (48, 5),
+            (64, 7),
+            (512, 63),
+        ] {
+            assert!(
+                Params::new(n, k).is_some(),
+                "({n}, {k}) must remain supported"
+            );
+        }
+    }
+}
