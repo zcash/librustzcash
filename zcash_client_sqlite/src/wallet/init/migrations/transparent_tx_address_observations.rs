@@ -26,7 +26,8 @@ use zcash_protocol::consensus;
 
 use super::{
     add_transparent_value_index, fix_bad_ironwood_change_flagging, ivk_item_cache,
-    orchard_ironwood_migration_transfer_change, restore_ua_transparent_receivers,
+    orchard_ironwood_migration_transfer_change, remove_spend_key_flag,
+    restore_ua_transparent_receivers,
     standalone_address, transparent_spend_locator_map, tree_retained_checkpoints,
     tx_status_observation_intent, v_address_uses_ironwood, v_tx_outputs_diversifier_index,
     witness_settled_height,
@@ -51,6 +52,7 @@ pub(super) const DEPENDENCIES: &[Uuid] = &[
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
     orchard_ironwood_migration_transfer_change::MIGRATION_ID,
+    remove_spend_key_flag::MIGRATION_ID,
     restore_ua_transparent_receivers::MIGRATION_ID,
     standalone_address::MIGRATION_ID,
     transparent_spend_locator_map::MIGRATION_ID,

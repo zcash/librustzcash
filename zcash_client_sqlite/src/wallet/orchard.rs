@@ -1021,6 +1021,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn spend_authority_restricts_shielded_selection() {
+        testing::pool::spend_authority_restricts_shielded_selection::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn checkpoint_gaps() {
         testing::pool::checkpoint_gaps::<OrchardPoolTester>()
     }

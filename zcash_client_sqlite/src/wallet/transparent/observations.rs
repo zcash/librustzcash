@@ -682,7 +682,7 @@ pub(crate) mod tests {
     use transparent::builder::TransparentSigningSet;
     use zcash_client_backend::{
         data_api::{
-            Account as _, AccountBirthday, AccountPurpose, SentTransaction, WalletWrite,
+            Account as _, AccountBirthday, SentTransaction, WalletWrite,
             chain::ChainState,
             scanning::{ScanPriority, ScanRange},
             testing::{AddressType, TestBuilder, TestState},
@@ -734,7 +734,9 @@ pub(crate) mod tests {
     };
 
     #[cfg(feature = "transparent-key-import")]
-    use secp256k1::SecretKey;
+    use {
+        secp256k1::SecretKey, zcash_client_backend::data_api::spend_authority::SpendingKeyCustody,
+    };
 
     /// A validly-encoded compressed public key: the `0x02` prefix followed by 32 bytes.
     fn pubkey_bytes() -> Vec<u8> {
@@ -1178,7 +1180,7 @@ pub(crate) mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
 
         let conn = &st.wallet().db().conn;
@@ -1500,7 +1502,7 @@ pub(crate) mod tests {
         }
 
         st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_uuid, pubkey)
+            .import_standalone_transparent_pubkey(account_uuid, pubkey, SpendingKeyCustody::Held)
             .unwrap();
 
         let conn = &st.wallet().db().conn;
@@ -1541,7 +1543,7 @@ pub(crate) mod tests {
         }
 
         st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_uuid, pubkey)
+            .import_standalone_transparent_pubkey(account_uuid, pubkey, SpendingKeyCustody::Held)
             .unwrap();
 
         let conn = &st.wallet().db().conn;
@@ -1615,7 +1617,7 @@ pub(crate) mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
 
         let conn = &st.wallet().db().conn;
@@ -2028,7 +2030,7 @@ pub(crate) mod tests {
 
         // The runtime path: importing the receiver that transaction B's `scriptSig` reveals.
         st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_uuid, pubkey)
+            .import_standalone_transparent_pubkey(account_uuid, pubkey, SpendingKeyCustody::Held)
             .expect("unparseable stored data does not abort an import");
 
         // The unrecoverable prevout yields no received output, and no error. Reconciliation asks
@@ -2118,7 +2120,7 @@ pub(crate) mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
 
         let conn = &st.wallet().db().conn;
@@ -2182,7 +2184,7 @@ pub(crate) mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
         let chain_end = claimed_birthday_height + 500;
         st.wallet_mut()
@@ -2296,7 +2298,7 @@ pub(crate) mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
 
         // The imported account's birthday lies inside the chain-tip pruning window, whose lowest
@@ -2397,7 +2399,7 @@ pub(crate) mod tests {
         // happens when the transaction arrives, not when the address does.
         let account = st
             .wallet_mut()
-            .import_account_ufvk("imported", &ufvk, &birthday, AccountPurpose::ViewOnly, None)
+            .import_account_ufvk("imported", &ufvk, &birthday, None, None)
             .unwrap();
         st.wallet_mut()
             .db_mut()
@@ -2511,13 +2513,7 @@ pub(crate) mod tests {
         let network = *st_a.network();
         let birthday = st_a.test_account().unwrap().birthday().clone();
         st_a.wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap();
         advance_gap(&st_a, &network);
 
@@ -2525,13 +2521,7 @@ pub(crate) mod tests {
         let (mut st_b, guest_ufvk_b) = build();
         advance_gap(&st_b, &network);
         st_b.wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk_b,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk_b, &birthday, None, None)
             .unwrap();
 
         assert_eq!(snapshot(&st_a), snapshot(&st_b));
@@ -2770,13 +2760,7 @@ pub(crate) mod tests {
         // links the spend and reveals which account funded the spending transaction.
         let guest_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
@@ -2827,13 +2811,7 @@ pub(crate) mod tests {
         let spend_txid = spend_tx.txid();
 
         st.wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap();
 
         let attributed = tx_output_accounts(&st.wallet().db().conn, spend_txid);
@@ -2917,7 +2895,7 @@ pub(crate) mod tests {
         }
 
         st.wallet_mut()
-            .import_standalone_transparent_pubkey(account_uuid, pubkey)
+            .import_standalone_transparent_pubkey(account_uuid, pubkey, SpendingKeyCustody::Held)
             .unwrap();
 
         // The spend of the recovered output makes the spending transaction's own output a send
@@ -3253,13 +3231,7 @@ pub(crate) mod tests {
         // reveals which account funded it.
         let guest_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
@@ -3335,13 +3307,7 @@ pub(crate) mod tests {
         // that a wallet account funded the transaction, so no replay has run.
         let sender_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "sender",
-                &sender_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("sender", &sender_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
@@ -3350,13 +3316,7 @@ pub(crate) mod tests {
         // Recognizing the transparent output the transaction spends does establish it.
         let guest_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
@@ -3408,13 +3368,7 @@ pub(crate) mod tests {
         let spend_txid = spend_tx.txid();
 
         st.wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap();
 
         let sapling = PoolType::Shielded(ShieldedPool::Sapling);
@@ -3523,13 +3477,7 @@ pub(crate) mod tests {
 
         let guest_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
@@ -3591,13 +3539,7 @@ pub(crate) mod tests {
 
         let guest_uuid = st
             .wallet_mut()
-            .import_account_ufvk(
-                "guest",
-                &guest_ufvk,
-                &birthday,
-                AccountPurpose::ViewOnly,
-                None,
-            )
+            .import_account_ufvk("guest", &guest_ufvk, &birthday, None, None)
             .unwrap()
             .id()
             .expose_uuid();
