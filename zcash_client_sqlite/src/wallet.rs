@@ -126,7 +126,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::{HashSer, read_commitment_tree},
-    transaction::{Transaction, TransactionData, coinbase::is_coinbase, fees::zip317},
+    transaction::{Transaction, coinbase::is_coinbase, fees::zip317},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool, TxId,
@@ -3268,61 +3268,28 @@ fn parse_tx<P: consensus::Parameters>(
     //   consensus branch ID is not used there), and then either use its non-zero expiry
     //   height, or fall back to the caller-supplied fallback height (typically the
     //   wallet's view of the chain tip).
-    if let Some(height) =
-        block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
-    {
-        Transaction::read(tx_bytes, BranchId::for_height(params, height))
-            .map(|t| (height, t))
-            .map_err(SqliteClientError::from)
-    } else {
-        let tx_data = Transaction::read(tx_bytes, BranchId::Sprout)
-            .map_err(SqliteClientError::from)?
-            .into_data();
+    //
+    // The transaction is always read from `tx_bytes` under the selected branch ID, never
+    // rebuilt from its parts, so that the result is exactly the transaction the bytes
+    // encode. Versions from v5 onward keep the branch ID they commit to, whatever the
+    // selected one.
+    let nonzero = |height: &BlockHeight| *height > BlockHeight::from(0);
+    let height = match block_height.or_else(|| expiry_height.filter(nonzero)) {
+        Some(height) => height,
+        None => Some(Transaction::read(tx_bytes, BranchId::Sprout)?.expiry_height())
+            .filter(nonzero)
+            .or(fallback_height)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Consensus branch ID not known, cannot parse this transaction until it is mined"
+                        .to_string(),
+                )
+            })?,
+    };
 
-        let expiry_height = tx_data.expiry_height();
-        if expiry_height > BlockHeight::from(0) {
-            #[cfg(not(all(feature = "zip-233", zcash_unstable = "zip233")))]
-            let tx_data = TransactionData::from_parts(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            );
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            let tx_data = TransactionData::from_parts_with_zip233(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.zip233_amount(),
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            );
-            tx_data
-                .freeze()
-                .map(|t| (expiry_height, t))
-                .map_err(SqliteClientError::from)
-        } else if let Some(fallback_height) = fallback_height {
-            // Unmined with no expiry, so no epoch is recorded for it. The branch ID
-            // does not affect parsing (absent from the pre-v5 serialized form; v5
-            // onward commit to their own), so select it from the caller-supplied
-            // fallback height, typically the wallet's view of the chain tip.
-            Transaction::read(tx_bytes, BranchId::for_height(params, fallback_height))
-                .map(|t| (fallback_height, t))
-                .map_err(SqliteClientError::from)
-        } else {
-            Err(SqliteClientError::CorruptedData(
-                "Consensus branch ID not known, cannot parse this transaction until it is mined"
-                    .to_string(),
-            ))
-        }
-    }
+    Transaction::read(tx_bytes, BranchId::for_height(params, height))
+        .map(|t| (height, t))
+        .map_err(SqliteClientError::from)
 }
 
 /// Looks up a transaction by its [`TxId`].
@@ -6461,6 +6428,10 @@ mod tests {
         num::{NonZeroU8, NonZeroU32},
     };
 
+    use proptest::{
+        prelude::{ProptestConfig, Strategy, TestCaseError},
+        prop_assert, prop_assert_eq, proptest,
+    };
     use rusqlite::{Connection, named_params};
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, Secret, SecretVec};
@@ -6484,11 +6455,17 @@ mod tests {
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::{
         block::BlockHash,
-        transaction::builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+        transaction::{
+            Transaction, TxVersion,
+            builder::{BLOSSOM_DEFAULT_TX_EXPIRY_DELTA, NU7_DEFAULT_TX_EXPIRY_DELTA},
+            testing::arb_tx,
+        },
     };
     use zcash_protocol::{
         TxId,
-        consensus::{BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters},
+        consensus::{
+            BlockHeight, BranchId, MAIN_NETWORK, NetworkUpgrade, Parameters, testing::arb_branch_id,
+        },
         local_consensus::LocalNetwork,
         value::{ZatBalance, Zatoshis},
         zip318::{Zip318Classification, Zip318TxKind},
@@ -7077,6 +7054,149 @@ mod tests {
             parse_tx(&MAIN_NETWORK, &raw, None, Some(BlockHeight::from(0)), None),
             Err(SqliteClientError::CorruptedData(_))
         ));
+    }
+
+    /// A network on which each upgrade activates at its own height, so that some height
+    /// selects each consensus branch from Overwinter onward.
+    const DISTINCT_ACTIVATIONS_NETWORK: LocalNetwork = LocalNetwork {
+        overwinter: Some(BlockHeight::from_u32(1)),
+        sapling: Some(BlockHeight::from_u32(2)),
+        blossom: Some(BlockHeight::from_u32(3)),
+        heartwood: Some(BlockHeight::from_u32(4)),
+        canopy: Some(BlockHeight::from_u32(5)),
+        nu5: Some(BlockHeight::from_u32(6)),
+        nu6: Some(BlockHeight::from_u32(7)),
+        nu6_1: Some(BlockHeight::from_u32(8)),
+        nu6_2: Some(BlockHeight::from_u32(9)),
+        nu6_3: Some(BlockHeight::from_u32(10)),
+        nu7: Some(BlockHeight::from_u32(11)),
+        #[cfg(zcash_unstable = "nutachyon")]
+        nu_tachyon: Some(BlockHeight::from_u32(12)),
+    };
+
+    /// A nonzero height in any epoch of [`DISTINCT_ACTIVATIONS_NETWORK`].
+    fn arb_nonzero_height() -> impl Strategy<Value = BlockHeight> {
+        // Every height past the last activation selects the final epoch.
+        (1u32..16).prop_map(BlockHeight::from_u32)
+    }
+
+    /// Checks `parse_tx` on the serialized form of `tx`, under every combination of an unknown
+    /// or known mined height, a missing, zero or nonzero cached expiry height, and an unknown or
+    /// known fallback height.
+    ///
+    /// `parse_tx` must select the first available of: the mined height, the nonzero cached
+    /// expiry height, the transaction's own nonzero expiry height, and the fallback height. It
+    /// must fail with `CorruptedData` when none is available. Otherwise it must return the
+    /// selected height and the stored transaction unchanged, with the same txid and the same
+    /// serialized bytes. A pre-v5 transaction does not commit to a consensus branch ID, so the
+    /// returned one must carry the branch ID of the selected height.
+    fn check_parse_tx_returns_stored_tx(
+        tx: &Transaction,
+        mined_height: BlockHeight,
+        cached_expiry_height: BlockHeight,
+        fallback_height: BlockHeight,
+    ) -> Result<(), TestCaseError> {
+        let params = DISTINCT_ACTIVATIONS_NETWORK;
+        let mut tx_bytes = vec![];
+        tx.write(&mut tx_bytes).unwrap();
+        // Pre-Overwinter versions do not serialize an expiry height, so the stored transaction
+        // is the one its bytes encode, rather than `tx` itself.
+        let stored = Transaction::read(&tx_bytes[..], tx.consensus_branch_id()).unwrap();
+        let nonzero = |height: &BlockHeight| *height > BlockHeight::from(0);
+
+        for block_height in [None, Some(mined_height)] {
+            for expiry_height in [None, Some(BlockHeight::from(0)), Some(cached_expiry_height)] {
+                for fallback in [None, Some(fallback_height)] {
+                    let context = format!(
+                        "block height {block_height:?}, cached expiry height {expiry_height:?}, \
+                         fallback height {fallback:?}"
+                    );
+                    let expected_height = block_height
+                        .or(expiry_height.filter(nonzero))
+                        .or(Some(stored.expiry_height()).filter(nonzero))
+                        .or(fallback);
+                    let result =
+                        parse_tx(&params, &tx_bytes, block_height, expiry_height, fallback);
+
+                    match expected_height {
+                        None => prop_assert!(
+                            matches!(result, Err(SqliteClientError::CorruptedData(_))),
+                            "{}",
+                            context
+                        ),
+                        Some(expected_height) => {
+                            let (height, parsed) = result
+                                .map_err(|e| TestCaseError::fail(format!("{context}: {e}")))?;
+                            let mut parsed_bytes = vec![];
+                            parsed.write(&mut parsed_bytes).unwrap();
+                            let expected_branch_id = match stored.version() {
+                                TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                                    BranchId::for_height(&params, expected_height)
+                                }
+                                _ => stored.consensus_branch_id(),
+                            };
+
+                            prop_assert_eq!(height, expected_height, "{}", context);
+                            prop_assert_eq!(parsed.txid(), stored.txid(), "{}", context);
+                            prop_assert_eq!(&parsed_bytes, &tx_bytes, "{}", context);
+                            prop_assert_eq!(
+                                parsed.consensus_branch_id(),
+                                expected_branch_id,
+                                "{}",
+                                context
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        /// `parse_tx` returns a stored transaction of any version unchanged.
+        #[test]
+        fn parse_tx_returns_stored_tx(
+            tx in arb_branch_id().prop_flat_map(arb_tx),
+            mined_height in arb_nonzero_height(),
+            cached_expiry_height in arb_nonzero_height(),
+            fallback_height in arb_nonzero_height(),
+        ) {
+            check_parse_tx_returns_stored_tx(
+                &tx,
+                mined_height,
+                cached_expiry_height,
+                fallback_height,
+            )?;
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(8))]
+
+        /// `parse_tx` keeps the Ironwood bundle of a v6 transaction, including when the
+        /// transaction is unmined and its consensus branch is selected by the expiry height
+        /// encoded in it.
+        #[test]
+        fn parse_tx_returns_stored_ironwood_tx(
+            tx in arb_tx(BranchId::Nu6_3).prop_filter(
+                "an Ironwood bundle and a nonzero expiry height",
+                |tx| tx.ironwood_bundle().is_some() && tx.expiry_height() > BlockHeight::from(0),
+            ),
+            mined_height in arb_nonzero_height(),
+            cached_expiry_height in arb_nonzero_height(),
+            fallback_height in arb_nonzero_height(),
+        ) {
+            check_parse_tx_returns_stored_tx(
+                &tx,
+                mined_height,
+                cached_expiry_height,
+                fallback_height,
+            )?;
+        }
     }
 
     /// A stored unmined transaction with a zero expiry height (e.g. a coinbase

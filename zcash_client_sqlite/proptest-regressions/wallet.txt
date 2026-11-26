@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 27ece8f6a119018a1cbf59e1aeb46eedfb38d3c29599e1460519c0d34c19d632 # shrinks to an unmined v5 tx whose expiry height selects a branch other than the one it commits to
+cc 6a8b6b6ef410258d47bc911db0e409d9f5af49cdfff62dbc59df901a808935cf # shrinks to an unmined v6 tx with an Ironwood bundle
