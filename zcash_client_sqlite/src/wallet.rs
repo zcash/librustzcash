@@ -4896,6 +4896,10 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     marking: Marking::None,
                 },
             )
+            // Truncate to the inserted checkpoint here: the final truncation below truncates
+            // the trees only if blocks above the target remain, and the truncation above may
+            // already have removed them, leaving checkpoints above the target in place.
+            .and_then(|_| tree.truncate_to_checkpoint(&target_height))
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Sapling,
                 height: target_height,
@@ -4913,6 +4917,7 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     marking: Marking::None,
                 },
             )
+            .and_then(|_| tree.truncate_to_checkpoint(&target_height))
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Orchard,
                 height: target_height,
@@ -4929,6 +4934,7 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     marking: Marking::None,
                 },
             )
+            .and_then(|_| tree.truncate_to_checkpoint(&target_height))
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Ironwood,
                 height: target_height,
