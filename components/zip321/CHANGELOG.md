@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Parameter values containing a `%` that does not begin a valid percent-encoded
+  sequence (a bare `%`, or one not followed by two hexadecimal digits) are now
+  rejected, as required by the grammar's `pct-encoded = "%" HEXDIG HEXDIG`
+  production and ZIP 321's "MUST NOT be accepted" rule; previously such text
+  was silently accepted and decoded as literal characters.
+
 ## [0.10.0] - 2026-10-21
 
 ### Changed
