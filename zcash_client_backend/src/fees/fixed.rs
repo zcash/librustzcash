@@ -90,8 +90,9 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         &self.fee_rule
     }
 
-    fn fetch_wallet_meta(
+    fn fetch_wallet_meta<P: consensus::Parameters>(
         &self,
+        _params: &P,
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
         _target_height: TargetHeight,
@@ -153,6 +154,9 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are pre-Revision-2 (no NU7 activation), where the fee is the 5000-zatoshi constant.
+    #![allow(deprecated)]
+
     use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
     use crate::fees::tests::all_change_receivers;
     use ::transparent::bundle::TxOut;

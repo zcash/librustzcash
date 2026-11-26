@@ -144,6 +144,7 @@ migration_modules!(
     orchard_ironwood_migration_history,
     orchard_ironwood_migration_txid_blob,
     orchard_ironwood_migration_tables,
+    orchard_ironwood_migration_transfer_change,
     orchard_ironwood_migration_unsatisfiability,
     orchard_note_version,
     orchard_received_notes,
@@ -314,10 +315,12 @@ pub(super) fn all_migrations<
     //                                                                            /                    \                   orchard_ironwood_broadcast_binding
     //                                                                           /                      \                                     |
     //                                                                          /                        \                orchard_ironwood_migration_txid_blob
-    //                                                                         /                          \                  /
-    //                                                                        /                          v_migration_transactions
-    //                                                                       /                            /
-    //                                                                   fix_v_transactions_multi_account_totals
+    //                                                                         /                          \                  /                 \
+    //                                                                        /                          v_migration_transactions               \
+    //                                                                       /                            /                                     |
+    //                                                                   fix_v_transactions_multi_account_totals                                |
+    //                                                                                                    \                                     |
+    //                                                                                                     `--- orchard_ironwood_migration_transfer_change
     //
     // `transparent_tx_address_observations` depends on every leaf of the graph above, and so it
     // follows all of them. `repair_funding_attribution` depends on it in turn.
@@ -449,6 +452,7 @@ pub(super) fn all_migrations<
         Box::new(witness_settled_height::Migration {
             _params: params.clone(),
         }),
+        Box::new(orchard_ironwood_migration_transfer_change::Migration),
         Box::new(transparent_tx_address_observations::Migration {
             _params: params.clone(),
         }),

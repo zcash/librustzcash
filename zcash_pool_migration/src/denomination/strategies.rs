@@ -226,6 +226,9 @@ impl DenominationStrategy for CanonicalOneTwoFive {
 
 #[cfg(test)]
 mod tests {
+    // Network-less planner arithmetic at the pre-Revision-2 marginal fee.
+    #![allow(deprecated)]
+
     use super::*;
     use proptest::prelude::*;
     use rand_chacha::ChaCha8Rng;

@@ -25,8 +25,7 @@ use alloc::vec::Vec;
 
 use getset::{CopyGetters, Getters};
 use rand_core::{CryptoRng, Rng};
-use zcash_protocol::TxId;
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::{TxId, consensus::BlockHeight, value::Zatoshis};
 
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
@@ -340,6 +339,10 @@ pub struct TransactionStatus {
     /// The height it was mined at, once mined.
     #[getset(get_copy = "pub")]
     pub(crate) mined_height: Option<BlockHeight>,
+    /// The value it returns to the Orchard pool as change, if any
+    /// ([`MigrationTransaction::orchard_change`]).
+    #[getset(get_copy = "pub")]
+    pub(crate) orchard_change: Option<Zatoshis>,
     /// The transaction id (raw internal bytes), from broadcast onward: a transaction keeps the
     /// txid it was broadcast under when it mines, so this stays populated through mining rather
     /// than lapsing at it.
@@ -1699,6 +1702,7 @@ impl MigrationState {
                     blocked_on,
                     unsatisfiable_kind,
                     mined_height,
+                    orchard_change: t.orchard_change,
                     txid,
                 }
             })
@@ -1756,6 +1760,7 @@ mod tests {
             unsatisfiable: None,
             spend_nullifiers: Vec::new(),
             broadcast_failure_at: None,
+            orchard_change: None,
         }
     }
 
