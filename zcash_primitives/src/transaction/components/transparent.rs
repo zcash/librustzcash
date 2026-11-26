@@ -47,8 +47,8 @@ pub fn read_script<R: Read>(reader: R) -> io::Result<Script> {
 /// Writes `script` with a CompactSize length prefix.
 ///
 /// Returns an error only if `writer` fails.
-pub fn write_script<W: Write>(mut writer: W, script: &Script) -> io::Result<()> {
-    Vector::write_bytes(&mut writer, &script.0.0)
+pub fn write_script<W: Write>(writer: W, script: &Script) -> io::Result<()> {
+    Vector::write_bytes(writer, &script.0.0)
 }
 
 /// Returns the length of `script` as encoded, including its CompactSize length prefix.
