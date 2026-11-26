@@ -330,6 +330,8 @@ CREATE TABLE blocks (
 ///   code for "nonconforming", which is a decision that the transaction is not a ZIP 318 one. A
 ///   client must render the default as no label, never as "not a migration". Rows written before
 ///   this column existed keep the default and need the transaction rescanned.
+/// - `abandoned`: whether the wallet has abandoned this transaction locally. Its unmined
+///   outputs and spends are excluded from balances and input selection.
 ///
 /// [`Zip318Classification::to_code`]: zcash_protocol::zip318::Zip318Classification::to_code
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
@@ -348,6 +350,7 @@ CREATE TABLE "transactions" (
     confirmed_unmined_at_height INTEGER,
     trust_status INTEGER,
     zip318_kind INTEGER NOT NULL DEFAULT 0,
+    abandoned INTEGER NOT NULL DEFAULT 0 CHECK (abandoned IN (0, 1)),
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block
@@ -426,11 +429,9 @@ CREATE INDEX idx_sapling_received_notes_witness_settled_height ON sapling_receiv
 ///
 /// Only one mined transaction can spend a note. However, transactions created by the
 /// wallet may expire before being mined, and the wallet still tracks the fact that the
-/// user created the transaction. The junction table enables the "spent-in" relationship
-/// between notes and expired transactions to be preserved; note spent-ness is determined
-/// by joining this table with [`TABLE_TRANSACTIONS`] and then filtering out transactions
-/// where either `transactions.block` is non-null, or `transactions.expiry_height` is not
-/// greater than the wallet's view of the chain tip.
+/// user created the transaction. The junction table preserves the "spent-in" relationship
+/// for expired and abandoned transactions. A spend reserves its note when the spending
+/// transaction is mined, or is neither expired nor abandoned.
 pub(super) const TABLE_SAPLING_RECEIVED_NOTE_SPENDS: &str = r#"
 CREATE TABLE "sapling_received_note_spends" (
     sapling_received_note_id INTEGER NOT NULL
@@ -920,6 +921,11 @@ CREATE TABLE "transparent_spend_map" (
 pub(super) const INDEX_TRANSPARENT_SPEND_MAP_TX: &str = r#"
 CREATE INDEX idx_transparent_spend_map_transaction_id ON transparent_spend_map (
     spending_transaction_id ASC
+)"#;
+pub(super) const INDEX_TRANSPARENT_SPEND_MAP_PREVOUT: &str = r#"
+CREATE INDEX idx_transparent_spend_map_prevout ON transparent_spend_map (
+    prevout_txid ASC,
+    prevout_output_index ASC
 )"#;
 
 /// Stores the outputs of transactions created by the wallet.
@@ -1558,7 +1564,8 @@ SELECT v_transactions.account_uuid           AS account_uuid,
        v_transactions.is_shielding           AS is_shielding,
        v_transactions.pool_crossing_value    AS pool_crossing_value,
        v_transactions.trust_status           AS trust_status,
-       v_transactions.zip318_kind            AS zip318_kind
+        v_transactions.zip318_kind            AS zip318_kind,
+        v_transactions.abandoned              AS abandoned
 FROM v_transactions
 UNION ALL
 SELECT vmt.account_uuid          AS account_uuid,
@@ -1582,7 +1589,8 @@ SELECT vmt.account_uuid          AS account_uuid,
        0                         AS is_shielding,
        vmt.pool_crossing_value   AS pool_crossing_value,
        NULL                      AS trust_status,
-       vmt.zip318_kind           AS zip318_kind
+        vmt.zip318_kind           AS zip318_kind,
+        0                         AS abandoned
 FROM v_migration_transactions vmt";
 
 /// The history of transactions that affect the balance of each account in the wallet. The parent
@@ -1750,7 +1758,8 @@ SELECT accounts.uuid                AS account_uuid,
        -- exactly when this column is non-NULL.
        pool_crossings.crossing_value AS pool_crossing_value,
        transactions.trust_status,
-       transactions.zip318_kind
+        transactions.zip318_kind,
+        transactions.abandoned
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
 JOIN transactions ON transactions.id_tx = notes.transaction_id

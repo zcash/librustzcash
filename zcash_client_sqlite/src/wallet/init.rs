@@ -226,6 +226,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::AccountUnknown => {
             unreachable!("all accounts are known in migration context")
         }
+        e @ (SqliteClientError::TransactionUnknown(_) | SqliteClientError::TransactionMined(_)) => {
+            WalletMigrationError::Other(Box::new(e))
+        }
         SqliteClientError::UnknownZip32Derivation => {
             unreachable!("we don't call methods that require operating on imported accounts")
         }
@@ -913,6 +916,7 @@ mod tests {
             db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_TX,
             db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_VALUE_ZAT,
             db::INDEX_TRANSPARENT_SPEND_LOCATOR_IDX,
+            db::INDEX_TRANSPARENT_SPEND_MAP_PREVOUT,
             db::INDEX_TRANSPARENT_SPEND_MAP_TX,
             db::INDEX_TRANSPARENT_SPEND_SEARCH_TX,
             db::INDEX_TRANSPARENT_TX_ADDRESS_OBSERVATIONS_ADDRESS,

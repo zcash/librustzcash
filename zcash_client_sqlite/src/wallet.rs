@@ -41,6 +41,9 @@
 //!   to one of the wallet's own addresses is classified once the wallet has observed the returned
 //!   output (which the scanner marks as change); while such a transaction is unmined it is
 //!   treated as an ordinary payment.
+//! - `abandoned`: whether the transaction has been abandoned locally. Its historical
+//!   amounts are retained, but must not be applied to the current balance or used to
+//!   select transactions for rebroadcast.
 //!
 //! ### Seed Phrase with Single Account
 //!
@@ -193,6 +196,7 @@ pub(crate) mod locking;
 pub(crate) mod orchard;
 pub(crate) mod sapling;
 pub(crate) mod scanning;
+pub(crate) mod transactions;
 #[cfg(feature = "transparent-inputs")]
 pub(crate) mod transparent;
 
@@ -4122,6 +4126,11 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
     match status {
+        TransactionStatus::InMempool => {
+            if let Some(tx_ref) = transactions::get_tx_ref(conn, txid)? {
+                transactions::observe(conn, tx_ref)?;
+            }
+        }
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
             conn.execute(
                 "UPDATE transactions
@@ -4204,6 +4213,10 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 
             #[cfg(feature = "transparent-inputs")]
             transparent::update_gap_limits(conn, params, gap_limits, txid, height)?;
+
+            if let Some(tx_ref) = transactions::get_tx_ref(conn, txid)? {
+                transactions::observe(conn, tx_ref)?;
+            }
 
             delete_retrieval_queue_entry(conn, txid, TxQueryType::Enhancement)?;
         }
@@ -5423,7 +5436,7 @@ pub(crate) fn set_tx_trust(
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
 pub(crate) fn put_tx_meta(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction<'_>,
     tx: &WalletTx<AccountUuid>,
     height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
@@ -5447,9 +5460,11 @@ pub(crate) fn put_tx_meta(
         ":tx_index": u16::from(tx.block_index()),
     ];
 
-    stmt_upsert_tx_meta
+    let tx_ref = stmt_upsert_tx_meta
         .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
-        .map_err(SqliteClientError::from)
+        .map_err(SqliteClientError::from)?;
+    transactions::observe(conn, tx_ref)?;
+    Ok(tx_ref)
 }
 
 /// Returns the most likely wallet address that corresponds to the protocol-level receiver of a

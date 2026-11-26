@@ -3783,6 +3783,10 @@ impl WalletWrite for MockWalletDb {
         Err(())
     }
 
+    fn abandon_transaction(&mut self, _txid: TxId) -> Result<(), <Self as WalletRead>::Error> {
+        Err(())
+    }
+
     fn set_transaction_status(
         &mut self,
         _txid: TxId,

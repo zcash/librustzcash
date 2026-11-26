@@ -588,6 +588,7 @@ pub(crate) fn put_received_note<
                 ":transaction_id": spent_in.0
             ],
         )?;
+        super::transactions::observe_mined(conn, spent_in)?;
     }
 
     Ok(account_id)
@@ -667,7 +668,7 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// Marking a note spent in this fashion does NOT imply that the
 /// spending transaction has been mined.
 pub(crate) fn mark_orchard_note_spent(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     tx_ref: TxRef,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
@@ -677,7 +678,7 @@ pub(crate) fn mark_orchard_note_spent(
 /// Marks a given Ironwood nullifier as having been revealed in the construction of the specified
 /// transaction. Ironwood nullifiers are Orchard-shaped; see [`mark_orchard_note_spent`].
 pub(crate) fn mark_ironwood_note_spent(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     tx_ref: TxRef,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
@@ -687,7 +688,7 @@ pub(crate) fn mark_ironwood_note_spent(
 /// Marks the received note in the given shielded pool's received-notes table with the given
 /// nullifier as spent in the referenced transaction.
 fn mark_note_spent(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     shielded_pool: ShieldedPool,
     tx_ref: TxRef,
     nf: &Nullifier,
@@ -737,7 +738,9 @@ fn mark_note_spent(
          ON CONFLICT ({table_prefix}_received_note_id, transaction_id) DO NOTHING"
     ))?;
 
-    match stmt_mark_note_spent.execute(sql_params)? {
+    let affected = stmt_mark_note_spent.execute(sql_params)?;
+    super::transactions::observe_mined(conn, tx_ref)?;
+    match affected {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),

@@ -273,7 +273,7 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// Marking a note spent in this fashion does NOT imply that the
 /// spending transaction has been mined.
 pub(crate) fn mark_sapling_note_spent(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     tx_ref: TxRef,
     nf: &sapling::Nullifier,
 ) -> Result<bool, SqliteClientError> {
@@ -315,7 +315,9 @@ pub(crate) fn mark_sapling_note_spent(
          ON CONFLICT (sapling_received_note_id, transaction_id) DO NOTHING",
     )?;
 
-    match stmt_mark_sapling_note_spent.execute(sql_params)? {
+    let affected = stmt_mark_sapling_note_spent.execute(sql_params)?;
+    super::transactions::observe_mined(conn, tx_ref)?;
+    match affected {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
@@ -463,6 +465,7 @@ pub(crate) fn put_received_note<
                 ":transaction_id": spent_in.0
             ],
         )?;
+        super::transactions::observe_mined(conn, spent_in)?;
     }
 
     Ok(account_id)

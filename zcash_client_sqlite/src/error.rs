@@ -124,6 +124,12 @@ pub enum SqliteClientError {
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown,
 
+    /// The transaction is not stored in the wallet.
+    TransactionUnknown(TxId),
+
+    /// A transaction or one of its descendants is mined and cannot be abandoned.
+    TransactionMined(TxId),
+
     /// The account being added collides with an existing account in the wallet with the given ID.
     /// The collision can be on the seed and ZIP-32 account index, or a shared IVK component.
     AccountCollision(AccountUuid),
@@ -391,6 +397,12 @@ impl fmt::Display for SqliteClientError {
             ),
             SqliteClientError::AddressGeneration(e) => write!(f, "{e}"),
             SqliteClientError::UnifiedEncoding(e) => write!(f, "{e}"),
+            SqliteClientError::TransactionUnknown(txid) => {
+                write!(f, "Transaction {txid} is not stored in the wallet")
+            }
+            SqliteClientError::TransactionMined(txid) => {
+                write!(f, "Mined transaction {txid} cannot be abandoned")
+            }
             SqliteClientError::AccountUnknown => write!(
                 f,
                 "The account with the given ID does not belong to this wallet."

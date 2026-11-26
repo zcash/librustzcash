@@ -2149,6 +2149,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.reserve_next_n_internal_addresses(account_id, n))
     }
 
+    fn abandon_transaction(&mut self, txid: TxId) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.abandon_transaction(txid))
+    }
+
     fn set_transaction_status(
         &mut self,
         txid: TxId,
@@ -2737,6 +2741,10 @@ impl<P: consensus::Parameters, CL: Clock, R: Rng> WalletWrite
         )?;
 
         Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
+    }
+
+    fn abandon_transaction(&mut self, txid: TxId) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::transactions::abandon(self.conn.0, txid)
     }
 
     fn set_transaction_status(

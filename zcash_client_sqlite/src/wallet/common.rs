@@ -144,7 +144,7 @@ pub(crate) fn default_tx_expiry_delta_sql<P: consensus::Parameters>(
     }
 }
 
-/// Generates an SQL condition that a transaction is unexpired.
+/// Generates an SQL condition that a transaction is mined, or is neither expired nor abandoned.
 ///
 /// # Usage requirements
 /// - `tx` must be set to the SQL variable name for the transaction in the parent.
@@ -164,11 +164,16 @@ pub(crate) fn tx_unexpired_condition<P: consensus::Parameters>(params: &P, tx: &
     format!(
         r#"
         {tx}.mined_height < :target_height  -- the transaction is mined
-        OR {tx}.expiry_height = 0  -- the tx will not expire
-        OR {tx}.expiry_height >= :target_height  -- the tx is unexpired
         OR (
-            {tx}.expiry_height IS NULL -- the expiry height is unknown
-            AND {tx}.min_observed_height + {default_expiry_delta} >= :target_height
+            {tx}.abandoned = 0
+            AND (
+                {tx}.expiry_height = 0  -- the tx will not expire
+                OR {tx}.expiry_height >= :target_height  -- the tx is unexpired
+                OR (
+                    {tx}.expiry_height IS NULL -- the expiry height is unknown
+                    AND {tx}.min_observed_height + {default_expiry_delta} >= :target_height
+                )
+            )
         )
         "#
     )
@@ -230,7 +235,7 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
                    FROM {table_prefix}_received_note_spends rns
                    JOIN transactions stx ON stx.id_tx = rns.transaction_id
                    WHERE stx.mined_height IS NOT NULL  -- the spending tx is mined
-                   OR stx.expiry_height = 0 -- the spending tx will not expire
+                   OR (stx.expiry_height = 0 AND stx.abandoned = 0)
                  )"
         )),
         NullifierQuery::All => conn.prepare(&format!(
