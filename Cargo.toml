@@ -232,3 +232,8 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nutachyon", "zip233"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+# TEMPORARY: orchard revision with `Action::from_encoded_parts` (zcash/orchard#594); replace with a
+# published orchard release once one carries it.
+orchard = { git = "https://github.com/upbqdn/orchard", rev = "ba8c7e2ee1e7f9d3b4266514cc4965ae7c57833c" }
