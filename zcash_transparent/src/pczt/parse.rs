@@ -14,6 +14,10 @@ use super::{Bip32Derivation, Bundle, Input, Output};
 /// spend finalization, so they cannot exceed this.
 pub(super) const MAX_SCRIPT_PUSH_VALUE_LEN: usize = 520;
 
+/// The least `nLockTime` value that denotes a UNIX timestamp; smaller nonzero values denote
+/// block heights (`LOCKTIME_THRESHOLD` in the Bitcoin and `zcashd` sources).
+const LOCKTIME_THRESHOLD: u32 = 500_000_000;
+
 impl<V> Bundle<V> {
     /// Parses a PCZT bundle from its component parts.
     pub fn parse(inputs: Vec<Input<V>>, outputs: Vec<Output<V>>) -> Result<Self, ParseError> {
@@ -46,12 +50,12 @@ impl<V: TryFrom<u64>> Input<V> {
         proprietary: BTreeMap<String, Vec<u8>>,
     ) -> Result<Self, ParseError> {
         match required_time_lock_time {
-            None | Some(500000000..) => Ok(()),
+            None | Some(LOCKTIME_THRESHOLD..) => Ok(()),
             Some(_) => Err(ParseError::InvalidRequiredTimeLocktime),
         }?;
 
         match required_height_lock_time {
-            None | Some(1..=499999999) => Ok(()),
+            None | Some(1..LOCKTIME_THRESHOLD) => Ok(()),
             Some(_) => Err(ParseError::InvalidRequiredHeightLocktime),
         }?;
 
@@ -190,7 +194,57 @@ mod tests {
     use crate::address::TransparentAddress;
     use crate::sighash::SIGHASH_ALL;
 
-    use super::{Input, ParseError};
+    use super::{Input, LOCKTIME_THRESHOLD, ParseError};
+
+    /// Parses a minimal P2PKH input carrying the given required lock times.
+    fn parse_with_lock_times(
+        required_time_lock_time: Option<u32>,
+        required_height_lock_time: Option<u32>,
+    ) -> Result<Input<u64>, ParseError> {
+        Input::<u64>::parse(
+            [0; 32],
+            0,
+            None,
+            required_time_lock_time,
+            required_height_lock_time,
+            None,
+            1000,
+            TransparentAddress::PublicKeyHash([0; 20])
+                .script()
+                .to_bytes(),
+            None,
+            BTreeMap::new(),
+            SIGHASH_ALL,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+    }
+
+    #[test]
+    fn input_parse_enforces_lock_time_threshold() {
+        assert!(parse_with_lock_times(None, None).is_ok());
+
+        assert!(parse_with_lock_times(Some(LOCKTIME_THRESHOLD), None).is_ok());
+        assert!(matches!(
+            parse_with_lock_times(Some(LOCKTIME_THRESHOLD - 1), None),
+            Err(ParseError::InvalidRequiredTimeLocktime)
+        ));
+
+        assert!(parse_with_lock_times(None, Some(1)).is_ok());
+        assert!(parse_with_lock_times(None, Some(LOCKTIME_THRESHOLD - 1)).is_ok());
+        assert!(matches!(
+            parse_with_lock_times(None, Some(0)),
+            Err(ParseError::InvalidRequiredHeightLocktime)
+        ));
+        assert!(matches!(
+            parse_with_lock_times(None, Some(LOCKTIME_THRESHOLD)),
+            Err(ParseError::InvalidRequiredHeightLocktime)
+        ));
+    }
 
     #[test]
     fn input_parse_rejects_oversized_partial_signature() {

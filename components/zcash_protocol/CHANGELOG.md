@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_protocol::consensus::MAX_TX_EXPIRY_HEIGHT`
 - `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
 
 ### Changed
@@ -22,6 +23,26 @@ workspace.
   that take consensus parameters are unspecified for an implementation that
   violates it, including a `zcash_protocol::local_consensus::LocalNetwork`
   whose activation heights are out of order.
+
+### Removed
+- `zcash_protocol::consensus::{SECONDS_PER_BLOCK, BLOCKS_PER_HOUR}` (deprecated
+  in 0.11.0). Use `zcash_protocol::consensus::pow_target_spacing` or
+  `zcash_protocol::consensus::target_time_between` instead.
+- The address and key encoding prefix constants in
+  `zcash_protocol::constants::{mainnet, testnet, regtest}` (deprecated in
+  0.11.0). Use the constants of the same names in
+  `zcash_address::constants::{mainnet, testnet, regtest}` or
+  `zcash_keys::constants::{mainnet, testnet, regtest}`:
+  - `HRP_SAPLING_EXTENDED_SPENDING_KEY`, `HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY`
+  - `HRP_SAPLING_PAYMENT_ADDRESS`
+  - `HRP_TEX_ADDRESS`
+  - `HRP_UNIFIED_ADDRESS`, `HRP_UNIFIED_FVK`, `HRP_UNIFIED_IVK`
+  - `B58_SPROUT_ADDRESS_PREFIX`, `B58_PUBKEY_ADDRESS_PREFIX`,
+    `B58_SCRIPT_ADDRESS_PREFIX`, `B58_SECRET_KEY_PREFIX`
+- All `zcash_protocol::consensus::NetworkConstants` methods except `coin_type`
+  (deprecated in 0.11.0). Use the functions of the same names in
+  `zcash_address::constants` or `zcash_keys::constants`, passing
+  `params.network_type()`.
 
 ### Deprecated
 - `zcash_protocol::zip318::BlockSpacing::nu7_activation`. Use

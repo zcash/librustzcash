@@ -375,39 +375,3 @@ pub const fn hrp_unified_ivk_r2(net: NetworkType) -> &'static str {
         NetworkType::Regtest => regtest::HRP_UNIFIED_IVK_R2,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use zcash_protocol::consensus::{NetworkConstants, NetworkType};
-
-    const NETWORKS: [NetworkType; 3] = [NetworkType::Main, NetworkType::Test, NetworkType::Regtest];
-
-    /// The `zcash_protocol` copies of these prefixes must not drift from the definitions
-    /// here while both exist.
-    #[test]
-    #[allow(deprecated)]
-    fn zcash_protocol_copies_match() {
-        for net in NETWORKS {
-            assert_eq!(
-                super::hrp_sapling_payment_address(net),
-                net.hrp_sapling_payment_address()
-            );
-            assert_eq!(
-                super::b58_sprout_address_prefix(net),
-                net.b58_sprout_address_prefix()
-            );
-            assert_eq!(
-                super::b58_pubkey_address_prefix(net),
-                net.b58_pubkey_address_prefix()
-            );
-            assert_eq!(
-                super::b58_script_address_prefix(net),
-                net.b58_script_address_prefix()
-            );
-            assert_eq!(super::hrp_tex_address(net), net.hrp_tex_address());
-            assert_eq!(super::hrp_unified_address(net), net.hrp_unified_address());
-            assert_eq!(super::hrp_unified_fvk(net), net.hrp_unified_fvk());
-            assert_eq!(super::hrp_unified_ivk(net), net.hrp_unified_ivk());
-        }
-    }
-}
