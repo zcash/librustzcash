@@ -4345,7 +4345,7 @@ mod tests {
             .with_data_store_factory(TestDbFactory::default())
             .build();
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
         let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
@@ -4375,7 +4375,7 @@ mod tests {
             .with_data_store_factory(TestDbFactory::default())
             .build();
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
         let first_seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
@@ -4408,7 +4408,7 @@ mod tests {
             .with_data_store_factory(TestDbFactory::default())
             .build();
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
         let seed = Secret::new(vec![FIRST_ACCOUNT_SEED_BYTE; SET_ACCOUNT_NAME_SEED_LEN]);
@@ -4793,7 +4793,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -4889,7 +4889,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -4924,7 +4924,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5002,7 +5002,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5078,7 +5078,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5132,7 +5132,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5275,7 +5275,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5307,7 +5307,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5419,7 +5419,7 @@ mod tests {
             .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -5742,7 +5742,7 @@ mod tests {
         let mut state = create_test_wallet_with_one_account();
         let first_account_id = state.test_account().unwrap().id();
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(state.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
         let (second_account_id, _) = state
@@ -5911,10 +5911,10 @@ mod tests {
         let mut state = create_test_wallet_with_one_account();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(state.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
-        let sapling_activation = state.network().sapling.unwrap();
+        let sapling_activation = state.sapling_activation_height();
 
         let (acc1_id, _) = state
             .wallet_mut()
@@ -5964,10 +5964,10 @@ mod tests {
         let mut state = create_test_wallet_with_one_account();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(state.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
-        let sapling_activation = state.network().sapling.unwrap();
+        let sapling_activation = state.sapling_activation_height();
 
         let (acc1_id, _) = state
             .wallet_mut()
@@ -6009,10 +6009,10 @@ mod tests {
         let mut state = create_test_wallet_with_one_account();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(state.sapling_activation_height() - 1, BlockHash([0; 32])),
             None,
         );
-        let sapling_activation = state.network().sapling.unwrap();
+        let sapling_activation = state.sapling_activation_height();
 
         let seed1 = Secret::new(vec![0u8; 32]);
         let seed2 = Secret::new(vec![1u8; 32]);

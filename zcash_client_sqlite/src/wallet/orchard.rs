@@ -767,7 +767,10 @@ pub(crate) mod tests {
             wallet::OvkPolicy,
         },
         zcash_keys::address::Address,
-        zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis},
+        zcash_protocol::{
+            consensus::{BlockHeight, NetworkUpgrade},
+            value::Zatoshis,
+        },
         zip321::{Payment, TransactionRequest},
     };
 
@@ -1374,13 +1377,9 @@ pub(crate) mod tests {
         // received Ironwood notes are offered by input selection (which gates on NU6.3 activation)
         // and can be spent.
         let activation = BlockHeight::from_u32(100_000);
-        let network = LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order");
 
         let mut st = TestBuilder::new()
             .with_network(network)
@@ -1513,13 +1512,9 @@ pub(crate) mod tests {
     #[cfg(feature = "orchard")]
     fn decrypt_transaction_detects_ironwood_output() {
         let activation = BlockHeight::from_u32(100_000);
-        let network = LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order");
 
         let mut st = TestBuilder::new()
             .with_network(network)
@@ -1679,13 +1674,9 @@ pub(crate) mod tests {
     #[cfg(feature = "orchard")]
     fn get_unspent_ironwood_notes_at_historical_height_boundary_heights() {
         let activation = BlockHeight::from_u32(100_000);
-        let network = LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order");
 
         let mut st = TestBuilder::new()
             .with_network(network)
@@ -1808,7 +1799,7 @@ pub(crate) mod tests {
         };
         use zcash_protocol::{
             PoolType, ShieldedPool,
-            consensus::BlockHeight,
+            consensus::{BlockHeight, NetworkUpgrade},
             local_consensus::LocalNetwork,
             memo::MemoBytes,
             value::{ZatBalance, Zatoshis},
@@ -1831,13 +1822,9 @@ pub(crate) mod tests {
         // received Ironwood notes are offered by input selection (which gates on NU6.3 activation).
         fn ironwood_active_network() -> LocalNetwork {
             let activation = BlockHeight::from_u32(100_000);
-            LocalNetwork {
-                nu6: Some(activation),
-                nu6_1: Some(activation),
-                nu6_2: Some(activation),
-                nu6_3: Some(activation),
-                ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-            }
+            TestBuilder::<(), ()>::DEFAULT_NETWORK
+                .activating_through(NetworkUpgrade::Nu6_3, activation)
+                .expect("the activation heights are in activation order")
         }
 
         // A single-output ZIP 317 change strategy. Its nominal change pool is Orchard, but once

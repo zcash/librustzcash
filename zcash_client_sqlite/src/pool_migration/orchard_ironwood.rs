@@ -669,13 +669,9 @@ mod retention_follows_the_committed_migration {
     #[test]
     fn misconfigured_reopen_keeps_retaining_the_committed_grid() {
         let activation = zcash_protocol::consensus::BlockHeight::from_u32(100_000);
-        let network = zcash_protocol::local_consensus::LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(zcash_protocol::consensus::NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order");
 
         // The wallet is left at the ZIP 318 default: this stands for an application that
         // configured a short grid when it committed, then reopened without reapplying it.

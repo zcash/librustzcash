@@ -1764,22 +1764,8 @@ mod tests {
     /// A regtest network that activates every upgrade at height 1, as a typical
     /// `regtest` node does.
     fn regtest_local_network() -> LocalNetwork {
-        let one = Some(BlockHeight::from_u32(1));
-        LocalNetwork {
-            overwinter: one,
-            sapling: one,
-            blossom: one,
-            heartwood: one,
-            canopy: one,
-            nu5: one,
-            nu6: one,
-            nu6_1: one,
-            nu6_2: one,
-            nu6_3: one,
-            nu7: one,
-            #[cfg(zcash_unstable = "nutachyon")]
-            nu_tachyon: None,
-        }
+        LocalNetwork::new(&[(NetworkUpgrade::Nu7, BlockHeight::from_u32(1))])
+            .expect("a single step is in activation order")
     }
 
     /// Creates an initialized empty wallet database on a regtest network.

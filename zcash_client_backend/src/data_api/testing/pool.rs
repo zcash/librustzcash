@@ -5095,13 +5095,9 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
     // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
     // retention is live with its floor at the account birthday.
     let activation = BlockHeight::from_u32(100_000);
-    let ironwood_active_network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let ironwood_active_network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -5240,13 +5236,9 @@ pub fn empty_boundary_blocks_are_checkpointed_and_retained<
     // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
     // retention is live with its floor at the account birthday.
     let activation = BlockHeight::from_u32(100_000);
-    let ironwood_active_network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let ironwood_active_network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -5468,13 +5460,9 @@ pub fn retained_boundaries_below_window_are_usable_anchors<
     // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
     // retention is live with its floor at the account birthday.
     let activation = BlockHeight::from_u32(100_000);
-    let ironwood_active_network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let ironwood_active_network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -10066,13 +10054,9 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
     // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
-        LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        }
+        TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order")
     };
 
     let mut st = TestDsl::from(
@@ -10211,13 +10195,9 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
     // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
-        LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        }
+        TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order")
     };
 
     let mut st = TestDsl::from(
@@ -10281,13 +10261,9 @@ where
     // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
-        LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        }
+        TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order")
     };
 
     let mut st = TestDsl::from(
@@ -10788,13 +10764,9 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
     // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
-        LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        }
+        TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order")
     };
 
     let mut st = TestDsl::from(
@@ -10932,13 +10904,9 @@ pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
     // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
-        LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        }
+        TestBuilder::<(), ()>::DEFAULT_NETWORK
+            .activating_through(NetworkUpgrade::Nu6_3, activation)
+            .expect("the activation heights are in activation order")
     };
 
     let mut st = TestDsl::from(
@@ -11149,13 +11117,9 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     // A short grid, so the test need not mine 144 blocks to cross a boundary.
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let ironwood_active_network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let ironwood_active_network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -11374,13 +11338,9 @@ pub fn canonical_crossing_builds_at_empty_boundary_block<Dsf: DataStoreFactory>(
     // A short grid, so the test need not mine 144 blocks to cross a boundary.
     let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let ironwood_active_network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let ironwood_active_network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -11500,13 +11460,9 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
 ) {
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -11605,13 +11561,9 @@ pub fn canonical_crossing_prefers_single_note<Dsf: DataStoreFactory>(
 ) {
     let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -11734,13 +11686,9 @@ pub fn canonical_crossing_abandoned_without_anchor_checkpoint<Dsf, TC>(
 {
     let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -11859,13 +11807,9 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
 ) {
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
-    let network = LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    };
+    let network = TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .expect("the activation heights are in activation order");
 
     let mut st = TestDsl::from(
         TestBuilder::new()
@@ -12229,16 +12173,14 @@ const NU7_ACTIVATION_OFFSET: u32 = 10;
 /// and NU7 activates [`NU7_ACTIVATION_OFFSET`] blocks later.
 fn nu7_activating_network() -> LocalNetwork {
     let activation = TestBuilder::<(), ()>::DEFAULT_NETWORK
-        .sapling
+        .activation_height(NetworkUpgrade::Sapling)
         .expect("the default test network activates Sapling");
-    LocalNetwork {
-        nu6: Some(activation),
-        nu6_1: Some(activation),
-        nu6_2: Some(activation),
-        nu6_3: Some(activation),
-        nu7: Some(activation + NU7_ACTIVATION_OFFSET),
-        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    }
+    TestBuilder::<(), ()>::DEFAULT_NETWORK
+        .activating_through(NetworkUpgrade::Nu6_3, activation)
+        .and_then(|network| {
+            network.activating_through(NetworkUpgrade::Nu7, activation + NU7_ACTIVATION_OFFSET)
+        })
+        .expect("the activation heights are in activation order")
 }
 
 /// Builds a wallet on [`nu7_activating_network`] that holds two spendable notes, with its chain

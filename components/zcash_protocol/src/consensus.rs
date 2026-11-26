@@ -54,6 +54,13 @@ impl BlockHeight {
         BlockHeight(v)
     }
 
+    /// Returns this height as a `u32`, for constant contexts in which `u32::from` cannot be
+    /// called.
+    #[cfg(feature = "local-consensus")]
+    pub(crate) const fn to_u32(self) -> u32 {
+        self.0
+    }
+
     /// Subtracts the provided value from this height, returning [`H0`] if this would result in
     /// underflow of the wrapped `u32`.
     pub fn saturating_sub(self, v: u32) -> BlockHeight {
@@ -1283,22 +1290,30 @@ mod tests {
     #[cfg(feature = "local-consensus")]
     fn local_epoch_bounds_match_branch_selection() {
         use crate::local_consensus::LocalNetwork;
-        for nu6_3 in [None, Some(BlockHeight(10)), Some(BlockHeight(30))] {
-            let network = LocalNetwork {
-                overwinter: None,
-                sapling: None,
-                blossom: None,
-                heartwood: None,
-                canopy: None,
-                nu5: None,
-                nu6: None,
-                nu6_1: None,
-                nu6_2: Some(BlockHeight(5)),
-                nu6_3,
-                nu7: Some(BlockHeight(20)),
-                #[cfg(zcash_unstable = "nutachyon")]
-                nu_tachyon: Some(BlockHeight(15)),
-            };
+        /// The height at which every network upgrade through NU6.2 activates.
+        const NU6_2: BlockHeight = BlockHeight(5);
+        /// The height at which NU7 activates, where it does.
+        const NU7: BlockHeight = BlockHeight(20);
+        let activation_steps: [&[(NetworkUpgrade, BlockHeight)]; 4] = [
+            // NU6.3 activates with NU6.2, so the NU6.2 epoch is empty.
+            &[
+                (NetworkUpgrade::Nu6_2, NU6_2),
+                (NetworkUpgrade::Nu6_3, NU6_2),
+                (NetworkUpgrade::Nu7, NU7),
+            ],
+            // Every epoch from NU6.2 through NU7 is non-empty.
+            &[
+                (NetworkUpgrade::Nu6_2, NU6_2),
+                (NetworkUpgrade::Nu6_3, BlockHeight(10)),
+                (NetworkUpgrade::Nu7, NU7),
+            ],
+            // NU6.3 activates with NU7, so the NU6.3 epoch is empty.
+            &[(NetworkUpgrade::Nu6_2, NU6_2), (NetworkUpgrade::Nu7, NU7)],
+            // No upgrade after NU6.2 activates.
+            &[(NetworkUpgrade::Nu6_2, NU6_2)],
+        ];
+        for steps in activation_steps {
+            let network = LocalNetwork::new(steps).expect("the steps are in activation order");
             for branch in core::iter::once(BranchId::Sprout)
                 .chain(UPGRADES_IN_ORDER.iter().map(|upgrade| upgrade.branch_id()))
             {

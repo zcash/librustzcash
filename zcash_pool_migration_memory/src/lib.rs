@@ -34,7 +34,7 @@ use orchard::{Anchor, NOTE_COMMITMENT_TREE_DEPTH};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{Rng, SeedableRng};
 use zcash_protocol::TxId;
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade};
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
 
@@ -85,25 +85,24 @@ pub fn account_derivation(seed: u64) -> AccountDerivation {
 /// A regtest network with the pre-NU6.3 upgrades active, and NU6.3 active only when requested.
 /// The migration builds on a network where NU6.3 (the Ironwood pool) is live.
 pub fn regtest_network(nu6_3_active: bool) -> LocalNetwork {
-    let nu6_3 = if nu6_3_active {
-        Some(BlockHeight::from_u32(10))
+    let pre_nu6_3 = LocalNetwork::new(&[
+        (NetworkUpgrade::Overwinter, BlockHeight::from_u32(1)),
+        (NetworkUpgrade::Sapling, BlockHeight::from_u32(2)),
+        (NetworkUpgrade::Blossom, BlockHeight::from_u32(3)),
+        (NetworkUpgrade::Heartwood, BlockHeight::from_u32(4)),
+        (NetworkUpgrade::Canopy, BlockHeight::from_u32(5)),
+        (NetworkUpgrade::Nu5, BlockHeight::from_u32(6)),
+        (NetworkUpgrade::Nu6, BlockHeight::from_u32(7)),
+        (NetworkUpgrade::Nu6_1, BlockHeight::from_u32(8)),
+        (NetworkUpgrade::Nu6_2, BlockHeight::from_u32(9)),
+    ])
+    .expect("the activation heights are in activation order");
+    if nu6_3_active {
+        pre_nu6_3
+            .activating_through(NetworkUpgrade::Nu6_3, BlockHeight::from_u32(10))
+            .expect("NU6.3 activates after NU6.2")
     } else {
-        None
-    };
-    LocalNetwork {
-        overwinter: Some(BlockHeight::from_u32(1)),
-        sapling: Some(BlockHeight::from_u32(2)),
-        blossom: Some(BlockHeight::from_u32(3)),
-        heartwood: Some(BlockHeight::from_u32(4)),
-        canopy: Some(BlockHeight::from_u32(5)),
-        nu5: Some(BlockHeight::from_u32(6)),
-        nu6: Some(BlockHeight::from_u32(7)),
-        nu6_1: Some(BlockHeight::from_u32(8)),
-        nu6_2: Some(BlockHeight::from_u32(9)),
-        nu6_3,
-        nu7: None,
-        #[cfg(zcash_unstable = "nutachyon")]
-        nu_tachyon: None,
+        pre_nu6_3
     }
 }
 

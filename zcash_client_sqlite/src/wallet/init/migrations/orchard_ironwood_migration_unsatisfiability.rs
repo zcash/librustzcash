@@ -600,10 +600,9 @@ mod tests {
         use orchard::value::NoteValue;
         use rand_chacha::ChaCha8Rng;
         use rand_core::{Rng, SeedableRng};
-        use zcash_client_backend::data_api::testing::TestBuilder;
         use zcash_pool_migration::build::build_transfer_pczt;
         use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
-        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade};
         use zcash_protocol::local_consensus::LocalNetwork;
         use zcash_protocol::value::Zatoshis;
 
@@ -652,13 +651,8 @@ mod tests {
         // A network with NU6.3 active below the transfer's target height, so the V6 format that
         // permits deferred anchors is available.
         let activation = BlockHeight::from_u32(100);
-        let network = LocalNetwork {
-            nu6: Some(activation),
-            nu6_1: Some(activation),
-            nu6_2: Some(activation),
-            nu6_3: Some(activation),
-            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-        };
+        let network = LocalNetwork::new(&[(NetworkUpgrade::Nu6_3, activation)])
+            .expect("a single step is in activation order");
 
         // A self-funding note: the crossing value plus the transfer's exact ZIP 317 fee (three
         // actions: the real spend, its Orchard padding dummy, and the Ironwood output).

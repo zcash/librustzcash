@@ -12,6 +12,9 @@ workspace.
 
 ### Added
 - `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
+- `zcash_protocol::local_consensus::LocalNetwork::{new, activating_through}`
+- `zcash_protocol::local_consensus::ActivationOrderError`
+- `zcash_protocol::local_consensus::testing::arb_local_network`
 
 ### Changed
 - `zcash_protocol::TxId::from_hex` now returns
@@ -20,8 +23,21 @@ workspace.
   network upgrades activate in the order of
   `zcash_protocol::consensus::UPGRADES_IN_ORDER`. The results of functions
   that take consensus parameters are unspecified for an implementation that
-  violates it, including a `zcash_protocol::local_consensus::LocalNetwork`
-  whose activation heights are out of order.
+  violates it.
+- The fields of `zcash_protocol::local_consensus::LocalNetwork` are no longer
+  public, so that a `LocalNetwork` always activates its network upgrades in
+  order.
+  - Construct one with `LocalNetwork::new`, which takes activation steps in
+    place of one height per upgrade. A step `(upgrade, height)` activates at
+    `height` every upgrade up to and including `upgrade` that no earlier step
+    activates, so a struct literal that set each field to `Some` becomes one
+    step per upgrade, and upgrades that shared a height need only one step.
+  - In place of struct update syntax, `LocalNetwork::activating_through`
+    activates further upgrades on an existing network.
+  - Read an activation height with
+    `Parameters::activation_height(NetworkUpgrade)` in place of a field.
+  - A set of heights in which a later upgrade activates below an earlier one,
+    or without it, can no longer be expressed.
 
 ### Deprecated
 - `zcash_protocol::zip318::BlockSpacing::nu7_activation`. Use
