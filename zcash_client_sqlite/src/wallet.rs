@@ -1133,14 +1133,22 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
         return Ok(0);
     }
 
-    // If this transparent receiver is already recorded (for example it was derived as an
-    // account receiver, so its row carries a NULL `imported_transparent_receiver_pubkey` and is
-    // therefore not matched by the pubkey lookup above), do not insert a second row for the same
-    // `cached_transparent_receiver_address`: the UNIQUE index on that column forbids it, and the
-    // existing representation already covers the address. This is the import-direction
-    // counterpart of the resolution in `store_address_range`, which upgrades an imported receiver
-    // in place when the same address is later derived.
-    if transparent_receiver_address_exists(conn, &addr_str)? {
+    // A standalone receiver owned by another account conflicts even when imported without
+    // key material. A derived receiver already covers the address and remains authoritative.
+    let existing_receiver = conn
+        .query_row(
+            "SELECT accounts.uuid, addresses.key_scope
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE cached_transparent_receiver_address = :address",
+            named_params![":address": addr_str],
+            |row| Ok((row.get::<_, Uuid>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    if let Some((current, scope)) = existing_receiver {
+        if KeyScope::decode(scope)? == KeyScope::Foreign && current != account_uuid.expose_uuid() {
+            return Err(SqliteClientError::StandaloneImportConflict(current));
+        }
         return Ok(0);
     }
 

@@ -4624,12 +4624,17 @@ mod tests {
                 // inserts our receiver rather than skipping an already-derived index.
                 child_index in 16u32..0x8000_0000u32,
             )| {
-                let st = TestBuilder::new()
+                let mut st = TestBuilder::new()
                     .with_data_store_factory(TestDbFactory::default())
                     .with_account_from_sapling_activation(BlockHash([0; 32]))
                     .build();
 
                 let account_uuid = st.test_account().unwrap().id();
+                let birthday = st.test_account().unwrap().birthday().clone();
+                let (other_account, _) = st
+                    .wallet_mut()
+                    .create_account("other", &Secret::new(vec![42; 32]), &birthday, None)
+                    .unwrap();
                 let network = *st.network();
 
                 // A real pubkey and the transparent receiver it hashes to.
@@ -4653,19 +4658,20 @@ mod tests {
                 )
                 .unwrap();
 
-                // Importing the same receiver as a standalone pubkey inserts nothing: the pubkey
-                // lookup does not match the derived (NULL-pubkey) row, but the address-existence
-                // check does.
-                let inserted = crate::wallet::import_standalone_transparent_pubkey(
-                    &tx,
-                    &network,
-                    &GapLimits::default(),
-                    account_uuid,
-                    pubkey,
-                    SpendingKeyCustody::Held,
-                )
-                .unwrap();
-                prop_assert_eq!(inserted, 0);
+                // A derived receiver takes precedence over a standalone import into either
+                // account; no duplicate receiver is inserted.
+                for importing_account in [account_uuid, other_account] {
+                    let inserted = crate::wallet::import_standalone_transparent_pubkey(
+                        &tx,
+                        &network,
+                        &GapLimits::default(),
+                        importing_account,
+                        pubkey,
+                        SpendingKeyCustody::Held,
+                    )
+                    .unwrap();
+                    prop_assert_eq!(inserted, 0);
+                }
 
                 // Exactly one row remains for the receiver.
                 let count: i64 = tx
@@ -4842,6 +4848,75 @@ mod tests {
                 prop_assert_eq!(again, 0);
             }
         );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys_address_only_conflict_rolls_back() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let owner = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().clone();
+        let (other, _) = st
+            .wallet_mut()
+            .create_account("other", &Secret::new(vec![42; 32]), &birthday, None)
+            .unwrap();
+        let [new_pubkey, conflicting_pubkey] = [7, 8].map(|byte| {
+            SecretKey::from_secret_bytes([byte; 32])
+                .unwrap()
+                .public_key()
+        });
+        let conflicting_address = TransparentAddress::from_pubkey(&conflicting_pubkey);
+        st.wallet_mut()
+            .import_standalone_transparent_address(owner, conflicting_address)
+            .unwrap();
+        let receivers_before = st
+            .wallet()
+            .get_transparent_receivers(other, true, true)
+            .unwrap();
+        let network = *st.network();
+
+        {
+            let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+            assert!(matches!(
+                crate::wallet::import_standalone_transparent_pubkeys(
+                    &tx,
+                    &network,
+                    &GapLimits::default(),
+                    other,
+                    &[new_pubkey, conflicting_pubkey],
+                    SpendingKeyCustody::Held,
+                ),
+                Err(crate::error::SqliteClientError::StandaloneImportConflict(uuid))
+                    if uuid == owner.expose_uuid()
+            ));
+        }
+
+        let receivers_after = st
+            .wallet()
+            .get_transparent_receivers(other, true, true)
+            .unwrap();
+        assert_eq!(receivers_before.len(), receivers_after.len());
+        assert!(!receivers_after.contains_key(&TransparentAddress::from_pubkey(&new_pubkey)));
+        assert!(!receivers_after.contains_key(&conflicting_address));
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(
+                owner,
+                conflicting_pubkey,
+                SpendingKeyCustody::Held,
+            )
+            .unwrap();
+        let owner_receivers = st
+            .wallet()
+            .get_transparent_receivers(owner, true, true)
+            .unwrap();
+        assert!(matches!(
+            owner_receivers[&conflicting_address].source(),
+            zcash_client_backend::wallet::TransparentAddressSource::StandalonePubkey(pk)
+                if pk == &conflicting_pubkey
+        ));
     }
 
     /// The batch import resolves the account up front, so a batch targeting an account that does

@@ -3115,6 +3115,86 @@ mod tests {
     }
 
     #[test]
+    fn pubkey_for_another_accounts_address_only_receiver_rolls_back_import() {
+        for custody in [SpendingKeyCustody::WatchOnly, SpendingKeyCustody::Held] {
+            let (_file, mut wdb) = test_wallet_db();
+            let secret_key = secp256k1::SecretKey::from_secret_bytes([7; 32]).unwrap();
+            let pubkey = secret_key.public_key();
+            let taddr = TransparentAddress::from_pubkey(&pubkey);
+            let address = taddr.encode(&TEST_NETWORK);
+            let recorded_pubkey = || {
+                ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                    .unwrap()
+            };
+            let make_doc = |seed, with_pubkey| {
+                let mut record = ::zewif::transparent::Address::new(address.clone());
+                if with_pubkey {
+                    record.set_pubkey(recorded_pubkey());
+                }
+                let mut account = view_only_account(&test_seed(seed));
+                account.add_address(::zewif::Address::new(
+                    ::zewif::ProtocolAddress::Transparent(record),
+                ));
+                let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+                wallet.add_account(account);
+                doc.add_wallet(wallet);
+                if with_pubkey && custody == SpendingKeyCustody::Held {
+                    let mut store = ::zewif::SecretStore::new();
+                    store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+                        recorded_pubkey(),
+                        ::zewif::transparent::TransparentSpendingKey::new(test_wif(&secret_key)),
+                    ));
+                    doc.set_secrets(::zewif::Secrets::Plain(store));
+                }
+                doc
+            };
+
+            let first = import_wallet(&mut wdb, &make_doc(0, false), &mut DiscardSecrets).unwrap();
+            assert_eq!(first.watch_only_receivers_imported, 1);
+            let owner = first.imported_accounts[0].account_uuid;
+            let accounts_before = wdb.get_account_ids().unwrap();
+            let addresses_before = wdb
+                .conn
+                .query_row("SELECT COUNT(*) FROM addresses", [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .unwrap();
+
+            assert!(matches!(
+                import_wallet(&mut wdb, &make_doc(1, true), &mut DiscardSecrets),
+                Err(ZewifImportError::Wallet(
+                    SqliteClientError::StandaloneImportConflict(uuid)
+                )) if uuid == owner.expose_uuid()
+            ));
+            assert_eq!(wdb.get_account_ids().unwrap(), accounts_before);
+            assert_eq!(
+                wdb.conn
+                    .query_row("SELECT COUNT(*) FROM addresses", [], |row| {
+                        row.get::<_, u32>(0)
+                    })
+                    .unwrap(),
+                addresses_before
+            );
+            let receivers = wdb.get_transparent_receivers(owner, true, true).unwrap();
+            assert!(matches!(
+                receivers[&taddr].source(),
+                zcash_client_backend::wallet::TransparentAddressSource::StandaloneAddress
+            ));
+
+            // A corrected document can still import the second account.
+            let (mut retry_doc, mut retry_wallet) = document(::zewif::Network::Testnet);
+            retry_wallet.add_account(view_only_account(&test_seed(1)));
+            retry_doc.add_wallet(retry_wallet);
+            let retry = import_wallet(&mut wdb, &retry_doc, &mut DiscardSecrets).unwrap();
+            assert_eq!(retry.imported_accounts.len(), 1);
+            assert_eq!(
+                wdb.get_account_ids().unwrap().len(),
+                accounts_before.len() + 1
+            );
+        }
+    }
+
+    #[test]
     fn duplicate_standalone_record_in_document_rolls_back_import() {
         for with_pubkey in [false, true] {
             let (_file, mut wdb) = test_wallet_db();
