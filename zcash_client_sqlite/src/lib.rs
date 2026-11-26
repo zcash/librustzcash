@@ -5569,14 +5569,14 @@ mod tests {
         assert!(account.ufvk().is_none());
 
         // New-address allocation requires a chain tip.
-        st.wallet_mut()
-            .update_chain_tip(birthday.height())
-            .unwrap();
+        st.wallet_mut().update_chain_tip(birthday.height()).unwrap();
 
         // A request that requires a transparent receiver: the UIVK has one, so
         // the account must be able to produce a new address.
         let request = UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require);
-        let addr = st.wallet_mut().get_next_available_address(account.id(), request);
+        let addr = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), request);
         assert!(
             addr.is_ok(),
             "get_next_available_address failed: {:?}",

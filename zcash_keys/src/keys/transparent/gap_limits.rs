@@ -230,10 +230,8 @@ fn generate_external_address(
 /// [`UnifiedAddressRequest`]; for internal and ephemeral scopes, the raw transparent address is
 /// returned.
 ///
-/// External addresses are derived from the account's UIVK, while internal and ephemeral
-/// addresses are derived from the account-level transparent public key in the UFVK. An account
-/// imported from only a UIVK has no UFVK but may still hold a transparent component in its
-/// UIVK, so each key scope is gated on the key it actually requires.
+/// External addresses are derived from the P2PKH component of `account_uivk`; internal and
+/// ephemeral addresses are derived from the P2PKH component of `account_ufvk`.
 ///
 /// Returns an empty list if the account lacks the transparent key required for the given
 /// scope and `require_key` is `false`. Returns an error if the key is required but
@@ -246,38 +244,19 @@ pub fn generate_address_list(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<Vec<(Address, TransparentAddress, NonHardenedChildIndex)>, AddressGenerationError> {
-    #[cfg(feature = "transparent-inputs")]
-    let no_key = || {
-        if require_key {
+    let account_pubkey = account_ufvk.and_then(|ufvk| ufvk.p2pkh());
+    let has_scope_key = match key_scope {
+        TransparentKeyScope::EXTERNAL => account_uivk.p2pkh().is_some(),
+        _ => account_pubkey.is_some(),
+    };
+    if !has_scope_key {
+        return if require_key {
             Err(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))
         } else {
             // No addresses to generate
             Ok(vec![])
-        }
-    };
-
-    // The account-level transparent public key, needed only for internal and
-    // ephemeral address derivation; `generate_external_address` derives
-    // external addresses (and checks for its own key) from the UIVK.
-    let account_pubkey = match key_scope {
-        TransparentKeyScope::EXTERNAL => {
-            #[cfg(feature = "transparent-inputs")]
-            if account_uivk.p2pkh().is_none() {
-                return no_key();
-            }
-            account_ufvk.and_then(|ufvk| ufvk.p2pkh())
-        }
-        _ => {
-            if let Some(k) = account_ufvk.and_then(|ufvk| ufvk.p2pkh()) {
-                Some(k)
-            } else {
-                #[cfg(feature = "transparent-inputs")]
-                return no_key();
-                #[cfg(not(feature = "transparent-inputs"))]
-                None
-            }
-        }
-    };
+        };
+    }
 
     let gen_addrs = |key_scope: TransparentKeyScope, index: NonHardenedChildIndex| match key_scope {
         TransparentKeyScope::EXTERNAL => generate_external_address(account_uivk, request, index),
