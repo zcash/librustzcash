@@ -324,6 +324,64 @@ pub struct Transaction {
     data: TransactionData<Authorized>,
 }
 
+#[cfg(feature = "std")]
+impl Transaction {
+    /// Heap storage in the transparent bundle, including spare vector capacity.
+    fn unshielded_dynamic_usage(&self) -> usize {
+        self.transparent_bundle.as_ref().map_or(0, |bundle| {
+            bundle.vin.capacity() * size_of::<transparent::TxIn<transparent::Authorized>>()
+                + bundle.vout.capacity() * size_of::<transparent::TxOut<Zatoshis>>()
+                + bundle
+                    .vin
+                    .iter()
+                    .map(|input| input.script_sig().0.0.capacity())
+                    .sum::<usize>()
+                + bundle
+                    .vout
+                    .iter()
+                    .map(|output| output.script_pubkey().0.0.capacity())
+                    .sum::<usize>()
+        })
+    }
+
+    /// Heap storage in the Sprout bundle and its JoinSplit vector.
+    fn sprout_dynamic_usage(&self) -> usize {
+        self.sprout_bundle.as_ref().map_or(0, |bundle| {
+            // JoinSplit descriptions store both proof variants and ciphertexts inline.
+            size_of::<sprout::Bundle>() + bundle.joinsplits.capacity() * size_of::<JsDescription>()
+        })
+    }
+}
+
+#[cfg(feature = "std")]
+impl memuse::DynamicUsage for Transaction {
+    fn dynamic_usage(&self) -> usize {
+        self.unshielded_dynamic_usage()
+            + self.sprout_dynamic_usage()
+            + self.sapling_bundle.dynamic_usage()
+            + self.orchard_bundle.dynamic_usage()
+            + self.ironwood_bundle.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        let mut lower_bound = self.unshielded_dynamic_usage() + self.sprout_dynamic_usage();
+        let mut upper_bound = Some(lower_bound);
+
+        for (bundle_lower, bundle_upper) in [
+            self.sapling_bundle.dynamic_usage_bounds(),
+            self.orchard_bundle.dynamic_usage_bounds(),
+            self.ironwood_bundle.dynamic_usage_bounds(),
+        ] {
+            lower_bound += bundle_lower;
+            upper_bound = upper_bound
+                .zip(bundle_upper)
+                .map(|(total, additional)| total + additional);
+        }
+
+        (lower_bound, upper_bound)
+    }
+}
+
 impl Deref for Transaction {
     type Target = TransactionData<Authorized>;
 

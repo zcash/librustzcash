@@ -1,4 +1,10 @@
 use proptest::prelude::*;
+#[cfg(all(test, feature = "std"))]
+use {
+    crate::transaction::{JsDescription, sprout},
+    alloc::boxed::Box,
+    memuse::DynamicUsage,
+};
 
 #[cfg(test)]
 use {
@@ -1506,5 +1512,135 @@ fn zip_0233() {
             v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts, None).as_ref(),
             tv.sighash_shielded
         );
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(16))]
+
+    /// The heap usage is the sum of the allocations owned by the generated transaction.
+    #[test]
+    fn dynamic_usage_counts_transaction_storage(
+        transaction in zcash_protocol::consensus::testing::arb_branch_id().prop_flat_map(arb_tx),
+    ) {
+        let Transaction { txid: _, data } = &transaction;
+        let TransactionData {
+            // Fields without dynamic allocations
+            version: _,
+            consensus_branch_id: _,
+            lock_time: _,
+            expiry_height: _,
+            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
+            zip233_amount: _,
+            // Fields with dynamic allocations
+            transparent_bundle,
+            sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+        } = data;
+
+        let mut expected = 0;
+
+        if let Some(bundle) = transparent_bundle {
+            expected += bundle.vin.capacity() * size_of::<TxIn<transparent::Authorized>>();
+            for input in &bundle.vin {
+                expected += input.script_sig().0.0.capacity();
+            }
+
+            expected += bundle.vout.capacity() * size_of::<transparent::TxOut<Zatoshis>>();
+            for output in &bundle.vout {
+                expected += output.script_pubkey().0.0.capacity();
+            }
+        }
+
+        if let Some(sprout_bundle) = sprout_bundle {
+            expected += size_of::<sprout::Bundle>()
+                + sprout_bundle.joinsplits.capacity() * size_of::<JsDescription>();
+        }
+
+        expected += boxed_bytes(sapling_bundle.as_deref());
+        expected += boxed_bytes(orchard_bundle.as_deref());
+        expected += boxed_bytes(ironwood_bundle.as_deref());
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
+
+        fn boxed_bytes<B: DynamicUsage>(bundle: Option<&B>) -> usize {
+            bundle.map_or(0, |bundle| size_of::<B>() + bundle.dynamic_usage())
+        }
+    }
+}
+
+/// Attach PHGR13 JoinSplits to a generated Overwinter transaction.
+#[cfg(all(test, feature = "std"))]
+fn with_joinsplits(transaction: Transaction, count: usize) -> Transaction {
+    // Serialized size of a PHGR13 JoinSplit description in a V3 transaction.
+    const DESCRIPTION_BYTES: usize = 1802;
+
+    let description = JsDescription::read(&[0; DESCRIPTION_BYTES][..], false).unwrap();
+    let mut data = transaction.into_data();
+
+    data.sprout_bundle = Some(Box::new(sprout::Bundle {
+        joinsplits: vec![description; count],
+        joinsplit_pubkey: [0; 32],
+        joinsplit_sig: [0; 64],
+    }));
+
+    data.freeze().unwrap()
+}
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    /// Adding a nonempty Sprout bundle retains its box and JoinSplit vector.
+    #[test]
+    fn dynamic_usage_counts_added_joinsplits(
+        transaction in arb_tx(BranchId::Overwinter),
+        count in 1_usize..8,
+    ) {
+        let original_bytes = transaction.dynamic_usage();
+        let transaction = with_joinsplits(transaction, count);
+
+        let bundle = transaction.sprout_bundle().unwrap();
+        let expected = original_bytes + size_of::<sprout::Bundle>()
+            + bundle.joinsplits.capacity() * size_of::<JsDescription>();
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+proptest! {
+    /// Increasing vector capacities adds exactly the newly reserved bytes.
+    #[test]
+    fn dynamic_usage_counts_spare_capacity(
+        transaction in arb_tx(BranchId::Overwinter),
+        count in 1_usize..8,
+        input_slots in 0_usize..16,
+        output_slots in 0_usize..16,
+        joinsplit_slots in 1_usize..8,
+    ) {
+        let mut transaction = with_joinsplits(transaction, count);
+        let mut expected = transaction.dynamic_usage();
+
+        if let Some(bundle) = transaction.data.transparent_bundle.as_mut() {
+            expected += reserve_slots(&mut bundle.vin, input_slots);
+            expected += reserve_slots(&mut bundle.vout, output_slots);
+        }
+
+        let sprout = transaction.data.sprout_bundle.as_mut().unwrap();
+        expected += reserve_slots(&mut sprout.joinsplits, joinsplit_slots);
+
+        prop_assert_eq!(transaction.dynamic_usage(), expected);
+        prop_assert_eq!(transaction.dynamic_usage_bounds(), (expected, Some(expected)));
+
+        /// Request slots beyond current capacity and count the actual allocation growth.
+        fn reserve_slots<T>(items: &mut Vec<T>, slots: usize) -> usize {
+            let before = items.capacity();
+            items.reserve(before - items.len() + slots);
+            (items.capacity() - before) * size_of::<T>()
+        }
     }
 }
