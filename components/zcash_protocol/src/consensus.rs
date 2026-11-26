@@ -26,6 +26,16 @@ memuse::impl_no_dynamic_usage!(BlockHeight);
 /// The height of the genesis block on a network.
 pub const H0: BlockHeight = BlockHeight(0);
 
+/// The greatest valid `nExpiryHeight` of a non-coinbase transaction.
+///
+/// Expiry heights share the range of `nLockTime` values that denote block heights, as
+/// specified in [ZIP 203]; a larger nonzero expiry height is invalid under the consensus
+/// rules of [§ 7.1.2 Transaction Consensus Rules].
+///
+/// [ZIP 203]: https://zips.z.cash/zip-0203
+/// [§ 7.1.2 Transaction Consensus Rules]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub const MAX_TX_EXPIRY_HEIGHT: BlockHeight = BlockHeight(499_999_999);
+
 /// The factor by which NU7 divides the target block spacing, from 75 seconds to 25 seconds
 /// ([ZIP 218]'s `NU7PoWTargetSpacingRatio`).
 ///

@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_protocol::consensus::MAX_TX_EXPIRY_HEIGHT`
 - `zcash_protocol::zip318::REFERENCE_BLOCK_SPACING`
 
 ### Changed
