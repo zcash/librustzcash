@@ -410,6 +410,8 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// For [`TransactionStatus::Mined`], the mined height must be the height of a block on the main chain. If it is above the
     /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
     /// blocks above the previous chain tip as not yet scanned.
+    ///
+    /// Abandonment reconciliation follows [`super::WalletWrite::set_transaction_status`].
     fn set_transaction_status(
         &mut self,
         txid: TxId,

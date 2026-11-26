@@ -1471,6 +1471,11 @@ pub enum TransactionStatus {
     /// but is in the mempool or is otherwise not mined in the main chain (but may have been mined
     /// on a fork that was reorged away).
     NotInMainChain,
+    /// The transaction was positively observed in the node's current mempool.
+    ///
+    /// Unlike [`Self::NotInMainChain`], this is evidence that an abandoned transaction
+    /// is still live. It reactivates that transaction and its required ancestors.
+    InMempool,
     /// The requested transaction ID corresponds to a transaction that has been included in the
     /// block at the provided height.
     Mined(BlockHeight),
@@ -4238,7 +4243,8 @@ pub trait WalletWrite:
     /// This must be called before the transactions are sent to the network.
     ///
     /// Transactions that have been stored by this method should be retransmitted while it
-    /// is still possible that they could be mined.
+    /// is still possible that they could be mined, unless they have been abandoned with
+    /// [`Self::abandon_transaction`]. Storing a transaction again does not undo abandonment.
     ///
     /// Implementations must unlock any locked outputs that are recorded as spent by the
     /// stored transactions. Once spend records exist, the outputs are protected from
@@ -4253,6 +4259,25 @@ pub trait WalletWrite:
         &mut self,
         transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],
     ) -> Result<(), <Self as WalletRead>::Error>;
+
+    /// Abandons a stored, unmined transaction and its stored, unmined descendants.
+    ///
+    /// Abandoned transactions must not be rebroadcast. Their outputs do not contribute
+    /// to balances or input selection, and their inputs are released unless another
+    /// active transaction spends them. Transaction data and spend relationships are retained.
+    /// Repeating this operation is a no-op. Unknown transactions, mined transactions,
+    /// and transactions with mined descendants must be rejected.
+    ///
+    /// Abandonment does not cancel a transaction on the network. Callers must not infer
+    /// permanent rejection from a transport error, a reorg, or a node not recognizing a
+    /// transaction. A later mined or explicit [`TransactionStatus::InMempool`] observation
+    /// reactivates the transaction and its required ancestors, but not its descendants.
+    /// Storing cached transaction data or reporting [`TransactionStatus::NotInMainChain`]
+    /// must not reactivate it.
+    ///
+    /// The operation is atomic: implementations must apply the whole update or none
+    /// of it. After an error the caller may assume that nothing was persisted.
+    fn abandon_transaction(&mut self, txid: TxId) -> Result<(), <Self as WalletRead>::Error>;
 
     /// Truncates the wallet database to at most the specified height.
     ///
@@ -4402,6 +4427,11 @@ pub trait WalletWrite:
     /// For [`TransactionStatus::Mined`], the mined height must be the height of a block on the main chain. If it is above the
     /// wallet's chain tip, the wallet's chain tip becomes that height, and the wallet treats the
     /// blocks above the previous chain tip as not yet scanned.
+    ///
+    /// A mined or [`TransactionStatus::InMempool`] observation reactivates an abandoned
+    /// transaction and its required ancestors, but not its descendants. Competing unmined
+    /// transactions and their descendants are abandoned. A mempool observation must not
+    /// override a conflicting mined transaction. Other statuses do not undo abandonment.
     ///
     /// The operation is atomic: implementations must apply the whole update or none of it. After
     /// an error the caller may assume that nothing was persisted.

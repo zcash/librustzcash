@@ -169,6 +169,7 @@ migration_modules!(
     tx_retrieval_queue,
     tx_retrieval_queue_expiry,
     tx_status_observation_intent,
+    transaction_abandonment,
     ufvk_support,
     utxos_table,
     utxos_to_txos,
@@ -322,6 +323,8 @@ pub(super) fn all_migrations<
     //                                                                                                    \                                     |
     //                                                                                                     `--- orchard_ironwood_migration_transfer_change
     //
+    // `transaction_abandonment` depends on `fix_v_transactions_multi_account_totals` and
+    // `tx_status_observation_intent`.
     // `transparent_tx_address_observations` depends on every leaf of the graph above, and so it
     // follows all of them. `repair_funding_attribution` depends on it in turn.
     let rng = Rc::new(Mutex::new(rng));
@@ -436,6 +439,7 @@ pub(super) fn all_migrations<
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
         Box::new(tx_status_observation_intent::Migration),
+        Box::new(transaction_abandonment::Migration),
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
         Box::new(v_tx_outputs_transparent_addresses::Migration),
         Box::new(v_tx_outputs_diversifier_index::Migration),

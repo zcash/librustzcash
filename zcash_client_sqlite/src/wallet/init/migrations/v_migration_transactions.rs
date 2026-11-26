@@ -68,6 +68,23 @@ WHERE m.status NOT IN ('complete', 'failed', 'superseded', 'cancelled')
   AND mt.state IN ('awaiting_signature', 'signed', 'proved')
   AND NOT EXISTS (SELECT 1 FROM transactions tt WHERE tt.txid = mt.txid)";
 
+/// The merged history shape at this point in the migration graph.
+const CREATE_UNION_VIEW_SQL: &str = "
+CREATE VIEW v_transactions_with_pending_migrations AS
+SELECT account_uuid, mined_height, txid, tx_index, expiry_height, raw,
+       account_balance_delta, total_spent, total_received, fee_paid,
+       has_change, sent_note_count, received_note_count, memo_count, block_time,
+       expired_unmined, spent_note_count, is_shielding, pool_crossing_value,
+       trust_status, zip318_kind
+FROM v_transactions
+UNION ALL
+SELECT vmt.account_uuid, NULL, vmt.txid, NULL, vmt.expiry_height, NULL,
+       -vmt.fee, vmt.value_spent, vmt.value_received, vmt.fee,
+       vmt.has_change, 0, vmt.received_note_count, 0, NULL,
+       (vmt.expiry_height BETWEEN 1 AND (SELECT MAX(blocks.height) FROM blocks)),
+       vmt.spent_note_count, 0, vmt.pool_crossing_value, NULL, vmt.zip318_kind
+FROM v_migration_transactions vmt";
+
 pub(super) struct Migration;
 
 impl schemerz::Migration<Uuid> for Migration {
@@ -88,11 +105,7 @@ impl RusqliteMigration for Migration {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        transaction.execute_batch(&format!(
-            "{};\n{};",
-            CREATE_VIEW_SQL,
-            crate::wallet::db::VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS,
-        ))?;
+        transaction.execute_batch(&format!("{};\n{};", CREATE_VIEW_SQL, CREATE_UNION_VIEW_SQL,))?;
         Ok(())
     }
 

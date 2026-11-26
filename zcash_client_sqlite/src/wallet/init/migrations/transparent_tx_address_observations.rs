@@ -27,9 +27,9 @@ use zcash_protocol::consensus;
 use super::{
     add_transparent_value_index, fix_bad_ironwood_change_flagging, ivk_item_cache,
     orchard_ironwood_migration_transfer_change, restore_ua_transparent_receivers,
-    standalone_address, transparent_spend_locator_map, tree_retained_checkpoints,
-    tx_status_observation_intent, v_address_uses_ironwood, v_tx_outputs_diversifier_index,
-    witness_settled_height,
+    standalone_address, transaction_abandonment, transparent_spend_locator_map,
+    tree_retained_checkpoints, tx_status_observation_intent, v_address_uses_ironwood,
+    v_tx_outputs_diversifier_index, witness_settled_height,
 };
 use crate::wallet::init::WalletMigrationError;
 
@@ -59,6 +59,7 @@ pub(super) const DEPENDENCIES: &[Uuid] = &[
     v_address_uses_ironwood::MIGRATION_ID,
     v_tx_outputs_diversifier_index::MIGRATION_ID,
     witness_settled_height::MIGRATION_ID,
+    transaction_abandonment::MIGRATION_ID,
 ];
 
 pub(super) struct Migration<P> {

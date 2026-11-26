@@ -1246,7 +1246,7 @@ pub(crate) fn spent_utxos_clause<P: consensus::Parameters>(params: &P) -> String
 }
 
 /// Generates an SQL condition that a transaction is mined with at least a required number of
-/// confirmations, or is unexpired if UTXOS are spendable with zero confirmations.
+/// confirmations, or is unexpired and not abandoned if UTXOs are spendable with zero confirmations.
 ///
 /// # Usage requirements
 /// - `tx` must be set to the SQL variable name for the transaction in the parent.
@@ -1264,6 +1264,7 @@ pub(crate) fn tx_unexpired_condition_minconf_0(tx: &str) -> String {
         -- or outputs may be spent with zero confirmations and the transaction is unexpired
         OR (
             :min_confirmations = 0
+            AND {tx}.abandoned = 0
             AND ({tx}.expiry_height = 0 OR {tx}.expiry_height >= :target_height)
         )
         "#
@@ -1316,6 +1317,17 @@ pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
         -- indicates that the subsequent spend failed and the spending transaction will have
         -- expired.
         OR {transparent_received_outputs}.max_observed_unspent_height > {tx}.expiry_height
+        -- or the wallet explicitly abandoned the spending transaction; the enclosing
+        -- spentness check still excludes the output if another active transaction spends it
+        OR EXISTS (
+            SELECT 1
+            FROM transparent_received_output_spends abandoned_spend
+            JOIN transactions abandoned_tx
+              ON abandoned_tx.id_tx = abandoned_spend.transaction_id
+            WHERE abandoned_spend.transparent_received_output_id = {transparent_received_outputs}.id
+              AND abandoned_tx.abandoned = 1
+              AND abandoned_tx.mined_height IS NULL
+        )
         "#
     )
 }
@@ -1854,6 +1866,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
                 -- or the tx is unmined but definitely not expired
                 OR (
                     t.mined_height IS NULL
+                    AND t.abandoned = 0
                     AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
                 )
              )
@@ -1993,6 +2006,7 @@ pub(crate) fn add_transparent_account_balances<P: consensus::Parameters>(
                 -- or the tx is unmined but definitely not expired
                 OR (
                     t.mined_height IS NULL
+                    AND t.abandoned = 0
                     AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
                 )
              )
@@ -2105,6 +2119,12 @@ pub(crate) fn mark_transparent_utxo_spent(
         )?;
     }
 
+    super::transactions::observe_mined(conn, spent_in_tx)?;
+    super::transactions::inherit_abandonment(
+        conn,
+        spent_in_tx,
+        TxId::from_bytes(*outpoint.hash()),
+    )?;
     Ok(affected_rows > 0)
 }
 
@@ -3145,6 +3165,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         }
     }
 
+    super::transactions::observe_mined(conn, TxRef(id_tx))?;
     Ok((account_id, account_uuid, key_scope, utxo_id))
 }
 
