@@ -10,6 +10,109 @@ workspace.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-26
+
+### Added
+- `zcash_transparent::builder::TransparentBuilder::add_script_output`
+
+### Changed
+- `zcash_transparent` no longer enables the following features of its
+  dependencies. A crate that relied on one being enabled through
+  `zcash_transparent` must now enable it directly.
+  - `bip32/secp256k1-ffi`, previously enabled by `transparent-inputs`.
+  - `zcash_script/descriptor`, previously always enabled.
+  - `zcash_protocol/test-dependencies`, previously enabled by
+    `test-dependencies`.
+- `zcash_transparent::pczt::Input::prevout_txid` now returns `&[u8; 32]`
+  instead of `&zcash_protocol::TxId`. Wrap it with
+  `zcash_protocol::TxId::from_bytes` where a `TxId` is needed.
+- The value of a transparent output is now a type parameter `V` instead of
+  `zcash_protocol::value::Zatoshis`. Callers that used `Zatoshis` write it as
+  the parameter, for example `TxOut<Zatoshis>` and `Bundle<A, Zatoshis>`. The
+  following items gained the parameter:
+  - `zcash_transparent::bundle::{TxOut, Bundle, EffectsOnly}`
+  - `zcash_transparent::builder::{TransparentBuilder, TransparentInputInfo,
+    Unauthorized, TransparentSignatureContext}`
+  - `zcash_transparent::sighash::{SignableInput, TransparentAuthorizingContext}`
+  - `zcash_transparent::pczt::{Bundle, Input, Output, Unbound, Updater,
+    InputUpdater, OutputUpdater}`
+- A value type `V` that implements `Copy` and `core::fmt::Debug` can be used
+  with every item in the crate. `zcash_transparent::pczt::{Input, Output}::parse`
+  additionally require `V: TryFrom<u64>`. `zcash_protocol::value::Zatoshis`
+  satisfies all three.
+- `zcash_transparent::bundle::testing::{arb_txout, arb_bundle}` take a strategy
+  for the output value as an argument.
+
+### Removed
+- The transaction wire codecs. Use the functions in
+  `zcash_primitives::transaction::components::transparent` instead:
+  - `zcash_transparent::bundle::OutPoint::{read, write}` are replaced by
+    `read_outpoint` and `write_outpoint`.
+  - `zcash_transparent::bundle::TxIn::<Authorized>::{read, write}` are replaced
+    by `read_txin` and `write_txin`.
+  - `zcash_transparent::bundle::TxOut::{read, write}` are replaced by
+    `read_txout` and `write_txout`.
+  - `zcash_transparent::address::Script::{read, write, serialized_size}` are
+    replaced by `read_script`, `write_script` and `script_serialized_size`.
+- `zcash_transparent::builder::p2sh_input_serialized_len`. Use
+  `zcash_primitives::transaction::fees::transparent::p2sh_input_serialized_len`.
+- `zcash_transparent::builder::TransparentInputInfo::serialized_len`. For fee
+  computation, use
+  `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`.
+  It returns an `InputSize` instead of an `Option<usize>`, with
+  `InputSize::Unknown` in place of `None`. For a P2PKH input it returns the
+  ZIP 317 standard size of 150 bytes, where `serialized_len` returned an upper
+  bound of 149 bytes.
+- `zcash_transparent::zip48`. The module is now
+  `zcash_keys::keys::transparent::zip48`, with the same items. It requires the
+  `transparent-inputs` feature of `zcash_keys`.
+- `zcash_transparent::keys`. Every item is now in
+  `zcash_keys::keys::transparent` under the same name. `AccountPrivKey`,
+  `AccountPubKey`, `IncomingViewingKey`, `ExternalIvk`, `InternalIvk` and
+  `EphemeralIvk` require the `transparent-inputs` feature of `zcash_keys`. The
+  other items require any one of its `orchard`, `sapling` or
+  `transparent-inputs` features.
+- `zcash_transparent::pczt::Bip32Derivation::{extract_bip_44_fields,
+  extract_zip_48_fields}`. Use the free functions
+  `zcash_keys::keys::transparent::{extract_bip_44_fields,
+  extract_zip_48_fields}`, which take the derivation as their first argument.
+  They require any one of the `orchard`, `sapling` or `transparent-inputs`
+  features of `zcash_keys`.
+- Coinbase transaction support. Use `zcash_primitives::transaction::coinbase`:
+  - `zcash_transparent::coinbase` (the module, its constants and `Error`) is
+    now `zcash_primitives::transaction::coinbase`.
+  - `zcash_transparent::builder::Coinbase` is now
+    `zcash_primitives::transaction::coinbase::Coinbase`.
+  - `zcash_transparent::bundle::TxIn::<Coinbase>::coinbase` is replaced by
+    `zcash_primitives::transaction::coinbase::coinbase_input`.
+  - `zcash_transparent::builder::TransparentBuilder::build_coinbase` is
+    removed; build coinbase transactions with
+    `zcash_primitives::transaction::builder::BuildConfig::Coinbase`, or
+    construct the transparent bundle directly from
+    `zcash_primitives::transaction::coinbase::coinbase_input` and
+    `TransparentBuilder::outputs`.
+  - `zcash_transparent::bundle::Bundle::is_coinbase` is replaced by
+    `zcash_primitives::transaction::coinbase::is_coinbase`, which takes the
+    transaction rather than its transparent bundle.
+- `zcash_transparent::bundle::Bundle::value_balance`. Use
+  `zcash_primitives::transaction::components::transparent::value_balance`,
+  which takes the bundle as its first argument.
+- `zcash_transparent::builder::TransparentBuilder::value_balance`. Compute it
+  as the sum of `TransparentInputInfo::coin().value()` over
+  `TransparentBuilder::inputs`, minus the sum of `TxOut::value` over
+  `TransparentBuilder::outputs`. `inputs` exists only with the
+  `transparent-inputs` feature; without it the builder has no inputs.
+- `zcash_transparent::builder::TransparentBuilder::add_null_data_output`. Use
+  `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`,
+  or build the `OP_RETURN` script and pass it to
+  `TransparentBuilder::add_script_output`.
+- `zcash_transparent::builder::Error::NullDataTooLong`. The error is now
+  `zcash_primitives::transaction::builder::Error::NullDataTooLong`.
+- `zcash_transparent::bundle::OutPoint::txid`. Use
+  `zcash_protocol::TxId::from_bytes(*outpoint.hash())`.
+- `zcash_transparent::util::sha256d`. The module is now
+  `zcash_primitives::transaction::util::sha256d`, with the same items.
+
 ## [0.11.1] - 2026-11-12
 
 ### Changed
