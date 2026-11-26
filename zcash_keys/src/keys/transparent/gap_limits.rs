@@ -230,8 +230,13 @@ fn generate_external_address(
 /// [`UnifiedAddressRequest`]; for internal and ephemeral scopes, the raw transparent address is
 /// returned.
 ///
-/// Returns an empty list if the account lacks a transparent key and `require_key` is `false`.
-/// Returns an error if the key is required but unavailable, or if the key scope is unsupported.
+/// External addresses are derived from the P2PKH component of `account_uivk`; internal and
+/// ephemeral addresses are derived from the P2PKH component of `account_ufvk`.
+///
+/// Returns an empty list for the external scope if `account_uivk` has a P2SH component, and
+/// for any scope if the account lacks the transparent key required for that scope and
+/// `require_key` is `false`. Returns an error if the key is required but unavailable, or if
+/// the key scope is unsupported.
 pub fn generate_address_list(
     account_uivk: &UnifiedIncomingViewingKey,
     account_ufvk: Option<&UnifiedFullViewingKey>,
@@ -240,29 +245,38 @@ pub fn generate_address_list(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<Vec<(Address, TransparentAddress, NonHardenedChildIndex)>, AddressGenerationError> {
-    let account_pubkey = if let Some(k) = account_ufvk.and_then(|ufvk| ufvk.p2pkh()) {
-        k
-    } else if matches!(
-        key_scope,
-        TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL
-    ) && require_key
-    {
-        return Err(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH));
-    } else {
-        // No addresses to generate
-        return Ok(vec![]);
+    let account_pubkey = account_ufvk.and_then(|ufvk| ufvk.p2pkh());
+    let has_scope_key = match key_scope {
+        TransparentKeyScope::EXTERNAL => match (account_uivk.p2pkh(), account_uivk.p2sh()) {
+            (Some(_), _) => true,
+            // External addresses are not generated from a P2SH component.
+            // TODO: generate them for derivable script templates (#3341).
+            (None, Some(_)) => return Ok(vec![]),
+            (None, None) => false,
+        },
+        _ => account_pubkey.is_some(),
     };
+    if !has_scope_key {
+        return if require_key {
+            Err(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))
+        } else {
+            // No addresses to generate
+            Ok(vec![])
+        };
+    }
 
     let gen_addrs = |key_scope: TransparentKeyScope, index: NonHardenedChildIndex| match key_scope {
         TransparentKeyScope::EXTERNAL => generate_external_address(account_uivk, request, index),
         TransparentKeyScope::INTERNAL => {
             let internal_address = account_pubkey
+                .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))?
                 .derive_internal_ivk()?
                 .derive_address(index)?;
             Ok((Address::from(internal_address), internal_address))
         }
         TransparentKeyScope::EPHEMERAL => {
             let ephemeral_address = account_pubkey
+                .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))?
                 .derive_ephemeral_ivk()?
                 .derive_ephemeral_address(index)?;
             Ok((Address::from(ephemeral_address), ephemeral_address))

@@ -4314,14 +4314,20 @@ mod tests {
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     use {
         crate::{AccountRef, wallet::transparent},
-        zcash_keys::keys::transparent::{NonHardenedChildIndex, TransparentKeyScope},
+        zcash_keys::keys::transparent::NonHardenedChildIndex,
     };
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{GapLimits, wallet::transparent::transaction_data_requests},
+        ::transparent::bundle::{OutPoint, TxOut},
         rusqlite::named_params,
-        std::collections::BTreeSet,
-        zcash_client_backend::data_api::TransactionDataRequest,
+        secp256k1::{PublicKey, SecretKey},
+        std::{collections::BTreeSet, num::NonZeroU8},
+        zcash_client_backend::{data_api::TransactionDataRequest, wallet::WalletTransparentOutput},
+        zcash_keys::keys::transparent::{
+            TransparentKeyScope,
+            zip48::{P2shFullViewingKey, P2shKey},
+        },
     };
 
     #[test]
@@ -5518,6 +5524,142 @@ mod tests {
             }),
             Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
         );
+    }
+
+    /// A UIVK-only account (imported via `ViewingKey::Incoming`, so it has no
+    /// UFVK) whose UIVK includes a transparent component must be able to generate
+    /// new unified addresses that require a transparent receiver.
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    pub(crate) fn uivk_only_account_generates_transparent_addresses() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+        assert!(
+            full_uivk.p2pkh().is_some(),
+            "the test requires the UIVK to have a transparent component"
+        );
+
+        // Import the full UIVK (transparent included) as a view-only account. The
+        // account holds no UFVK, only the UIVK.
+        let account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "uivk-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+        assert!(account.ufvk().is_none());
+
+        // New-address allocation requires a chain tip.
+        st.wallet_mut().update_chain_tip(birthday.height()).unwrap();
+
+        // A request that requires a transparent receiver: the UIVK has one, so
+        // the account must be able to produce a new address.
+        let request = UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require);
+        let addr = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), request);
+        assert!(
+            addr.is_ok(),
+            "get_next_available_address failed: {:?}",
+            addr.as_ref().err()
+        );
+        assert!(
+            addr.unwrap().is_some(),
+            "no address was generated for the UIVK-only account"
+        );
+    }
+
+    /// An account whose viewing key has a P2SH component must be able to receive a
+    /// transparent output at its default address, even though no gap-limit addresses are
+    /// generated for that component.
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn p2sh_account_receives_utxo_at_default_address() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let cosigners = [1u8, 2, 3]
+            .iter()
+            .map(|i| {
+                let sk = SecretKey::from_secret_bytes([*i; 32]).expect("valid secret key");
+                P2shKey::new([*i; 32], PublicKey::from_secret_key(&sk))
+            })
+            .collect::<Vec<_>>();
+        let p2sh_fvk = P2shFullViewingKey::new(NonZeroU8::new(2).unwrap(), cosigners)
+            .expect("valid cosigner set");
+        let ufvk = UnifiedFullViewingKey::from_p2sh(p2sh_fvk).expect("constructible");
+
+        let account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "p2sh",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Full(Box::new(ufvk)),
+                    &birthday,
+                    &GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        let (default_address, _) = account
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        let taddr = *default_address
+            .transparent()
+            .expect("the default address has a P2SH receiver");
+
+        st.wallet_mut().update_chain_tip(birthday.height()).unwrap();
+
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::fake(),
+            TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into()),
+            Some(birthday.height()),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .expect("a P2SH account accepts a UTXO at its default address");
     }
 
     /// Tests that importing a UIVK with additional items over an existing IVK-only
