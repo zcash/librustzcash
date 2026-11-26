@@ -3,13 +3,17 @@
 
 Usage: report-benchmark-changes.py <criterion output directory>
            --baseline-commit <sha> [--regression-output <path>]
+           [--expected-baseline-commit <sha> --repository-url <url>]
 
 Reads the results that `cargo bench` writes when it compares with a saved
 baseline, and prints one table row per benchmark with the relative change in
 its mean time. A change is flagged only when the whole confidence interval of
 the change lies beyond `CHANGE_THRESHOLD`. With `--regression-output`, appends
 `regressed=true` or `regressed=false` to the given file, in the GitHub Actions
-step output format. Exits successfully whenever the report is printed.
+step output format. With `--expected-baseline-commit`, warns when the baseline
+comes from a different commit, and links the changes between the two commits,
+which also affect the results. Exits successfully whenever the report is
+printed.
 """
 
 import argparse
@@ -60,10 +64,25 @@ def benchmark_results(criterion_dir):
             yield benchmark_id, None
 
 
-def print_report(results, baseline_commit):
+def print_baseline_source(baseline_commit, expected_commit, repository_url):
+    """Prints which commit the baseline comes from, and whether it is stale."""
+    if expected_commit is None or baseline_commit == expected_commit:
+        print(f'Compared with the baseline for `{baseline_commit}`.')
+        return
+    print(
+        f'> [!WARNING]\n'
+        f'> The baseline comes from `{baseline_commit}`, not `{expected_commit}`. '
+        f'The [changes between them]'
+        f'({repository_url}/compare/{baseline_commit}...{expected_commit}) also '
+        f'affect the results below. Rerun this job when the baseline for '
+        f'`{expected_commit}` is cached.'
+    )
+
+
+def print_report(results, baseline_commit, expected_commit, repository_url):
     print('## Benchmark comparison')
     print()
-    print(f'Compared with the baseline for `{baseline_commit}`.')
+    print_baseline_source(baseline_commit, expected_commit, repository_url)
     print()
     if not results:
         print('No benchmark results were found.')
@@ -98,7 +117,13 @@ def parse_args():
     parser.add_argument('criterion_dir', type=Path)
     parser.add_argument('--baseline-commit', required=True)
     parser.add_argument('--regression-output', type=Path)
-    return parser.parse_args()
+    parser.add_argument('--expected-baseline-commit')
+    parser.add_argument('--repository-url')
+    args = parser.parse_args()
+    if (args.expected_baseline_commit is None) != (args.repository_url is None):
+        parser.error(
+            '--expected-baseline-commit and --repository-url must be given together')
+    return args
 
 
 def main():
@@ -106,7 +131,9 @@ def main():
     if not args.criterion_dir.is_dir():
         sys.exit(f'{args.criterion_dir} is not a directory')
     results = list(benchmark_results(args.criterion_dir))
-    print_report(results, args.baseline_commit)
+    print_report(
+        results, args.baseline_commit, args.expected_baseline_commit,
+        args.repository_url)
 
     if args.regression_output is not None:
         regressed = any(
