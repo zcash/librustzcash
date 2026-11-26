@@ -344,13 +344,15 @@ impl Run {
 
     /// The height of the next block a transaction could be mined in, which is what
     /// `advance_migration` plans against.
-    fn target_height(&self) -> BlockHeight {
-        self.st
-            .wallet()
-            .chain_height()
-            .expect("reads the chain height")
-            .expect("the wallet has a chain tip")
-            + 1
+    fn target_height(&self) -> TargetHeight {
+        TargetHeight::from(
+            self.st
+                .wallet()
+                .chain_height()
+                .expect("reads the chain height")
+                .expect("the wallet has a chain tip")
+                + 1,
+        )
     }
 
     /// The dueness targets the simulation drives at. The simulated wallet scans every block it
@@ -783,7 +785,7 @@ impl Run {
             let sk = self.usk.orchard().unwrap();
             let (state, _) = engine::commit_preparation_with_funding(
                 &self.network,
-                tip,
+                TargetHeight::from(tip + 1),
                 &mut adapter,
                 sk,
                 &plan,
@@ -1124,7 +1126,6 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
 )]
 fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     use zcash_client_backend::data_api::InputSource;
-    use zcash_client_backend::data_api::wallet::TargetHeight;
     use zcash_client_backend::data_api::wallet::input_selection::LockFilter;
     use zcash_protocol::ShieldedPool;
 
@@ -1141,7 +1142,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     let transfer_id = run.drive_to_first_transfer_step(&mut committed);
 
     let spendable_values = |run: &mut Run| -> Vec<Zatoshis> {
-        let target = TargetHeight::from(u32::from(run.target_height()));
+        let target = run.target_height();
         run.st
             .wallet()
             .select_unspent_notes(
@@ -1278,6 +1279,31 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
         "the crossing carries an Ironwood bundle",
     );
 
+    // The wallet records the transaction with the target height it was scheduled for: the first
+    // height at which it can be mined.
+    let scheduled_height = committed
+        .state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .expect("the transfer is present")
+        .scheduled_height();
+    let stored_target_height: u32 = run
+        .st
+        .wallet_mut()
+        .conn_mut()
+        .query_row(
+            "SELECT target_height FROM transactions WHERE txid = :txid",
+            rusqlite::named_params![":txid": txid.as_ref()],
+            |row| row.get(0),
+        )
+        .expect("reads the recorded target height");
+    assert_eq!(
+        stored_target_height,
+        u32::from(scheduled_height),
+        "the transaction is recorded with its scheduled target height",
+    );
+
     // Its sent-output record is exactly the transfer's REAL outputs: the Ironwood crossing
     // output carrying the migrated value, plus the Orchard change returning the unspent share of
     // the funding note's fee buffer — together the funding note minus the fee. The padding
@@ -1360,7 +1386,7 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     // The stored row carries its ZIP 318 classification from this same atomic write — while the
     // transaction is still UNMINED. The enhance path only stamps classifications for transactions
     // the wallet learns about by scanning, i.e. after they mine; a scheduled transfer sits stored
-    // and unmined until its broadcast height, and a wallet labeling (or holding back) its own
+    // and unmined until its scheduled height, and a wallet labeling (or holding back) its own
     // migration traffic during that window must not read "not classified" there.
     let (zip318_kind, mined_height): (i64, Option<i64>) = run
         .st
@@ -1594,7 +1620,7 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     let sk = usk.orchard().unwrap();
     let (state, _) = engine::commit_preparation_with_funding(
         &network,
-        tip,
+        TargetHeight::from(tip + 1),
         &mut adapter,
         sk,
         &plan,
@@ -2330,7 +2356,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
             matches!(
                 engine::commit_preparation_with_funding(
                     &run.network,
-                    tip,
+                    TargetHeight::from(tip + 1),
                     &mut adapter,
                     sk,
                     &plan,
@@ -2370,7 +2396,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     let sk = run.usk.orchard().unwrap();
     let (replanned, _) = engine::commit_preparation_with_funding(
         &run.network,
-        tip,
+        TargetHeight::from(tip + 1),
         &mut adapter,
         sk,
         &plan,

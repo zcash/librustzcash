@@ -58,7 +58,7 @@ mod tests {
         TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
     };
     use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
-    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+    use zcash_primitives::transaction::{TargetHeight, fees::zip317::MARGINAL_FEE};
 
     use crate::denomination::zat;
 
@@ -77,11 +77,11 @@ mod tests {
         let rng = ChaCha8Rng::seed_from_u64(note_seed);
         let expiry = u32::from(crate::scheduling::expiry_height(
             &crate::scheduling::BlockSpacing::UNIFORM,
-            zcash_protocol::consensus::BlockHeight::from_u32(TARGET_HEIGHT),
+            TargetHeight::from(TARGET_HEIGHT),
         ));
         let (pczt, _) = build_prep_tx(
             &params,
-            TARGET_HEIGHT,
+            TargetHeight::from(TARGET_HEIGHT),
             expiry,
             fvk,
             vec![note],

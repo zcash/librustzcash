@@ -7,6 +7,81 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Heights in this crate's target-height convention (the height of the next
+  block, one above the chain tip) are now typed as
+  `zcash_primitives::transaction::TargetHeight` instead of `BlockHeight`. Chain
+  tips, anchor boundaries, expiry heights and mined heights remain
+  `BlockHeight`. A caller holding a chain tip `tip` passes
+  `TargetHeight::from(tip + 1)` where a target height is now required, and
+  converts a returned `TargetHeight` with `BlockHeight::from` where it needs a
+  `BlockHeight`. The affected items are:
+  - `zcash_pool_migration::scheduling`:
+    - `Schedule::broadcast_height(&self) -> BlockHeight` has been renamed to
+      `Schedule::scheduled_height(&self) -> TargetHeight`.
+    - `schedule_broadcast_heights(.., commit_height: BlockHeight, ..) -> Vec<BlockHeight>`
+      has been renamed to
+      `schedule_heights(.., commit_target: TargetHeight, ..) -> Vec<TargetHeight>`.
+    - `schedule_prep_broadcast_heights(.., start: BlockHeight, ..) -> Vec<BlockHeight>`
+      has been renamed to
+      `schedule_prep_heights(.., start: TargetHeight, ..) -> Vec<TargetHeight>`.
+    - `schedule(.., commit_height: BlockHeight, ..)` now takes
+      `commit_target: TargetHeight`.
+    - `schedule_sync_wakeups` now takes
+      `transfers: &[(T, BlockHeight, TargetHeight)]` in place of
+      `&[(T, BlockHeight, BlockHeight)]`; the third element is the transfer's
+      scheduled height.
+    - `expiry_height` is no longer a re-export of
+      `zcash_protocol::zip318::expiry_height`. It now takes
+      `(spacing: &BlockSpacing, scheduled_height: TargetHeight)` and returns the
+      same `BlockHeight` that `zip318::expiry_height` returns for that height.
+    - `earliest_broadcast_height(..) -> BlockHeight` has been renamed to
+      `earliest_scheduled_height(..) -> TargetHeight`, and its value is one
+      greater: it previously returned the first chain tip at which a candidate
+      anchor exists, and now returns the earliest target height at which a
+      transfer may be scheduled, one above that tip.
+    - `draw_anchor_boundary`'s fourth argument has changed from
+      `chain_tip_height: BlockHeight` to `target_height: TargetHeight`, and the
+      candidate set is evaluated at the chain tip one below it. A caller that
+      passed an observed chain tip `tip` passes `TargetHeight::from(tip + 1)`;
+      a caller drawing for a scheduled transaction passes its scheduled height.
+    - `redraw_anchor_boundary`'s third argument has changed from
+      `scheduled_height: BlockHeight` to `scheduled_height: TargetHeight`, and
+      the candidate set is evaluated at the chain tip one below it, rather than
+      at the scheduled height itself.
+  - `zcash_pool_migration::engine`:
+    - `MigrationTransaction::scheduled_height` now returns `TargetHeight`, and
+      `MigrationTransaction::from_parts` takes `scheduled_height: TargetHeight`.
+    - `MigrationPlan::prep_schedule` now returns `&[Vec<TargetHeight>]`.
+    - `commit_preparation`, `commit_preparation_with_funding` and
+      `build_preparation_unsigned` now take `target_height: TargetHeight`.
+  - `zcash_pool_migration::satisfiability`:
+    - `DuenessTargets::new` and `DuenessTargets::at` now take `TargetHeight`
+      arguments, and `DuenessTargets::{scanned, effective}` return
+      `TargetHeight`.
+    - `Advance::next` now returns `Option<(TargetHeight, StepKind)>`.
+  - `zcash_pool_migration::state::TransactionStatus::scheduled_height` now
+    returns `TargetHeight`.
+  - `zcash_pool_migration::signing_rounds::PlannedTx::new` now takes
+    `scheduled_height: Option<TargetHeight>`, and
+    `PlannedTx::scheduled_height` returns `Option<TargetHeight>`.
+  - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` now
+    take `target_height: TargetHeight` in place of `target_height: u32`.
+
+### Fixed
+- `zcash_pool_migration::engine::plan_migration` and its variants no longer
+  schedule a transfer whose only candidate anchor at its broadcast tip would be
+  the most recent boundary (an age-0 anchor, which ZIP 318 forbids). Every
+  transfer now has a candidate anchor at the tip it is broadcast from.
+- `zcash_pool_migration::engine::plan_migration` and its variants no longer
+  schedule a preparation or transfer at the chain tip, a height that is already
+  mined; every scheduled height is now above it.
+- The anchor boundaries that `zcash_pool_migration::engine` draws for scheduled
+  transfers (at commit, at rebuild, and when the overdue shift redraws them)
+  are never age 0. Previously, when a transfer's scheduled height landed
+  exactly on an anchor boundary, the drawn anchor could be the most recent
+  boundary at the tip the transfer is broadcast from.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added

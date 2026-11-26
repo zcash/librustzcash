@@ -602,7 +602,7 @@ mod tests {
         use rand_core::{Rng, SeedableRng};
         use zcash_client_backend::data_api::testing::TestBuilder;
         use zcash_pool_migration::build::build_transfer_pczt;
-        use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+        use zcash_primitives::transaction::{TargetHeight, fees::zip317::MARGINAL_FEE};
         use zcash_protocol::consensus::BlockHeight;
         use zcash_protocol::local_consensus::LocalNetwork;
         use zcash_protocol::value::Zatoshis;
@@ -670,7 +670,7 @@ mod tests {
 
         let pczt = build_transfer_pczt(
             &network,
-            200,
+            TargetHeight::from(200),
             240,
             &fvk,
             note,
