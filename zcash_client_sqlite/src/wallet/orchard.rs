@@ -32,8 +32,12 @@ use crate::{
 };
 
 use super::{
-    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
+    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr,
+    upsert_address_and_reconcile,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::GapLimits;
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
@@ -404,6 +408,7 @@ pub(crate) fn ensure_address<
     params: &P,
     output: &T,
     exposure_height: Option<BlockHeight>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Option<AddressRef>, SqliteClientError> {
     if output.recipient_key_scope() != Some(Scope::Internal) {
         let account = get_account(conn, params, output.account_id())?
@@ -422,7 +427,7 @@ pub(crate) fn ensure_address<
         let ua = account
             .uivk()
             .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
-        upsert_address(
+        upsert_address_and_reconcile(
             conn,
             params,
             account.internal_id(),
@@ -430,6 +435,8 @@ pub(crate) fn ensure_address<
             &ua,
             exposure_height,
             false,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
         )
         .map(Some)
     } else {
@@ -488,6 +495,7 @@ pub(crate) fn parse_note_version(code: i64) -> Option<NoteVersion> {
 /// version is recorded in the `note_version` column but does not influence table selection. This
 /// lets the scanner route its separate Orchard and Ironwood output streams to their respective
 /// tables while the decrypted-transaction path selects the table from the note version.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn put_received_note<
     T: ReceivedOrchardOutput<AccountId = AccountUuid>,
     P: consensus::Parameters,
@@ -499,11 +507,19 @@ pub(crate) fn put_received_note<
     tx_ref: TxRef,
     target_or_mined_height: Option<BlockHeight>,
     spent_in: Option<TxRef>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<AccountRef, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(shielded_pool)?;
 
     let account_id = get_account_ref(conn, output.account_id())?;
-    let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
+    let address_id = ensure_address(
+        conn,
+        params,
+        output,
+        target_or_mined_height,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+    )?;
     let note_version = output.note().version();
     let mut stmt_upsert_received_note = conn.prepare_cached(&format!(
         "INSERT INTO {table_prefix}_received_notes (
@@ -1280,6 +1296,8 @@ pub(crate) mod tests {
             tx_ref,
             None,
             None,
+            #[cfg(feature = "transparent-inputs")]
+            &crate::GapLimits::default(),
         )
         .unwrap();
         super::put_received_note(
@@ -1290,6 +1308,8 @@ pub(crate) mod tests {
             tx_ref,
             None,
             None,
+            #[cfg(feature = "transparent-inputs")]
+            &crate::GapLimits::default(),
         )
         .unwrap();
 
