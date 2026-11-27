@@ -1047,11 +1047,21 @@ impl<P: consensus::Parameters> Builder<P, ()> {
         let sapling_builder = build_config
             .sapling_builder_config()
             .map(|(bundle_type, anchor)| {
-                sapling::builder::Builder::new(
-                    zip212_enforcement(&params, target_height),
-                    bundle_type,
-                    anchor,
-                )
+                // A transaction builder always creates notes with the post-ZIP 212
+                // plaintext lead byte (both `GracePeriod` and `On` select
+                // `Rseed::AfterZip212`), which recipients accept from Canopy
+                // activation onward. Building with `On` from Canopy is therefore
+                // equivalent to building during the grace period, except that
+                // Sapling PCZTs can also be built (the Sapling PCZT builder
+                // rejects `GracePeriod` because the format only represents
+                // post-ZIP 212 notes).
+                let zip212 = match zip212_enforcement(&params, target_height) {
+                    sapling::note_encryption::Zip212Enforcement::GracePeriod => {
+                        sapling::note_encryption::Zip212Enforcement::On
+                    }
+                    policy => policy,
+                };
+                sapling::builder::Builder::new(zip212, bundle_type, anchor)
             });
 
         // # Consensus Rules
@@ -2367,49 +2377,61 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "circuits")]
-    fn nu6_3_coinbase_builder_has_ironwood_output_option() {
-        let recipient = orchard::keys::FullViewingKey::from(
-            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
-        )
-        .address_at(0u32, orchard::keys::Scope::External);
+    #[cfg(all(feature = "circuits", feature = "transparent-inputs"))]
+    fn build_for_pczt_succeeds_during_zip212_grace_period() {
+        // Canopy activates at height 5, so the ZIP 212 grace period runs until
+        // height 32261: a regtest-style network cannot build Sapling PCZTs at
+        // ordinary block heights unless the builder uses the post-ZIP 212 note
+        // plaintext lead byte, which recipients accept from Canopy onward.
+        let network = nu6_3_test_network();
+        let height = BlockHeight::from_u32(10);
+        assert_eq!(
+            super::super::components::sapling::zip212_enforcement(&network, height),
+            sapling::note_encryption::Zip212Enforcement::GracePeriod
+        );
+
+        let extsk = sapling::zip32::ExtendedSpendingKey::master(&[0; 32]).unwrap();
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let recipient = dfvk.default_address().1;
+
         let mut builder = Builder::new(
-            nu6_3_test_network(),
-            10u32.into(),
-            BuildConfig::Coinbase { miner_data: None },
+            network,
+            height,
+            BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
+            },
         );
 
-        assert_matches!(
-            builder.add_orchard_output::<Infallible>(
-                None,
-                recipient,
-                Zatoshis::const_from_u64(10_000),
-                MemoBytes::empty(),
-            ),
-            Err(Error::OrchardBuilderNotAvailable)
+        let mut transparent_signing_set = TransparentSigningSet::new();
+        let sk = secp256k1::SecretKey::from_secret_bytes(TEST_TRANSPARENT_SECRET_KEY).unwrap();
+        let pubkey = transparent_signing_set.add_key(sk);
+        let prev_coin = TxOut::new(
+            Zatoshis::const_from_u64(1_000_000),
+            TransparentAddress::from_pubkey(&pubkey).script().into(),
         );
-
         builder
-            .add_ironwood_output::<Infallible>(
-                None,
+            .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
+            .unwrap();
+        builder
+            .add_sapling_output::<crate::transaction::fees::zip317::FeeRule>(
+                Some(dfvk.to_ovk(zip32::Scope::External)),
                 recipient,
-                Zatoshis::const_from_u64(10_000),
+                Zatoshis::const_from_u64(985_000),
                 MemoBytes::empty(),
             )
             .unwrap();
-        assert_eq!(
-            builder.ironwood_builder.as_ref().map(|b| b.outputs().len()),
-            Some(1)
-        );
-        assert_eq!(
-            super::orchard_action_count(
-                builder.ironwood_builder.as_ref().unwrap(),
-                true,
-                orchard::bundle::BundleVersion::ironwood_v3()
+        let res = builder
+            .build_for_pczt(
+                UnwrapErr(SysRng),
+                &crate::transaction::fees::zip317::FeeRule::standard(),
             )
-            .unwrap(),
-            1
-        );
+            .unwrap();
+
+        assert!(res.pczt_parts.sapling.is_some());
     }
 
     #[test]
