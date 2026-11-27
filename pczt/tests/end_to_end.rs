@@ -486,6 +486,153 @@ fn transparent_p2sh_multisig_to_orchard() {
 }
 
 #[test]
+fn transparent_to_sapling_via_v1() {
+    let params = pre_nu6_3_test_network();
+    let rng = UnwrapErr(SysRng);
+
+    // Create a transparent account to send funds from.
+    let transparent_account_sk =
+        AccountPrivKey::from_seed(&params, &[1; 32], zip32::AccountId::ZERO).unwrap();
+    let (transparent_addr, address_index) = transparent_account_sk
+        .to_account_pubkey()
+        .derive_external_ivk()
+        .unwrap()
+        .default_address();
+    let transparent_sk = transparent_account_sk
+        .derive_external_secret_key(address_index)
+        .unwrap();
+    let transparent_pubkey = transparent_sk.public_key();
+
+    // Create a Sapling account to receive funds.
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32])
+        .expect("the derivation path yields a valid key");
+    let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
+    let sapling_ovk = sapling_dfvk.to_ovk(zip32::Scope::External);
+    let recipient = sapling_dfvk.default_address().1;
+
+    // Pretend we already have a transparent coin.
+    let utxo = transparent::OutPoint::fake();
+    let coin = transparent::TxOut::new(
+        Zatoshis::const_from_u64(1_000_000),
+        transparent_addr.script().into(),
+    );
+
+    // Create the transaction's I/O. The Sapling bundle is output-only: the v5
+    // transaction format only carries `anchorSapling` when the bundle has Sapling
+    // spends, so this bundle does not require an anchor at all.
+    let mut builder = Builder::new(
+        params,
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: Some(sapling::Anchor::empty_tree()),
+            orchard_anchor: None,
+            ironwood_anchor: None,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
+        },
+    );
+    builder
+        .add_transparent_p2pkh_input(transparent_pubkey, utxo, coin)
+        .unwrap();
+    builder
+        .add_sapling_output::<zip317::FeeRule>(
+            Some(sapling_ovk),
+            recipient,
+            Zatoshis::const_from_u64(100_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_sapling_output::<zip317::FeeRule>(
+            Some(sapling_ovk),
+            recipient,
+            Zatoshis::const_from_u64(885_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(rng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT, and drop the builder's anchor from the output-only
+    // bundle: a spend-less Sapling bundle carries no anchor in the v5 format.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    let pczt = Redactor::new(pczt)
+        .redact_sapling_with(|mut sapling| sapling.clear_anchor())
+        .finish();
+    assert!(pczt.sapling().anchor().is_none());
+    check_round_trip(&pczt);
+
+    // Finalize the I/O. This parses the bundle with the anchor required (the v5
+    // signature hash commits to shielded anchors), so it also depends on a
+    // spend-less bundle parsing without an anchor.
+    let pczt = IoFinalizer::new(pczt)
+        .finalize_io(UnwrapErr(SysRng))
+        .unwrap();
+    check_round_trip(&pczt);
+    assert!(pczt.sapling().anchor().is_none());
+
+    // Pass the PCZT to the prover and signer through a v1 serialization cycle,
+    // emulating passing it to devices that only understand the v1 format. The v1
+    // encoding's anchor field is mandatory, so the encoder substitutes its
+    // placeholder for the bundle's absent anchor; parsing must undo that
+    // substitution, restoring the absent anchor.
+    let encoded = v1::Pczt::try_from(pczt).unwrap().serialize();
+    let pczt = Pczt::parse(&encoded).unwrap();
+    assert!(pczt.sapling().anchor().is_none());
+
+    // Create proofs. The bundle has no spends, so the Prover does not consume the
+    // anchor; it must parse the bundle despite the anchor being absent.
+    let sapling_prover = LocalTxProver::bundled();
+    let pczt = Prover::new(pczt)
+        .create_sapling_proofs(UnwrapErr(SysRng), &sapling_prover, &sapling_prover)
+        .unwrap()
+        .finish();
+    check_round_trip(&pczt);
+
+    // Apply signatures. Signing the transparent input commits to the v5 signature
+    // hash, which commits to the Sapling bundle only through its spends digest
+    // (ZIP 244 T.3a.ii); an output-only bundle therefore signs without an anchor.
+    let mut signer = Signer::new(pczt).unwrap();
+    signer.sign_transparent(0, &transparent_sk).unwrap();
+    let pczt = signer.finish();
+    check_round_trip(&pczt);
+
+    // Finalize spends.
+    let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
+    check_round_trip(&pczt);
+
+    // We should now be able to extract the fully authorized transaction.
+    let (spend_vk, output_vk) = sapling_prover.verifying_keys();
+    let tx = TransactionExtractor::new(pczt)
+        .with_sapling(&spend_vk, &output_vk)
+        .extract(UnwrapErr(SysRng))
+        .unwrap();
+
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+    assert_eq!(tx.transparent_bundle().unwrap().vin.len(), 1);
+    assert_eq!(tx.sapling_bundle().unwrap().shielded_outputs().len(), 2);
+
+    // The outputs are real Sapling notes, decryptable by the recipient.
+    let domain = sapling::note_encryption::SaplingDomain::new(
+        sapling::note_encryption::Zip212Enforcement::On,
+    );
+    let values: Vec<_> = tx
+        .sapling_bundle()
+        .unwrap()
+        .shielded_outputs()
+        .iter()
+        .map(|output| {
+            try_note_decryption(&domain, &sapling_dfvk.to_external_ivk().prepare(), output)
+                .map(|(note, _, _)| note.value())
+                .expect("both outputs are sent to the recipient's external address")
+        })
+        .collect();
+    assert!(values.contains(&sapling::value::NoteValue::from_raw(100_000)));
+    assert!(values.contains(&sapling::value::NoteValue::from_raw(885_000)));
+}
+
+#[test]
 fn sapling_to_orchard() {
     let mut rng = UnwrapErr(SysRng);
 

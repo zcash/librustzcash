@@ -27,8 +27,10 @@ pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 ))]
 pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 
-/// Governs whether a non-empty shielded bundle's `anchor` must be set in order to parse
-/// it into the form used by the payment protocol crates.
+/// Governs whether a shielded bundle's `anchor` must be set in order to parse it
+/// into the form used by the payment protocol crates: with [`AnchorRequirement::Required`],
+/// parsing fails if the anchor is absent from a bundle that contains items that depend
+/// on it (Sapling spends, or Orchard-family actions).
 ///
 /// [ZIP 374](https://zips.z.cash/zip-0374) makes Sapling and Orchard-family bundle anchors
 /// deferrable in V6 and later transactions, so operations that do not depend on the
@@ -50,7 +52,8 @@ pub(crate) enum AnchorRequirement {
     /// are the only operations lenient enough to use it.
     NotRequired,
     /// The operation requires the anchor's real value; parsing fails if it is absent
-    /// from a non-empty bundle.
+    /// from a bundle that contains items that depend on the anchor (Sapling spends,
+    /// or Orchard-family actions).
     Required,
 }
 
@@ -79,21 +82,25 @@ impl AnchorRequirement {
     }
 
     /// Resolves a shielded bundle's wire `anchor` to the anchor that should be used
-    /// when parsing it, given whether the bundle has no transaction items (no Sapling
-    /// spends or outputs, or no Orchard-protocol actions).
+    /// when parsing it, given whether the bundle has no transaction items that
+    /// depend on the anchor (no Sapling spends, or no Orchard-protocol actions;
+    /// shielded outputs never depend on the anchor).
     ///
     /// Returns `None` to mean "the anchor is absent and required"; callers should map
-    /// that case to their own missing-anchor error. An absent anchor on an empty bundle
-    /// resolves to [`PLACEHOLDER_ANCHOR`], since there is nothing to prove or extract.
+    /// that case to their own missing-anchor error. An absent anchor on such a
+    /// spend-less bundle resolves to [`PLACEHOLDER_ANCHOR`], since the anchor's
+    /// value is never used.
     pub(crate) fn resolve(
         self,
         anchor: Option<[u8; 32]>,
-        bundle_is_empty: bool,
+        no_anchor_dependent_items: bool,
     ) -> Option<[u8; 32]> {
         match (self, anchor) {
             (_, Some(anchor)) => Some(anchor),
             (AnchorRequirement::NotRequired, None) => Some(PLACEHOLDER_ANCHOR),
-            (AnchorRequirement::Required, None) if bundle_is_empty => Some(PLACEHOLDER_ANCHOR),
+            (AnchorRequirement::Required, None) if no_anchor_dependent_items => {
+                Some(PLACEHOLDER_ANCHOR)
+            }
             (AnchorRequirement::Required, None) => None,
         }
     }
