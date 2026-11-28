@@ -2,7 +2,7 @@
 
 use corez::io::{self, Read, Write};
 use ripemd::Ripemd160;
-use sha2::{Digest, Sha256, digest::Output};
+use sha2::{Digest, Sha256};
 
 /// Computes `RIPEMD-160(SHA-256(input))` in one shot.
 pub fn hash(input: &[u8]) -> [u8; 20] {
@@ -10,7 +10,7 @@ pub fn hash(input: &[u8]) -> [u8; 20] {
     writer
         .write_all(input)
         .expect("HashWriter::write is infallible");
-    writer.into_hash().into()
+    writer.into_hash()
 }
 
 /// Abstraction over a reader which HASH160-hashes the data being read.
@@ -35,8 +35,8 @@ impl<R: Read> HashReader<R> {
     }
 
     /// Destroy this reader and return the hash of what was read.
-    pub fn into_hash(self) -> Output<Ripemd160> {
-        Ripemd160::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> [u8; 20] {
+        Ripemd160::digest(self.hasher.finalize()).into()
     }
 }
 
@@ -69,8 +69,8 @@ impl Default for HashWriter {
 
 impl HashWriter {
     /// Destroy this writer and return the hash of what was written.
-    pub fn into_hash(self) -> Output<Ripemd160> {
-        Ripemd160::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> [u8; 20] {
+        Ripemd160::digest(self.hasher.finalize()).into()
     }
 }
 

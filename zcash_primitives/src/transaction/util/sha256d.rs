@@ -1,7 +1,7 @@
 //! SHA-256d (double SHA-256) hashing of data as it is read or written.
 
 use corez::io::{self, Read, Write};
-use sha2::{Digest, Sha256, digest::Output};
+use sha2::{Digest, Sha256};
 
 /// Abstraction over a reader which SHA-256d-hashes the data being read.
 pub struct HashReader<R: Read> {
@@ -25,8 +25,8 @@ impl<R: Read> HashReader<R> {
     }
 
     /// Destroy this reader and return the hash of what was read.
-    pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> [u8; 32] {
+        Sha256::digest(self.hasher.finalize()).into()
     }
 }
 
@@ -57,8 +57,8 @@ impl Default for HashWriter {
 
 impl HashWriter {
     /// Destroy this writer and return the hash of what was written.
-    pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> [u8; 32] {
+        Sha256::digest(self.hasher.finalize()).into()
     }
 }
 

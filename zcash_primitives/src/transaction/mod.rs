@@ -935,7 +935,7 @@ impl Transaction {
         };
         let mut writer = HashWriter::default();
         tx.write(&mut writer)?;
-        tx.txid = TxId::from_bytes(writer.into_hash().into());
+        tx.txid = TxId::from_bytes(writer.into_hash());
         Ok(tx)
     }
 
@@ -1040,9 +1040,7 @@ impl Transaction {
             None
         };
 
-        let mut txid = [0; 32];
-        let hash_bytes = reader.into_hash();
-        txid.copy_from_slice(&hash_bytes);
+        let txid = reader.into_hash();
 
         Ok(Transaction {
             txid: TxId::from_bytes(txid),
